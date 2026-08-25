@@ -184,6 +184,12 @@
                 :composition-fields (:composition-fields class-spec)
                 :runtime-type-fields (:runtime-type-fields class-spec)
                 :fields (:fields class-spec)}
+               {:name "set_outer"
+                :descriptor "(Ljava/lang/Object;)V"
+                :flags Opcodes/ACC_PUBLIC
+                :kind :set-outer
+                :owner (:internal-name class-spec)
+                :composition-fields (:composition-fields class-spec)}
                {:name "<clinit>"
                 :descriptor "()V"
                 :flags (+ Opcodes/ACC_STATIC)
@@ -380,10 +386,6 @@
     (.visitCode mv)
     (.visitVarInsn mv Opcodes/ALOAD 0)
     (.visitMethodInsn mv Opcodes/INVOKESPECIAL super-name "<init>" "()V" false)
-    ;; Initialize __outer__ = this (self-reference for dynamic dispatch)
-    (.visitVarInsn mv Opcodes/ALOAD 0)
-    (.visitVarInsn mv Opcodes/ALOAD 0)
-    (.visitFieldInsn mv Opcodes/PUTFIELD owner "__outer__" "Ljava/lang/Object;")
     (doseq [{:keys [name jvm-type]} composition-fields]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (.visitTypeInsn mv Opcodes/NEW (second jvm-type))
@@ -393,12 +395,7 @@
                        Opcodes/PUTFIELD
                        owner
                        name
-                       (desc/jvm-type->descriptor jvm-type))
-      ;; Set parent.__outer__ = this (back-pointer for dynamic dispatch)
-      (.visitVarInsn mv Opcodes/ALOAD 0)
-      (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
-      (.visitVarInsn mv Opcodes/ALOAD 0)
-      (.visitFieldInsn mv Opcodes/PUTFIELD (second jvm-type) "__outer__" "Ljava/lang/Object;"))
+                       (desc/jvm-type->descriptor jvm-type)))
     (doseq [{:keys [name jvm-type nex-type]} (concat runtime-type-fields fields)]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (cond
@@ -431,6 +428,48 @@
                        owner
                        name
                        (desc/jvm-type->descriptor jvm-type)))
+    ;; Bootstrap __outer__ (see emit-set-outer-method!) to this, recursively
+    ;; through every composition field, however deeply nested.
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL owner "set_outer" "(Ljava/lang/Object;)V" false)
+    (.visitInsn mv Opcodes/RETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
+(defn- emit-set-outer-method!
+  "Sets `__outer__` (this class's self-reference for dynamic self-call
+   dispatch — see the `method-def` branch of `nex.lower/lower-target-call`
+   that reads it) to OUTER, then recurses into every composition field with
+   the same OUTER value.
+
+   `emit-user-default-constructor!` bootstraps this with `outer = this` once
+   an object's own composition-field tree is fully built. A one-shot,
+   depth-one `parent.__outer__ = this` at construction time (the previous
+   approach) is wrong past a single level of composition: when a class with
+   its own composition fields (e.g. `Circle2`, composed from `Shape`) is
+   itself constructed as *another* class's composition field (e.g. inside
+   `Circle3`), `Circle2`'s own `<init>` runs first and points its `Shape`
+   field's `__outer__` at the nested `Circle2` instance, not at the true
+   outermost `Circle3` object — so a self-call inside a method inherited
+   from `Shape` (e.g. `describe()` calling `area()`) resolves against
+   `Circle2`, which may not implement it either, instead of `Circle3`'s
+   actual override. Recursing here — an ordinary virtual method call chain,
+   not something baked in at construction time — self-corrects to the same
+   OUTER value no matter how many composition levels deep it runs, the same
+   way `Circle3`'s own construction now overwrites whatever `Circle2`'s
+   already-finished `<init>` set."
+  [^ClassWriter cw {:keys [owner composition-fields]}]
+  (let [^MethodVisitor mv (.visitMethod cw Opcodes/ACC_PUBLIC "set_outer" "(Ljava/lang/Object;)V" nil nil)]
+    (.visitCode mv)
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (.visitVarInsn mv Opcodes/ALOAD 1)
+    (.visitFieldInsn mv Opcodes/PUTFIELD owner "__outer__" "Ljava/lang/Object;")
+    (doseq [{:keys [name jvm-type]} composition-fields]
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
+      (.visitVarInsn mv Opcodes/ALOAD 1)
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL (second jvm-type) "set_outer" "(Ljava/lang/Object;)V" false))
     (.visitInsn mv Opcodes/RETURN)
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
@@ -2987,6 +3026,7 @@
     :default-constructor (emit-default-constructor! cw method-spec)
     :launcher-main (emit-launcher-main! cw method-spec)
     :user-default-constructor (emit-user-default-constructor! cw method-spec)
+    :set-outer (emit-set-outer-method! cw method-spec)
     :class-initializer (emit-class-initializer! cw method-spec)
     :eval-from-ir (emit-eval-method! cw method-spec)
     :repl-fn (emit-repl-fn-method! cw method-spec)

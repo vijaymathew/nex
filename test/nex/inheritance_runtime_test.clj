@@ -859,3 +859,207 @@ end")
       ;; redefined class (the one with `key`, not the original) is what ran.
       (let [out (with-out-str (repl/eval-code ctx "b.value"))]
         (is (not (str/includes? out "Error:")) out)))))
+
+;; ─── Self-calls inside an inherited (never-overridden-in-between) template
+;; method must dispatch to the actual runtime object's override, however many
+;; composition levels deep it sits ────────────────────────────────────────
+;;
+;; The compiled backend has no real JVM `extends` between Nex classes —
+;; inheritance is emulated by composition (nex.lower/make-delegation-method-
+;; node): a class that doesn't override an inherited method gets a thin
+;; forwarding stub that calls into a "carrier" field holding a genuine,
+;; separately-compiled instance of whichever ancestor actually defines it.
+;; Dynamic self-dispatch (nex.lower's `method-def` branch of the target-call
+;; lowering) works by reading a `__outer__` back-pointer instead of relying
+;; on the JVM's own (nonexistent) virtual dispatch. Before this fix,
+;; `__outer__` was set only one level deep at construction time
+;; (`parent.__outer__ = this`), so a class with its own composition fields
+;; (Circle2, composed from Shape) built as *another* class's composition
+;; field (inside Circle3) pointed its own Shape field's `__outer__` at
+;; itself, not at the true outermost Circle3 -- so `describe()` (defined on
+;; Shape, calling `area()` on itself) resolved `area` against Circle2
+;; (deferred, no override) instead of Circle3's actual implementation,
+;; crashing with a raw "Internal error" naming a synthetic
+;; `__method_area$arity0` symbol. The fix: `__outer__` propagation
+;; (`nex.compiler.jvm.emit/emit-set-outer-method!`) is now a real recursive
+;; instance method call chain, invoked once a class's own composition tree
+;; is fully built, so it self-corrects no matter how many levels deep.
+
+(def ^:private shape-with-template-method
+  "deferred class Shape
+  feature
+    colour: String
+    area(): Real deferred
+    perimeter(): Real deferred
+    describe(): String do
+      result := \"A \" + colour + \" shape with area \" + area.to_string
+    end
+end")
+
+(deftest compiled-template-method-dispatches-through-direct-override-test
+  (testing "describe() (defined on Shape) correctly finds a DIRECT child's area() override"
+    (with-compiled-repl ctx
+      (with-out-str (repl/eval-code ctx shape-with-template-method))
+      (with-out-str
+        (repl/eval-code ctx "class Square
+  inherit Shape
+  create
+    make(c: String, s: Real) do
+      colour := c
+      side := s
+    end
+  feature
+    side: Real
+    area(): Real do
+      result := side * side
+    end
+    perimeter(): Real do
+      result := 4.0 * side
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "let sq := create Square.make(\"blue\", 3.0)"))
+      (let [out (with-out-str (repl/eval-code ctx "sq.describe"))]
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "area 9.0") out)))))
+
+(deftest compiled-template-method-dispatches-through-grandchild-override-test
+  (testing "describe() (defined on Shape, inherited unchanged through Circle2) correctly
+            finds Circle3's area() override two composition levels down"
+    (with-compiled-repl ctx
+      (with-out-str (repl/eval-code ctx shape-with-template-method))
+      (with-out-str
+        (repl/eval-code ctx "deferred class Circle2
+  inherit Shape
+  create
+    make(c: String, r: Real) do
+      colour := c
+      radius := r
+    end
+  feature
+    radius: Real
+    perimeter(): Real do
+      result := 2.0 * 3.14159 * radius
+    end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Circle3
+  inherit Circle2
+  feature
+    area(): Real do
+      result := 3.14159 * radius * radius
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "let c2 := create Circle3.make(\"aa\", 1.2)"))
+      (let [area-out (with-out-str (repl/eval-code ctx "c2.area"))
+            perimeter-out (with-out-str (repl/eval-code ctx "c2.perimeter"))
+            describe-out (with-out-str (repl/eval-code ctx "c2.describe"))]
+        (is (not (str/includes? area-out "Error:")) area-out)
+        (is (not (str/includes? perimeter-out "Error:")) perimeter-out)
+        (is (not (str/includes? describe-out "Error:")) describe-out)
+        (is (not (str/includes? describe-out "Internal error")) describe-out)
+        (is (str/includes? describe-out "area 4.5238") describe-out)))))
+
+(deftest compiled-template-method-dispatches-through-four-level-chain-test
+  (testing "self-dispatch survives a chain deeper than the reported 2-intermediate-level
+            case -- Level0's report() -> val() must find Level3's override through
+            Level1 and Level2, neither of which override anything"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class Level0
+  feature
+    val(): Integer deferred
+    report(): String do
+      result := \"val=\" + val.to_string
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "deferred class Level1 inherit Level0 end"))
+      (with-out-str (repl/eval-code ctx "deferred class Level2 inherit Level1 end"))
+      (with-out-str
+        (repl/eval-code ctx "class Level3
+  inherit Level2
+  feature
+    val(): Integer do result := 42 end
+end"))
+      (with-out-str (repl/eval-code ctx "let lv := create Level3"))
+      (let [report-out (with-out-str (repl/eval-code ctx "lv.report"))]
+        (is (not (str/includes? report-out "Error:")) report-out)
+        (is (not (str/includes? report-out "Internal error")) report-out)
+        (is (str/includes? report-out "val=42") report-out)))))
+
+(deftest compiled-template-method-dispatches-through-multiple-inheritance-test
+  (testing "self-dispatch works when the template method's class is one of several
+            direct parents (multiple inheritance), not the only one"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class Named
+  feature
+    name: String
+    label(): String deferred
+    announce(): String do
+      result := \"This is \" + name + \": \" + label
+    end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "deferred class Sized
+  feature
+    size(): Integer deferred
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Widget
+  inherit Named, Sized
+  create
+    make(n: String, c: Integer) do
+      name := n
+      count := c
+    end
+  feature
+    count: Integer
+    label(): String do
+      result := \"Widget\"
+    end
+    size(): Integer do
+      result := count
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "let w := create Widget.make(\"gadget\", 5)"))
+      (let [size-out (with-out-str (repl/eval-code ctx "w.size"))
+            announce-out (with-out-str (repl/eval-code ctx "w.announce"))]
+        (is (not (str/includes? size-out "Error:")) size-out)
+        (is (str/includes? size-out "5") size-out)
+        (is (not (str/includes? announce-out "Error:")) announce-out)
+        (is (not (str/includes? announce-out "Internal error")) announce-out)
+        (is (str/includes? announce-out "This is gadget: Widget") announce-out)))))
+
+(deftest compiled-template-method-dispatches-through-multiple-inheritance-and-depth-test
+  (testing "self-dispatch works when multiple inheritance and extra chain depth combine --
+            one of the multiply-inherited parents (NamedThing) is itself a pure pass-
+            through over the class that actually declares the template method (Named)"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class Named
+  feature
+    label(): String deferred
+    announce(): String do
+      result := \"Label: \" + label
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "deferred class NamedThing inherit Named end"))
+      (with-out-str
+        (repl/eval-code ctx "deferred class Sized
+  feature
+    size(): Integer deferred
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Widget
+  inherit NamedThing, Sized
+  feature
+    label(): String do result := \"Widget\" end
+    size(): Integer do result := 5 end
+end"))
+      (with-out-str (repl/eval-code ctx "let w := create Widget"))
+      (let [size-out (with-out-str (repl/eval-code ctx "w.size"))
+            announce-out (with-out-str (repl/eval-code ctx "w.announce"))]
+        (is (not (str/includes? size-out "Error:")) size-out)
+        (is (not (str/includes? announce-out "Error:")) announce-out)
+        (is (not (str/includes? announce-out "Internal error")) announce-out)
+        (is (str/includes? announce-out "Label: Widget") announce-out)))))
