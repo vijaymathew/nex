@@ -1996,7 +1996,15 @@
               (if class-target
                 nil
                 (if target-name
-                (env-lookup (:current-env ctx) target-name)
+                ;; Route through `eval-node :identifier` rather than a bare
+                ;; `env-lookup` -- a call target written as a plain name (e.g.
+                ;; `label` in `label.to_string`) is exactly as often a zero-
+                ;; arg method/constant on `(:current-object ctx)` as it is a
+                ;; local, and only that fallback chain knows how to resolve
+                ;; one. `env-lookup` alone just threw "Undefined variable" for
+                ;; every such call target, even one an external call (e.g.
+                ;; `obj.label`) would have dispatched correctly.
+                (eval-node ctx {:type :identifier :name target-name})
                 (eval-node ctx target))))]
     {:target-name target-name
      :super-target? super-target?
@@ -2859,8 +2867,22 @@
           (if-let [constant (lookup-class-constant ctx class-def name)]
             (eval-class-constant ctx (:declaring-class constant class-def) name)
             (if-let [current-obj (:current-object ctx)]
+              ;; The existence check must start from the object's *actual*
+              ;; runtime class, not `class-def` (the class whose source
+              ;; happens to be executing): a method declared -- possibly
+              ;; `deferred` -- on an ancestor and only implemented by a more-
+              ;; derived class is reachable from an inherited method's body
+              ;; exactly the way an external call reaches it, but searching
+              ;; upward from `class-def` only ever finds an override *above*
+              ;; it, never one below in the object's own subclass, so a
+              ;; template method calling a still-abstract sibling feature
+              ;; threw "Undefined variable" instead of dispatching to the
+              ;; real object's override -- even though the call just below,
+              ;; once this confirms a method by this name exists somewhere
+              ;; reachable, already dispatches on `current-obj` correctly.
               (let [method-lookup (lookup-method-with-inheritance ctx
-                                                                  class-def
+                                                                  (or (lookup-class ctx (:class-name current-obj))
+                                                                      class-def)
                                                                   name
                                                                   0
                                                                   current-class-name)]
