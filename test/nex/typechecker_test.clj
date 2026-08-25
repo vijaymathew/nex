@@ -1865,6 +1865,122 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
+(deftest test-concrete-class-must-implement-inherited-deferred-method
+  (testing "a non-deferred class that skips an inherited deferred method fails to type-check"
+    (let [code "deferred class Shape
+  feature
+    colour: String
+    area(): Real deferred
+    perimeter(): Real deferred
+end
+
+class Circle inherit Shape
+  create
+    make(c: String, r: Real) do
+      colour := c
+      radius := r
+    end
+  feature
+    radius: Real
+    perimeter(): Real do
+      result := 2.0 * 3.14159 * radius
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Circle.*does not implement deferred method 'area'" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-concrete-class-implementing-all-deferred-methods-type-checks
+  (testing "a class that overrides every inherited deferred method type-checks fine"
+    (let [code "deferred class Shape
+  feature
+    colour: String
+    area(): Real deferred
+    perimeter(): Real deferred
+end
+
+class Square inherit Shape
+  create
+    make(c: String, s: Real) do
+      colour := c
+      side := s
+    end
+  feature
+    side: Real
+    area(): Real do
+      result := side * side
+    end
+    perimeter(): Real do
+      result := 4.0 * side
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-non-deferred-class-cannot-declare-its-own-deferred-method
+  (testing "a plain class with a body-less `deferred` method fails even with no inheritance involved"
+    (let [code "class Widget
+  feature
+    render(): String deferred
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (not (:success result)))
+      (is (some #(re-find #"Widget.*does not implement deferred method 'render'" %)
+                (map tc/format-type-error (:errors result)))))))
+
+(deftest test-deferred-subclass-may-leave-deferred-method-unimplemented
+  (testing "a deferred subclass is not required to implement inherited deferred methods"
+    (let [code "deferred class Shape
+  feature
+    area(): Real deferred
+    perimeter(): Real deferred
+end
+
+deferred class Polygon inherit Shape
+  feature
+    perimeter(): Real do
+      result := 0.0
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest test-function-value-classes-need-not-implement-every-call-arity
+  (testing "a top-level function, an anonymous fn, and a spawn closure all inherit
+            the builtin Function class (call0..call32, all deferred) and only
+            implement the single call<N> matching their own arity -- the deferred-
+            method-implemented check must not require the other 32"
+    (let [code "function choose(flag: Boolean): String
+do
+  if flag then
+    result := \"yes\"
+  else
+    result := \"no\"
+  end
+end
+
+class Main
+  feature
+    demo() do
+      let inc := fn (n: Integer): Integer do
+        result := n + 1
+      end
+      print(inc(41))
+      print(choose(false))
+    end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
 (deftest test-builtin-comparable-hashable-constraints
   (testing "Built-in scalar types satisfy Comparable and Hashable generic constraints"
     (let [code "class Sorted_Box [T -> Comparable]

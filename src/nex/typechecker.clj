@@ -4947,6 +4947,92 @@
                               (:parents class-def))))))))]
     (some (fn [pe] (search pe {} #{})) parents)))
 
+(defn- all-deferred-method-keys
+  "[[name arity] ...], distinct, for every declaration-only (`deferred`)
+   method declared anywhere in class-name's own body or its ancestor chain —
+   regardless of whether some other ancestor already overrides it. Paired
+   with `effective-method-member` below to check that each one actually has
+   a body somewhere between class-name and that declaration.
+
+   `Function` (`nex.types.bootstrap/build-function-base-class`) is excluded:
+   it deliberately declares call0..call32 all deferred as a menu of arity
+   overloads, not a contract every implementor must fully satisfy — every
+   function-value class (from a top-level `function`, an anonymous `fn`, or
+   a `spawn` closure) inherits it and implements only the single call<N>
+   matching its own arity, by design, forever leaving the other 32 deferred."
+  [env class-name]
+  (letfn [(walk [cn visited]
+            (when (and cn (not= cn "Function") (not (contains? visited cn)))
+              (let [class-def (env-lookup-class env cn)
+                    visited' (conj visited cn)]
+                (when class-def
+                  (concat
+                   (keep (fn [member]
+                           (when (and (= (:type member) :method)
+                                      (:declaration-only? member))
+                             [(:name member) (count (or (:params member) []))]))
+                         (feature-members class-def))
+                   (mapcat (fn [{:keys [parent]}] (walk parent visited'))
+                           (:parents class-def)))))))]
+    (distinct (walk class-name #{}))))
+
+(defn- effective-method-member
+  "The feature member that answers method-name/arity when called on an
+   instance of class-name: its own definition if it has one, otherwise the
+   nearest ancestor's (see `inherited-method-member`). `:declaration-only?`
+   on the result means nothing between class-name and the declaring
+   ancestor supplies a body."
+  [env class-name method-name arity]
+  (let [class-def (env-lookup-class env class-name)
+        own (when class-def
+              (some (fn [member]
+                      (when (and (= (:type member) :method)
+                                 (= (:name member) method-name)
+                                 (= (count (or (:params member) [])) arity))
+                        member))
+                    (feature-members class-def)))]
+    (or own
+        (when class-def
+          (inherited-method-member env (:parents class-def) method-name arity)))))
+
+;; Only a `deferred class` may leave a feature unimplemented — Nex's
+;; Eiffel-style abstract-method contract. Without this check, a concrete
+;; class that skips an inherited deferred method (or declares its own
+;; `deferred` without being a deferred class) compiles and instantiates
+;; fine, and only fails the first time the missing method is actually
+;; called — as a raw JVM "Internal error" naming a synthetic
+;; `__method_<name>$arityN` symbol, with nothing pointing back at the
+;; missing override.
+(defn- direct-function-value-class?
+  "True for a class whose own `inherit` clause names the builtin `Function`
+   base directly -- the shape every function-value class has, since walker.clj
+   and lower.clj are the only places that ever write `:parents [{:parent
+   \"Function\"}]` (a top-level `function`, an anonymous `fn`, a `spawn`
+   closure, and a `declare function` forward-declaration stub)."
+  [class-def]
+  (boolean (some #(= "Function" (:parent %)) (:parents class-def))))
+
+(defn- check-deferred-methods-implemented!
+  [env class-name class-def]
+  (when (and (not (:deferred? class-def))
+             ;; A function-value class's own call<N> is exempt for two
+             ;; reasons: `all-deferred-method-keys` already excludes the 32
+             ;; other call arities Function declares but this class will
+             ;; never implement, by design (see its docstring) -- but a
+             ;; `declare function` forward-declaration stub's *own* call<N> is
+             ;; itself still declaration-only at this point (its real `function
+             ;; ... end` body arrives in a later statement/cell), which is
+             ;; exactly as legitimate, not a class that will never be
+             ;; completed.
+             (not (direct-function-value-class? class-def)))
+    (doseq [[m-name arity] (all-deferred-method-keys env class-name)]
+      (when (:declaration-only? (effective-method-member env class-name m-name arity))
+        (throw (ex-info (str "Class " class-name " does not implement deferred method " m-name)
+                        {:error (type-error
+                                 (str "Class '" class-name "' does not implement deferred method '"
+                                      m-name "'. Provide a body for '" m-name
+                                      "', or declare '" class-name "' itself 'deferred'."))}))))))
+
 (defn- check-override-conformance
   "Enforce CONTRAVARIANT parameters and COVARIANT return for a method that
    overrides an inherited routine of the same name and arity. The inherited
@@ -5163,6 +5249,7 @@
                                        (->> body
                                             (filter #(= :constructors (:type %)))
                                             (mapcat :constructors))))
+  (check-deferred-methods-implemented! env name class-def)
 
   ;; Check invariants
   (doseq [assertion invariant]
