@@ -2258,6 +2258,7 @@
                          (or (env-lookup-var env target)
                              (when current-class
                                (or (lookup-class-field env current-class target)
+                                   (:field-type (lookup-class-constant env current-class target))
                                    ;; A readable top-level global (§7). Gated on
                                    ;; being in the static world so top-level
                                    ;; source-order threading is preserved.
