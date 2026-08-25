@@ -108,7 +108,7 @@
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :unary
     :call :if :when :this :array-literal :map-literal :set-literal
-    :anonymous-function :spawn})
+    :anonymous-function :spawn :create})
 
 (def ^:private builtin-function-names
   (set (keys bi/builtins)))
