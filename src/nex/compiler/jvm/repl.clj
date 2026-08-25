@@ -78,9 +78,15 @@
    class/function-declaring cell — see `declares-class-or-function?` — except
    for a `LinkageError`, which (like `nex.eval/run-ast`'s identical handling
    for whole-file execution) is always a backend defect rather than the
-   program's own behavior, so it is always safe to recover from."
-  [^Throwable t declaring?]
-  (if (instance? LinkageError (unwrap-reflective-exception t))
+   program's own behavior, so it is always safe to recover from; and except
+   when `redeclaring?` is true, since a *re*-declaration (the name already has
+   a working definition from an earlier cell, interpreted or compiled) never
+   leaves anything undefined on failure — it just keeps the prior definition's
+   backend instead of also becoming/staying compiled, exactly like the
+   best-effort recompile `sync-interpreter->session!` already does after every
+   interpreter-run cell."
+  [^Throwable t declaring? redeclaring?]
+  (if (or redeclaring? (instance? LinkageError (unwrap-reflective-exception t)))
     true
     (let [msg (.getMessage t)]
       (boolean
@@ -710,12 +716,17 @@
      ctx)))
 
 (defn eligible-ast?
+  "Whether the compiled backend should attempt this AST at all. A class name
+   colliding with one already compiled in this session is no longer grounds
+   to decline outright — that used to force every class redeclaration onto
+   the interpreter — `compile-and-register-classes!` recompiles a redeclared
+   class under a fresh internal JVM name and its lowering context now drops
+   the stale entry (see `other-classes` there), so a straightforward
+   redeclaration can just compile directly."
   [session ast]
   (let [ast' (normalize-program-ast ast)
-        actual-class-names (set (map :name (user-class-defs ast')))
         initial-ctx (initial-eligibility-ctx session ast')]
     (and (= :program (:type ast'))
-         (empty? (set/intersection (compiled-class-names session) actual-class-names))
          (or (seq (:functions ast'))
              (seq (:statements ast'))
              (seq (:classes ast'))
@@ -780,9 +791,18 @@
             new-class-map (allocate-compiled-class-metadata session compiled-class-defs)
           compiled-map (merge @(:compiled-classes session) new-class-map)
           visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
+          ;; A class redeclared in this cell replaces its prior session
+          ;; definition; drop the stale one from every name-based lookup below
+          ;; so lowering (e.g. `ctx-class-def` in nex.lower, which returns the
+          ;; *first* class matching a name) sees only the current shape rather
+          ;; than whichever of the two entries happens to come first — mirrors
+          ;; `compile-and-register-functions!`'s `other-functions` filtering.
+          replaced-names (set (map :name actual-classes))
+          other-classes (remove #(contains? replaced-names (:name %))
+                                (vals @(:class-asts session)))
           visible-classes (vec (concat (builtin-class-defs)
                                        (import-placeholder-classes (:imports ast))
-                                       (vals @(:class-asts session))
+                                       other-classes
                                        actual-classes
                                        (keep :class-def visible-functions)))
           visible-imports (:imports ast)
@@ -798,7 +818,7 @@
           ;; session state in its <clinit> to build it, so it needs the same
           ;; class/import metadata the launcher gets — here the union of the
           ;; session's known classes and the batch being defined.
-          bootstrap-edn {:classes-edn (pr-str (vec (concat (vals @(:class-asts session))
+          bootstrap-edn {:classes-edn (pr-str (vec (concat other-classes
                                                            actual-classes)))
                          :imports-edn (pr-str visible-imports)}]
         (doseq [class-def compiled-class-defs]
@@ -997,7 +1017,7 @@
            ;; undefined. So `declaring?` is always false here: this call never
            ;; needs the stricter, visible-failure behavior `compile-and-eval!`
            ;; uses for a definition's *first* attempt.
-           (when-not (deopt-compiled-exception? e false)
+           (when-not (deopt-compiled-exception? e false false)
              (throw e))))
        session))))
 
@@ -1027,6 +1047,18 @@
                        @(:function-asts session))
                  (session-var-types session))}))
 
+(defn- redeclares-existing-class-or-function?
+  "True when `ast` declares a class or function name the session already has
+   a working definition for (compiled or interpreted). Used to keep a failed
+   *re*-compile attempt from surfacing as a hard error the way a brand-new
+   definition's compile failure does — see `deopt-compiled-exception?`."
+  [session ast]
+  (boolean
+   (or (some (set (map :name (user-class-defs ast)))
+             (compiled-class-names session))
+       (some (set (map :name (:functions ast)))
+             (keys @(:function-asts session))))))
+
 (defn compile-and-eval!
   "Attempt compiled evaluation for a narrow REPL-safe top-level subset.
    Returns {:compiled? true :session .. :result ..} on success, nil when the
@@ -1043,7 +1075,8 @@
                         :imports (:imports module-ast)
                         :var-types (session-var-types session)})]
      (when (eligible-ast? session prepared-ast)
-       (let [declaring? (declares-class-or-function? prepared-ast)]
+       (let [declaring? (declares-class-or-function? prepared-ast)
+             redeclaring? (redeclares-existing-class-or-function? session prepared-ast)]
          (try
            (let [class-name (next-class-name! session)
                  _ (compile-and-register-classes! session prepared-ast source-id)
@@ -1069,12 +1102,12 @@
               :output (rt/state-output state)
               :result result})
            (catch clojure.lang.ExceptionInfo e
-             (if (deopt-compiled-exception? e declaring?)
+             (if (deopt-compiled-exception? e declaring? redeclaring?)
                (do (reset! (:last-decline-reason session) (decline-reason e))
                    nil)
                (throw e)))
            (catch Throwable t
-             (if (deopt-compiled-exception? t declaring?)
+             (if (deopt-compiled-exception? t declaring? redeclaring?)
                (do (reset! (:last-decline-reason session) (decline-reason t))
                    nil)
                (throw t)))))))))
