@@ -4283,68 +4283,78 @@
 (defn- result-definitely-assigned-after-stmt
   "Whether result is definitely assigned after executing stmt, assuming assigned? before it."
   [stmt assigned?]
-  (case (:type stmt)
-    :assign (if (#{"result" "Result"} (:target stmt)) true assigned?)
-    :let (if (#{"result" "Result"} (:name stmt)) true assigned?)
-    :if (let [;; A branch that cannot complete normally (it always raises or
-              ;; retries) contributes no path that falls through to the rest of
-              ;; the routine, so it need not assign result itself.
-              branch-out (fn [body]
-                           (or (not (body-may-complete-normally? body))
-                               (result-definitely-assigned-in-body? body assigned?)))
-              branch-outs (concat
-                           [(branch-out (:then stmt))]
-                           (map #(branch-out (:then %)) (:elseif stmt))
-                           [(if (:else stmt)
-                              (branch-out (:else stmt))
-                              assigned?)])]
-          (every? true? branch-outs))
-    :loop (result-definitely-assigned-in-body? (:init stmt) assigned?)
-    :select (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
-                  timeout-out (when-let [timeout (:timeout stmt)]
-                                (result-definitely-assigned-in-body? (:body timeout) assigned?))
-                  else-out (when-let [else-body (:else stmt)]
-                             (result-definitely-assigned-in-body? else-body assigned?))
-                  all-outs (concat clause-outs
-                                   (when timeout-out [timeout-out])
-                                   (when else-out [else-out]))]
-              (if (seq all-outs)
-                (every? true? all-outs)
-                assigned?))
-    :scoped-block (let [body-out (result-definitely-assigned-in-body? (:body stmt) assigned?)]
-                    (if-let [rescue-body (:rescue stmt)]
-                      ;; The block completes normally either by the body completing
-                      ;; (result assigned iff body-out) or by the rescue completing
-                      ;; normally. A rescue that always 'retry's (re-runs the body) or
-                      ;; 're-raise's never falls through, so it adds no returning path
-                      ;; and need not assign result itself.
-                      (if (body-may-complete-normally? rescue-body)
-                        (and body-out
-                             (result-definitely-assigned-in-body? rescue-body assigned?))
-                        body-out)
-                      body-out))
-    :with (result-definitely-assigned-in-body? (:body stmt) assigned?)
-    :case (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
-                else-out (if-let [else-body (:else stmt)]
-                           (result-definitely-assigned-in-body? else-body assigned?)
-                           assigned?)]
-            (every? true? (concat clause-outs [else-out])))
-    :match (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
-                 ;; A match with no `else` that type-checked is exhaustive over a
-                 ;; sealed type (the exhaustiveness check rejects it otherwise), so
-                 ;; there is no fall-through path — every value hits a clause.
-                 else-out (if-let [else-body (:else stmt)]
-                            (result-definitely-assigned-in-body? else-body assigned?)
-                            true)]
-             (every? true? (concat clause-outs [else-out])))
-    assigned?))
+  (let [;; A branch/clause that cannot complete normally (it always raises or
+        ;; retries) contributes no path that falls through to the rest of the
+        ;; routine, so it need not assign result itself. Shared by every
+        ;; multi-branch construct below (:if, :select, :case, :match) so a
+        ;; raising/retrying branch never has to also assign result.
+        branch-out (fn [body]
+                     (or (not (body-may-complete-normally? body))
+                         (result-definitely-assigned-in-body? body assigned?)))]
+    (case (:type stmt)
+      :assign (if (#{"result" "Result"} (:target stmt)) true assigned?)
+      :let (if (#{"result" "Result"} (:name stmt)) true assigned?)
+      :if (let [branch-outs (concat
+                             [(branch-out (:then stmt))]
+                             (map #(branch-out (:then %)) (:elseif stmt))
+                             [(if (:else stmt)
+                                (branch-out (:else stmt))
+                                assigned?)])]
+            (every? true? branch-outs))
+      :loop (result-definitely-assigned-in-body? (:init stmt) assigned?)
+      :select (let [clause-outs (map #(branch-out (:body %)) (:clauses stmt))
+                    timeout-out (when-let [timeout (:timeout stmt)]
+                                  (branch-out (:body timeout)))
+                    else-out (when-let [else-body (:else stmt)]
+                               (branch-out else-body))
+                    all-outs (concat clause-outs
+                                     (when timeout-out [timeout-out])
+                                     (when else-out [else-out]))]
+                (if (seq all-outs)
+                  (every? true? all-outs)
+                  assigned?))
+      :scoped-block (let [body-out (result-definitely-assigned-in-body? (:body stmt) assigned?)]
+                      (if-let [rescue-body (:rescue stmt)]
+                        ;; The block completes normally either by the body completing
+                        ;; (result assigned iff body-out) or by the rescue completing
+                        ;; normally. A rescue that always 'retry's (re-runs the body) or
+                        ;; 're-raise's never falls through, so it adds no returning path
+                        ;; and need not assign result itself.
+                        (if (body-may-complete-normally? rescue-body)
+                          (and body-out
+                               (result-definitely-assigned-in-body? rescue-body assigned?))
+                          body-out)
+                        body-out))
+      :with (result-definitely-assigned-in-body? (:body stmt) assigned?)
+      :case (let [clause-outs (map #(branch-out (:body %)) (:clauses stmt))
+                  else-out (if-let [else-body (:else stmt)]
+                             (branch-out else-body)
+                             assigned?)]
+              (every? true? (concat clause-outs [else-out])))
+      :match (let [clause-outs (map #(branch-out (:body %)) (:clauses stmt))
+                   ;; A match with no `else` that type-checked is exhaustive over a
+                   ;; sealed type (the exhaustiveness check rejects it otherwise), so
+                   ;; there is no fall-through path — every value hits a clause.
+                   else-out (if-let [else-body (:else stmt)]
+                              (branch-out else-body)
+                              true)]
+               (every? true? (concat clause-outs [else-out])))
+      assigned?)))
 
 (defn- result-definitely-assigned-in-body?
+  "BODY is usually a vector of statements, but a `case`/`match` clause (or its
+   `else`) with no `do...end` is a single bare statement map, not a
+   one-element vector (see `nex.walker`) — `reduce`ing a map directly walks
+   its own key/value pairs as `[k v]` tuples instead of treating it as one
+   statement, so `(:type stmt)` never matched anything and a clause's own
+   `result := ...` was invisible to this analysis. Normalizing here, once,
+   keeps every caller (and `body-may-complete-normally?` below) agnostic to
+   which shape a given clause happened to parse as."
   [body assigned?]
   (reduce (fn [acc stmt]
             (result-definitely-assigned-after-stmt stmt acc))
           assigned?
-          body))
+          (if (map? body) [body] body)))
 
 (declare body-may-complete-normally?)
 
@@ -4382,8 +4392,14 @@
     true))
 
 (defn- body-may-complete-normally?
+  "See `result-definitely-assigned-in-body?`'s docstring: BODY may be a single
+   bare statement map (a `case`/`match` clause with no `do...end`), not a
+   vector. Normalized the same way, or a one-statement `raise`/`retry` clause
+   silently read as `true` (falls through, completing normally) instead of
+   `false`, by walking the statement's own map entries instead of the
+   statement."
   [body]
-  (loop [stmts body]
+  (loop [stmts (if (map? body) [body] body)]
     (if-let [stmt (first stmts)]
       (if (stmt-may-complete-normally? stmt)
         (recur (rest stmts))

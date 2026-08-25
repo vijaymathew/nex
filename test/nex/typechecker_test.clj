@@ -834,6 +834,86 @@ end"
       (is (some #(re-find #"does not definitely assign result on all returning paths" %)
                 (map tc/format-type-error (:errors result)))))))
 
+(deftest test-case-clause-with-no-do-end-assigns-result
+  (testing "a case clause's body is a single bare statement (not a vector) when it has no
+            do...end -- result-definitely-assigned-in-body? used to reduce over that map's
+            own key/value pairs instead of treating it as one statement, so `result := ...`
+            directly in a one-liner clause was invisible to the analysis"
+    (let [code "function classify(tag: Integer): String
+do
+  case tag of
+    1 then result := \"one\"
+    else result := \"other\"
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-match-clause-with-no-do-end-assigns-result
+  (testing "the same fix for match, whose clauses have the identical single-statement shape"
+    (let [code "deferred class Shape end
+class Circle inherit Shape end
+class Square inherit Shape end
+
+function describe(s: Shape): String
+do
+  match s of
+    Circle as c then result := \"circle\"
+    Square as sq then result := \"square\"
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-case-clause-that-always-raises-does-not-need-result-assignment
+  (testing "a case clause that always raises (never completes normally) contributes no
+            returning path, so it need not assign result itself -- unlike `:if`, `:case`'s
+            definite-assignment check did not consult body-may-complete-normally? at all"
+    (let [code "function classify(n: Integer): String
+do
+  case n of
+    1 then raise \"one\"
+    else result := \"other\"
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-match-clause-that-always-raises-does-not-need-result-assignment
+  (testing "the same fix for match"
+    (let [code "deferred class Shape end
+class Circle inherit Shape end
+class Square inherit Shape end
+
+function describe(s: Shape): String
+do
+  match s of
+    Circle as c then raise \"no circles\"
+    Square as sq then result := \"square\"
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
+(deftest test-select-else-that-always-raises-does-not-need-result-assignment
+  (testing "the same fix for select's else clause"
+    (let [code "function pick(ch: Channel[Integer]): Integer
+do
+  select
+    when ch.receive as value then
+      result := value
+  else
+    raise \"nothing ready\"
+  end
+end"
+          ast (p/ast code)
+          result (tc/type-check ast)]
+      (is (:success result) (pr-str result)))))
+
 (deftest test-string-concatenation-typecheck
   (testing "String concatenation with + should typecheck"
     (let [code "class Test
