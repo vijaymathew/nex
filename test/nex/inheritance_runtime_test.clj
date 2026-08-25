@@ -859,3 +859,410 @@ end")
       ;; redefined class (the one with `key`, not the original) is what ran.
       (let [out (with-out-str (repl/eval-code ctx "b.value"))]
         (is (not (str/includes? out "Error:")) out)))))
+
+;; ─── Self-calls inside an inherited (never-overridden-in-between) template
+;; method must dispatch to the actual runtime object's override, however many
+;; composition levels deep it sits ────────────────────────────────────────
+;;
+;; The compiled backend has no real JVM `extends` between Nex classes —
+;; inheritance is emulated by composition (nex.lower/make-delegation-method-
+;; node): a class that doesn't override an inherited method gets a thin
+;; forwarding stub that calls into a "carrier" field holding a genuine,
+;; separately-compiled instance of whichever ancestor actually defines it.
+;; Dynamic self-dispatch (nex.lower's `method-def` branch of the target-call
+;; lowering) works by reading a `__outer__` back-pointer instead of relying
+;; on the JVM's own (nonexistent) virtual dispatch. Before this fix,
+;; `__outer__` was set only one level deep at construction time
+;; (`parent.__outer__ = this`), so a class with its own composition fields
+;; (Circle2, composed from Shape) built as *another* class's composition
+;; field (inside Circle3) pointed its own Shape field's `__outer__` at
+;; itself, not at the true outermost Circle3 -- so `describe()` (defined on
+;; Shape, calling `area()` on itself) resolved `area` against Circle2
+;; (deferred, no override) instead of Circle3's actual implementation,
+;; crashing with a raw "Internal error" naming a synthetic
+;; `__method_area$arity0` symbol. The fix: `__outer__` propagation
+;; (`nex.compiler.jvm.emit/emit-set-outer-method!`) is now a real recursive
+;; instance method call chain, invoked once a class's own composition tree
+;; is fully built, so it self-corrects no matter how many levels deep.
+
+(def ^:private shape-with-template-method
+  "deferred class Shape
+  feature
+    colour: String
+    area(): Real deferred
+    perimeter(): Real deferred
+    describe(): String do
+      result := \"A \" + colour + \" shape with area \" + area.to_string
+    end
+end")
+
+(deftest compiled-template-method-dispatches-through-direct-override-test
+  (testing "describe() (defined on Shape) correctly finds a DIRECT child's area() override"
+    (with-compiled-repl ctx
+      (with-out-str (repl/eval-code ctx shape-with-template-method))
+      (with-out-str
+        (repl/eval-code ctx "class Square
+  inherit Shape
+  create
+    make(c: String, s: Real) do
+      colour := c
+      side := s
+    end
+  feature
+    side: Real
+    area(): Real do
+      result := side * side
+    end
+    perimeter(): Real do
+      result := 4.0 * side
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "let sq := create Square.make(\"blue\", 3.0)"))
+      (let [out (with-out-str (repl/eval-code ctx "sq.describe"))]
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "area 9.0") out)))))
+
+(deftest compiled-template-method-dispatches-through-grandchild-override-test
+  (testing "describe() (defined on Shape, inherited unchanged through Circle2) correctly
+            finds Circle3's area() override two composition levels down"
+    (with-compiled-repl ctx
+      (with-out-str (repl/eval-code ctx shape-with-template-method))
+      (with-out-str
+        (repl/eval-code ctx "deferred class Circle2
+  inherit Shape
+  create
+    make(c: String, r: Real) do
+      colour := c
+      radius := r
+    end
+  feature
+    radius: Real
+    perimeter(): Real do
+      result := 2.0 * 3.14159 * radius
+    end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Circle3
+  inherit Circle2
+  feature
+    area(): Real do
+      result := 3.14159 * radius * radius
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "let c2 := create Circle3.make(\"aa\", 1.2)"))
+      (let [area-out (with-out-str (repl/eval-code ctx "c2.area"))
+            perimeter-out (with-out-str (repl/eval-code ctx "c2.perimeter"))
+            describe-out (with-out-str (repl/eval-code ctx "c2.describe"))]
+        (is (not (str/includes? area-out "Error:")) area-out)
+        (is (not (str/includes? perimeter-out "Error:")) perimeter-out)
+        (is (not (str/includes? describe-out "Error:")) describe-out)
+        (is (not (str/includes? describe-out "Internal error")) describe-out)
+        (is (str/includes? describe-out "area 4.5238") describe-out)))))
+
+(deftest compiled-template-method-dispatches-through-four-level-chain-test
+  (testing "self-dispatch survives a chain deeper than the reported 2-intermediate-level
+            case -- Level0's report() -> val() must find Level3's override through
+            Level1 and Level2, neither of which override anything"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class Level0
+  feature
+    val(): Integer deferred
+    report(): String do
+      result := \"val=\" + val.to_string
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "deferred class Level1 inherit Level0 end"))
+      (with-out-str (repl/eval-code ctx "deferred class Level2 inherit Level1 end"))
+      (with-out-str
+        (repl/eval-code ctx "class Level3
+  inherit Level2
+  feature
+    val(): Integer do result := 42 end
+end"))
+      (with-out-str (repl/eval-code ctx "let lv := create Level3"))
+      (let [report-out (with-out-str (repl/eval-code ctx "lv.report"))]
+        (is (not (str/includes? report-out "Error:")) report-out)
+        (is (not (str/includes? report-out "Internal error")) report-out)
+        (is (str/includes? report-out "val=42") report-out)))))
+
+(deftest compiled-template-method-dispatches-through-multiple-inheritance-test
+  (testing "self-dispatch works when the template method's class is one of several
+            direct parents (multiple inheritance), not the only one"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class Named
+  feature
+    name: String
+    label(): String deferred
+    announce(): String do
+      result := \"This is \" + name + \": \" + label
+    end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "deferred class Sized
+  feature
+    size(): Integer deferred
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Widget
+  inherit Named, Sized
+  create
+    make(n: String, c: Integer) do
+      name := n
+      count := c
+    end
+  feature
+    count: Integer
+    label(): String do
+      result := \"Widget\"
+    end
+    size(): Integer do
+      result := count
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "let w := create Widget.make(\"gadget\", 5)"))
+      (let [size-out (with-out-str (repl/eval-code ctx "w.size"))
+            announce-out (with-out-str (repl/eval-code ctx "w.announce"))]
+        (is (not (str/includes? size-out "Error:")) size-out)
+        (is (str/includes? size-out "5") size-out)
+        (is (not (str/includes? announce-out "Error:")) announce-out)
+        (is (not (str/includes? announce-out "Internal error")) announce-out)
+        (is (str/includes? announce-out "This is gadget: Widget") announce-out)))))
+
+(deftest compiled-template-method-dispatches-through-multiple-inheritance-and-depth-test
+  (testing "self-dispatch works when multiple inheritance and extra chain depth combine --
+            one of the multiply-inherited parents (NamedThing) is itself a pure pass-
+            through over the class that actually declares the template method (Named)"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class Named
+  feature
+    label(): String deferred
+    announce(): String do
+      result := \"Label: \" + label
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "deferred class NamedThing inherit Named end"))
+      (with-out-str
+        (repl/eval-code ctx "deferred class Sized
+  feature
+    size(): Integer deferred
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Widget
+  inherit NamedThing, Sized
+  feature
+    label(): String do result := \"Widget\" end
+    size(): Integer do result := 5 end
+end"))
+      (with-out-str (repl/eval-code ctx "let w := create Widget"))
+      (let [size-out (with-out-str (repl/eval-code ctx "w.size"))
+            announce-out (with-out-str (repl/eval-code ctx "w.announce"))]
+        (is (not (str/includes? size-out "Error:")) size-out)
+        (is (not (str/includes? announce-out "Error:")) announce-out)
+        (is (not (str/includes? announce-out "Internal error")) announce-out)
+        (is (str/includes? announce-out "Label: Widget") announce-out)))))
+
+;; ─── A constructor can assign/read a field declared two or more `inherit`s
+;; above it, not just its direct parent's ──────────────────────────────────
+;;
+;; `nex.lower/direct-parent-field-map` used to record, for each inherited
+;; field, a single `{:carrier-owner :carrier-field}` hop into the *direct*
+;; parent's own composition field -- so a field declared on a grandparent (or
+;; further) was simply absent from the compiled lowering env's `:fields` map,
+;; even though the typechecker (which walks the full chain) accepted the
+;; program. A constructor assigning such a field crashed with "Assignment
+;; target is not a known local"; a bare read of it crashed with "Unknown
+;; local in non-top-level lowering". The fix makes `direct-parent-field-map`
+;; recurse into each direct parent's own inherited-field map, prepending the
+;; extra composition hop, so `:carrier-path` is a chain of however many hops
+;; are actually needed (see `nex.lower/carrier-path-target-ir`).
+
+(deftest compiled-constructor-assigns-grandparent-field-test
+  (testing "a constructor two inherit-levels below the field's declaration can still
+            assign it, and a sibling method can read it back"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class Level0
+  feature
+    v: Integer
+    val(): Integer deferred
+end"))
+      (with-out-str (repl/eval-code ctx "deferred class Level1 inherit Level0 end"))
+      (with-out-str
+        (repl/eval-code ctx "class Level2
+  inherit Level1
+  create
+    make(n: Integer) do v := n end
+  feature
+    val(): Integer do result := v end
+end"))
+      (with-out-str (repl/eval-code ctx "let lv := create Level2.make(42)"))
+      (let [out (with-out-str (repl/eval-code ctx "lv.val"))]
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "42") out)))))
+
+(deftest compiled-constructor-assigns-great-grandparent-field-test
+  (testing "the same, three inherit-levels below the field's declaration"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class LevelA
+  feature
+    w: Integer
+end"))
+      (with-out-str (repl/eval-code ctx "deferred class LevelB inherit LevelA end"))
+      (with-out-str (repl/eval-code ctx "deferred class LevelC inherit LevelB end"))
+      (with-out-str
+        (repl/eval-code ctx "class LevelD
+  inherit LevelC
+  create
+    make(n: Integer) do w := n end
+  feature
+    val(): Integer do result := w end
+end"))
+      (with-out-str (repl/eval-code ctx "let ld := create LevelD.make(99)"))
+      (let [out (with-out-str (repl/eval-code ctx "ld.val"))]
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "99") out)))))
+
+(deftest compiled-constructor-assigns-generic-grandparent-field-test
+  (testing "generic substitutions still compose correctly across the extra hop --
+            a field declared as one generic class's own param, restated under a
+            different name by an intermediate class, then bound concretely by the
+            leaf -- reads back as the right value with the right type"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "class Pair [A, B]
+  feature
+    first: A
+    second: B
+end"))
+      (with-out-str (repl/eval-code ctx "class Middle [X, Y] inherit Pair[Y, X] end"))
+      (with-out-str
+        (repl/eval-code ctx "class Leaf
+  inherit Middle[Integer, String]
+  create
+    make(s: String, i: Integer) do
+      first := s
+      second := i
+    end
+  feature
+    show(): String do result := first + \":\" + second.to_string end
+end"))
+      (with-out-str (repl/eval-code ctx "let lf := create Leaf.make(\"hi\", 42)"))
+      (let [out (with-out-str (repl/eval-code ctx "lf.show"))]
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "hi:42") out)))))
+
+;; ─── A bare-identifier call *target* (e.g. `label` in `label.to_string`)
+;; must resolve a still-abstract sibling method through the object's actual
+;; runtime class, on the interpreter too ──────────────────────────────────
+;;
+;; `nex.interpreter/resolve-interp-call-target` resolved a call target
+;; written as a plain name via a bare `env-lookup`, which just throws
+;; "Undefined variable" for a name that isn't a local -- never falling back
+;; to "is this a zero-arg method/constant on the current object" the way
+;; `eval-node :identifier` already does for a bare identifier used as an
+;; ordinary expression. So a template method's call target chain (`label.
+;; to_string`, not just a bare `label`) broke for exactly the deferred-
+;; method-call-target shape this fix's compiled-backend counterpart
+;; (`__outer__`, see `nex.compiler.jvm.emit/emit-set-outer-method!`) already
+;; covers. Separately, `eval-node :identifier`'s own fallback searched for
+;; the method starting from `class-def` -- the class whose source is
+;; lexically executing (e.g. `Shape`) -- which only ever finds an override
+;; *above* it, never one below in the object's own more-derived subclass;
+;; fixed to start from the object's actual runtime class instead.
+
+(defmacro with-interpreter-repl [ctx-sym & body]
+  `(binding [repl/*type-checking-enabled* (atom true)
+             repl/*repl-var-types* (atom {})
+             repl/*repl-backend* (atom :interpreter)]
+     (let [~ctx-sym (repl/init-repl-context)]
+       ~@body)))
+
+(deftest interpreter-template-method-dispatches-through-direct-override-test
+  (testing "describe() (defined on Shape) correctly finds a DIRECT child's area() override"
+    (with-interpreter-repl ctx
+      (with-out-str (repl/eval-code ctx shape-with-template-method))
+      (with-out-str
+        (repl/eval-code ctx "class Square
+  inherit Shape
+  create
+    make(c: String, s: Real) do
+      colour := c
+      side := s
+    end
+  feature
+    side: Real
+    area(): Real do
+      result := side * side
+    end
+    perimeter(): Real do
+      result := 4.0 * side
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "let sq := create Square.make(\"blue\", 3.0)"))
+      (let [out (with-out-str (repl/eval-code ctx "sq.describe"))]
+        (is (not (str/includes? out "Error:")) out)
+        (is (str/includes? out "area 9.0") out)))))
+
+(deftest interpreter-template-method-dispatches-through-grandchild-override-test
+  (testing "describe() (defined on Shape, inherited unchanged through Circle2) correctly
+            finds Circle3's area() override two levels down, on the interpreter"
+    (with-interpreter-repl ctx
+      (with-out-str (repl/eval-code ctx shape-with-template-method))
+      (with-out-str
+        (repl/eval-code ctx "deferred class Circle2
+  inherit Shape
+  create
+    make(c: String, r: Real) do
+      colour := c
+      radius := r
+    end
+  feature
+    radius: Real
+    perimeter(): Real do
+      result := 2.0 * 3.14159 * radius
+    end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class Circle3
+  inherit Circle2
+  feature
+    area(): Real do
+      result := 3.14159 * radius * radius
+    end
+end"))
+      (with-out-str (repl/eval-code ctx "let c2 := create Circle3.make(\"aa\", 1.2)"))
+      (let [area-out (with-out-str (repl/eval-code ctx "c2.area"))
+            describe-out (with-out-str (repl/eval-code ctx "c2.describe"))]
+        (is (not (str/includes? area-out "Error:")) area-out)
+        (is (not (str/includes? describe-out "Error:")) describe-out)
+        (is (str/includes? describe-out "area 4.5238") describe-out)))))
+
+(deftest interpreter-template-method-with-field-and-empty-intermediate-test
+  (testing "a template method's deferred call target still resolves when the field it
+            ultimately reads was assigned by a constructor two inherit-levels below --
+            the exact combination that originally surfaced this bug"
+    (with-interpreter-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "deferred class Named
+  feature
+    w: Integer
+    label(): Integer deferred
+    announce(): String do result := \"L=\" + label.to_string end
+end"))
+      (with-out-str (repl/eval-code ctx "deferred class NamedThing inherit Named end"))
+      (with-out-str
+        (repl/eval-code ctx "class Widget
+  inherit NamedThing
+  create
+    make(n: Integer) do w := n end
+  feature
+    label(): Integer do result := w end
+end"))
+      (with-out-str (repl/eval-code ctx "let ww := create Widget.make(7)"))
+      (let [announce-out (with-out-str (repl/eval-code ctx "ww.announce"))]
+        (is (not (str/includes? announce-out "Error:")) announce-out)
+        (is (str/includes? announce-out "L=7") announce-out)))))

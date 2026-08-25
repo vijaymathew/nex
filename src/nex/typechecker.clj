@@ -2258,6 +2258,7 @@
                          (or (env-lookup-var env target)
                              (when current-class
                                (or (lookup-class-field env current-class target)
+                                   (:field-type (lookup-class-constant env current-class target))
                                    ;; A readable top-level global (§7). Gated on
                                    ;; being in the static world so top-level
                                    ;; source-order threading is preserved.
@@ -4282,68 +4283,78 @@
 (defn- result-definitely-assigned-after-stmt
   "Whether result is definitely assigned after executing stmt, assuming assigned? before it."
   [stmt assigned?]
-  (case (:type stmt)
-    :assign (if (#{"result" "Result"} (:target stmt)) true assigned?)
-    :let (if (#{"result" "Result"} (:name stmt)) true assigned?)
-    :if (let [;; A branch that cannot complete normally (it always raises or
-              ;; retries) contributes no path that falls through to the rest of
-              ;; the routine, so it need not assign result itself.
-              branch-out (fn [body]
-                           (or (not (body-may-complete-normally? body))
-                               (result-definitely-assigned-in-body? body assigned?)))
-              branch-outs (concat
-                           [(branch-out (:then stmt))]
-                           (map #(branch-out (:then %)) (:elseif stmt))
-                           [(if (:else stmt)
-                              (branch-out (:else stmt))
-                              assigned?)])]
-          (every? true? branch-outs))
-    :loop (result-definitely-assigned-in-body? (:init stmt) assigned?)
-    :select (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
-                  timeout-out (when-let [timeout (:timeout stmt)]
-                                (result-definitely-assigned-in-body? (:body timeout) assigned?))
-                  else-out (when-let [else-body (:else stmt)]
-                             (result-definitely-assigned-in-body? else-body assigned?))
-                  all-outs (concat clause-outs
-                                   (when timeout-out [timeout-out])
-                                   (when else-out [else-out]))]
-              (if (seq all-outs)
-                (every? true? all-outs)
-                assigned?))
-    :scoped-block (let [body-out (result-definitely-assigned-in-body? (:body stmt) assigned?)]
-                    (if-let [rescue-body (:rescue stmt)]
-                      ;; The block completes normally either by the body completing
-                      ;; (result assigned iff body-out) or by the rescue completing
-                      ;; normally. A rescue that always 'retry's (re-runs the body) or
-                      ;; 're-raise's never falls through, so it adds no returning path
-                      ;; and need not assign result itself.
-                      (if (body-may-complete-normally? rescue-body)
-                        (and body-out
-                             (result-definitely-assigned-in-body? rescue-body assigned?))
-                        body-out)
-                      body-out))
-    :with (result-definitely-assigned-in-body? (:body stmt) assigned?)
-    :case (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
-                else-out (if-let [else-body (:else stmt)]
-                           (result-definitely-assigned-in-body? else-body assigned?)
-                           assigned?)]
-            (every? true? (concat clause-outs [else-out])))
-    :match (let [clause-outs (map #(result-definitely-assigned-in-body? (:body %) assigned?) (:clauses stmt))
-                 ;; A match with no `else` that type-checked is exhaustive over a
-                 ;; sealed type (the exhaustiveness check rejects it otherwise), so
-                 ;; there is no fall-through path — every value hits a clause.
-                 else-out (if-let [else-body (:else stmt)]
-                            (result-definitely-assigned-in-body? else-body assigned?)
-                            true)]
-             (every? true? (concat clause-outs [else-out])))
-    assigned?))
+  (let [;; A branch/clause that cannot complete normally (it always raises or
+        ;; retries) contributes no path that falls through to the rest of the
+        ;; routine, so it need not assign result itself. Shared by every
+        ;; multi-branch construct below (:if, :select, :case, :match) so a
+        ;; raising/retrying branch never has to also assign result.
+        branch-out (fn [body]
+                     (or (not (body-may-complete-normally? body))
+                         (result-definitely-assigned-in-body? body assigned?)))]
+    (case (:type stmt)
+      :assign (if (#{"result" "Result"} (:target stmt)) true assigned?)
+      :let (if (#{"result" "Result"} (:name stmt)) true assigned?)
+      :if (let [branch-outs (concat
+                             [(branch-out (:then stmt))]
+                             (map #(branch-out (:then %)) (:elseif stmt))
+                             [(if (:else stmt)
+                                (branch-out (:else stmt))
+                                assigned?)])]
+            (every? true? branch-outs))
+      :loop (result-definitely-assigned-in-body? (:init stmt) assigned?)
+      :select (let [clause-outs (map #(branch-out (:body %)) (:clauses stmt))
+                    timeout-out (when-let [timeout (:timeout stmt)]
+                                  (branch-out (:body timeout)))
+                    else-out (when-let [else-body (:else stmt)]
+                               (branch-out else-body))
+                    all-outs (concat clause-outs
+                                     (when timeout-out [timeout-out])
+                                     (when else-out [else-out]))]
+                (if (seq all-outs)
+                  (every? true? all-outs)
+                  assigned?))
+      :scoped-block (let [body-out (result-definitely-assigned-in-body? (:body stmt) assigned?)]
+                      (if-let [rescue-body (:rescue stmt)]
+                        ;; The block completes normally either by the body completing
+                        ;; (result assigned iff body-out) or by the rescue completing
+                        ;; normally. A rescue that always 'retry's (re-runs the body) or
+                        ;; 're-raise's never falls through, so it adds no returning path
+                        ;; and need not assign result itself.
+                        (if (body-may-complete-normally? rescue-body)
+                          (and body-out
+                               (result-definitely-assigned-in-body? rescue-body assigned?))
+                          body-out)
+                        body-out))
+      :with (result-definitely-assigned-in-body? (:body stmt) assigned?)
+      :case (let [clause-outs (map #(branch-out (:body %)) (:clauses stmt))
+                  else-out (if-let [else-body (:else stmt)]
+                             (branch-out else-body)
+                             assigned?)]
+              (every? true? (concat clause-outs [else-out])))
+      :match (let [clause-outs (map #(branch-out (:body %)) (:clauses stmt))
+                   ;; A match with no `else` that type-checked is exhaustive over a
+                   ;; sealed type (the exhaustiveness check rejects it otherwise), so
+                   ;; there is no fall-through path — every value hits a clause.
+                   else-out (if-let [else-body (:else stmt)]
+                              (branch-out else-body)
+                              true)]
+               (every? true? (concat clause-outs [else-out])))
+      assigned?)))
 
 (defn- result-definitely-assigned-in-body?
+  "BODY is usually a vector of statements, but a `case`/`match` clause (or its
+   `else`) with no `do...end` is a single bare statement map, not a
+   one-element vector (see `nex.walker`) — `reduce`ing a map directly walks
+   its own key/value pairs as `[k v]` tuples instead of treating it as one
+   statement, so `(:type stmt)` never matched anything and a clause's own
+   `result := ...` was invisible to this analysis. Normalizing here, once,
+   keeps every caller (and `body-may-complete-normally?` below) agnostic to
+   which shape a given clause happened to parse as."
   [body assigned?]
   (reduce (fn [acc stmt]
             (result-definitely-assigned-after-stmt stmt acc))
           assigned?
-          body))
+          (if (map? body) [body] body)))
 
 (declare body-may-complete-normally?)
 
@@ -4381,8 +4392,14 @@
     true))
 
 (defn- body-may-complete-normally?
+  "See `result-definitely-assigned-in-body?`'s docstring: BODY may be a single
+   bare statement map (a `case`/`match` clause with no `do...end`), not a
+   vector. Normalized the same way, or a one-statement `raise`/`retry` clause
+   silently read as `true` (falls through, completing normally) instead of
+   `false`, by walking the statement's own map entries instead of the
+   statement."
   [body]
-  (loop [stmts body]
+  (loop [stmts (if (map? body) [body] body)]
     (if-let [stmt (first stmts)]
       (if (stmt-may-complete-normally? stmt)
         (recur (rest stmts))
@@ -4946,6 +4963,92 @@
                               (:parents class-def))))))))]
     (some (fn [pe] (search pe {} #{})) parents)))
 
+(defn- all-deferred-method-keys
+  "[[name arity] ...], distinct, for every declaration-only (`deferred`)
+   method declared anywhere in class-name's own body or its ancestor chain —
+   regardless of whether some other ancestor already overrides it. Paired
+   with `effective-method-member` below to check that each one actually has
+   a body somewhere between class-name and that declaration.
+
+   `Function` (`nex.types.bootstrap/build-function-base-class`) is excluded:
+   it deliberately declares call0..call32 all deferred as a menu of arity
+   overloads, not a contract every implementor must fully satisfy — every
+   function-value class (from a top-level `function`, an anonymous `fn`, or
+   a `spawn` closure) inherits it and implements only the single call<N>
+   matching its own arity, by design, forever leaving the other 32 deferred."
+  [env class-name]
+  (letfn [(walk [cn visited]
+            (when (and cn (not= cn "Function") (not (contains? visited cn)))
+              (let [class-def (env-lookup-class env cn)
+                    visited' (conj visited cn)]
+                (when class-def
+                  (concat
+                   (keep (fn [member]
+                           (when (and (= (:type member) :method)
+                                      (:declaration-only? member))
+                             [(:name member) (count (or (:params member) []))]))
+                         (feature-members class-def))
+                   (mapcat (fn [{:keys [parent]}] (walk parent visited'))
+                           (:parents class-def)))))))]
+    (distinct (walk class-name #{}))))
+
+(defn- effective-method-member
+  "The feature member that answers method-name/arity when called on an
+   instance of class-name: its own definition if it has one, otherwise the
+   nearest ancestor's (see `inherited-method-member`). `:declaration-only?`
+   on the result means nothing between class-name and the declaring
+   ancestor supplies a body."
+  [env class-name method-name arity]
+  (let [class-def (env-lookup-class env class-name)
+        own (when class-def
+              (some (fn [member]
+                      (when (and (= (:type member) :method)
+                                 (= (:name member) method-name)
+                                 (= (count (or (:params member) [])) arity))
+                        member))
+                    (feature-members class-def)))]
+    (or own
+        (when class-def
+          (inherited-method-member env (:parents class-def) method-name arity)))))
+
+;; Only a `deferred class` may leave a feature unimplemented — Nex's
+;; Eiffel-style abstract-method contract. Without this check, a concrete
+;; class that skips an inherited deferred method (or declares its own
+;; `deferred` without being a deferred class) compiles and instantiates
+;; fine, and only fails the first time the missing method is actually
+;; called — as a raw JVM "Internal error" naming a synthetic
+;; `__method_<name>$arityN` symbol, with nothing pointing back at the
+;; missing override.
+(defn- direct-function-value-class?
+  "True for a class whose own `inherit` clause names the builtin `Function`
+   base directly -- the shape every function-value class has, since walker.clj
+   and lower.clj are the only places that ever write `:parents [{:parent
+   \"Function\"}]` (a top-level `function`, an anonymous `fn`, a `spawn`
+   closure, and a `declare function` forward-declaration stub)."
+  [class-def]
+  (boolean (some #(= "Function" (:parent %)) (:parents class-def))))
+
+(defn- check-deferred-methods-implemented!
+  [env class-name class-def]
+  (when (and (not (:deferred? class-def))
+             ;; A function-value class's own call<N> is exempt for two
+             ;; reasons: `all-deferred-method-keys` already excludes the 32
+             ;; other call arities Function declares but this class will
+             ;; never implement, by design (see its docstring) -- but a
+             ;; `declare function` forward-declaration stub's *own* call<N> is
+             ;; itself still declaration-only at this point (its real `function
+             ;; ... end` body arrives in a later statement/cell), which is
+             ;; exactly as legitimate, not a class that will never be
+             ;; completed.
+             (not (direct-function-value-class? class-def)))
+    (doseq [[m-name arity] (all-deferred-method-keys env class-name)]
+      (when (:declaration-only? (effective-method-member env class-name m-name arity))
+        (throw (ex-info (str "Class " class-name " does not implement deferred method " m-name)
+                        {:error (type-error
+                                 (str "Class '" class-name "' does not implement deferred method '"
+                                      m-name "'. Provide a body for '" m-name
+                                      "', or declare '" class-name "' itself 'deferred'."))}))))))
+
 (defn- check-override-conformance
   "Enforce CONTRAVARIANT parameters and COVARIANT return for a method that
    overrides an inherited routine of the same name and arity. The inherited
@@ -5162,6 +5265,7 @@
                                        (->> body
                                             (filter #(= :constructors (:type %)))
                                             (mapcat :constructors))))
+  (check-deferred-methods-implemented! env name class-def)
 
   ;; Check invariants
   (doseq [assertion invariant]

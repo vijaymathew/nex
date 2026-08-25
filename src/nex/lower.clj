@@ -39,6 +39,7 @@
 (declare function-return-type)
 (declare normalized-function-def)
 (declare ensure-convert-binding)
+(declare carrier-path-target-ir)
 (declare lower-convert-expression)
 (declare lookup-class-constant)
 (declare constant-nex-type)
@@ -1207,21 +1208,14 @@
     :else false))
 
 (defn- snapshot-source-ir
-  [env {:keys [owner field carrier-owner carrier-field carrier-jvm-type nex-type jvm-type]}]
-  (let [this-ir (ir/this-node (:this-type env)
-                              (exact-class-jvm-type env (:this-type env)))
-        target-ir (if carrier-field
-                    (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
-                                       carrier-field
-                                       this-ir
-                                       owner
-                                       carrier-jvm-type)
-                    this-ir)]
-    (ir/field-get-node (:internal-name (class-jvm-meta env owner))
-                       field
-                       target-ir
-                       nex-type
-                       jvm-type)))
+  [env {:keys [owner field carrier-path nex-type jvm-type]}]
+  (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                     field
+                     (carrier-path-target-ir env carrier-path
+                                             (ir/this-node (:this-type env)
+                                                           (exact-class-jvm-type env (:this-type env))))
+                     nex-type
+                     jvm-type))
 
 (defn- assertion-ir
   "Lower a require/ensure/invariant/class-invariant clause to an assert IR
@@ -1887,7 +1881,37 @@
        (remove nil?)
        vec))
 
+(defn- carrier-path-target-ir
+  "Build the target-ir for reaching a field through CARRIER-PATH -- a vector of
+   `{:owner :field :ancestor :ancestor-jvm-type}` hops from THIS-IR, outermost
+   first (see `direct-parent-field-map`) -- as a chain of nested field-gets,
+   one GETFIELD per composition level. Empty CARRIER-PATH (the field is on
+   the caller's own class) just returns THIS-IR unchanged; callers pass their
+   own `this`-node so a per-site jvm-type quirk on it isn't disturbed."
+  [env carrier-path this-ir]
+  (reduce (fn [target-ir {:keys [owner field ancestor ancestor-jvm-type]}]
+            (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                               field
+                               target-ir
+                               ancestor
+                               ancestor-jvm-type))
+          this-ir
+          carrier-path))
+
 (defn- direct-parent-field-map
+  "Every field class-def can reach through its `inherit` clauses, own
+   declarations excluded -- including a grandparent's, great-grandparent's,
+   etc., not just a direct parent's. Recurses into each direct parent's own
+   `direct-parent-field-map` for anything *it* inherits, prepending the hop
+   into that parent's composition field to the path recorded there, so e.g. a
+   field two `inherit`s up carries `:carrier-path [hop-to-parent hop-to-
+   grandparent]` -- see `carrier-path-target-ir`, which walks it as nested
+   GETFIELDs. Before this, a field's `:carrier-path` (then a single
+   `:carrier-owner`/`:carrier-field` pair) only ever reached a *direct*
+   parent's own fields, so a class assigning or reading a field declared two
+   or more `inherit`s above it hit `(:fields env)` lookups that came up empty
+   -- \"Assignment target is not a known local\" for a bare `field := value` in
+   a constructor, or an analogous failure for a bare read."
   [env class-def]
   (reduce (fn [m {:keys [parent generic-args]}]
             (if-let [parent-def (and (get (:compiled-classes env) parent)
@@ -1906,24 +1930,44 @@
                     ;; link. Resolving with the parent's parameters in scope keeps
                     ;; them erased instead of emitting a phantom class named `A`.
                     parent-env (update env :generic-param-names
-                                       #(into (set %) parent-params))]
-                (reduce (fn [m2 field]
-                          (if (or (:constant? field)
-                                  (contains? m2 (:name field)))
-                            m2
-                            (assoc m2
-                                   (:name field)
-                                   {:owner parent
-                                    :field (:name field)
-                                    :carrier-owner (:name class-def)
-                                    :carrier-field composition-field
-                                    :nex-type (if (seq subst)
-                                                (tc/resolve-generic-type (:field-type field) subst)
-                                                (:field-type field))
-                                    :jvm-type (resolve-jvm-type parent-env (:field-type field))
-                                    :carrier-jvm-type (exact-class-jvm-type env parent)})))
-                        m
-                        (class-fields parent-def)))
+                                       #(into (set %) parent-params))
+                    hop {:owner (:name class-def)
+                         :field composition-field
+                         :ancestor parent
+                         :ancestor-jvm-type (exact-class-jvm-type env parent)}
+                    m-with-own-fields
+                    (reduce (fn [m2 field]
+                              (if (or (:constant? field)
+                                      (contains? m2 (:name field)))
+                                m2
+                                (assoc m2
+                                       (:name field)
+                                       {:owner parent
+                                        :field (:name field)
+                                        :carrier-path [hop]
+                                        :nex-type (if (seq subst)
+                                                    (tc/resolve-generic-type (:field-type field) subst)
+                                                    (:field-type field))
+                                        :jvm-type (resolve-jvm-type parent-env (:field-type field))})))
+                            m
+                            (class-fields parent-def))
+                    ;; Fields `parent` itself only reaches through *its own*
+                    ;; `inherit` clauses (a grandparent's, etc.) -- restate their
+                    ;; types in class-def's terms too (substitutions compose the
+                    ;; same way down the chain) and prepend this hop to reach
+                    ;; them from class-def.
+                    inherited-by-parent (direct-parent-field-map parent-env parent-def)]
+                (reduce-kv (fn [m2 field-name info]
+                             (if (contains? m2 field-name)
+                               m2
+                               (assoc m2 field-name
+                                      (-> info
+                                          (update :nex-type
+                                                  #(if (seq subst) (tc/resolve-generic-type % subst) %))
+                                          (update :carrier-path
+                                                  (fn [path] (into [hop] path)))))))
+                           m-with-own-fields
+                           inherited-by-parent))
               m))
           {}
           (remove #(contains? #{"Any" "Function"} (:parent %)) (:parents class-def))))
@@ -3174,24 +3218,17 @@
                                    (:declaring-class (or method-def field-def)))]
     (cond
       (and (= (:type target-expr) :this)
-           (if-let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}
+           (if-let [{:keys [owner field carrier-path nex-type jvm-type]}
                     (get (:fields env) method)]
              (false? has-parens)
              false))
-      (let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}
-            (get (:fields env) method)
-            target' (if carrier-field
-                      (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
-                                         carrier-field
-                                         (ir/this-node (:this-type env)
-                                                       (exact-class-jvm-type env (:this-type env)))
-                                         owner
-                                         carrier-jvm-type)
-                      (ir/this-node (:this-type env)
-                                    (exact-class-jvm-type env (:this-type env))))]
+      (let [{:keys [owner field carrier-path nex-type jvm-type]}
+            (get (:fields env) method)]
         (ir/field-get-node (:internal-name (class-jvm-meta env owner))
                            field
-                           target'
+                           (carrier-path-target-ir env carrier-path
+                                                   (ir/this-node (:this-type env)
+                                                                 (exact-class-jvm-type env (:this-type env))))
                            nex-type
                            jvm-type))
 
@@ -3349,22 +3386,15 @@
   [env expr]
   (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) (:name expr))]
     (ir/local-node (:name expr) slot nex-type jvm-type)
-    (if-let [{:keys [owner field carrier-owner carrier-field nex-type jvm-type carrier-jvm-type]}
+    (if-let [{:keys [owner field carrier-path nex-type jvm-type]}
              (get (:fields env) (:name expr))]
-      (let [target-ir (if carrier-field
-                        (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
-                                           carrier-field
-                                           (ir/this-node (:this-type env)
-                                                         (resolve-jvm-type env (:this-type env)))
-                                           owner
-                                           carrier-jvm-type)
-                        (ir/this-node (:this-type env)
-                                      (resolve-jvm-type env (:this-type env))))]
-        (ir/field-get-node (:internal-name (class-jvm-meta env owner))
-                           field
-                           target-ir
-                           nex-type
-                           jvm-type))
+      (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                         field
+                         (carrier-path-target-ir env carrier-path
+                                                 (ir/this-node (:this-type env)
+                                                               (resolve-jvm-type env (:this-type env))))
+                         nex-type
+                         jvm-type)
       (if-let [constant (and (:current-class env)
                              (lookup-class-constant env (:current-class env) (:name expr)))]
         (let [owner (:declaring-class constant)
@@ -4570,17 +4600,10 @@
         target-name (:target stmt)]
     (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) target-name)]
       [env (ir/set-local-node slot value-ir nex-type jvm-type)]
-      (if-let [{:keys [owner field nex-type jvm-type]} (get (:fields env) target-name)]
-        (let [field-info (get (:fields env) target-name)
-              target-ir (if-let [carrier-field (:carrier-field field-info)]
-                          (ir/field-get-node (:internal-name (class-jvm-meta env (:carrier-owner field-info)))
-                                             carrier-field
-                                             (ir/this-node (:this-type env)
-                                                           (exact-class-jvm-type env (:this-type env)))
-                                             owner
-                                             (:carrier-jvm-type field-info))
-                          (ir/this-node (:this-type env)
-                                        (exact-class-jvm-type env (:this-type env))))]
+      (if-let [{:keys [owner field nex-type jvm-type carrier-path]} (get (:fields env) target-name)]
+        (let [target-ir (carrier-path-target-ir env carrier-path
+                                                (ir/this-node (:this-type env)
+                                                              (exact-class-jvm-type env (:this-type env))))]
           [env (ir/field-set-node (:internal-name (class-jvm-meta env owner))
                                   field
                                   target-ir
@@ -4789,15 +4812,9 @@
                           {:field field-name
                            :declaring-class (:owner field-info)
                            :target target-expr})))
-        (let [target-ir (if-let [carrier-field (:carrier-field field-info)]
-                          (ir/field-get-node (:internal-name (class-jvm-meta env (:carrier-owner field-info)))
-                                             carrier-field
-                                             (ir/this-node (:this-type env)
-                                                           (exact-class-jvm-type env (:this-type env)))
-                                             (:owner field-info)
-                                             (:carrier-jvm-type field-info))
-                          (ir/this-node (:this-type env)
-                                        (exact-class-jvm-type env (:this-type env))))]
+        (let [target-ir (carrier-path-target-ir env (:carrier-path field-info)
+                                                (ir/this-node (:this-type env)
+                                                              (exact-class-jvm-type env (:this-type env))))]
           [env (ir/field-set-node (:internal-name (class-jvm-meta env (:owner field-info)))
                                   field-name
                                   target-ir
