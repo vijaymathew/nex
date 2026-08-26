@@ -2562,3 +2562,27 @@ end"))
           result (tc/type-check (p/ast code))]
       (is (:success result) (pr-str (:errors result)))
       (is (empty? (:errors result))))))
+
+(deftest test-single-generic-param-not-compatible-with-concrete-type
+  (testing "an unconstrained generic parameter is opaque: it cannot be assigned into a concretely-typed slot"
+    (let [code "function f [G] (x: G): Integer
+                do
+                  result := x
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Cannot assign G to variable of type Integer") msgs) (pr-str msgs)))))
+
+(deftest test-same-generic-name-bound-inconsistently-in-one-call-rejected
+  (testing "the same generic name used twice in a signature must resolve to one consistent type per call"
+    (let [code "function transform [G] (x: G, f: Function(v: G): G): G
+                do
+                  result := f(x)
+                end
+
+                print(transform(5, fn(v: Integer): String do result := \"n=\" + v end))"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Conflicting inferred types for generic parameter G") msgs) (pr-str msgs)))))

@@ -600,21 +600,21 @@
      (or (= t1 t2)
          ;; Any is compatible with all types
          (or (= t1 "Any") (= t2 "Any"))
-         ;; An unbound generic type parameter is compatible with any concrete
-         ;; type -- there's no per-call-site binding tracked while checking a
-         ;; generic body in the abstract. But two DIFFERENT generic parameter
-         ;; names must NOT be treated as interchangeable with each other: that
-         ;; would let a value typed as one type variable flow into a slot
-         ;; typed as an unrelated one (e.g. `function f(xs: Array[G]):
-         ;; Array[T]` silently accepting a G-typed element into a T-typed
-         ;; slot). Same-name generic params already match via `(= t1 t2)`
-         ;; above, so if both look like generic params by the time we reach
-         ;; here, their names must differ -- and that combination is
-         ;; deliberately excluded below.
-         (let [g1? (if env (is-generic-type-param? env t1) (is-generic-type-param? t1))
-               g2? (if env (is-generic-type-param? env t2) (is-generic-type-param? t2))]
-           (or (and g1? (not g2?))
-               (and g2? (not g1?))))
+         ;; A generic type parameter is opaque: while checking a generic
+         ;; declaration's own body in the abstract, it is equal only to
+         ;; itself (already handled by `(= t1 t2)` above) -- never to a
+         ;; different generic name (that let a G-typed value flow into an
+         ;; unrelated T-typed slot) and never to a concrete type either (that
+         ;; let `function f[G](x: G): Integer do result := x end` silently
+         ;; accept any G as an Integer). A caller with an actual binding for a
+         ;; generic name resolves it via resolve-generic-type BEFORE reaching
+         ;; this comparison (see infer-free-function-return-type, the callN
+         ;; argument-checking path, check-override-conformance, and the
+         ;; Function-signature branch of types-compatible? below) -- so by the
+         ;; time a bare generic name reaches here unresolved, there either is
+         ;; no caller-provided binding to apply (the declaration-checking
+         ;; case), or resolution has already happened and this name is
+         ;; genuinely a mismatch.
          ;; Function types are equal iff they have the same parameter types and
          ;; the same return type (parameter names are irrelevant). Their
          ;; conformance under subtyping -- contravariant parameters, covariant
@@ -669,6 +669,10 @@
 
 (declare types-compatible?)
 (declare lookup-class-method)
+(declare merge-inferred-generic-bindings)
+(declare infer-generic-type-map-from-arg)
+(declare generic-names-in-type)
+(declare resolve-generic-type)
 
 (defn- substitute-type-params
   "Replace generic parameter names in `t` using `subst` (param name -> type)."
@@ -786,14 +790,30 @@
                (= (:base-type a1) "Function") (= (:base-type a2) "Function")
                (:param-types a1) (:param-types a2)
                (= (count (:param-types a1)) (count (:param-types a2)))
-               (every? true?
-                       (map (fn [p1 p2]
-                              ;; contravariant: target param must conform to source param
-                              (types-compatible? env (:type p2) (:type p1)))
-                            (:param-types a1) (:param-types a2)))
-               (or (nil? (:return-type a1)) (nil? (:return-type a2))
-                   ;; covariant: source return must conform to target return
-                   (types-compatible? env (:return-type a1) (:return-type a2))))
+               ;; a2 (the target) may be written in terms of the callee's own,
+               ;; still-unbound generic params (`Function(v: G): T`). Unify
+               ;; those against a1's actual, concrete signature first and
+               ;; compare against the SUBSTITUTED target -- rather than
+               ;; comparing the raw generic names, which relied on a generic
+               ;; name being treated as compatible with anything.
+               (let [generic-names (generic-names-in-type env a2)
+                     type-map (when (seq generic-names)
+                                (reduce (fn [acc [d a]]
+                                          (merge-inferred-generic-bindings
+                                           env acc (infer-generic-type-map-from-arg env generic-names d a)))
+                                        {}
+                                        (cond-> (mapv vector (map :type (:param-types a2)) (map :type (:param-types a1)))
+                                          (and (:return-type a2) (:return-type a1))
+                                          (conj [(:return-type a2) (:return-type a1)]))))
+                     a2' (if (seq type-map) (resolve-generic-type a2 type-map) a2)]
+                 (and (every? true?
+                              (map (fn [p1 p2]
+                                     ;; contravariant: target param must conform to source param
+                                     (types-compatible? env (:type p2) (:type p1)))
+                                   (:param-types a1) (:param-types a2')))
+                      (or (nil? (:return-type a1)) (nil? (:return-type a2'))
+                          ;; covariant: source return must conform to target return
+                          (types-compatible? env (:return-type a1) (:return-type a2'))))))
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
           ;; Conformance to a parameterized target through an instantiated
@@ -1699,7 +1719,13 @@
 
 (defn resolve-generic-type
   "Substitute generic type parameters using a type-map.
-   E.g., with type-map {\"T\" \"Integer\"}, resolves \"T\" to \"Integer\"."
+   E.g., with type-map {\"T\" \"Integer\"}, resolves \"T\" to \"Integer\".
+   A Function-shaped type's generic-relevant substructure lives under
+   :param-types/:return-type rather than :type-params/:type-args (those are
+   how Array[T]/Map[K,V]/user generic classes are shaped), so both are
+   substituted -- otherwise a declared `Function(v: G): T` is left with its
+   raw, unsubstituted generic names even after a caller's G/T bindings are
+   known."
   [param-type type-map]
   (cond
     (nil? type-map) param-type
@@ -1707,7 +1733,9 @@
     (map? param-type) (-> param-type
                           (update :base-type #(get type-map % %))
                           (update :type-args #(when % (mapv (fn [t] (resolve-generic-type t type-map)) %)))
-                          (update :type-params #(when % (mapv (fn [t] (resolve-generic-type t type-map)) %))))
+                          (update :type-params #(when % (mapv (fn [t] (resolve-generic-type t type-map)) %)))
+                          (update :param-types #(when % (mapv (fn [p] (update p :type resolve-generic-type type-map)) %)))
+                          (update :return-type #(when % (resolve-generic-type % type-map))))
     :else param-type))
 
 (defn build-generic-type-map
@@ -1781,6 +1809,23 @@
        (assoc acc generic-name inferred-type)))
    left
    right))
+
+(defn- generic-names-in-type
+  "Every bare generic-parameter-shaped name reachable within a type
+   expression -- recursing into type-params/type-args (Array[T]/Map[K,V]/user
+   generic classes) and, for a Function type, param-types/return-type -- as
+   judged by is-generic-type-param?, not just \"looks like a capitalized
+   name\" (that would also match real classes like Comparable)."
+  [env t]
+  (let [t (normalize-type t)]
+    (cond
+      (and (string? t) (is-generic-type-param? env t)) #{t}
+      (map? t) (reduce set/union #{}
+                       (concat (map #(generic-names-in-type env %)
+                                    (or (:type-params t) (:type-args t) []))
+                               (map #(generic-names-in-type env (:type %)) (:param-types t))
+                               (when (:return-type t) [(generic-names-in-type env (:return-type t))])))
+      :else #{})))
 
 (defn- infer-generic-type-map-from-arg
   [env generic-names param-type arg-type]
@@ -3063,11 +3108,16 @@
                                 {:error (type-error
                                          (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
           ;; A Function value carrying an explicit signature knows its own return
-          ;; type; prefer it over the generic callN result (which is Any).
+          ;; type; prefer it over the generic callN result (which is Any). Still
+          ;; resolve it through type-map: when that signature is itself generic
+          ;; (`let id := fn[T](x: T): T ...`), the raw declared return type is
+          ;; the unbound "T", not this call's actual inferred type -- without
+          ;; this, `let y: Integer := id(10)` reported the call's type as the
+          ;; literal name "T" instead of the "Integer" this call resolved it to.
           (if (and (map? var-type)
                    (= "Function" (:base-type var-type))
                    (:return-type var-type))
-            (:return-type var-type)
+            (resolve-generic-type (:return-type var-type) type-map)
             ;; Coalesce a missing :return-type to "Void" — see
             ;; check-call-signature's identical fix for why a bare nil here
             ;; would slip past check-expression's Void-as-value guard.
