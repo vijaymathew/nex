@@ -600,11 +600,21 @@
      (or (= t1 t2)
          ;; Any is compatible with all types
          (or (= t1 "Any") (= t2 "Any"))
-         ;; Generic type parameters are compatible with any type (only when not a class)
-         (or (and env (is-generic-type-param? env t1))
-             (and env (is-generic-type-param? env t2))
-             (and (nil? env) (is-generic-type-param? t1))
-             (and (nil? env) (is-generic-type-param? t2)))
+         ;; An unbound generic type parameter is compatible with any concrete
+         ;; type -- there's no per-call-site binding tracked while checking a
+         ;; generic body in the abstract. But two DIFFERENT generic parameter
+         ;; names must NOT be treated as interchangeable with each other: that
+         ;; would let a value typed as one type variable flow into a slot
+         ;; typed as an unrelated one (e.g. `function f(xs: Array[G]):
+         ;; Array[T]` silently accepting a G-typed element into a T-typed
+         ;; slot). Same-name generic params already match via `(= t1 t2)`
+         ;; above, so if both look like generic params by the time we reach
+         ;; here, their names must differ -- and that combination is
+         ;; deliberately excluded below.
+         (let [g1? (if env (is-generic-type-param? env t1) (is-generic-type-param? t1))
+               g2? (if env (is-generic-type-param? env t2) (is-generic-type-param? t2))]
+           (or (and g1? (not g2?))
+               (and g2? (not g1?))))
          ;; Function types are equal iff they have the same parameter types and
          ;; the same return type (parameter names are irrelevant). Their
          ;; conformance under subtyping -- contravariant parameters, covariant
@@ -5633,42 +5643,65 @@
                  (when-not (or (full?) (contains? @seen msg))
                    (vswap! seen conj msg)
                    (vswap! errs conj (type-error msg line)))))
-        check! (fn [label line type-expr]
+        ;; The names a class/function/lambda itself declares as generic
+        ;; parameters (`[G, T]`) -- NOT every generic-param name visible
+        ;; anywhere in the program. `known-type-name?`/`declared-generic-param?`
+        ;; can't be reused for the generic-shaped case here: they treat a name
+        ;; as a "declared" generic param as soon as it matches *some* visible
+        ;; class's own `[...]` list, which would let an unrelated class's `[G]`
+        ;; silently authorize a bare, undeclared `G` in a completely different
+        ;; function. No synthetic generic-param placeholder classes have been
+        ;; registered in `env` yet at this point in the pipeline (that happens
+        ;; later, during body checking), so `env-lookup-class` can't be relied
+        ;; on to distinguish "genuinely declared here" from "coincidentally
+        ;; named the same as someone else's type variable" either.
+        generic-param-names (fn [gparams]
+                              (into #{} (keep (comp type-name-string :name)) gparams))
+        known-here? (fn [nm local-generics]
+                     (or (builtin-type? nm)
+                         (some? (env-lookup-class env nm))
+                         (some? (env-lookup-type-alias env nm))
+                         (contains? local-generics nm)))
+        check! (fn [label line type-expr local-generics]
                  (when (and type-expr (not (full?)))
                    (doseq [nm (distinct (type-base-name-refs type-expr))
                            :while (not (full?))]
-                     (when-not (known-type-name? env nm)
+                     (when-not (known-here? nm local-generics)
                        (add! nm label line)))))
-        check-constraints! (fn [gparams owner line]
+        check-constraints! (fn [gparams owner line local-generics]
                              (doseq [{:keys [name constraint]} gparams
                                      :when constraint]
                                (check! (str "constraint on type parameter '"
                                             (type-name-string name) "' of " owner)
-                                       line constraint)))
-        check-params! (fn [params owner line]
+                                       line constraint local-generics)))
+        check-params! (fn [params owner line local-generics]
                         (doseq [{pname :name ptype :type} params]
-                          (check! (str "parameter '" pname "' of " owner) line ptype)))
-        check-body-lets! (fn [body owner]
+                          (check! (str "parameter '" pname "' of " owner) line ptype local-generics)))
+        check-body-lets! (fn [body owner local-generics]
                            (doseq [{:keys [name var-type] line :dbg/line} (typed-let-nodes body)]
-                             (check! (str "local variable '" name "' in " owner) line var-type))
-                           (doseq [{:keys [params return-type] line :dbg/line} (anonymous-function-nodes body)]
-                             (check-params! params (str "anonymous function in " owner) line)
-                             (check! (str "return type of anonymous function in " owner)
-                                     line return-type)))]
+                             (check! (str "local variable '" name "' in " owner) line var-type local-generics))
+                           (doseq [{:keys [params return-type generic-params] line :dbg/line}
+                                   (anonymous-function-nodes body)]
+                             (let [lambda-generics (into local-generics (generic-param-names generic-params))]
+                               (check-params! params (str "anonymous function in " owner) line lambda-generics)
+                               (check! (str "return type of anonymous function in " owner)
+                                       line return-type lambda-generics))))]
     ;; Free functions.
     (doseq [{:keys [name params return-type generic-params body] line :dbg/line} functions
             :while (not (full?))]
-      (let [owner (str "function '" name "'")]
-        (check-constraints! generic-params owner line)
-        (check-params! params owner line)
-        (check! (str "return type of " owner) line return-type)
-        (check-body-lets! body owner)))
+      (let [owner (str "function '" name "'")
+            local-generics (generic-param-names generic-params)]
+        (check-constraints! generic-params owner line local-generics)
+        (check-params! params owner line local-generics)
+        (check! (str "return type of " owner) line return-type local-generics)
+        (check-body-lets! body owner local-generics)))
     ;; Classes (user + interned); generated function classes handled above.
     (doseq [{:keys [name generic-params parents body] cline :dbg/line} classes
             :when (not (contains? fn-class-names name))
             :while (not (full?))]
-      (let [cowner (str "class '" name "'")]
-        (check-constraints! generic-params cowner cline)
+      (let [cowner (str "class '" name "'")
+            local-generics (generic-param-names generic-params)]
+        (check-constraints! generic-params cowner cline local-generics)
         (doseq [{:keys [parent generic-args]} parents]
           ;; The bare parent name has a dedicated inheritance check with a
           ;; clearer "Undefined parent class" message; leave it to that pass and
@@ -5677,7 +5710,7 @@
           ;; dedicated check surfaces rather than a generic one.
           (when (known-type-name? env parent)
             (doseq [ga generic-args]
-              (check! (str "type argument to parent of " cowner) cline ga))))
+              (check! (str "type argument to parent of " cowner) cline ga local-generics))))
         (doseq [section body
                 :when (= (:type section) :feature-section)
                 member (:members section)
@@ -5685,30 +5718,31 @@
           (let [mline (:dbg/line member)]
             (case (:type member)
               :field (check! (str "field '" (:name member) "' in " cowner)
-                             mline (:field-type member))
+                             mline (:field-type member) local-generics)
               :method (let [owner (str "method '" (:name member) "' in " cowner)]
-                        (check-params! (:params member) owner mline)
-                        (check! (str "return type of " owner) mline (:return-type member))
-                        (check-body-lets! (:body member) owner))
+                        (check-params! (:params member) owner mline local-generics)
+                        (check! (str "return type of " owner) mline (:return-type member) local-generics)
+                        (check-body-lets! (:body member) owner local-generics))
               nil)))
         (doseq [section body
                 :when (= (:type section) :constructors)
                 ctor (:constructors section)
                 :while (not (full?))]
           (let [owner (str "constructor '" (:name ctor) "' in " cowner)]
-            (check-params! (:params ctor) owner (:dbg/line ctor))
-            (check-body-lets! (:body ctor) owner)))))
+            (check-params! (:params ctor) owner (:dbg/line ctor) local-generics)
+            (check-body-lets! (:body ctor) owner local-generics)))))
     ;; Top-level `let` statements.
     (doseq [{:keys [name var-type] line :dbg/line} (typed-let-nodes statements)
             :while (not (full?))]
-      (check! (str "variable '" name "'") line var-type))
+      (check! (str "variable '" name "'") line var-type #{}))
     ;; Top-level anonymous functions (`fn(...) ... end` used directly in a
     ;; top-level statement, e.g. as an argument, not bound through a typed
     ;; `let` above).
-    (doseq [{:keys [params return-type] line :dbg/line} (anonymous-function-nodes statements)
+    (doseq [{:keys [params return-type generic-params] line :dbg/line} (anonymous-function-nodes statements)
             :while (not (full?))]
-      (check-params! params "a top-level anonymous function" line)
-      (check! "return type of a top-level anonymous function" line return-type))
+      (let [local-generics (generic-param-names generic-params)]
+        (check-params! params "a top-level anonymous function" line local-generics)
+        (check! "return type of a top-level anonymous function" line return-type local-generics)))
     @errs))
 
 (defn- collect-top-level-globals!

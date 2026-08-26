@@ -157,7 +157,7 @@ print(xs = [5, 7, 9])")
           out-dir (io/file tmp-dir "out")]
       (try
         (.mkdirs tmp-dir)
-        (spit nex-file "function before_key(key: Comparable, other: K): Boolean
+        (spit nex-file "function before_key [K] (key: Comparable, other: K): Boolean
 do
   result := key.compare(other) < 0
 end

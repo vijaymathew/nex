@@ -1702,7 +1702,7 @@ end"
     right: ?Node[K, V]
 end
 
-function search(node: ?Node[K, V], key: K): ?V
+function search [K, V] (node: ?Node[K, V], key: K): ?V
 do
   if node = nil then
     result := nil
@@ -1748,12 +1748,12 @@ end"
     end
 end
 
-function rebalance(node: Node[K, V]): Node[K, V]
+function rebalance [K, V] (node: Node[K, V]): Node[K, V]
 do
   result := node
 end
 
-function insert(node: ?Node[K, V], key: K, value: V): Node[K, V]
+function insert [K, V] (node: ?Node[K, V], key: K, value: V): Node[K, V]
 do
   if node = nil then
     result := create Node[K, V].make(key, value)
