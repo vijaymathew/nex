@@ -2330,7 +2330,7 @@ end"))]
 end"))
             fn-output
             (with-out-str
-              (repl/eval-code ctx0 "function search(node: ?Node[K, V], key: K): ?V
+              (repl/eval-code ctx0 "function search [K, V] (node: ?Node[K, V], key: K): ?V
 do
   if node = nil then
     result := nil

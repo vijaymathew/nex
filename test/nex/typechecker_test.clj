@@ -1702,7 +1702,7 @@ end"
     right: ?Node[K, V]
 end
 
-function search(node: ?Node[K, V], key: K): ?V
+function search [K, V] (node: ?Node[K, V], key: K): ?V
 do
   if node = nil then
     result := nil
@@ -1748,12 +1748,12 @@ end"
     end
 end
 
-function rebalance(node: Node[K, V]): Node[K, V]
+function rebalance [K, V] (node: Node[K, V]): Node[K, V]
 do
   result := node
 end
 
-function insert(node: ?Node[K, V], key: K, value: V): Node[K, V]
+function insert [K, V] (node: ?Node[K, V], key: K, value: V): Node[K, V]
 do
   if node = nil then
     result := create Node[K, V].make(key, value)
@@ -2497,3 +2497,150 @@ end"))
           result (tc/type-check (p/ast code))]
       (is (:success result) (pr-str (:errors result)))
       (is (empty? (:errors result))))))
+
+(deftest test-free-function-bare-generic-letter-must-be-declared
+  (testing "a `function` can no longer imply `[G]` from a bare capital-letter type in its signature"
+    (let [code "function every_other(xs: Array[G]): Array[G]
+                do
+                  result := xs
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Undefined type: G") msgs) (pr-str msgs)))))
+
+(deftest test-anonymous-function-bare-generic-letter-must-be-declared
+  (testing "a `fn(...)` lambda can no longer imply `[T]` from a bare capital-letter type either"
+    (let [code "let f := fn(x: T): T do result := x end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Undefined type: T") msgs) (pr-str msgs)))))
+
+(deftest test-unrelated-class-generic-name-does-not-authorize-undeclared-function-generic
+  (testing "another class declaring `[G]` elsewhere in the file must not make a bare, undeclared `G` pass for an unrelated function"
+    (let [code "class Box [G]
+                feature
+                  value: G
+                create make(v: G) do value := v end
+                end
+
+                function every_other(xs: Array[G]): Array[G]
+                do
+                  result := xs
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Undefined type: G") msgs) (pr-str msgs)))))
+
+(deftest test-distinct-generic-params-are-not-interchangeable
+  (testing "two distinct, properly-declared generic parameters are not silently compatible with each other"
+    (let [code "function every_other [G, T] (xs: Array[G]): Array[T]
+                do
+                  result := []
+                  from
+                    let i := 0
+                  until
+                    i = xs.length
+                  do
+                    if i % 2 = 0 then result.add(xs.get(i)) end
+                    i := i + 1
+                  end
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Expected T, got G") msgs) (pr-str msgs)))))
+
+(deftest test-generic-function-relating-two-params-through-a-function-arg-succeeds
+  (testing "a generic parameter that only flows from one to another through an actual G -> T Function argument still checks out"
+    (let [code "function transform [G, T] (x: G, f: Function(v: G): T): T
+                do
+                  result := f(x)
+                end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
+
+(deftest test-single-generic-param-not-compatible-with-concrete-type
+  (testing "an unconstrained generic parameter is opaque: it cannot be assigned into a concretely-typed slot"
+    (let [code "function f [G] (x: G): Integer
+                do
+                  result := x
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Cannot assign G to variable of type Integer") msgs) (pr-str msgs)))))
+
+(deftest test-generic-constraint-checked-against-inferred-call-argument
+  (testing "an argument inferred to bind a constrained generic parameter must itself satisfy the constraint"
+    (let [code "class Animal
+                feature
+                  speak(): String do result := \"...\" end
+                end
+
+                function describe [G -> Animal] (x: G): String
+                do
+                  result := x.speak()
+                end
+
+                print(describe(42))"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "does not satisfy constraint Animal") msgs) (pr-str msgs)))))
+
+(deftest test-generic-constraint-satisfied-by-inferred-call-argument-succeeds
+  (testing "an argument that does satisfy the constraint still checks out"
+    (let [code "class Animal
+                feature
+                  speak(): String do result := \"...\" end
+                end
+
+                class Dog inherit Animal
+                create make() do end
+                feature
+                  speak(): String do result := \"Woof\" end
+                end
+
+                function describe [G -> Animal] (x: G): String
+                do
+                  result := x.speak()
+                end
+
+                let d: Dog := create Dog.make()
+                print(describe(d))"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
+
+(deftest test-generic-value-upcast-to-its-constraint-succeeds
+  (testing "a constrained generic parameter's value can be assigned to a slot typed as its own constraint"
+    (let [code "class Animal
+                feature
+                  speak(): String do result := \"...\" end
+                end
+
+                function describe [G -> Animal] (x: G): String
+                do
+                  let a: Animal := x
+                  result := a.speak()
+                end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
+
+(deftest test-same-generic-name-bound-inconsistently-in-one-call-rejected
+  (testing "the same generic name used twice in a signature must resolve to one consistent type per call"
+    (let [code "function transform [G] (x: G, f: Function(v: G): G): G
+                do
+                  result := f(x)
+                end
+
+                print(transform(5, fn(v: Integer): String do result := \"n=\" + v end))"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Conflicting inferred types for generic parameter G") msgs) (pr-str msgs)))))
