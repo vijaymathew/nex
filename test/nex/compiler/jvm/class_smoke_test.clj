@@ -1214,6 +1214,94 @@ end"))
       (is (= ["\"inner: L3\"" "\"mid: L2\"" "\"outer: L1\""]
              (runtime/state-output (:state session)))))))
 
+;; `retry` shares the same exception-table dispatch that the nested-rescue
+;; fix above touched (a retry-signal throwable, caught by the nearest
+;; enclosing try/catch), so it needed the identical fix and gets the same
+;; nested-do/rescue coverage here.
+
+(deftest compiled-retry-in-rescue-nested-inside-outer-rescue-clause-smoke-test
+  (testing "retry in a do/rescue nested inside another rescue clause only re-loops the inner block"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "let outer_count := 0\n"
+                   "let inner_count := 0\n"
+                   "do\n"
+                   "  outer_count := outer_count + 1\n"
+                   "  raise \"OUTER\"\n"
+                   "rescue\n"
+                   "  do\n"
+                   "    inner_count := inner_count + 1\n"
+                   "    if inner_count < 3 then\n"
+                   "      raise \"INNER\"\n"
+                   "    end\n"
+                   "  rescue\n"
+                   "    retry\n"
+                   "  end\n"
+                   "  print(\"inner_count: \" + inner_count)\n"
+                   "end\n"
+                   "print(\"outer_count: \" + outer_count)")))
+      (is (= ["\"inner_count: 3\"" "\"outer_count: 1\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-retry-at-both-nesting-levels-smoke-test
+  (testing "retry in a do/rescue nested inside another try's body, plus a separate
+            retry at the outer level, each loop only their own enclosing block"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "let inner_count := 0\n"
+                   "let outer_count := 0\n"
+                   "do\n"
+                   "  do\n"
+                   "    inner_count := inner_count + 1\n"
+                   "    if inner_count < 3 then\n"
+                   "      raise \"INNER\"\n"
+                   "    end\n"
+                   "  rescue\n"
+                   "    retry\n"
+                   "  end\n"
+                   "  outer_count := outer_count + 1\n"
+                   "  if outer_count < 2 then\n"
+                   "    raise \"OUTER\"\n"
+                   "  end\n"
+                   "rescue\n"
+                   "  retry\n"
+                   "end\n"
+                   "print(\"inner_count: \" + inner_count)\n"
+                   "print(\"outer_count: \" + outer_count)")))
+      (is (= ["\"inner_count: 4\"" "\"outer_count: 2\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-retry-in-triple-nested-rescue-smoke-test
+  (testing "retry at the innermost of three nested do/rescue levels only re-loops that level"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "let c1 := 0\n"
+                   "let c2 := 0\n"
+                   "let c3 := 0\n"
+                   "do\n"
+                   "  c1 := c1 + 1\n"
+                   "  raise \"L1\"\n"
+                   "rescue\n"
+                   "  do\n"
+                   "    c2 := c2 + 1\n"
+                   "    raise \"L2\"\n"
+                   "  rescue\n"
+                   "    do\n"
+                   "      c3 := c3 + 1\n"
+                   "      if c3 < 3 then\n"
+                   "        raise \"L3\"\n"
+                   "      end\n"
+                   "    rescue\n"
+                   "      retry\n"
+                   "    end\n"
+                   "    print(\"c3: \" + c3)\n"
+                   "  end\n"
+                   "  print(\"c2: \" + c2)\n"
+                   "end\n"
+                   "print(\"c1: \" + c1)")))
+      (is (= ["\"c3: 3\"" "\"c2: 1\"" "\"c1: 1\""] (runtime/state-output (:state session)))))))
+
 ;; ─── Exceptions thrown by a *free function* call, seen through `rescue` ─────
 ;;
 ;; A free-function call lowers to `:call-repl-fn` (emit.clj), which invokes it
