@@ -1031,6 +1031,76 @@ end"))
         (is (nil? (:result result))))
       (is (= ["\"boom\""] (runtime/state-output (:state session)))))))
 
+;; ─── Nested `do/rescue` blocks ──────────────────────────────────────────────
+;;
+;; `emit-try!` (emit.clj) used to register its own try/catch entries via
+;; `visitTryCatchBlock` *before* emitting its body/rescue statements. Any
+;; nested `do/rescue` inside those statements would then register its entries
+;; *after* the enclosing one. The JVM dispatches to the first matching handler
+;; in exception-table order, so the enclosing (less specific) handler won the
+;; race for any range it shared with the nested block — the nested `rescue`
+;; never ran and the exception surfaced as an unhandled crash instead. Fixed
+;; by deferring the enclosing try/catch registration until after body/rescue
+;; (and any nested try/catch registrations within them) are emitted.
+
+(deftest compiled-nested-rescue-in-rescue-clause-smoke-test
+  (testing "a do/rescue nested inside another rescue clause catches its own exception"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "do\n"
+                   "  raise \"OUTER\"\n"
+                   "rescue\n"
+                   "  do\n"
+                   "    raise \"BYE\"\n"
+                   "  rescue\n"
+                   "    print(\"2: \" + exception)\n"
+                   "  end\n"
+                   "  print(\"1: \" + exception)\n"
+                   "end")))
+      (is (= ["\"2: BYE\"" "\"1: OUTER\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-nested-rescue-in-body-smoke-test
+  (testing "a do/rescue nested inside another try's body catches its own exception"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "do\n"
+                   "  do\n"
+                   "    raise \"BYE\"\n"
+                   "  rescue\n"
+                   "    print(\"2: \" + exception)\n"
+                   "  end\n"
+                   "  raise \"OUTER\"\n"
+                   "rescue\n"
+                   "  print(\"1: \" + exception)\n"
+                   "end")))
+      (is (= ["\"2: BYE\"" "\"1: OUTER\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-triple-nested-rescue-smoke-test
+  (testing "three levels of nested do/rescue each catch their own exception and
+            `exception` re-scopes to the enclosing level once a nested rescue completes"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "do\n"
+                   "  raise \"L1\"\n"
+                   "rescue\n"
+                   "  do\n"
+                   "    raise \"L2\"\n"
+                   "  rescue\n"
+                   "    do\n"
+                   "      raise \"L3\"\n"
+                   "    rescue\n"
+                   "      print(\"inner: \" + exception)\n"
+                   "    end\n"
+                   "    print(\"mid: \" + exception)\n"
+                   "  end\n"
+                   "  print(\"outer: \" + exception)\n"
+                   "end")))
+      (is (= ["\"inner: L3\"" "\"mid: L2\"" "\"outer: L1\""]
+             (runtime/state-output (:state session)))))))
+
 ;; ─── Exceptions thrown by a *free function* call, seen through `rescue` ─────
 ;;
 ;; A free-function call lowers to `:call-repl-fn` (emit.clj), which invokes it

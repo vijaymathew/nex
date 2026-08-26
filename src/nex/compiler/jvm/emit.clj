@@ -2514,8 +2514,6 @@
         not-retry-label (Label.)
         rescue-not-retry-label (Label.)
         end-label (Label.)]
-    (.visitTryCatchBlock mv body-start body-end body-handler throwable-internal-name)
-    (.visitTryCatchBlock mv rescue-start rescue-end rescue-handler throwable-internal-name)
     (.visitLabel mv loop-start)
     (.visitLabel mv body-start)
     (doseq [stmt body]
@@ -2565,7 +2563,14 @@
     (.visitLabel mv rescue-not-retry-label)
     (.visitVarInsn mv Opcodes/ALOAD rescue-throwable-slot)
     (.visitInsn mv Opcodes/ATHROW)
-    (.visitLabel mv end-label)))
+    (.visitLabel mv end-label)
+
+    ;; Registered after emitting body/rescue (and any nested try/rescue blocks
+    ;; therein) so this try's handlers land later in the exception table.
+    ;; The JVM tries handlers in table order, so nested handlers must precede
+    ;; enclosing ones for overlapping ranges to dispatch to the innermost match.
+    (.visitTryCatchBlock mv body-start body-end body-handler throwable-internal-name)
+    (.visitTryCatchBlock mv rescue-start rescue-end rescue-handler throwable-internal-name)))
 
 (defn- emit-line-number!
   [^MethodVisitor mv stmt]
