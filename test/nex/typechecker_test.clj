@@ -2574,6 +2574,64 @@ end"))
       (is (false? (:success result)))
       (is (some #(str/includes? % "Cannot assign G to variable of type Integer") msgs) (pr-str msgs)))))
 
+(deftest test-generic-constraint-checked-against-inferred-call-argument
+  (testing "an argument inferred to bind a constrained generic parameter must itself satisfy the constraint"
+    (let [code "class Animal
+                feature
+                  speak(): String do result := \"...\" end
+                end
+
+                function describe [G -> Animal] (x: G): String
+                do
+                  result := x.speak()
+                end
+
+                print(describe(42))"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "does not satisfy constraint Animal") msgs) (pr-str msgs)))))
+
+(deftest test-generic-constraint-satisfied-by-inferred-call-argument-succeeds
+  (testing "an argument that does satisfy the constraint still checks out"
+    (let [code "class Animal
+                feature
+                  speak(): String do result := \"...\" end
+                end
+
+                class Dog inherit Animal
+                create make() do end
+                feature
+                  speak(): String do result := \"Woof\" end
+                end
+
+                function describe [G -> Animal] (x: G): String
+                do
+                  result := x.speak()
+                end
+
+                let d: Dog := create Dog.make()
+                print(describe(d))"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
+
+(deftest test-generic-value-upcast-to-its-constraint-succeeds
+  (testing "a constrained generic parameter's value can be assigned to a slot typed as its own constraint"
+    (let [code "class Animal
+                feature
+                  speak(): String do result := \"...\" end
+                end
+
+                function describe [G -> Animal] (x: G): String
+                do
+                  let a: Animal := x
+                  result := a.speak()
+                end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
+
 (deftest test-same-generic-name-bound-inconsistently-in-one-call-rejected
   (testing "the same generic name used twice in a signature must resolve to one consistent type per call"
     (let [code "function transform [G] (x: G, f: Function(v: G): G): G

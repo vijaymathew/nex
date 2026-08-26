@@ -3074,6 +3074,26 @@
                                         (map vector arg-types effective-params))
               type-map (merge (build-generic-type-map env var-type)
                               inferred-type-map)]
+          ;; An inferred binding must itself satisfy its generic parameter's
+          ;; own declared constraint (`[G -> Animal]`) -- validate-generic-args
+          ;; already does this for an EXPLICIT type argument (`Box[Dog]`), but
+          ;; nothing did for a binding inferred from a call's own arguments
+          ;; (`describe(42)` against `describe[G -> Animal](x: G)` type-checked
+          ;; with G bound to Integer, which doesn't satisfy Animal).
+          (doseq [{:keys [name constraint]} (concat (:generic-params class-def) (:generic-params var-type))
+                  :when constraint
+                  :let [gname (type-name-string name)
+                        constraint (type-name-string constraint)
+                        bound (get type-map gname)]
+                  :when bound]
+            (when-not (types-compatible? env bound constraint)
+              (throw (ex-info (str "Argument type " (display-type bound)
+                                   " does not satisfy constraint " constraint
+                                   " for generic parameter " gname)
+                              {:error (type-error
+                                       (str "Argument type " (display-type bound)
+                                            " does not satisfy constraint " constraint
+                                            " for generic parameter " gname))}))))
           (when (not= (count args) (count effective-params))
             (throw (ex-info (str "Method " call-name " expects " (count effective-params)
                                  " arguments, got " (count args))
