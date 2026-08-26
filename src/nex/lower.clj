@@ -5235,19 +5235,39 @@
         result-init-stmt
         (when result-local
           (let [jvm-type (:jvm-type result-local)
-                default-val (cond
-                              (= :int jvm-type) 0
-                              (= :long jvm-type) 0
-                              (= :double jvm-type) 0.0
-                              (= :boolean jvm-type) false
-                              (= :char jvm-type) 0
-                              :else nil)]
-            (ir/set-local-node (:slot result-local)
-                               (ir/const-node default-val
-                                              (:nex-type result-local)
-                                              jvm-type)
-                               (:nex-type result-local)
-                               jvm-type)))
+                nex-type (:nex-type result-local)
+                base-type (when (map? nex-type) (:base-type nex-type))
+                detachable? (and (map? nex-type) (:detachable nex-type))
+                scalar-default (cond
+                                 (= :int jvm-type) 0
+                                 (= :long jvm-type) 0
+                                 (= :double jvm-type) 0.0
+                                 (= :boolean jvm-type) false
+                                 (= :char jvm-type) 0
+                                 :else nil)
+                ;; Attached Array/Map/Set results default to an empty
+                ;; collection (matching get-default-field-value in the
+                ;; interpreter) instead of null, so a body that only ever
+                ;; mutates `result` (e.g. `result.append(...)`) without an
+                ;; explicit `result := ...` still has a real object to
+                ;; mutate. Detachable collection returns keep the null
+                ;; default, same as every other detachable reference type.
+                init-expr (cond
+                            (some? scalar-default)
+                            (ir/const-node scalar-default nex-type jvm-type)
+
+                            (and (not detachable?) (= base-type "Array"))
+                            (ir/array-literal-node [] nex-type jvm-type)
+
+                            (and (not detachable?) (= base-type "Map"))
+                            (ir/map-literal-node [] nex-type jvm-type)
+
+                            (and (not detachable?) (= base-type "Set"))
+                            (ir/set-literal-node [] nex-type jvm-type)
+
+                            :else
+                            (ir/const-node nil nex-type jvm-type))]
+            (ir/set-local-node (:slot result-local) init-expr nex-type jvm-type)))
         effective-require (or (:effective-require fn-def) (:require fn-def))
         effective-ensure (or (:effective-ensure fn-def) (:ensure fn-def))
         [env-with-old old-snapshot-stmts old-field-locals]

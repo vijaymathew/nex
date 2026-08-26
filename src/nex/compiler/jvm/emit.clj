@@ -399,6 +399,13 @@
     (doseq [{:keys [name jvm-type nex-type]} (concat runtime-type-fields fields)]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (cond
+        ;; A detachable field (`?Array[...]`/`?Map[...]`/`?Set[...]`) defaults
+        ;; to nil like any other detachable reference type, not to an empty
+        ;; collection — matches get-default-field-value in the interpreter
+        ;; and the analogous :detachable check in lower.clj's result-init-stmt.
+        (and (map? nex-type) (:detachable nex-type))
+        (.visitInsn mv Opcodes/ACONST_NULL)
+
         (= (ir/object-jvm-type "java/util/ArrayList") jvm-type)
         (do
           (.visitTypeInsn mv Opcodes/NEW arraylist-internal-name)

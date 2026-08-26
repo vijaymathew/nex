@@ -767,9 +767,14 @@ end"
 
 (deftest test-attached-non-scalar-return-requires-result-assignment
   (testing "Attached non-scalar return types must definitely assign result"
-    (let [code "class Test
+    (let [code "class Box
   feature
-    bad(): Array[Integer] do
+    x: Integer
+end
+
+class Test
+  feature
+    bad(): Box do
     end
 end"
           ast (p/ast code)
@@ -780,14 +785,33 @@ end"
 
 (deftest test-detachable-non-scalar-return-may-omit-result-assignment
   (testing "Detachable non-scalar return types may omit result assignment"
-    (let [code "class Test
+    (let [code "class Box
   feature
-    ok(): ?Array[Integer] do
+    x: Integer
+end
+
+class Test
+  feature
+    ok(): ?Box do
     end
 end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (:success result) (pr-str result)))))
+
+(deftest test-attached-array-map-set-return-may-omit-result-assignment
+  (testing "Array/Map/Set are auto-initialized to empty, like Integer/Real/Boolean, so an
+            attached (non-detachable) return of one of these types may omit an explicit
+            'result :=' as long as the method only mutates result in place"
+    (doseq [return-type ["Array[Integer]" "Map[String, Integer]" "Set[Integer]"]]
+      (let [code (str "class Test\n"
+                      "  feature\n"
+                      "    ok(): " return-type " do\n"
+                      "    end\n"
+                      "end")
+            ast (p/ast code)
+            result (tc/type-check ast)]
+        (is (:success result) (str return-type " -> " (pr-str result)))))))
 
 (deftest test-rescue-with-retry-or-raise-does-not-require-result-assignment
   (testing "A rescue that only retries or re-raises adds no returning path, so result need not be assigned there"

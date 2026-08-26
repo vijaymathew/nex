@@ -1031,6 +1031,119 @@ end"))
         (is (nil? (:result result))))
       (is (= ["\"boom\""] (runtime/state-output (:state session)))))))
 
+;; ─── `result` auto-initializes to an empty Array/Map/Set ────────────────────
+;;
+;; Integer/Real/Boolean/Char return types already got an implicit zero-value
+;; default for `result` (result-init-stmt in lower.clj), so a method could
+;; mutate `result` in place (`result := result + 1`) without an explicit
+;; `result := ...` on every path. Array/Map/Set return types didn't: the
+;; typechecker required an explicit assignment on every returning path
+;; (attached-non-scalar-type?), and even if it hadn't, the compiled `result`
+;; local was always initialized to null rather than an empty collection —
+;; mutating it in place (`result.add(...)`) would NPE. Both gaps are now
+;; closed for non-detachable Array/Map/Set return types, matching what
+;; get-default-field-value already does for the interpreter.
+
+(deftest compiled-array-result-auto-inits-to-empty-smoke-test
+  (testing "an Array[T] result can be built by mutation alone, with no explicit result :="
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "function make_list(n: Integer): Array[Integer]\n"
+                   "do\n"
+                   "  from\n"
+                   "    let i := 0\n"
+                   "  until\n"
+                   "    i >= n\n"
+                   "  do\n"
+                   "    result.add(i)\n"
+                   "    i := i + 1\n"
+                   "  end\n"
+                   "end\n"
+                   "print(make_list(4))")))
+      (is (= ["[0, 1, 2, 3]"] (runtime/state-output (:state session)))))))
+
+(deftest compiled-map-result-auto-inits-to-empty-smoke-test
+  (testing "a Map[K, V] result can be built by mutation alone, with no explicit result :="
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "function squares(n: Integer): Map[Integer, Integer]\n"
+                   "do\n"
+                   "  from\n"
+                   "    let i := 0\n"
+                   "  until\n"
+                   "    i >= n\n"
+                   "  do\n"
+                   "    result.put(i, i * i)\n"
+                   "    i := i + 1\n"
+                   "  end\n"
+                   "end\n"
+                   "print(squares(3))")))
+      (is (= ["{0: 0, 1: 1, 2: 4}"] (runtime/state-output (:state session)))))))
+
+(deftest compiled-set-result-auto-inits-to-empty-smoke-test
+  (testing "a Set[T] result can be built by mutation alone, with no explicit result :="
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "function distinct_upto(n: Integer): Set[Integer]\n"
+                   "do\n"
+                   "  from\n"
+                   "    let i := 0\n"
+                   "  until\n"
+                   "    i >= n\n"
+                   "  do\n"
+                   "    result.add(i)\n"
+                   "    i := i + 1\n"
+                   "  end\n"
+                   "end\n"
+                   "print(distinct_upto(3))")))
+      (is (= ["#{0, 1, 2}"] (runtime/state-output (:state session)))))))
+
+(deftest compiled-class-method-array-result-auto-inits-to-empty-smoke-test
+  (testing "the same auto-init applies to a class method's Array[T] result, not just free functions"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "class Builder\n"
+                   "feature\n"
+                   "  build(n: Integer): Array[Integer]\n"
+                   "  do\n"
+                   "    from\n"
+                   "      let i := 0\n"
+                   "    until\n"
+                   "      i >= n\n"
+                   "    do\n"
+                   "      result.add(i * 2)\n"
+                   "      i := i + 1\n"
+                   "    end\n"
+                   "  end\n"
+                   "end\n"
+                   "print((create Builder).build(3))")))
+      (is (= ["[0, 2, 4]"] (runtime/state-output (:state session)))))))
+
+(deftest compiled-detachable-array-result-still-defaults-to-nil-smoke-test
+  (testing "a detachable ?Array[T] result keeps the null default, unlike its attached counterpart"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "function maybe_list(x: Integer): ?Array[Integer]\n"
+                   "do\n"
+                   "  if x = 0 then\n"
+                   "    result := [1, 2, 3]\n"
+                   "  end\n"
+                   "end\n"
+                   "print(maybe_list(1))")))
+      (is (= ["nil"] (runtime/state-output (:state session)))))))
+
+;; Note: whether a non-collection attached reference return type still
+;; requires an explicit result assignment is a typechecker concern, not a
+;; lowering/emission one — compile-and-eval! here skips the typechecker
+;; entirely, so that invariant is covered instead by
+;; test-attached-non-scalar-return-requires-result-assignment in
+;; typechecker_test.clj.
+
 ;; ─── Nested `do/rescue` blocks ──────────────────────────────────────────────
 ;;
 ;; `emit-try!` (emit.clj) used to register its own try/catch entries via
