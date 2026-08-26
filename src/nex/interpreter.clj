@@ -1500,6 +1500,11 @@
   "Get default value for a field type"
   [field-type]
   (cond
+    ;; A detachable field (`?T`) always defaults to nil, regardless of T's
+    ;; own default — matches the JVM backend's field/result init.
+    (and (map? field-type) (:detachable field-type))
+    nil
+
     ;; Handle parameterized types
     (map? field-type)
     (case (:base-type field-type)

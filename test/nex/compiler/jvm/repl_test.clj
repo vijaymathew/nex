@@ -319,8 +319,13 @@ end"))
               repl/*repl-backend* (atom :interpreter)
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx (repl/init-repl-context)
+            _ (with-out-str
+                (repl/eval-code ctx "class Box
+feature
+  x: Integer
+end"))
             fn-output (with-out-str
-                        (repl/eval-code ctx "function f(): Array[Integer] do end"))]
+                        (repl/eval-code ctx "function f(): Box do end"))]
         (is (str/includes? fn-output "Error:"))
         (is (str/includes? fn-output "does not definitely assign result on all returning paths"))))))
 

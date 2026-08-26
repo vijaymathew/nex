@@ -1031,6 +1031,277 @@ end"))
         (is (nil? (:result result))))
       (is (= ["\"boom\""] (runtime/state-output (:state session)))))))
 
+;; ─── `result` auto-initializes to an empty Array/Map/Set ────────────────────
+;;
+;; Integer/Real/Boolean/Char return types already got an implicit zero-value
+;; default for `result` (result-init-stmt in lower.clj), so a method could
+;; mutate `result` in place (`result := result + 1`) without an explicit
+;; `result := ...` on every path. Array/Map/Set return types didn't: the
+;; typechecker required an explicit assignment on every returning path
+;; (attached-non-scalar-type?), and even if it hadn't, the compiled `result`
+;; local was always initialized to null rather than an empty collection —
+;; mutating it in place (`result.add(...)`) would NPE. Both gaps are now
+;; closed for non-detachable Array/Map/Set return types, matching what
+;; get-default-field-value already does for the interpreter.
+
+(deftest compiled-array-result-auto-inits-to-empty-smoke-test
+  (testing "an Array[T] result can be built by mutation alone, with no explicit result :="
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "function make_list(n: Integer): Array[Integer]\n"
+                   "do\n"
+                   "  from\n"
+                   "    let i := 0\n"
+                   "  until\n"
+                   "    i >= n\n"
+                   "  do\n"
+                   "    result.add(i)\n"
+                   "    i := i + 1\n"
+                   "  end\n"
+                   "end\n"
+                   "print(make_list(4))")))
+      (is (= ["[0, 1, 2, 3]"] (runtime/state-output (:state session)))))))
+
+(deftest compiled-map-result-auto-inits-to-empty-smoke-test
+  (testing "a Map[K, V] result can be built by mutation alone, with no explicit result :="
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "function squares(n: Integer): Map[Integer, Integer]\n"
+                   "do\n"
+                   "  from\n"
+                   "    let i := 0\n"
+                   "  until\n"
+                   "    i >= n\n"
+                   "  do\n"
+                   "    result.put(i, i * i)\n"
+                   "    i := i + 1\n"
+                   "  end\n"
+                   "end\n"
+                   "print(squares(3))")))
+      (is (= ["{0: 0, 1: 1, 2: 4}"] (runtime/state-output (:state session)))))))
+
+(deftest compiled-set-result-auto-inits-to-empty-smoke-test
+  (testing "a Set[T] result can be built by mutation alone, with no explicit result :="
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "function distinct_upto(n: Integer): Set[Integer]\n"
+                   "do\n"
+                   "  from\n"
+                   "    let i := 0\n"
+                   "  until\n"
+                   "    i >= n\n"
+                   "  do\n"
+                   "    result.add(i)\n"
+                   "    i := i + 1\n"
+                   "  end\n"
+                   "end\n"
+                   "print(distinct_upto(3))")))
+      (is (= ["#{0, 1, 2}"] (runtime/state-output (:state session)))))))
+
+(deftest compiled-class-method-array-result-auto-inits-to-empty-smoke-test
+  (testing "the same auto-init applies to a class method's Array[T] result, not just free functions"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "class Builder\n"
+                   "feature\n"
+                   "  build(n: Integer): Array[Integer]\n"
+                   "  do\n"
+                   "    from\n"
+                   "      let i := 0\n"
+                   "    until\n"
+                   "      i >= n\n"
+                   "    do\n"
+                   "      result.add(i * 2)\n"
+                   "      i := i + 1\n"
+                   "    end\n"
+                   "  end\n"
+                   "end\n"
+                   "print((create Builder).build(3))")))
+      (is (= ["[0, 2, 4]"] (runtime/state-output (:state session)))))))
+
+(deftest compiled-detachable-array-result-still-defaults-to-nil-smoke-test
+  (testing "a detachable ?Array[T] result keeps the null default, unlike its attached counterpart"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "function maybe_list(x: Integer): ?Array[Integer]\n"
+                   "do\n"
+                   "  if x = 0 then\n"
+                   "    result := [1, 2, 3]\n"
+                   "  end\n"
+                   "end\n"
+                   "print(maybe_list(1))")))
+      (is (= ["nil"] (runtime/state-output (:state session)))))))
+
+;; Note: whether a non-collection attached reference return type still
+;; requires an explicit result assignment is a typechecker concern, not a
+;; lowering/emission one — compile-and-eval! here skips the typechecker
+;; entirely, so that invariant is covered instead by
+;; test-attached-non-scalar-return-requires-result-assignment in
+;; typechecker_test.clj.
+
+;; ─── Nested `do/rescue` blocks ──────────────────────────────────────────────
+;;
+;; `emit-try!` (emit.clj) used to register its own try/catch entries via
+;; `visitTryCatchBlock` *before* emitting its body/rescue statements. Any
+;; nested `do/rescue` inside those statements would then register its entries
+;; *after* the enclosing one. The JVM dispatches to the first matching handler
+;; in exception-table order, so the enclosing (less specific) handler won the
+;; race for any range it shared with the nested block — the nested `rescue`
+;; never ran and the exception surfaced as an unhandled crash instead. Fixed
+;; by deferring the enclosing try/catch registration until after body/rescue
+;; (and any nested try/catch registrations within them) are emitted.
+
+(deftest compiled-nested-rescue-in-rescue-clause-smoke-test
+  (testing "a do/rescue nested inside another rescue clause catches its own exception"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "do\n"
+                   "  raise \"OUTER\"\n"
+                   "rescue\n"
+                   "  do\n"
+                   "    raise \"BYE\"\n"
+                   "  rescue\n"
+                   "    print(\"2: \" + exception)\n"
+                   "  end\n"
+                   "  print(\"1: \" + exception)\n"
+                   "end")))
+      (is (= ["\"2: BYE\"" "\"1: OUTER\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-nested-rescue-in-body-smoke-test
+  (testing "a do/rescue nested inside another try's body catches its own exception"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "do\n"
+                   "  do\n"
+                   "    raise \"BYE\"\n"
+                   "  rescue\n"
+                   "    print(\"2: \" + exception)\n"
+                   "  end\n"
+                   "  raise \"OUTER\"\n"
+                   "rescue\n"
+                   "  print(\"1: \" + exception)\n"
+                   "end")))
+      (is (= ["\"2: BYE\"" "\"1: OUTER\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-triple-nested-rescue-smoke-test
+  (testing "three levels of nested do/rescue each catch their own exception and
+            `exception` re-scopes to the enclosing level once a nested rescue completes"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "do\n"
+                   "  raise \"L1\"\n"
+                   "rescue\n"
+                   "  do\n"
+                   "    raise \"L2\"\n"
+                   "  rescue\n"
+                   "    do\n"
+                   "      raise \"L3\"\n"
+                   "    rescue\n"
+                   "      print(\"inner: \" + exception)\n"
+                   "    end\n"
+                   "    print(\"mid: \" + exception)\n"
+                   "  end\n"
+                   "  print(\"outer: \" + exception)\n"
+                   "end")))
+      (is (= ["\"inner: L3\"" "\"mid: L2\"" "\"outer: L1\""]
+             (runtime/state-output (:state session)))))))
+
+;; `retry` shares the same exception-table dispatch that the nested-rescue
+;; fix above touched (a retry-signal throwable, caught by the nearest
+;; enclosing try/catch), so it needed the identical fix and gets the same
+;; nested-do/rescue coverage here.
+
+(deftest compiled-retry-in-rescue-nested-inside-outer-rescue-clause-smoke-test
+  (testing "retry in a do/rescue nested inside another rescue clause only re-loops the inner block"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "let outer_count := 0\n"
+                   "let inner_count := 0\n"
+                   "do\n"
+                   "  outer_count := outer_count + 1\n"
+                   "  raise \"OUTER\"\n"
+                   "rescue\n"
+                   "  do\n"
+                   "    inner_count := inner_count + 1\n"
+                   "    if inner_count < 3 then\n"
+                   "      raise \"INNER\"\n"
+                   "    end\n"
+                   "  rescue\n"
+                   "    retry\n"
+                   "  end\n"
+                   "  print(\"inner_count: \" + inner_count)\n"
+                   "end\n"
+                   "print(\"outer_count: \" + outer_count)")))
+      (is (= ["\"inner_count: 3\"" "\"outer_count: 1\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-retry-at-both-nesting-levels-smoke-test
+  (testing "retry in a do/rescue nested inside another try's body, plus a separate
+            retry at the outer level, each loop only their own enclosing block"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "let inner_count := 0\n"
+                   "let outer_count := 0\n"
+                   "do\n"
+                   "  do\n"
+                   "    inner_count := inner_count + 1\n"
+                   "    if inner_count < 3 then\n"
+                   "      raise \"INNER\"\n"
+                   "    end\n"
+                   "  rescue\n"
+                   "    retry\n"
+                   "  end\n"
+                   "  outer_count := outer_count + 1\n"
+                   "  if outer_count < 2 then\n"
+                   "    raise \"OUTER\"\n"
+                   "  end\n"
+                   "rescue\n"
+                   "  retry\n"
+                   "end\n"
+                   "print(\"inner_count: \" + inner_count)\n"
+                   "print(\"outer_count: \" + outer_count)")))
+      (is (= ["\"inner_count: 4\"" "\"outer_count: 2\""] (runtime/state-output (:state session)))))))
+
+(deftest compiled-retry-in-triple-nested-rescue-smoke-test
+  (testing "retry at the innermost of three nested do/rescue levels only re-loops that level"
+    (let [session (compiled-repl/make-session)]
+      (compiled-repl/compile-and-eval!
+       session
+       (p/ast (str "let c1 := 0\n"
+                   "let c2 := 0\n"
+                   "let c3 := 0\n"
+                   "do\n"
+                   "  c1 := c1 + 1\n"
+                   "  raise \"L1\"\n"
+                   "rescue\n"
+                   "  do\n"
+                   "    c2 := c2 + 1\n"
+                   "    raise \"L2\"\n"
+                   "  rescue\n"
+                   "    do\n"
+                   "      c3 := c3 + 1\n"
+                   "      if c3 < 3 then\n"
+                   "        raise \"L3\"\n"
+                   "      end\n"
+                   "    rescue\n"
+                   "      retry\n"
+                   "    end\n"
+                   "    print(\"c3: \" + c3)\n"
+                   "  end\n"
+                   "  print(\"c2: \" + c2)\n"
+                   "end\n"
+                   "print(\"c1: \" + c1)")))
+      (is (= ["\"c3: 3\"" "\"c2: 1\"" "\"c1: 1\""] (runtime/state-output (:state session)))))))
+
 ;; ─── Exceptions thrown by a *free function* call, seen through `rescue` ─────
 ;;
 ;; A free-function call lowers to `:call-repl-fn` (emit.clj), which invokes it

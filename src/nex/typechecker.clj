@@ -507,13 +507,28 @@
     (and (string? base)
          (not (#{"Integer" "Real" "Char" "Boolean"} base)))))
 
+(defn- auto-initializable-collection-type?
+  "Whether type is a builtin collection type (Array/Map/Set) that always has
+   a sensible empty-value default (matching get-default-field-value in the
+   interpreter and the equivalent literal-node init emitted by the JVM
+   lowerer), so `result` need not be explicitly assigned on every path the
+   way other reference-like types are."
+  [t]
+  (let [n (attachable-type t)
+        base (cond
+               (string? n) n
+               (map? n) (:base-type n)
+               :else nil)]
+    (contains? #{"Array" "Map" "Set"} base)))
+
 (defn- attached-non-scalar-type?
   "Whether a type is an attached, non-scalar return type that must not
    implicitly fall back to nil."
   [t]
   (let [n (normalize-type t)]
     (and (not (detachable-type? n))
-         (reference-like-type? n))))
+         (reference-like-type? n)
+         (not (auto-initializable-collection-type? n)))))
 
 (defn is-generic-type-param?
   "Check if a type is a generic type parameter (single uppercase letter)."
