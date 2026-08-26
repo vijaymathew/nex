@@ -188,6 +188,31 @@ print(box.value)")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-generic-function-with-function-param-return-type-test
+  (testing "a free function generic over two distinct type params, where the second is only
+            reachable through a Function argument's return type (`f: Function(v: G): T`),
+            infers T correctly instead of leaking the literal name \"T\" into codegen as a
+            bogus class reference (regression: used to compile but crash the jar at run time
+            with NoClassDefFoundError: T)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-generic-fn-param")
+          nex-file (io/file tmp-dir "app.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit nex-file "function transform [G, T] (x: G, f: Function(v: G): T): T
+do
+  result := f(x)
+end
+
+print(transform(5, fn(v: Integer): String do result := \"n=\" + v end))")
+        (let [result (file/compile-jar (.getPath nex-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))]
+          (is (= 0 exit) err)
+          (is (= "\"n=5\"" (str/trim out))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-object-model-and-contracts-smoke-test
   (testing "compile-jar runs inheritance, super, contracts, old, and invariants end-to-end"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-file-smoke-oo")

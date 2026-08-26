@@ -2497,3 +2497,68 @@ end"))
           result (tc/type-check (p/ast code))]
       (is (:success result) (pr-str (:errors result)))
       (is (empty? (:errors result))))))
+
+(deftest test-free-function-bare-generic-letter-must-be-declared
+  (testing "a `function` can no longer imply `[G]` from a bare capital-letter type in its signature"
+    (let [code "function every_other(xs: Array[G]): Array[G]
+                do
+                  result := xs
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Undefined type: G") msgs) (pr-str msgs)))))
+
+(deftest test-anonymous-function-bare-generic-letter-must-be-declared
+  (testing "a `fn(...)` lambda can no longer imply `[T]` from a bare capital-letter type either"
+    (let [code "let f := fn(x: T): T do result := x end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Undefined type: T") msgs) (pr-str msgs)))))
+
+(deftest test-unrelated-class-generic-name-does-not-authorize-undeclared-function-generic
+  (testing "another class declaring `[G]` elsewhere in the file must not make a bare, undeclared `G` pass for an unrelated function"
+    (let [code "class Box [G]
+                feature
+                  value: G
+                create make(v: G) do value := v end
+                end
+
+                function every_other(xs: Array[G]): Array[G]
+                do
+                  result := xs
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Undefined type: G") msgs) (pr-str msgs)))))
+
+(deftest test-distinct-generic-params-are-not-interchangeable
+  (testing "two distinct, properly-declared generic parameters are not silently compatible with each other"
+    (let [code "function every_other [G, T] (xs: Array[G]): Array[T]
+                do
+                  result := []
+                  from
+                    let i := 0
+                  until
+                    i = xs.length
+                  do
+                    if i % 2 = 0 then result.add(xs.get(i)) end
+                    i := i + 1
+                  end
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Expected T, got G") msgs) (pr-str msgs)))))
+
+(deftest test-generic-function-relating-two-params-through-a-function-arg-succeeds
+  (testing "a generic parameter that only flows from one to another through an actual G -> T Function argument still checks out"
+    (let [code "function transform [G, T] (x: G, f: Function(v: G): T): T
+                do
+                  result := f(x)
+                end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result)))
+      (is (empty? (:errors result))))))
