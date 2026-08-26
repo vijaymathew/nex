@@ -1101,6 +1101,49 @@
       (and (string? param-type) (contains? generic-names param-type))
       {param-type arg-type}
 
+      ;; The argument is a bare class name -- a free function passed by
+      ;; reference, or an anonymous lambda's generated wrapper class (see the
+      ;; analogous branch in nex.typechecker/types-compatible?) -- rather than
+      ;; an already-structural Function type. Resolve its callN method to an
+      ;; equivalent structural shape before unifying against param-type.
+      (and (map? param-type) (= (:base-type param-type) "Function") (:param-types param-type)
+           (string? arg-type))
+      (if-let [method-sig (class-method-def (get (visible-class-map env) arg-type)
+                                            (str "call" (count (:param-types param-type)))
+                                            (count (:param-types param-type)))]
+        (infer-generic-type-map-from-arg
+         env generic-names param-type
+         {:base-type "Function"
+          :param-types (mapv (fn [p] {:name (:name p) :type (:type p)}) (:params method-sig))
+          :return-type (:return-type method-sig)})
+        {})
+
+      ;; A Function-typed param/arg carries its generic-relevant substructure
+      ;; under :param-types/:return-type, not :type-params/:type-args (those
+      ;; are how Array[T]/Map[K,V]/user generic classes are shaped) -- so a
+      ;; generic parameter appearing only in a Function value's parameter or
+      ;; return position (e.g. `f: Function(v: G): T` matched against an
+      ;; argument lambda `fn(v: Integer): String`) must be unified here
+      ;; explicitly, or its binding is silently missed. A missed return-type
+      ;; binding leaves T unsubstituted in infer-free-function-return-type,
+      ;; which then leaks the literal generic name "T" into codegen as if it
+      ;; were a real class -- the jar compiles but crashes with
+      ;; NoClassDefFoundError: T at run time.
+      (and (map? param-type) (map? arg-type)
+           (= (:base-type param-type) (:base-type arg-type))
+           (= (:base-type param-type) "Function"))
+      (let [param-params (or (:param-types param-type) [])
+            arg-params (or (:param-types arg-type) [])]
+        (if (= (count param-params) (count arg-params))
+          (reduce (fn [acc [pt at]]
+                    (merge-inferred-generic-bindings
+                     env acc (infer-generic-type-map-from-arg env generic-names pt at)))
+                  {}
+                  (cond-> (mapv (fn [pp ap] [(:type pp) (:type ap)]) param-params arg-params)
+                    (and (:return-type param-type) (:return-type arg-type))
+                    (conj [(:return-type param-type) (:return-type arg-type)])))
+          {}))
+
       (and (map? param-type) (map? arg-type)
            (= (:base-type param-type) (:base-type arg-type)))
       (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
@@ -1116,6 +1159,22 @@
       :else
       {})))
 
+(defn- argument-type-for-generic-inference
+  "Like infer-type, but for an inline `fn(...) ... end` argument this returns
+   its own declared Function shape (param types + return type) instead of
+   infer-type's blanket \"Function\" string (see the :anonymous-function case
+   of infer-type-*, which erases the signature entirely). Without this, a
+   generic parameter that only appears in the lambda's own signature -- e.g.
+   `f: Function(v: G): T` matched against an argument `fn(v: Integer): String
+   ...` -- can never be unified by infer-generic-type-map-from-arg, because
+   there is nothing left in \"Function\" (the string) to recurse into."
+  [env arg]
+  (if (and (map? arg) (= :anonymous-function (:type arg)))
+    {:base-type "Function"
+     :param-types (mapv (fn [p] {:name (:name p) :type (:type p)}) (or (:params arg) []))
+     :return-type (:return-type arg)}
+    (infer-type env arg)))
+
 (defn- infer-free-function-return-type
   [env fn-def args]
   (let [fn-def (normalized-function-def fn-def)
@@ -1129,7 +1188,7 @@
                              env
                              generic-names
                              (:type param)
-                             (infer-type env arg))))
+                             (argument-type-for-generic-inference env arg))))
                          {}
                          (map vector (:params fn-def) args))]
     (tc/resolve-generic-type (function-return-type fn-def) type-map)))

@@ -1790,6 +1790,45 @@
       (and (string? param-type) (contains? generic-names param-type))
       {param-type arg-type}
 
+      ;; The argument is a bare class name -- a free function passed by
+      ;; reference, or an anonymous lambda's generated wrapper class (see the
+      ;; analogous branch in types-compatible? above) -- rather than an
+      ;; already-structural Function type. Resolve its callN method to an
+      ;; equivalent structural shape before unifying against param-type.
+      (and (map? param-type) (= (:base-type param-type) "Function") (:param-types param-type)
+           (string? arg-type))
+      (if-let [method-sig (lookup-class-method env arg-type
+                                               (str "call" (count (:param-types param-type)))
+                                               (count (:param-types param-type)))]
+        (infer-generic-type-map-from-arg
+         env generic-names param-type
+         {:base-type "Function"
+          :param-types (mapv (fn [p] {:name (:name p) :type (:type p)}) (:params method-sig))
+          :return-type (:return-type method-sig)})
+        {})
+
+      ;; A Function-typed param/arg carries its generic-relevant substructure
+      ;; under :param-types/:return-type, not :type-params/:type-args (those
+      ;; are how Array[T]/Map[K,V]/user generic classes are shaped) -- so a
+      ;; generic parameter appearing only in a Function value's parameter or
+      ;; return position (e.g. `f: Function(v: G): T` matched against an
+      ;; argument lambda `fn(v: Integer): String`) must be unified here
+      ;; explicitly, or its binding is silently missed.
+      (and (map? param-type) (map? arg-type)
+           (= (:base-type param-type) (:base-type arg-type))
+           (= (:base-type param-type) "Function"))
+      (let [param-params (or (:param-types param-type) [])
+            arg-params (or (:param-types arg-type) [])]
+        (if (= (count param-params) (count arg-params))
+          (reduce (fn [acc [pt at]]
+                    (merge-inferred-generic-bindings
+                     env acc (infer-generic-type-map-from-arg env generic-names pt at)))
+                  {}
+                  (cond-> (mapv (fn [pp ap] [(:type pp) (:type ap)]) param-params arg-params)
+                    (and (:return-type param-type) (:return-type arg-type))
+                    (conj [(:return-type param-type) (:return-type arg-type)])))
+          {}))
+
       (and (map? param-type) (map? arg-type)
            (= (:base-type param-type) (:base-type arg-type)))
       (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
