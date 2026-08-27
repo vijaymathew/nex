@@ -61,6 +61,7 @@
 (declare lower-select)
 (declare java-superclass-parent)
 (declare java-super-constructor-call?)
+(declare ctor-forwards-java-super-args?)
 (declare resolve-imported-java-type)
 
 (defn- invalid-bare-create-call-ex
@@ -4015,17 +4016,35 @@
                            :class-name class-name
                            :constructor constructor-name
                            :arity (count (:args expr))})))
-        (ir/call-virtual-node (:internal-name compiled)
-                              (lowered-constructor-method-name ctor-def)
-                              (desc/repl-instance-method-descriptor)
-                              (ir/new-node (:internal-name compiled)
-                                           class-name
-                                           created-type
-                                           (exact-class-jvm-type env class-name))
-                              (into (mapv #(lower-expression env %) (:args expr))
-                                    runtime-generic-args)
-                              created-type
-                              (resolve-jvm-type env created-type)))
+        (let [lowered-args (mapv #(lower-expression env %) (:args expr))
+              {:keys [nex-name]} (java-superclass-parent env class-def)
+              new-ir (if (and nex-name (ctor-forwards-java-super-args? nex-name ctor-def))
+                       ;; This constructor's own <init> overload (see
+                       ;; java-super-ctor-forward-spec) forwards real
+                       ;; arguments into the Java superclass constructor —
+                       ;; its descriptor is built from ctor-def's own Nex
+                       ;; param types (matching that overload exactly), fed
+                       ;; the SAME lowered-args also passed to the ordinary
+                       ;; ctor-method call below (evaluated once).
+                       (ir/new-node (:internal-name compiled)
+                                    class-name
+                                    (desc/method-descriptor
+                                     (mapv #(resolve-jvm-type env (:type %)) (:params ctor-def))
+                                     :void)
+                                    lowered-args
+                                    created-type
+                                    (exact-class-jvm-type env class-name))
+                       (ir/new-node (:internal-name compiled)
+                                    class-name
+                                    created-type
+                                    (exact-class-jvm-type env class-name)))]
+          (ir/call-virtual-node (:internal-name compiled)
+                                (lowered-constructor-method-name ctor-def)
+                                (desc/repl-instance-method-descriptor)
+                                new-ir
+                                (into lowered-args runtime-generic-args)
+                                created-type
+                                (resolve-jvm-type env created-type))))
       (do
         (when (seq (:args expr))
           (throw (unsupported "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
@@ -4199,34 +4218,86 @@
           jvm-type (resolve-jvm-type env nex-type)]
       (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type))))
 
+(defn- java-numeric-param-class?
+  [^Class param-class]
+  (contains? #{Integer/TYPE Long/TYPE Float/TYPE Double/TYPE Byte/TYPE Short/TYPE
+               Integer Long Float Double Byte Short}
+             param-class))
+
+(defn- java-param-compatible?
+  "Whether a Nex argument of ARG-NEX-TYPE may be coerced into a Java
+   parameter of PARAM-CLASS — arity-and-family matching (numeric/boolean/
+   char/String families, else any non-primitive/non-wrapper reference type),
+   not full per-argument type inference. Used to disambiguate same-arity
+   overloads without guessing: see select-java-callable."
+  [arg-nex-type ^Class param-class]
+  (let [base (base-type-name arg-nex-type)]
+    (cond
+      (#{"Integer" "Real"} base) (java-numeric-param-class? param-class)
+      (= "Boolean" base) (contains? #{Boolean/TYPE Boolean} param-class)
+      (= "Char" base) (contains? #{Character/TYPE Character} param-class)
+      (= "String" base) (= String param-class)
+      :else (and (not (.isPrimitive param-class))
+                 (not (contains? #{String Boolean Character Integer Long Float Double Byte Short}
+                                 param-class))))))
+
+(defn- select-java-callable
+  "Resolve the single java.lang.reflect.Constructor/Method (both expose
+   getParameterTypes(), so CANDIDATES may be either) matching ARITY among
+   CANDIDATES whose parameter types are each compatible (java-param-
+   compatible?) with the corresponding ARG-NEX-TYPES — or throw a clear,
+   honest error. Mirrors the checked-in Phase 1/2 policy of arity-only
+   matching where that is unambiguous (nex.typechecker/reflected-java-
+   constructor-arities), falling back to family-based type matching only to
+   break a same-arity tie (Thread(String)/Thread(Runnable), say) — and never
+   guessing when that still leaves more than one plausible candidate.
+   KIND-LABEL/TARGET-LABEL are used only for the error message."
+  [candidates arity arg-nex-types kind-label target-label]
+  (let [by-arity (filter #(= arity (alength (.getParameterTypes ^java.lang.reflect.Executable %)))
+                         candidates)]
+    (when (empty? by-arity)
+      (throw (unsupported
+              (str "No " kind-label " on " target-label " with " arity " argument(s)")
+              {:target target-label :arity arity})))
+    (if (= 1 (count by-arity))
+      (first by-arity)
+      (let [plausible (filter (fn [^java.lang.reflect.Executable c]
+                                 (every? true? (map java-param-compatible?
+                                                    arg-nex-types (.getParameterTypes c))))
+                               by-arity)]
+        (case (count plausible)
+          1 (first plausible)
+          0 (throw (unsupported
+                    (str "No " kind-label " on " target-label " matches these argument types")
+                    {:target target-label :arg-types (vec arg-nex-types)}))
+          (throw (unsupported
+                  (str "Ambiguous " kind-label " overload on " target-label
+                       " — cannot resolve statically which one to call")
+                  {:target target-label :arg-types (vec arg-nex-types)})))))))
+
 ;; Phase 2 (docs/proposals/java-interop.md): super.<method>(...) reaching the
 ;; real Java superclass implementation, bypassing this class's own override
 ;; of it if any (see ir/call-super-java-node). `new` never reaches here —
 ;; it's stripped from the constructor body earlier, in lower-constructor.
 (defn- lower-java-super-call
-  [env expr parent-name ^Class java-super-klass]
-  (if (seq (:args expr))
-    (throw (unsupported (str "super." (:method expr)
-                             "(args) with arguments is not supported yet in compiled "
-                             "lowering for a Java superclass — only zero-argument calls are")
-                    {:expr expr :parent parent-name}))
-    (let [^java.lang.reflect.Method m (some (fn [^java.lang.reflect.Method cand]
-                                              (and (= (.getName cand) (:method expr))
-                                                   (zero? (alength (.getParameterTypes cand)))
-                                                   cand))
-                                            (.getMethods java-super-klass))]
-      (when-not m
-        (throw (ex-info "Undefined super method call during lowering"
-                        {:expr expr :parent parent-name})))
-      (let [nex-type "Any"
-            jvm-type (resolve-jvm-type env nex-type)]
-        (ir/call-super-java-node (desc/internal-class-name (.getName java-super-klass))
-                                 (:method expr)
-                                 (Type/getMethodDescriptor m)
-                                 (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
-                                 (.getReturnType m)
-                                 nex-type
-                                 jvm-type)))))
+  [env expr parent-name ^Class java-super-klass arg-irs]
+  (let [arg-nex-types (mapv #(infer-type env %) (:args expr))
+        candidates (filter #(= (.getName ^java.lang.reflect.Method %) (:method expr))
+                           (.getMethods java-super-klass))
+        ^java.lang.reflect.Method m (select-java-callable candidates (count (:args expr)) arg-nex-types
+                                                           "method"
+                                                           (str (.getName java-super-klass) "." (:method expr)))
+        boxed-args (mapv ir/java-arg-box-node arg-irs (.getParameterTypes m))
+        nex-type "Any"
+        jvm-type (resolve-jvm-type env nex-type)]
+    (ir/call-super-java-node (desc/internal-class-name (.getName java-super-klass))
+                             (:method expr)
+                             (Type/getMethodDescriptor m)
+                             (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+                             boxed-args
+                             (.getReturnType m)
+                             nex-type
+                             jvm-type)))
 
 (defn- lower-nex-super-call
   [env expr parent-name parent-def arg-irs]
@@ -4287,7 +4358,7 @@
                           (let [^Class klass (resolve-imported-java-type env parent-name)]
                             (when (and klass (not (.isInterface klass))) klass)))]
     (if java-super-klass
-      (lower-java-super-call env expr parent-name java-super-klass)
+      (lower-java-super-call env expr parent-name java-super-klass arg-irs)
       (lower-nex-super-call env expr parent-name parent-def arg-irs))))
 
 (defn- lower-parent-qualified-call
@@ -5387,30 +5458,119 @@
                      :deferred? (boolean (:deferred? fn-def))
                      :override? (boolean (:override? fn-def))})))))
 
+(defn- super-ctor-arg-nex-type
+  "The Nex type of a super.new(...)/<Super>.new(...) argument AST node when
+   it is simple enough to evaluate twice safely — a literal, or a reference
+   to one of CTOR-PARAMS — nil otherwise. A real argument must be safe to
+   re-evaluate because the compiled backend needs the same value both inside
+   the generated <init> (to forward it into the Java superclass constructor)
+   and again, immediately after, for the ordinary Nex constructor method."
+  [ctor-params arg]
+  (case (:type arg)
+    :string "String"
+    :integer "Integer"
+    :real "Real"
+    :boolean "Boolean"
+    :char "Char"
+    :identifier (some #(when (= (:name %) (:name arg)) (:type %)) ctor-params)
+    nil))
+
+(defn- resolve-super-ctor-call
+  "Validate and resolve a non-empty-argument super.new(args)/<Super>.new(args)
+   call: every argument must be simple (super-ctor-arg-nex-type), and the
+   overall arg list must resolve to exactly one of JAVA-SUPER-KLASS's public
+   constructors (select-java-callable — arity, then family-based type
+   matching to break a same-arity tie). Returns {:java-constructor ...}, or
+   throws a clear, honest ex-info otherwise — never guesses."
+  [^Class java-super-klass super-name class-name ctor-def args]
+  (let [arg-nex-types (mapv (fn [arg]
+                              (or (super-ctor-arg-nex-type (:params ctor-def) arg)
+                                  (throw (unsupported
+                                          (str class-name "." (:name ctor-def)
+                                               ": super.new(...) (extending " super-name
+                                               ") arguments must be one of the constructor's own "
+                                               "parameters or a literal constant for now — assign "
+                                               "a computed value to a `let` first")
+                                          {:class-name class-name :constructor (:name ctor-def)}))))
+                            args)
+        ctor (select-java-callable (.getConstructors java-super-klass) (count args) arg-nex-types
+                                   "constructor" super-name)]
+    {:java-constructor ctor}))
+
+(defn- ctor-forwards-java-super-args?
+  "Whether CTOR-DEF opens with an explicit, real-argument super.new(args)/
+   <Super>.new(args) call — the case needing a dedicated <init> overload
+   (see java-super-ctor-forward-spec) rather than the shared zero-arg one."
+  [super-name ctor-def]
+  (let [first-stmt (first (:body ctor-def))]
+    (and (java-super-constructor-call? super-name first-stmt)
+         (seq (:args first-stmt)))))
+
+(defn- java-super-ctor-forward-spec
+  "For CTOR-DEF on CLASS-DEF — whose Java superclass parent (java-
+   superclass-parent) is JAVA-SUPER-KLASS, named SUPER-NAME in `inherit` —
+   resolve+lower a real-argument super.new(args)/SUPER-NAME.new(args) call
+   into everything a dedicated <init> overload needs to forward those
+   arguments into the real Java superclass constructor: nil when CTOR-DEF
+   has no such call (implicit, zero-arg — the shared <init> already handles
+   both). <init>'s own params are lowered in a fresh, minimal env, matching
+   the JVM's own constraint that super()'s arguments may only reference the
+   constructor's own parameters — nothing else exists on `this` yet."
+  [visible-functions visible-imports visible-classes compiled-classes class-def
+   ^Class java-super-klass super-name ctor-def]
+  (when (ctor-forwards-java-super-args? super-name ctor-def)
+    (let [{:keys [java-constructor]} (resolve-super-ctor-call java-super-klass super-name
+                                                              (:name class-def) ctor-def
+                                                              (:args (first (:body ctor-def))))
+          env0 (make-lowering-env {:classes visible-classes
+                                   :functions visible-functions
+                                   :imports visible-imports
+                                   :compiled-classes compiled-classes
+                                   :generic-param-names (set (map :name (:generic-params class-def)))
+                                   :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
+                                   :this-type (:name class-def)
+                                   :top-level? false
+                                   :repl? true
+                                   :state-slot 0
+                                   :next-slot 1})
+          [env-with-params _] (reduce (fn [[e acc] {:keys [name type]}]
+                                        (let [[e' local] (env-add-local e name type)]
+                                          [e' (conj acc local)]))
+                                      [env0 []]
+                                      (:params ctor-def))
+          own-param-jvm-types (mapv #(resolve-jvm-type env0 (:type %)) (:params ctor-def))
+          boxed-args (mapv (fn [arg ^Class pc]
+                              (ir/java-arg-box-node (lower-expression env-with-params arg) pc))
+                            (:args (first (:body ctor-def)))
+                            (.getParameterTypes ^java.lang.reflect.Constructor java-constructor))]
+      {:ctor-name (:name ctor-def)
+       :arity (count (:params ctor-def))
+       :own-descriptor (desc/method-descriptor own-param-jvm-types :void)
+       :super-descriptor (Type/getConstructorDescriptor ^java.lang.reflect.Constructor java-constructor)
+       :boxed-args boxed-args})))
+
 (defn- lower-constructor
   [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
-  (let [ctor-def (if-let [{:keys [nex-name]} (java-superclass-parent {:classes visible-classes} class-def)]
+  (let [ctor-def (if-let [{:keys [nex-name klass]} (java-superclass-parent {:classes visible-classes} class-def)]
                    (let [first-stmt (first (:body ctor-def))]
                      (if (java-super-constructor-call? nex-name first-stmt)
-                       (if (seq (:args first-stmt))
-                         ;; The typechecker validates arity against the Java
-                         ;; class's real constructors, but the compiled
-                         ;; backend does not yet forward arguments into the
-                         ;; real super constructor — only the implicit/no-arg
-                         ;; case is wired (real `<init>` always calls the
-                         ;; Java superclass's no-arg constructor; see
-                         ;; emit-user-default-constructor!). --interpret
-                         ;; doesn't help here either (Phase 2 is compiled-
-                         ;; backend-only), so this is a genuine, currently
-                         ;; unsupported construct.
-                         (throw (unsupported
-                                 "super.new(args)/<JavaClass>.new(args) with arguments is not supported yet in compiled lowering — only the implicit/no-arg Java superclass constructor is"
-                                 {:class-name (:name class-def) :constructor (:name ctor-def)}))
-                         ;; A zero-arg explicit call is exactly the implicit
-                         ;; case — drop the now-redundant statement so the
-                         ;; ordinary body-lowering below never sees a call to
-                         ;; the "new" selector, which is not an ordinary Nex
-                         ;; method.
+                       (do
+                         ;; Validate eagerly (throws on a non-simple argument
+                         ;; or an unresolvable overload) even though the
+                         ;; resolved constructor itself isn't needed here —
+                         ;; the real forwarding lives in the dedicated <init>
+                         ;; overload (see java-super-ctor-forward-spec,
+                         ;; called separately from lower-class-def).
+                         (when (seq (:args first-stmt))
+                           (resolve-super-ctor-call klass nex-name (:name class-def) ctor-def
+                                                    (:args first-stmt)))
+                         ;; Either way this statement is now redundant in the
+                         ;; ordinary ctor-method body: a zero-arg call is
+                         ;; exactly the implicit case, and a real-argument
+                         ;; call's forwarding now lives in <init>. Drop it so
+                         ;; the ordinary body-lowering below never sees a
+                         ;; call to the "new" selector, which is not an
+                         ;; ordinary Nex method.
                          (update ctor-def :body rest))
                        ctor-def))
                    ctor-def)
@@ -5962,6 +6122,16 @@
                                                      class-def
                                                      ctor-def
                                                      compiled-classes))))
+        ;; A dedicated <init> overload per own (not inherited-shim — see
+        ;; java-super-ctor-forward-spec) constructor that forwards real
+        ;; arguments into a Java superclass constructor; empty when this
+        ;; class has no Java superclass parent or none of its constructors
+        ;; do that.
+        java-super-ctor-forwards (when-let [{:keys [klass nex-name]} (java-superclass-parent env class-def)]
+                                   (vec (keep #(java-super-ctor-forward-spec
+                                                visible-functions visible-imports (:classes opts)
+                                                compiled-classes class-def klass nex-name %)
+                                              (class-constructors class-def))))
         constructors (cond-> constructors
                        (seq (:generic-params class-def))
                        (conj (lower-generic-init-method (:jvm-name class-meta)
@@ -6066,6 +6236,7 @@
      :runtime-type-fields runtime-type-fields
      :constants constants
      :constructors constructors
+     :java-super-ctor-forwards java-super-ctor-forwards
      :methods methods}))
 
 (defn- compute-top-level-globals
