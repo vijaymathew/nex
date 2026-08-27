@@ -10,11 +10,21 @@ Addresses **Deficiency #2** in `docs/language-notes-from-book.md`:
 
 > **Implementation status.** The refinement-subtype flavor is implemented:
 > `declare type X = Base where n: <pred>`, with checks injected at `let`,
-> parameter, and return narrowing sites, erased to the base representation, and
-> working on the interpreter, JVM, and JS backends. Not yet implemented: field
-> narrowing, `convert`-to-refinement, `?R` detachable checks, `distinct`
-> newtypes, and `skip-contracts` gating of the injected checks. The design below
-> is the full target; those items remain follow-ups.
+> parameter, return, and field-assignment narrowing sites, erased to the base
+> representation, and working on the interpreter, JVM, and JS backends. Field
+> narrowing (`this.field := v` or bare `field := v`) evaluates the assigned
+> value once into a synthetic local and checks that, both to avoid
+> double-evaluating a computed right-hand side and because the tree-walking
+> interpreter's own object value-semantics (a mutation write-back can leave a
+> stale copy of an object reachable through an outer binding) could not yet be
+> trusted to see a field as freshly written from inside the very statement
+> that just wrote it; a bare `field := v` is only treated as a field write
+> when no `let` anywhere in the enclosing routine binds that same name
+> (walker.clj's `body-let-names`/`assign-target-field-name`), since a local
+> may shadow a field of the same spelling. Not yet implemented:
+> `convert`-to-refinement, `?R` detachable checks, `distinct` newtypes, and
+> `skip-contracts` gating of the injected checks. The design below is the
+> full target; those items remain follow-ups.
 
 ## Summary
 
