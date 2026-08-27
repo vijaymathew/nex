@@ -96,3 +96,16 @@ end
 let bs := create Boxes
 let out := bs.filter_boxes(is_big)
 print(out)")))))
+
+(deftest function-param-shadowing-same-arity-top-level-function-test
+  (testing "a Function-typed parameter is resolved as itself, not as an unrelated
+            top-level free function that happens to share its name and arity"
+    (is (= ["42"]
+           (both "function f(z: Integer): Array[Integer]
+do
+end
+function apply_it[T, U](x: T, f: Function(y: T): U): U do
+  result := f(x)
+end
+let r := apply_it(21, fn (y: Integer): Integer do result := y * 2 end)
+print(r)")))))
