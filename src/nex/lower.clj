@@ -1730,8 +1730,20 @@
             (ir/loop-node [] done-node loop-body)))]))
 
 (defn- visible-class-map
+  "Name -> class-def, including every name an `intern ... as` alias resolves
+   to. An aliased intern registers only a `*type-aliases*` entry pointing at
+   the real class (see `nex.interpreter/resolve-interned*`), not a second,
+   nominally distinct class-def — so the alias name is added here as an extra
+   key onto the *same* class-def value, keeping both names resolvable to one
+   compiled class."
   [env]
-  (into {} (map (juxt :name identity) (:classes env))))
+  (let [base (into {} (map (juxt :name identity) (:classes env)))]
+    (reduce-kv (fn [m alias-name _]
+                 (if-let [class-def (get base (resolve-type-alias alias-name))]
+                   (assoc m alias-name class-def)
+                   m))
+               base
+               *type-aliases*)))
 
 (defn- lowering-type-env
   [env]

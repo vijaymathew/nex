@@ -2,6 +2,7 @@
   "Tests for intern statement to load external classes"
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
+            [nex.eval :as e]
             [nex.parser :as p]
             [nex.repl :as repl]))
 
@@ -380,6 +381,95 @@ end")
                    (repl/eval-code ctx "print(rx.to_string())"))]
       (is (not (.contains output "Cannot find intern file for text/Regex")))
       (is (.contains output "\"Regex(/[a-z]+/)\"")))))
+
+(deftest file-eval-intern-alias-is-the-real-class-not-a-duplicate-test
+  (testing "`intern X as Y` makes Y the same class as X, not a nominally
+            distinct duplicate with an identical body — a value built via the
+            alias still type-checks and runs, compiled and interpreted, where
+            a second interned module expects X's real name (a diamond
+            dependency: the regression seen when the alias and the real name
+            are both in scope at once)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-intern-alias-diamond-" (System/nanoTime)))
+          account-file (io/file tmp-dir "Account.nex")
+          report-file (io/file tmp-dir "Report.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs tmp-dir)
+      (spit account-file "class Account
+feature
+  owner: String
+create
+  make(name: String) do owner := name end
+end")
+      (spit report-file "intern Account
+
+class Report
+feature
+  print_owner(a: Account) do
+    print(a.owner)
+  end
+end")
+      (spit main-file "intern Account as Acc
+intern Report
+
+let a := create Acc.make(\"river\")
+let r := create Report
+r.print_owner(a)")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (not (.contains compiled "Undefined class")))
+          (is (not (.contains compiled "Error")))
+          (is (.contains compiled "\"river\"")))
+        (finally
+          (.delete account-file)
+          (.delete report-file)
+          (.delete main-file)
+          (.delete tmp-dir))))))
+
+(deftest repl-intern-alias-resolves-across-later-cells-test
+  (testing "an `intern ... as` alias declared in one REPL cell still resolves
+            in a later cell — including against a class a second interned
+            module reaches unaliased (a diamond dependency). Regression test:
+            the compiled-REPL session used to rebuild its class registry
+            between cells from the real names only, silently dropping the
+            alias a prior cell had established"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-intern-alias-repl-" (System/nanoTime)))
+          account-file (io/file tmp-dir "Account.nex")
+          report-file (io/file tmp-dir "Report.nex")
+          ctx (repl/init-repl-context)
+          source-id (.getPath (io/file tmp-dir "session.nex"))]
+      (.mkdirs tmp-dir)
+      (spit account-file "class Account
+feature
+  owner: String
+create
+  make(name: String) do owner := name end
+end")
+      (spit report-file "intern Account
+
+class Report
+feature
+  print_owner(a: Account) do
+    print(a.owner)
+  end
+end")
+      (try
+        (binding [repl/*type-checking-enabled* (atom true)
+                  repl/*repl-var-types* (atom {})]
+          (let [output (with-out-str
+                         (repl/eval-code ctx "intern Account as Acc" source-id)
+                         (repl/eval-code ctx "intern Report" source-id)
+                         (repl/eval-code ctx "let a := create Acc.make(\"river\")" source-id)
+                         (repl/eval-code ctx "let r := create Report" source-id)
+                         (repl/eval-code ctx "r.print_owner(a)" source-id))]
+            (is (not (.contains output "Undefined class: Acc")))
+            (is (not (.contains output "Undefined class: Report")))
+            (is (.contains output "\"river\""))))
+        (finally
+          (.delete account-file)
+          (.delete report-file)
+          (.delete tmp-dir))))))
 
 (deftest repl-intern-brings-module-free-functions-into-later-cells
   (testing "REPL keeps an interned module's free functions callable in later cells"
