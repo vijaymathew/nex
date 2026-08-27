@@ -968,14 +968,15 @@
         target-expr (normalize-call-target raw-target)]
     (if (nil? target-expr)
       (or
-       (get builtin-free-function-return-types (:method expr))
-       (when-let [fn-def (some (fn [fn-def]
-                                 (when (and (= (:name fn-def) (:method expr))
-                                            (= (count (or (:params fn-def) []))
-                                               (count (:args expr))))
-                                   fn-def))
-                               (:functions env))]
-         (infer-free-function-return-type env fn-def (:args expr)))
+       ;; A local/parameter binding (e.g. a `Function`-typed parameter) shadows
+       ;; a same-named, same-arity top-level free function, exactly like plain
+       ;; lexical scoping everywhere else — so this must be checked before the
+       ;; top-level-function lookup below. Otherwise a call to a Function-typed
+       ;; parameter whose name happens to collide with an unrelated top-level
+       ;; function of the same arity infers the top-level function's return
+       ;; type instead of the parameter's own, silently mis-lowering the call's
+       ;; `:jvm-type` (codegen still invokes the right value at runtime, so
+       ;; this only surfaces as a bad cast/unbox on the call's result).
        (when (function-object-call? env (:method expr) (count (:args expr)))
          (let [binding-type (function-object-binding-type env (:method expr))
                base-type (base-type-name binding-type)
@@ -988,6 +989,14 @@
              (some-> (get (visible-class-map env) base-type)
                      (class-method-def call-name (count (:args expr)))
                      function-return-type))))
+       (get builtin-free-function-return-types (:method expr))
+       (when-let [fn-def (some (fn [fn-def]
+                                 (when (and (= (:name fn-def) (:method expr))
+                                            (= (count (or (:params fn-def) []))
+                                               (count (:args expr))))
+                                   fn-def))
+                               (:functions env))]
+         (infer-free-function-return-type env fn-def (:args expr)))
        (when (:this-type env)
          (some-> (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
                      (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
