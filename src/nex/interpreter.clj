@@ -1637,15 +1637,28 @@
       definitions, import declarations, free functions, and `declare type`
       aliases they bring into scope for static analysis. Returns
       {:classes [...] :imports [...] :functions [...] :type-aliases [...]
-      :seen #{...}}. Aliased interns add an extra class entry under the alias
-      name. Imports are carried through so that an interned module's
-      host-class imports (e.g. `import java.net.ServerSocket`) are visible to
-      the typechecker that elaborates the merged program — a `declare type`
-      refinement alias needs exactly the same treatment: check-program only
-      ever reads :type-aliases off the *root* program's own parse, so without
-      collecting it here too, a refinement type declared in an interned file
-      (rather than the root script) type-checked as an outright \"Undefined
-      type\" everywhere it was used, even inside that same interned file's own
+      :seen #{...}}. An aliased intern (`intern X as Y`) adds a `:type-aliases`
+      entry mapping Y to X's real class name, rather than a second, renamed
+      copy of the class-def: `Y` must be the *same* class as `X`, not a
+      nominally distinct duplicate with an identical body. A duplicate broke
+      as soon as the same underlying class was also reachable elsewhere in the
+      program under its real name (e.g. transitively, via a second module that
+      interns it unaliased) — the typechecker and JVM backend then saw two
+      unrelated classes and rejected a value of one where the other was
+      expected, even though the program never declared two different types.
+      Static class-name resolution (`nex.typechecker/env-lookup-class` and
+      `env-lookup-method`, `nex.lower`'s `visible-class-map`, and
+      `nex.compiler.jvm.file/file-class-metadata`) all fall back through
+      `:type-aliases` when a literal name misses, so `Y` still resolves to
+      X's real, singular class-def and compiled `.class` everywhere. Imports
+      are carried through so that an interned module's host-class imports
+      (e.g. `import java.net.ServerSocket`) are visible to the typechecker
+      that elaborates the merged program — a `declare type` refinement alias
+      needs exactly the same treatment: check-program only ever reads
+      :type-aliases off the *root* program's own parse, so without collecting
+      it here too, a refinement type declared in an interned file (rather
+      than the root script) type-checked as an outright \"Undefined type\"
+      everywhere it was used, even inside that same interned file's own
       classes."
      [source-id program seen-files]
      (letfn [(resolve* [current-source current-program seen]
@@ -1667,13 +1680,13 @@
                               ;; helper/combinator functions, not just classes.
                               all-file-functions (concat (:functions file-ast) (:functions nested))
                               all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
-                              aliased-class (when alias
-                                              (when-let [class-def (some #(when (= (:name %) class-name) %) all-file-classes)]
-                                                [(assoc class-def :name alias)]))]
-                          {:classes (into classes (concat all-file-classes aliased-class))
+                              alias-type-alias (when (and alias
+                                                          (some #(= (:name %) class-name) all-file-classes))
+                                                 [{:name alias :type-expr class-name}])]
+                          {:classes (into classes all-file-classes)
                            :imports (into imports all-file-imports)
                            :functions (into functions all-file-functions)
-                           :type-aliases (into type-aliases all-file-type-aliases)
+                           :type-aliases (into type-aliases (concat all-file-type-aliases alias-type-alias))
                            :seen (:seen nested)}))))
                   {:classes [] :imports [] :functions [] :type-aliases [] :seen seen}
                   (:interns current-program))))]

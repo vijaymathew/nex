@@ -8,6 +8,8 @@
 ;; Type Environment
 ;;
 
+(declare env-lookup-type-alias)
+
 (def ^:dynamic *strict-undefined-targets*
   "When true, a member access / call on an unresolved bare-identifier target is a
    compile-time 'Undefined variable' error. Enabled for whole-program/file
@@ -82,7 +84,9 @@
       (env-set! parent name type))))
 
 (defn env-lookup-method
-  "Look up a method signature in the environment"
+  "Look up a method signature in the environment. Falls back to resolving
+   class-name as a type alias (see env-lookup-class) when no methods are
+   registered under the literal name."
   ([env class-name method-name]
    (env-lookup-method env class-name method-name nil))
   ([env class-name method-name arity]
@@ -95,8 +99,11 @@
                        method-entry)
         (map? method-entry) (get method-entry arity)
         :else method-entry))
-    (when (:parent env)
-      (env-lookup-method (:parent env) class-name method-name arity)))))
+    (if (:parent env)
+      (env-lookup-method (:parent env) class-name method-name arity)
+      (when-let [aliased (env-lookup-type-alias env class-name)]
+        (when (and (string? aliased) (not= aliased class-name))
+          (env-lookup-method env aliased method-name arity)))))))
 
 (defn env-add-method
   "Add a method signature to the environment"
@@ -109,12 +116,18 @@
                     (assoc (or (get class-methods method-name) {}) arity signature))))))
 
 (defn env-lookup-class
-  "Look up a class definition in the environment"
+  "Look up a class definition in the environment. Falls back to resolving
+   class-name as a type alias (e.g. from `intern ... as`, which registers only
+   an alias to the real class rather than a nominally distinct duplicate of
+   it) when no class is registered under the literal name."
   [env class-name]
   (if-let [class-def (get @(:classes env) class-name)]
     class-def
-    (when (:parent env)
-      (env-lookup-class (:parent env) class-name))))
+    (if (:parent env)
+      (env-lookup-class (:parent env) class-name)
+      (when-let [aliased (env-lookup-type-alias env class-name)]
+        (when (and (string? aliased) (not= aliased class-name))
+          (env-lookup-class env aliased))))))
 
 (defn env-add-class
   "Add a class definition to the environment"
@@ -5297,7 +5310,16 @@
        (mapcat :members)
        (filter #(and (= :field (:type %)) (not (:constant? %))))
        (filter (fn [{:keys [field-type]}]
-                 (let [t (normalize-type field-type)
+                 ;; Expand a type alias (`declare type Id = Integer`, or an
+                 ;; `intern ... as` class alias) before classifying: since
+                 ;; env-lookup-class now itself falls back through aliases
+                 ;; (so a class alias correctly counts as the real class
+                 ;; here), leaving field-type unexpanded would classify by
+                 ;; the alias's literal name instead of its target — e.g.
+                 ;; `builtin-type?` on the un-expanded name "Id" misses,
+                 ;; wrongly treating an aliased scalar as a user class field
+                 ;; that requires constructor initialization.
+                 (let [t (normalize-type (expand-type-aliases env field-type))
                        a (attachable-type t)
                        base (if (map? a) (:base-type a) a)]
                    (and (not (detachable-type? t))

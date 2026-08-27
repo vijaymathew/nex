@@ -29,6 +29,12 @@
      :class-asts (atom {})
      :import-asts (atom [])
      :intern-asts (atom [])
+     ;; name -> {:name .. :type-expr ..}, accumulated across cells the same
+     ;; way :class-asts/:function-asts are — an `intern ... as` alias (or a
+     ;; `declare type` alias) declared in an earlier cell must still resolve
+     ;; in a later one that only uses it. See augment-ast-with-modules and
+     ;; remember-top-level-ast!.
+     :type-aliases (atom {})
      ;; The message of the last exception `compile-and-eval!` swallowed to fall
      ;; back to the interpreter for a plain statement/expression cell, or nil
      ;; after a cell that didn't need to. `nex.repl` reads this to print a
@@ -272,7 +278,8 @@
   (tc/infer-expression-type expr {:classes (:classes ctx)
                                   :functions (:functions ctx)
                                   :imports (:imports ctx)
-                                  :var-types (:var-types ctx)}))
+                                  :var-types (:var-types ctx)
+                                  :type-aliases (:type-aliases ctx)}))
 
 (defn- builtin-target-call-in-ctx?
   [ctx expr]
@@ -466,11 +473,21 @@
         intern-imports (interp/resolve-interned-imports source-id ast')
         merged-imports (merge-import-like-nodes
                         (merge-import-like-nodes @(:import-asts session) intern-imports)
-                        (:imports ast'))]
+                        (:imports ast'))
+        ;; An aliased intern (`intern X as Y`) resolves to a :type-aliases
+        ;; entry, not a second class-def (see nex.interpreter/resolve-interned*)
+        ;; — carried forward the same way class-asts/function-asts are, so a
+        ;; later cell that only *uses* the alias (declared by an earlier cell)
+        ;; still sees it.
+        intern-type-aliases (interp/resolve-interned-type-aliases source-id ast')
+        merged-type-aliases (vec (concat (vals @(:type-aliases session))
+                                         intern-type-aliases
+                                         (:type-aliases ast')))]
     (assoc ast'
            :imports merged-imports
            :classes (vec (concat intern-classes (:classes ast')))
-           :functions (vec (concat intern-functions (:functions ast'))))))
+           :functions (vec (concat intern-functions (:functions ast')))
+           :type-aliases merged-type-aliases)))
 
 (defn- initial-eligibility-ctx
   [session ast]
@@ -499,6 +516,13 @@
       :compiled-class-names (set (concat (compiled-class-names session)
                                          (map :name actual-classes)))
       :imports (:imports ast)
+      ;; {name -> type-expr}, matching nex.lower's *type-aliases* shape, so
+      ;; infer-type-in-ctx can resolve an `intern ... as` alias (or a
+      ;; `declare type` alias) the same way full lowering does — without it,
+      ;; a create-expression naming the alias infers as "Undefined class"
+      ;; here, which this eligibility check treats as a hard type error
+      ;; rather than the resolvable reference it actually is.
+      :type-aliases (into {} (map (juxt :name :type-expr)) (:type-aliases ast))
       :retry-allowed? false})))
 
 (defn supported-expr-in-ctx?
@@ -844,6 +868,13 @@
   (concat (vals @(:class-asts session))
           (keep :class-def (vals @(:function-asts session)))))
 
+(defn- inference-type-aliases-for-session
+  "{name -> type-expr}, matching nex.lower's *type-aliases* shape, for
+   inference calls made outside a bound *type-aliases* — e.g. an `intern
+   ... as` alias resolves here the same way a real class name does."
+  [session]
+  (into {} (map (fn [[k {:keys [type-expr]}]] [k type-expr])) @(:type-aliases session)))
+
 (defn- sync-var-types-from-ast!
   [session ast]
   (doseq [stmt (:statements (normalize-program-ast ast))]
@@ -859,7 +890,8 @@
                                  {:classes (inference-classes-for-session session)
                                   :functions (vals @(:function-asts session))
                                   :imports @(:import-asts session)
-                                  :var-types (session-var-types session)})
+                                  :var-types (session-var-types session)
+                                  :type-aliases (inference-type-aliases-for-session session)})
                                 "Any")]
              (when nex-type
                (rt/state-set-type! (:state session) (:name stmt) nex-type))))
@@ -869,7 +901,8 @@
                                        {:classes (inference-classes-for-session session)
                                         :functions (vals @(:function-asts session))
                                         :imports @(:import-asts session)
-                                        :var-types (session-var-types session)})
+                                        :var-types (session-var-types session)
+                                        :type-aliases (inference-type-aliases-for-session session)})
                                       "Any")]
                 (rt/state-set-type! (:state session) (:target stmt) nex-type))
       :convert (rt/state-set-type! (:state session)
@@ -908,6 +941,12 @@
                            (anonymous-class-defs ast)))))
   (swap! (:import-asts session) merge-import-like-nodes (:imports ast))
   (swap! (:intern-asts session) merge-import-like-nodes (:interns ast))
+  (swap! (:type-aliases session)
+         (fn [m]
+           (reduce (fn [acc {:keys [name] :as alias}]
+                     (assoc acc name alias))
+                   m
+                   (:type-aliases ast))))
   (rt/state-set-classes! (:state session) @(:class-asts session))
   (rt/state-set-imports! (:state session) @(:import-asts session))
   session)
@@ -1037,6 +1076,16 @@
       (interp/eval-node ctx' class-def))
     (doseq [fn-def (vals @(:function-asts session))]
       (interp/eval-node ctx' fn-def))
+    ;; An `intern ... as` alias is a session :type-alias entry, not a second
+    ;; class-def (see nex.interpreter/resolve-interned*), so the classes just
+    ;; re-registered above from :class-asts only cover the real names —
+    ;; restore each alias as its own key onto the same class-def, matching
+    ;; what nex.interpreter/process-intern does the first time an `intern`
+    ;; runs. Without this, resetting :classes above to the rebuilt registry
+    ;; drops any alias a prior cell's `intern` established.
+    (doseq [[alias-name {:keys [type-expr]}] @(:type-aliases session)]
+      (when-let [real-class (and (string? type-expr) (get @(:classes ctx') type-expr))]
+        (swap! (:classes ctx') assoc alias-name real-class)))
     (doseq [[k v] @(:values (:state session))]
       (interp/env-define (:globals ctx') k v))
     {:ctx ctx'

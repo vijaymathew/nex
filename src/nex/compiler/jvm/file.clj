@@ -162,16 +162,28 @@
   [source-path prepared-ast]
   (let [package-root (hidden-package-root source-path)
         emitted-classes (vec (concat (user-class-defs prepared-ast)
-                                     (emitted-anonymous-class-defs prepared-ast)))]
-    (into {}
-          (map (fn [class-def]
-                 (let [internal-name (format "%s/%s" package-root (:name class-def))]
-                   [(:name class-def)
-                    {:name (:name class-def)
-                     :internal-name internal-name
-                     :jvm-name internal-name
-                     :binary-name (desc/binary-class-name internal-name)}]))
-               emitted-classes))))
+                                     (emitted-anonymous-class-defs prepared-ast)))
+        base (into {}
+                   (map (fn [class-def]
+                          (let [internal-name (format "%s/%s" package-root (:name class-def))]
+                            [(:name class-def)
+                             {:name (:name class-def)
+                              :internal-name internal-name
+                              :jvm-name internal-name
+                              :binary-name (desc/binary-class-name internal-name)}]))
+                        emitted-classes))]
+    ;; An `intern ... as` alias (see nex.interpreter/resolve-interned*) adds a
+    ;; :type-aliases entry rather than a second, nominally distinct class-def,
+    ;; so the alias name needs an entry here too, pointing at the SAME
+    ;; metadata as the real class rather than a separately compiled
+    ;; duplicate. Folding over the growing map (not just `base`) lets a
+    ;; forward-ordered alias-of-an-alias chain resolve in this one pass.
+    (reduce (fn [m {:keys [name type-expr]}]
+              (if-let [meta (and (string? type-expr) (get m type-expr))]
+                (assoc m name meta)
+                m))
+            base
+            (:type-aliases prepared-ast))))
 
 (defn- output-file-for-class
   [output-dir binary-name]
