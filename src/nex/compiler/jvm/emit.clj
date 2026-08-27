@@ -31,6 +31,7 @@
 (declare emit-runtime-call!)
 (declare emit-runtime-invoke-1!)
 (declare emit-expression!)
+(declare emit-expr!)
 (declare primitive-class->jvm-type)
 (declare primitive-box-info)
 
@@ -183,8 +184,27 @@
                 :super-name (or (:java-super-class class-spec) "java/lang/Object")
                 :composition-fields (:composition-fields class-spec)
                 :runtime-type-fields (:runtime-type-fields class-spec)
-                :fields (:fields class-spec)}
-               {:name "set_outer"
+                :fields (:fields class-spec)}]
+              ;; One further <init> overload per own constructor that
+              ;; forwards real arguments into the Java superclass
+              ;; constructor (see nex.lower/java-super-ctor-forward-spec) —
+              ;; alongside, never instead of, the shared zero-arg one above,
+              ;; which every other constructor (no super-args, or none at
+              ;; all) still targets.
+              (map (fn [{:keys [own-descriptor super-descriptor boxed-args]}]
+                     {:name "<init>"
+                      :descriptor own-descriptor
+                      :flags Opcodes/ACC_PUBLIC
+                      :kind :user-default-constructor
+                      :owner (:internal-name class-spec)
+                      :super-name (or (:java-super-class class-spec) "java/lang/Object")
+                      :super-descriptor super-descriptor
+                      :boxed-args boxed-args
+                      :composition-fields (:composition-fields class-spec)
+                      :runtime-type-fields (:runtime-type-fields class-spec)
+                      :fields (:fields class-spec)})
+                   (:java-super-ctor-forwards class-spec))
+              [{:name "set_outer"
                 :descriptor "(Ljava/lang/Object;)V"
                 :flags Opcodes/ACC_PUBLIC
                 :kind :set-outer
@@ -381,11 +401,28 @@
       (.visitEnd mv))))
 
 (defn- emit-user-default-constructor!
-  [^ClassWriter cw {:keys [name descriptor flags fields composition-fields runtime-type-fields owner super-name]}]
+  "The ordinary case (super-descriptor/boxed-args absent) is the shared,
+   zero-arg <init> every compiled class gets: it calls the Java superclass's
+   own no-arg constructor unconditionally, which the typechecker guarantees
+   exists whenever no Nex constructor explicitly forwards real arguments
+   into it (nex.typechecker/check-java-super-constructor-call). A
+   constructor that DOES forward real arguments gets its own dedicated
+   <init> overload instead (see nex.lower/java-super-ctor-forward-spec and
+   lower-user-create) — DESCRIPTOR is then that constructor's own real
+   parameter types, BOXED-ARGS (already-lowered nex.ir/java-arg-box-node
+   values, each knowing its own param slot) are pushed before the
+   INVOKESPECIAL, and SUPER-DESCRIPTOR is the resolved Java constructor's
+   real descriptor instead of the plain \"()V\". Everything else — field
+   defaults, composition fields, the set_outer bootstrap below — is
+   identical either way."
+  [^ClassWriter cw {:keys [name descriptor flags fields composition-fields runtime-type-fields owner super-name
+                           super-descriptor boxed-args]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
     (.visitVarInsn mv Opcodes/ALOAD 0)
-    (.visitMethodInsn mv Opcodes/INVOKESPECIAL super-name "<init>" "()V" false)
+    (doseq [arg boxed-args]
+      (emit-expr! mv arg 0))
+    (.visitMethodInsn mv Opcodes/INVOKESPECIAL super-name "<init>" (or super-descriptor "()V") false)
     (doseq [{:keys [name jvm-type]} composition-fields]
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (.visitTypeInsn mv Opcodes/NEW (second jvm-type))
@@ -799,6 +836,7 @@
 (declare emit-binary!)
 (declare emit-compare!)
 (declare emit-stmt!)
+(declare emit-expr-java-arg-box!)
 (declare emit-boxed-expr!)
 (declare emit-boxed-arg-array!)
 
@@ -1991,7 +2029,9 @@
   [^MethodVisitor mv expr state-slot]
   (.visitTypeInsn mv Opcodes/NEW (:class expr))
   (.visitInsn mv Opcodes/DUP)
-  (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:class expr) "<init>" "()V" false)
+  (doseq [arg (:args expr)]
+    (emit-expr! mv arg state-slot))
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:class expr) "<init>" (:descriptor expr) false)
   ;; Hand the object the state that made it (see the __state__ field): the
   ;; emitted equals/hashCode need it and Java gives them no way to obtain it.
   (.visitInsn mv Opcodes/DUP)
@@ -2123,6 +2163,8 @@
 (defn- emit-expr-call-super-java!
   [^MethodVisitor mv expr state-slot]
   (emit-expr! mv (:target expr) state-slot)
+  (doseq [arg (:args expr)]
+    (emit-expr! mv arg state-slot))
   (.visitMethodInsn mv Opcodes/INVOKESPECIAL (:owner expr) (:method expr) (:descriptor expr) false)
   (let [java-kind (get primitive-class->jvm-type (:java-return-class expr))]
     (cond
@@ -2266,6 +2308,7 @@
    :call-function      emit-expr-call-function!
    :call-virtual       emit-expr-call-virtual!
    :call-super-java    emit-expr-call-super-java!
+   :java-arg-box       (fn [mv expr state-slot] (emit-expr-java-arg-box! mv expr state-slot))
    :call-runtime       emit-expr-call-runtime!
    :collection-method  emit-collection-method!
    :concurrency-method emit-concurrency-method!
@@ -2918,6 +2961,14 @@
    :byte    {:box-owner "java/lang/Byte"      :box-desc "(B)Ljava/lang/Byte;"      :unbox-name "byteValue"    :unbox-desc "()B" :load Opcodes/ILOAD :return Opcodes/IRETURN}
    :short   {:box-owner "java/lang/Short"     :box-desc "(S)Ljava/lang/Short;"     :unbox-name "shortValue"   :unbox-desc "()S" :load Opcodes/ILOAD :return Opcodes/IRETURN}})
 
+(def ^:private java-wrapper-class->kind
+  "The primitive-box-info kind a Java wrapper class boxes — the reverse of
+   each entry's :box-owner, used by emit-expr-java-arg-box! to box an
+   outgoing Nex argument into the exact wrapper type a resolved super
+   method/constructor parameter declares (java.lang.Integer, not just int)."
+  {Integer :int, Long :long, Double :double, Float :float,
+   Boolean :boolean, Character :char, Byte :byte, Short :short})
+
 (defn- reference-type-internal-name
   [^Class klass]
   (.getInternalName (Type/getType klass)))
@@ -2954,6 +3005,33 @@
             [:float :int] Opcodes/F2I, [:float :long] Opcodes/F2L, [:float :double] Opcodes/F2D
             [:double :int] Opcodes/D2I, [:double :long] Opcodes/D2L, [:double :float] Opcodes/D2F}
            [from to]))))
+
+(defn- emit-expr-java-arg-box!
+  "Coerce an already-emitted Nex argument value (still on the stack, in its
+   own :long/:double/:boolean/:char/object shape) into the exact Java
+   parameter type a resolved super method/constructor call needs — the
+   mirror, outgoing direction of emit-interface-bridge-method!'s incoming-
+   param handling, reusing the same primitive-class->jvm-type/primitive-box-
+   info/numeric-widen-narrow-opcode tables."
+  [^MethodVisitor mv expr state-slot]
+  (let [^Class target (:target-class expr)
+        nex-kind (emit-expr! mv (:value expr) state-slot)]
+    (cond
+      (get primitive-class->jvm-type target)
+      (let [java-kind (get primitive-class->jvm-type target)]
+        (when-let [conv (numeric-widen-narrow-opcode nex-kind java-kind)]
+          (.visitInsn mv conv)))
+
+      (contains? java-wrapper-class->kind target)
+      (let [java-kind (get java-wrapper-class->kind target)
+            {:keys [box-owner box-desc]} (get primitive-box-info java-kind)]
+        (when-let [conv (numeric-widen-narrow-opcode nex-kind java-kind)]
+          (.visitInsn mv conv))
+        (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))
+
+      :else
+      (.visitTypeInsn mv Opcodes/CHECKCAST (reference-type-internal-name target))))
+  (:jvm-type expr))
 
 (defn- emit-interface-bridge-method!
   "Bridges a Java interface method's real descriptor to the compiled class's

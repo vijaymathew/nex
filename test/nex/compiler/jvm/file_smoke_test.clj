@@ -742,8 +742,8 @@ end")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
-(deftest compile-jar-extends-java-class-with-args-super-new-fails-with-clear-error-test
-  (testing "super.new(args) with real arguments is a named, honest gap on the compiled backend, not silent wrong behavior"
+(deftest compile-jar-extends-java-class-with-args-super-new-forwards-real-arguments-test
+  (testing "super.new(args) forwards a real argument into the Java superclass's own constructor — not just accepted at typecheck time, but actually reaching Thread's real name"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-extend-args-gap")
           main-file (io/file tmp-dir "main.nex")
           out-dir (io/file tmp-dir "out")]
@@ -761,11 +761,89 @@ create
   end
 feature
   run() do
+    print(\"ran: \" + super.getName())
+  end
+  show_name() do
+    print(super.getName())
+  end
+end
+
+let t := create My_Thread.make(\"worker-42\")
+t.show_name()
+t.start()
+t.join()")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"worker-42\"" "\"ran: worker-42\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-super-method-call-with-args-test
+  (testing "super.<method>(args) reaches the real Java superclass method with real arguments, both a numeric-narrowing param (setPriority(int)) and a String one (setName(String))"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-super-method-args")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Thread
+
+class My_Thread
+  inherit
+    Thread
+create
+  make() do
+    super.new()
+  end
+feature
+  run() do
+    print(\"ran\")
+  end
+  configure(p: Integer, n: String) do
+    super.setPriority(p)
+    super.setName(n)
+    print(super.getPriority())
+    print(super.getName())
+  end
+end
+
+let t := create My_Thread.make()
+t.configure(7, \"configured\")")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["7" "\"configured\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
+(deftest compile-jar-super-new-non-simple-argument-fails-with-clear-error-test
+  (testing "super.new(args) still needs an honest, named error (not silent double-evaluation) when an argument is a computed expression rather than a bare parameter or literal"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-super-new-nonsimple")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.lang.Thread
+
+class My_Thread
+  inherit
+    Thread
+create
+  make(prefix: String)
+  do
+    super.new(prefix + \"!\")
+  end
+feature
+  run() do
     print(\"ran\")
   end
 end")
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"not supported yet"
+                              #"must be one of the constructor's own"
                               (file/compile-jar (.getPath main-file) (.getPath out-dir) {})))
         (finally
           (when (.exists tmp-dir)

@@ -158,13 +158,23 @@
    :nex-type nex-type
    :jvm-type jvm-type})
 
-(defn new-node [class class-name nex-type jvm-type]
-  {:op :new
-   :class class
-   :class-name class-name
-   :args []
-   :nex-type nex-type
-   :jvm-type jvm-type})
+(defn new-node
+  "NEW class; DUP; <push ARGS>; INVOKESPECIAL class.<init>DESCRIPTOR. The
+   4-arity form is the ordinary, ubiquitous case (implicit/no-op superclass
+   init, matching every constructor except one that forwards real arguments
+   into a Java superclass — see nex.lower/java-super-ctor-forward-spec and
+   lower-user-create) — no ARGS, and DESCRIPTOR defaults to the plain
+   zero-arg \"()V\" every user-default-constructor <init> already has."
+  ([class class-name nex-type jvm-type]
+   (new-node class class-name "()V" [] nex-type jvm-type))
+  ([class class-name descriptor args nex-type jvm-type]
+   {:op :new
+    :class class
+    :class-name class-name
+    :descriptor descriptor
+    :args (vec args)
+    :nex-type nex-type
+    :jvm-type jvm-type}))
 
 (defn field-get-node [owner field target nex-type jvm-type]
   {:op :field-get
@@ -274,16 +284,37 @@
    would recurse into it instead of reaching the real superclass body.
    java-return-class is the reflected java.lang.reflect.Method's return Class
    (compile-time only, not serialized), used to box a primitive result back
-   into Nex's internal representation."
-  [owner method descriptor target java-return-class nex-type jvm-type]
-  {:op :call-super-java
-   :owner owner
-   :method method
-   :descriptor descriptor
-   :target target
-   :java-return-class java-return-class
-   :nex-type nex-type
-   :jvm-type jvm-type})
+   into Nex's internal representation. ARGS (default []) are already-lowered
+   argument values, each wrapped in java-arg-box-node against the resolved
+   method's own real parameter type — pushed in order right after TARGET,
+   before the INVOKESPECIAL (see emit-expr-call-super-java!)."
+  ([owner method descriptor target java-return-class nex-type jvm-type]
+   (call-super-java-node owner method descriptor target [] java-return-class nex-type jvm-type))
+  ([owner method descriptor target args java-return-class nex-type jvm-type]
+   {:op :call-super-java
+    :owner owner
+    :method method
+    :descriptor descriptor
+    :target target
+    :args (vec args)
+    :java-return-class java-return-class
+    :nex-type nex-type
+    :jvm-type jvm-type}))
+
+(defn java-arg-box-node
+  "Coerce an already-lowered argument VALUE (Nex-shaped on the JVM stack —
+   :long/:double/:boolean/:char primitive, or an object reference) into the
+   exact Java parameter type TARGET-CLASS a resolved super method/constructor
+   call needs: numeric widen/narrow for a Java primitive target, the same
+   plus boxing for a wrapper-class target, or CHECKCAST for String/any other
+   reference type. See emit-expr-java-arg-box! (docs/proposals/java-
+   interop.md Phase 2 — real-argument super calls)."
+  [value ^Class target-class]
+  {:op :java-arg-box
+   :value value
+   :target-class target-class
+   :nex-type (:nex-type value)
+   :jvm-type (:jvm-type value)})
 
 (defn box-node [from to expr nex-type]
   {:op :box
