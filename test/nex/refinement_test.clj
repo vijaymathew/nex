@@ -67,6 +67,56 @@ print(use(ok))")))))
 function make_bad(): Quantity do result := -1 end
 print(make_bad())"))))
 
+(deftest refinement-field-assignment-checked-via-this
+  (testing "assigning a value that violates the predicate to a refinement-typed
+            field via `this.field := v` raises"
+    (is (violates? "declare type Quantity = Integer where n: n > 0
+class Box
+  create make(v: Integer) do this.q := v end
+  feature q: Quantity
+end
+print(create Box.make(-5).q)"))
+    (is (= ["7"]
+           (run "declare type Quantity = Integer where n: n > 0
+class Box
+  create make(v: Integer) do this.q := v end
+  feature q: Quantity
+end
+print(create Box.make(7).q)")))))
+
+(deftest refinement-field-assignment-checked-via-implicit-self
+  (testing "assigning a value that violates the predicate to a refinement-typed
+            field via bare `field := v` (implicit self) raises"
+    (is (violates? "declare type Quantity = Integer where n: n > 0
+class Box
+  create make(v: Integer) do q := v end
+  feature q: Quantity
+end
+print(create Box.make(-5).q)"))
+    (is (= ["7"]
+           (run "declare type Quantity = Integer where n: n > 0
+class Box
+  create make(v: Integer) do q := v end
+  feature q: Quantity
+end
+print(create Box.make(7).q)")))))
+
+(deftest refinement-field-check-ignores-shadowing-local
+  (testing "a local `let` that shares a refinement-typed field's name is never
+            mistaken for a field write — only the later `this.q := v` is
+            checked, and a local-only reassignment does not raise"
+    (is (= ["5"]
+           (run "declare type Quantity = Integer where n: n > 0
+class Box
+  create make(v: Integer) do
+    let q := -100
+    q := -200
+    this.q := v
+  end
+  feature q: Quantity
+end
+print(create Box.make(5).q)")))))
+
 (deftest refinement-nested-let-checked
   (testing "a refinement let nested inside a body is still checked"
     (is (violates? "declare type Quantity = Integer where n: n > 0

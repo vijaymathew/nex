@@ -526,10 +526,12 @@
 ;; type checking, plus a predicate checked wherever a value is *narrowed* into
 ;; the refinement. Narrowing sites reachable from the syntax alone are: a `let`
 ;; whose declared type is the refinement, a parameter of that type (checked at
-;; entry), and a return of that type (checked on `result`). The check is emitted
-;; as ordinary AST — a scoped block that binds the predicate's binder to the
-;; value and raises when the predicate is false — so every backend runs it and
-;; `skip-contracts` is out of scope here (a follow-up can gate it like `require`).
+;; entry), a return of that type (checked on `result`), and an assignment to a
+;; field of that type (`this.field := v` or bare `field := v`). The check is
+;; emitted as ordinary AST — a scoped block that binds the predicate's binder to
+;; the value and raises when the predicate is false — so every backend runs it
+;; and `skip-contracts` is out of scope here (a follow-up can gate it like
+;; `require`).
 
 (defn- refinement-name
   "The refinement name a type annotation refers to, or nil. Only plain named
@@ -548,14 +550,18 @@
           (:type-aliases program)))
 
 (defn- make-refinement-check
-  "AST for `do let <binder>: <base> := <value-var>  if not(<pred>) then raise ... end end`.
+  "AST for `do let <binder>: <base> := <value-expr>  if not(<pred>) then raise ... end end`.
   Binding the predicate binder at the base type keeps its methods/operators
-  resolvable on every backend (a refinement is otherwise opaque to lowering)."
-  [rname {:keys [binder predicate base]} value-var]
+  resolvable on every backend (a refinement is otherwise opaque to lowering).
+  VALUE-EXPR is a full expression node (not just a name), so a caller checking
+  a narrowed field can pass a reference to the temp local it copied the
+  right-hand side into (see narrow-field-assignment) rather than only a bare
+  variable name."
+  [rname {:keys [binder predicate base]} value-expr]
   {:type :scoped-block
    :rescue nil
    :body [{:type :let :name binder :var-type base
-           :value {:type :identifier :name value-var}}
+           :value value-expr}
           {:type :if
            :condition {:type :unary :operator "not" :expr predicate}
            :then [{:type :raise
@@ -564,6 +570,9 @@
            :elseif []
            :else nil}]})
 
+(defn- identifier-node [name]
+  {:type :identifier :name name})
+
 (defn- expand-refinement-lets
   "Expand each `let x: R := …` in a statement vector into [the-let, check]."
   [stmts refinements]
@@ -571,7 +580,7 @@
         (fn [s]
           (if-let [r (and (map? s) (= :let (:type s))
                           (get refinements (refinement-name (:var-type s))))]
-            [s (make-refinement-check (refinement-name (:var-type s)) r (:name s))]
+            [s (make-refinement-check (refinement-name (:var-type s)) r (identifier-node (:name s)))]
             [s]))
         stmts)))
 
@@ -581,11 +590,11 @@
   [node refinements]
   (let [param-checks (keep (fn [p]
                              (when-let [r (get refinements (refinement-name (:type p)))]
-                               (make-refinement-check (refinement-name (:type p)) r (:name p))))
+                               (make-refinement-check (refinement-name (:type p)) r (identifier-node (:name p)))))
                            (:params node))
         ret-name (refinement-name (:return-type node))
         ret-r (get refinements ret-name)
-        ret-check (when ret-r (make-refinement-check ret-name ret-r "result"))]
+        ret-check (when ret-r (make-refinement-check ret-name ret-r (identifier-node "result")))]
     (if (or (seq param-checks) ret-check)
       (assoc node :body (vec (concat param-checks
                                      (or (:body node) [])
@@ -658,26 +667,128 @@
            n))
        program))))
 
+(defn- class-field-refinements
+  "field-name -> refinement info, for CLASS-NODE's own (non-constant) fields
+  declared with a refinement type."
+  [class-node refinements]
+  (into {}
+        (keep (fn [member]
+                (when (and (= :field (:type member)) (not (:constant? member)))
+                  (when-let [r (get refinements (refinement-name (:field-type member)))]
+                    [(:name member) r]))))
+        (mapcat :members (filter #(= :feature-section (:type %)) (:body class-node)))))
+
+(defn- body-let-names
+  "Every name some `let` anywhere in BODY binds — a coarse, whole-body
+  approximation (mirrors nex.typechecker/body-let-names, used there for the
+  analogous global-vs-local question) rather than a precise per-point scope
+  trace. Used to avoid treating a bare `field := v` as a field write when the
+  same name might instead be a shadowing local somewhere in this routine —
+  `this.field := v` never needs this, since it names its field unambiguously."
+  [body]
+  (into #{}
+        (comp (filter #(and (map? %) (= :let (:type %))))
+              (keep :name))
+        (tree-seq coll? seq body)))
+
+(defn- assign-target-field-name
+  "The field name a narrowing assignment STMT writes, or nil."
+  [stmt shadowed]
+  (case (:type stmt)
+    :member-assign (when (= :this (:type (:object stmt))) (:field stmt))
+    :assign (when-not (contains? shadowed (:target stmt)) (:target stmt))
+    nil))
+
+(defn- narrow-field-assignment
+  "[assignment (rewritten to copy from a fresh temp), check] for a narrowing
+  assignment STMT into one of FIELD-REFINEMENTS' fields, or nil when STMT
+  isn't one. The right-hand side is evaluated exactly once, into the temp —
+  both so a computed/side-effecting expression is not evaluated twice, and
+  so the check reads an ordinary local rather than re-reading the field
+  through `this`: the tree-walking interpreter's own object value-semantics
+  (a mutation write-back can leave a stale copy of an object reachable
+  through an outer binding) cannot yet be trusted to see a field as freshly
+  written from inside the very statement that just wrote it."
+  [stmt field-refinements shadowed]
+  (when-let [field-name (assign-target-field-name stmt shadowed)]
+    (when-let [r (get field-refinements field-name)]
+      (let [tmp (str "__field_check_" (swap! next-fn-id inc) "__")]
+        [{:type :let :name tmp :var-type nil :value (:value stmt)}
+         (assoc stmt :value (identifier-node tmp))
+         (make-refinement-check field-name r (identifier-node tmp))]))))
+
+(defn- inject-field-checks-in-body
+  "Insert a refinement check after each statement in STMTS that narrows a
+  value into one of FIELD-REFINEMENTS' fields (`field := v` or `this.field :=
+  v`), recursing into nested :then/:else/:body statement lists so a narrowing
+  assignment inside an `if`/loop is caught too."
+  [stmts field-refinements shadowed]
+  (vec (mapcat
+        (fn [s]
+          (if (map? s)
+            (let [s (reduce (fn [m k]
+                              (if (sequential? (get m k))
+                                (assoc m k (inject-field-checks-in-body
+                                            (get m k) field-refinements shadowed))
+                                m))
+                            s [:body :then :else])]
+              (or (narrow-field-assignment s field-refinements shadowed)
+                  [s]))
+            [s]))
+        stmts)))
+
+(defn- inject-class-field-refinement-checks
+  "Rewrite CLASS-NODE's own constructors and methods, inserting a refinement
+  check after every assignment that narrows a value into one of its
+  refinement-typed fields. A no-op when the class has none."
+  [class-node refinements]
+  (let [field-refinements (class-field-refinements class-node refinements)]
+    (if (empty? field-refinements)
+      class-node
+      (let [check-body (fn [routine]
+                          (if (sequential? (:body routine))
+                            (update routine :body
+                                    #(inject-field-checks-in-body
+                                      % field-refinements (body-let-names %)))
+                            routine))]
+        (update class-node :body
+                (fn [sections]
+                  (mapv (fn [section]
+                          (case (:type section)
+                            :constructors (update section :constructors #(mapv check-body %))
+                            :feature-section (update section :members
+                                                     (fn [members]
+                                                       (mapv (fn [m]
+                                                               (if (= :method (:type m))
+                                                                 (check-body m)
+                                                                 m))
+                                                             members)))
+                            section))
+                        sections)))))))
+
 (defn inject-refinement-checks
   "Rewrite a walked program, injecting predicate checks at every refinement
-  narrowing site (let bindings, parameters, returns) throughout the tree."
+  narrowing site (let bindings, parameters, returns, and field assignments)
+  throughout the tree."
   [program]
   (let [refinements (collect-refinements program)]
     (if (empty? refinements)
       program
-      (walk/postwalk
-       (fn [n]
-         (if (map? n)
-           (let [n (reduce (fn [m k]
-                             (if (sequential? (get m k))
-                               (assoc m k (expand-refinement-lets (get m k) refinements))
-                               m))
-                           n [:body :then :else :statements])]
-             (if (#{:method :constructor :function} (:type n))
-               (add-param-return-checks n refinements)
+      (-> (walk/postwalk
+           (fn [n]
+             (if (map? n)
+               (let [n (reduce (fn [m k]
+                                 (if (sequential? (get m k))
+                                   (assoc m k (expand-refinement-lets (get m k) refinements))
+                                   m))
+                               n [:body :then :else :statements])]
+                 (if (#{:method :constructor :function} (:type n))
+                   (add-param-return-checks n refinements)
+                   n))
                n))
-           n))
-       program))))
+           program)
+          (update :classes (fn [classes]
+                              (mapv #(inject-class-field-refinement-checks % refinements) classes)))))))
 
 (defn- process-field-patterns
   "Desugar a variant's field patterns against a bound variable `var-name`.
