@@ -481,3 +481,274 @@ end")
                    (repl/eval-code ctx "print(d.unwrap_or(0))"))]
       (is (not (.contains output "Undefined function: result_map")))
       (is (.contains output "42")))))
+
+;; --- Namespaces (docs/proposals/namespaces.md), Phase 2: ambiguity detection ---
+
+(defn- spit-account-lib!
+  "Write a minimal `Account` class into <tmp-dir>/lib/<path>/Account.nex, the
+   layout `intern <path>/Account` resolves against (see find-intern-file)."
+  [tmp-dir path field]
+  (let [dir (io/file tmp-dir "lib" path)
+        f (io/file dir "Account.nex")]
+    (.mkdirs dir)
+    (spit f (str "class Account\nfeature\n  " field ": Integer\ncreate\n  make(v: Integer) do "
+                 field " := v end\nend"))
+    f))
+
+(deftest file-eval-intern-ambiguous-bare-class-name-is-a-compile-error-test
+  (testing "two interned modules exporting the same bare class name is a
+            compile-time ambiguity error, not a silent last-one-wins pick"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-ambiguous-" (System/nanoTime)))
+          finance-file (spit-account-lib! tmp-dir "finance" "balance")
+          billing-file (spit-account-lib! tmp-dir "billing" "id")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern finance/Account
+intern billing/Account
+
+let c := create Account.make(1)")
+      (try
+        (let [error (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file) {})))
+              message (str (ex-message error) (some-> error ex-data str))]
+          (is (.contains message "Ambiguous reference to 'Account'"))
+          (is (.contains message "billing.Account"))
+          (is (.contains message "finance.Account")))
+        (finally
+          (.delete finance-file)
+          (.delete billing-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "finance"))
+          (.delete (io/file tmp-dir "lib" "billing"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-own-class-shadows-ambiguous-interned-name-test
+  (testing "a class declared directly in the entry file always wins over a
+            same-named interned class — ambiguity is only ever between two
+            *interned* things, never against the file's own definitions"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-own-wins-" (System/nanoTime)))
+          finance-file (spit-account-lib! tmp-dir "finance" "balance")
+          billing-file (spit-account-lib! tmp-dir "billing" "id")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern finance/Account
+intern billing/Account
+
+class Account
+feature
+  tag: Integer
+create
+  make(t: Integer) do tag := t end
+end
+
+let c := create Account.make(1)
+print(c.tag)")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file) {}))]
+          (is (not (.contains output "Ambiguous reference")))
+          (is (.contains output "1")))
+        (finally
+          (.delete finance-file)
+          (.delete billing-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "finance"))
+          (.delete (io/file tmp-dir "lib" "billing"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-intern-as-alias-does-not-resolve-ambiguity-test
+  (testing "`intern X as Y` does not resolve a same-named collision: Y is a
+            synonym alongside X (the diamond-dependency alias fix), not a
+            replacement for X, so X's bare name is still claimed by its real
+            class and still collides"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-alias-no-fix-" (System/nanoTime)))
+          finance-file (spit-account-lib! tmp-dir "finance" "balance")
+          billing-file (spit-account-lib! tmp-dir "billing" "id")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern finance/Account
+intern billing/Account as Billing_Account
+
+let b := create Billing_Account.make(2)")
+      (try
+        (let [error (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file) {})))
+              message (str (ex-message error) (some-> error ex-data str))]
+          (is (.contains message "Ambiguous reference to 'Account'")))
+        (finally
+          (.delete finance-file)
+          (.delete billing-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "finance"))
+          (.delete (io/file tmp-dir "lib" "billing"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-diamond-dependency-is-not-ambiguous-test
+  (testing "two different `intern` paths that resolve to the SAME canonical
+            file (a diamond dependency) are not a collision — resolve-interned*
+            already dedupes those by canonical path, so only one qualified
+            name ever reaches the ambiguity check. `finance/Account` lives
+            under a fake ~/.nex/deps so it resolves identically regardless of
+            which file (main.nex or wrapper/Money_Box.nex, in different
+            directories) does the interning — the diamond shape itself, not a
+            coincidence of both interns sharing one directory."
+    (let [fake-home (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-diamond-home-" (System/nanoTime)))
+          finance-file (spit-account-lib! fake-home "finance" "balance")
+          tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-diamond-" (System/nanoTime)))
+          wrapper-file (io/file tmp-dir "lib" "wrapper" "Money_Box.nex")
+          main-file (io/file tmp-dir "main.nex")
+          original-home (System/getProperty "user.home")]
+      (.mkdirs (.getParentFile wrapper-file))
+      ;; spit-account-lib! writes to <root>/lib/finance/Account.nex; move it to
+      ;; the ~/.nex/deps/finance layout find-intern-file also searches.
+      (let [deps-dir (io/file fake-home ".nex" "deps" "finance")
+            deps-file (io/file deps-dir "Account.nex")]
+        (.mkdirs deps-dir)
+        (io/copy finance-file deps-file)
+        (.delete finance-file)
+        (.delete (io/file fake-home "lib" "finance"))
+        (.delete (io/file fake-home "lib")))
+      (spit wrapper-file "intern finance/Account
+
+class Money_Box
+feature
+  peek(a: Account): Integer do
+    result := a.balance
+  end
+end")
+      (spit main-file "intern finance/Account
+intern wrapper/Money_Box
+
+let c := create Account.make(1)
+let box := create Money_Box
+print(box.peek(c))")
+      (try
+        (System/setProperty "user.home" (.getAbsolutePath fake-home))
+        (let [output (with-out-str (e/eval-file (.getPath main-file) {}))]
+          (is (not (.contains output "Ambiguous reference")))
+          (is (.contains output "1")))
+        (finally
+          (System/setProperty "user.home" original-home)
+          (.delete (io/file fake-home ".nex" "deps" "finance" "Account.nex"))
+          (.delete (io/file fake-home ".nex" "deps" "finance"))
+          (.delete (io/file fake-home ".nex" "deps"))
+          (.delete (io/file fake-home ".nex"))
+          (.delete fake-home)
+          (.delete wrapper-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "wrapper"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+;; --- Namespaces (docs/proposals/namespaces.md), Phase 3: qualified reference syntax ---
+
+(deftest file-eval-qualified-reference-resolves-collision-test
+  (testing "a qualified reference (`finance/Account`, walked to \"finance.Account\")
+            disambiguates a genuine bare-name collision end to end — type
+            annotation, `create`, and field access all resolve to the RIGHT
+            one of the two same-named classes, constructing real, distinct
+            objects, on both the compiled and the interpreted backend"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-qualified-" (System/nanoTime)))
+          finance-file (spit-account-lib! tmp-dir "finance" "balance")
+          billing-file (spit-account-lib! tmp-dir "billing" "id")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern finance/Account
+intern billing/Account
+
+let a: finance/Account := create finance/Account.make(1)
+let b: billing/Account := create billing/Account.make(2)
+print(a.balance)
+print(b.id)")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "1"))
+          (is (.contains compiled "2")))
+        (finally
+          (.delete finance-file)
+          (.delete billing-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "finance"))
+          (.delete (io/file tmp-dir "lib" "billing"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-reference-to-non-colliding-class-test
+  (testing "a qualified reference to a class that ISN'T ambiguous still
+            resolves correctly, and interchangeably with a bare reference to
+            the SAME class — regression coverage for a real bug found while
+            building this: naively preferring the qualified name for every
+            interned class's own JVM/runtime identity (not just a genuinely
+            colliding one) broke the common, non-colliding case, since every
+            *other*, ordinary bare reference to it in the program still
+            expects its plain bare identity"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-non-colliding-" (System/nanoTime)))
+          account-file (spit-account-lib! tmp-dir "finance" "balance")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern finance/Account
+
+let a: Account := create finance/Account.make(7)
+let b: finance/Account := create Account.make(8)
+print(a.balance)
+print(b.balance)")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "7"))
+          (is (.contains compiled "8")))
+        (finally
+          (.delete account-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "finance"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-match-clause-on-sealed-hierarchy-test
+  (testing "a qualified match clause (`when shapes/Circle then ...`) dispatches
+            correctly against a real object of that (non-colliding) class, on
+            both backends — regression coverage for a second bug found while
+            building this: runtime match/convert dispatch compares plain Nex
+            type-name *strings* against the value's own embedded runtime type
+            name, a separate mechanism from JVM identity that needed its own
+            fix once the class-identity fix above landed"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-qualified-match-" (System/nanoTime)))
+          shape-dir (io/file tmp-dir "lib" "shapes")
+          shape-file (io/file shape-dir "Shape.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs shape-dir)
+      (spit shape-file "sealed deferred class Shape
+end
+
+class Circle
+inherit Shape
+feature
+  radius: Integer
+create
+  make(r: Integer) do this.radius := r end
+end
+
+class Square
+inherit Shape
+feature
+  side: Integer
+create
+  make(s: Integer) do this.side := s end
+end")
+      (spit main-file "intern shapes/Shape
+
+let s: Shape := create shapes/Circle.make(5)
+match s of
+  shapes/Circle then print(\"circle\")
+  shapes/Square then print(\"square\")
+end")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "circle"))
+          (is (not (.contains compiled "square"))))
+        (finally
+          (.delete shape-file)
+          (.delete shape-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))

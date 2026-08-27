@@ -158,20 +158,55 @@
   [ast]
   (vec (remove :closure-runtime-object? (lower/collect-anonymous-class-defs ast))))
 
+(defn- class-metadata-entry
+  [package-root internal-name-suffix bare-name]
+  (let [internal-name (format "%s/%s" package-root internal-name-suffix)]
+    {:name bare-name
+     :internal-name internal-name
+     :jvm-name internal-name
+     :binary-name (desc/binary-class-name internal-name)}))
+
 (defn- file-class-metadata
   [source-path prepared-ast]
   (let [package-root (hidden-package-root source-path)
         emitted-classes (vec (concat (user-class-defs prepared-ast)
                                      (emitted-anonymous-class-defs prepared-ast)))
-        base (into {}
-                   (map (fn [class-def]
-                          (let [internal-name (format "%s/%s" package-root (:name class-def))]
-                            [(:name class-def)
-                             {:name (:name class-def)
-                              :internal-name internal-name
-                              :jvm-name internal-name
-                              :binary-name (desc/binary-class-name internal-name)}]))
-                        emitted-classes))]
+        ;; Whichever class-def is *last* for a given bare name is the one
+        ;; that "wins" it — the exact last-wins rule the plain `into {}`
+        ;; collapse below already applies; computed up front, as class-defs
+        ;; rather than metadata, purely to answer "is THIS class-def the one
+        ;; that owns the bare-name slot" per class-def below.
+        bare-winner-by-name (into {} (map (juxt :name identity)) emitted-classes)
+        ;; A class-def gets the ordinary flat internal name
+        ;; (`<package-root>/Account`) when it's also the bare-name slot's
+        ;; winner — matching every *bare* reference to it elsewhere in the
+        ;; program, which is the overwhelming majority of interned classes,
+        ;; not just the colliding ones (every interned class carries
+        ;; :qualified-name, Phase 1). Only a class-def that actually lost the
+        ;; bare-name collapse to a *different* class-def — a genuine
+        ;; same-bare-name collision — gets a distinct internal name, nested
+        ;; as a genuine JVM sub-package (`<package-root>/finance/Account`),
+        ;; so two classes sharing a bare name (`finance/Account` and
+        ;; `billing/Account`, both `Account`) become two distinct compiled
+        ;; .class files instead of one silently winning the bare-name
+        ;; collapse (the JVM-identity half of the same bug the
+        ;; `intern ... as` alias fix closed for aliasing specifically). Using
+        ;; the qualified internal name unconditionally here — even for a
+        ;; class with no collision at all — would compile it under one
+        ;; internal name while every ordinary bare reference to it resolves
+        ;; to the (never emitted) flat one instead: a LinkageError on every
+        ;; interned class, not just colliding ones.
+        entry-for (fn [class-def]
+                    (if (= class-def (get bare-winner-by-name (:name class-def)))
+                      (class-metadata-entry package-root (:name class-def) (:name class-def))
+                      (class-metadata-entry package-root
+                                            (str/replace (:qualified-name class-def) "." "/")
+                                            (:name class-def))))
+        base (into {} (map (fn [cd] [(:name cd) (entry-for cd)])) emitted-classes)
+        base (into base
+                   (comp (filter :qualified-name)
+                         (map (fn [cd] [(:qualified-name cd) (entry-for cd)])))
+                   emitted-classes)]
     ;; An `intern ... as` alias (see nex.interpreter/resolve-interned*) adds a
     ;; :type-aliases entry rather than a second, nominally distinct class-def,
     ;; so the alias name needs an entry here too, pointing at the SAME
@@ -248,9 +283,19 @@
            ;; to run (see interpreter-reachable? below — it never knew this
            ;; fallback path existed, so it trimmed bodies a program with no
            ;; closures at all could still end up needing).
+           ;; :qualified-name over the bare :name when present — the bare
+           ;; slot in compiled-classes (docs/proposals/namespaces.md, Phase
+           ;; 3/4) holds whichever class won the bare-name collapse when two
+           ;; interned classes share a name, which is not necessarily this
+           ;; one; looking itself up by bare name here would stamp this
+           ;; entry with a *different* class's internal name — one no
+           ;; `lower-class-def` call actually emitted a .class under (it
+           ;; used its own qualified internal name instead), so anything
+           ;; that touches this table's :internal-name at class-load time
+           ;; hits a LinkageError for a class that was never defined.
            class-asts (mapv (fn [c]
                               (if-let [{:keys [internal-name jvm-name binary-name]}
-                                       (get compiled-classes (:name c))]
+                                       (get compiled-classes (or (:qualified-name c) (:name c)))]
                                 (assoc c
                                        :internal-name internal-name
                                        :jvm-name jvm-name
