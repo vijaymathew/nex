@@ -803,3 +803,251 @@ end")
           (.delete main-file)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(deftest file-eval-aliased-collision-used-inside-a-constructor-body-test
+  (testing "a path-qualified alias resolving a bare-name collision (two
+            different libraries both named Counter, at multi-segment paths)
+            works when referenced from INSIDE a class's own constructor body,
+            not just at top level — regression test: visible-class-map's
+            qualified-name recovery only reached the top-level lowering env;
+            every nested lowering scope (a constructor, a method, ...) builds
+            its own :classes list independently via its own make-lowering-env
+            call, and the class that lost the bare-name collapse was simply
+            absent from it, so a nested `create C1.make` failed to lower even
+            though the identical top-level reference worked fine"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-nested-alias-" (System/nanoTime)))
+          math-dir (io/file tmp-dir "lib" "math")
+          cc-dir (io/file tmp-dir "lib" "cc" "bb")
+          math-file (io/file math-dir "Counter.nex")
+          cc-file (io/file cc-dir "Counter.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs math-dir)
+      (.mkdirs cc-dir)
+      (spit math-file "class Counter
+  create
+    make() do
+      count := 0
+    end
+  feature
+    count: Integer
+    increment() do
+      count := count + 1
+    end
+    value(): Integer do
+      result := count
+    end
+end")
+      (spit cc-file "class Counter
+create
+  make do print(\"COUNTER\") end
+end")
+      (spit main-file "intern math/Counter as C1
+intern cc/bb/Counter as C
+
+class Main
+  create
+    make() do
+      let c := create C1.make
+      c.increment
+      c.increment
+      print(c.value)
+    end
+  end
+
+  create Main.make")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "2")))
+        (finally
+          (.delete math-file)
+          (.delete cc-file)
+          (.delete main-file)
+          (.delete math-dir)
+          (.delete cc-dir)
+          (.delete (io/file tmp-dir "lib" "cc"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(defn- spit-widget-lib!
+  "Write a minimal `Widget` class into <tmp-dir>/lib/<path>/Widget.nex — a
+   String `tag` field set from `tag-value`, plus a `greet()` method that
+   reads it. Used to exercise a colliding, aliased qualified class from
+   several different nested lowering scopes (method body, class constant,
+   `inherit` clause) — each builds its own lowering env independently (see
+   `nex.lower/make-lowering-env` call sites), which is exactly the class of
+   bug `file-eval-aliased-collision-used-inside-a-constructor-body-test`,
+   above, found and fixed for the constructor-body case specifically."
+  [tmp-dir path tag-value]
+  (let [dir (io/file tmp-dir "lib" path)
+        f (io/file dir "Widget.nex")]
+    (.mkdirs dir)
+    ;; tag has a default value (not attachable/must-init) so a subclass's own
+    ;; constructor never needs to touch it — Nex only allows a field write from
+    ;; its OWN declaring class, even for a public field, so a subclass writing
+    ;; an inherited field is invalid Nex regardless of namespacing (confirmed
+    ;; separately with a non-colliding, non-interned pair of classes) and
+    ;; would only get in the way of the inherit-parent test below.
+    (spit f (str "class Widget\nfeature\n  tag: String = \"" tag-value
+                 "\"\ncreate\n  make() do end\nfeature\n  greet(): String do result := \"hi from \" + tag end\nend"))
+    f))
+
+(deftest file-eval-aliased-collision-used-inside-a-method-body-test
+  (testing "a path-qualified alias resolving a bare-name collision works when
+            referenced from inside an ordinary METHOD body (not a
+            constructor) — a different make-lowering-env call site
+            (lower-function, shared by methods and free functions) than the
+            constructor-body regression above"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-method-alias-" (System/nanoTime)))
+          a-file (spit-widget-lib! tmp-dir "widgets_a" "a")
+          b-file (spit-widget-lib! tmp-dir "widgets_b" "b")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern widgets_a/Widget as WA
+intern widgets_b/Widget as WB
+
+class Main
+create
+  make() do end
+feature
+  run() do
+    let a := create WA.make
+    let b := create WB.make
+    print(a.greet())
+    print(b.greet())
+  end
+end
+
+let m := create Main.make
+m.run()")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "hi from a"))
+          (is (.contains compiled "hi from b")))
+        (finally
+          (.delete a-file)
+          (.delete b-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "widgets_a"))
+          (.delete (io/file tmp-dir "lib" "widgets_b"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-aliased-collision-used-in-a-class-constant-test
+  (testing "a path-qualified alias resolving a bare-name collision works when
+            referenced from inside a class CONSTANT's initializer — the
+            constant-env make-lowering-env call site inside lower-class-def,
+            distinct from both the constructor-body and method-body cases"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-constant-alias-" (System/nanoTime)))
+          a-file (spit-widget-lib! tmp-dir "widgets_a" "a")
+          b-file (spit-widget-lib! tmp-dir "widgets_b" "b")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern widgets_a/Widget as WA
+intern widgets_b/Widget as WB
+
+class Holder
+feature
+  default_widget = create WA.make
+  describe(): String do result := default_widget.greet() end
+end
+
+let h := create Holder
+print(h.describe())")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "hi from a")))
+        (finally
+          (.delete a-file)
+          (.delete b-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "widgets_a"))
+          (.delete (io/file tmp-dir "lib" "widgets_b"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-aliased-collision-used-as-inherit-parent-test
+  (testing "a path-qualified alias resolving a bare-name collision works as
+            an `inherit` parent, with a subclass calling a method it
+            inherits from that parent — exercises parent-chain metadata
+            resolution (resolve-parent-metas / direct-parent-method-map),
+            architecturally distinct from resolving a class's own identity"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-inherit-alias-" (System/nanoTime)))
+          a-file (spit-widget-lib! tmp-dir "widgets_a" "a")
+          b-file (spit-widget-lib! tmp-dir "widgets_b" "b")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern widgets_a/Widget as WA
+intern widgets_b/Widget as WB
+
+class Special
+inherit WA
+create
+  make() do end
+feature
+  shout(): String do result := greet() + \"!\" end
+end
+
+let s := create Special.make
+print(s.shout())")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "hi from a!")))
+        (finally
+          (.delete a-file)
+          (.delete b-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "widgets_a"))
+          (.delete (io/file tmp-dir "lib" "widgets_b"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-aliased-generic-class-constructs-with-explicit-type-args-test
+  (testing "an aliased GENERIC class constructs correctly when given explicit
+            type arguments (`create BA[Integer].make(...)`) — regression test
+            for a bug found while testing the collision cases above, on the
+            interpreter specifically: nex.interpreter/create-user-object
+            computes the specialized class's registry key from the reference
+            actually used (`class-name`, e.g. \"BA\" -> \"BA[Integer]\"), but
+            specialize-class computed its OWN internal name from the
+            TEMPLATE's own :name (the alias target's real name, e.g. \"Box\"
+            -> \"Box[Integer]\") and register-specialized-class trusted that
+            instead — a key mismatch that made the freshly-registered
+            specialization unfindable under the name the caller was about to
+            look it up by, falling through to the Java-interop fallback and
+            failing with \"Undefined class\". Not collision-specific — this
+            reproduces with only ONE interned library, no bare-name collision
+            at all — but found via, and fixed alongside, the namespaces work,
+            so covered here for the same reason the other tests in this file
+            are: it is exactly the `intern ... as` combination those changes
+            made it easy to reach."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-generic-alias-" (System/nanoTime)))
+          box-dir (io/file tmp-dir "lib" "boxes")
+          box-file (io/file box-dir "Box.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs box-dir)
+      (spit box-file "class Box[T]
+feature
+  value: T
+create
+  make(v: T) do this.value := v end
+end")
+      (spit main-file "intern boxes/Box as BA
+
+let a := create BA[Integer].make(1)
+print(a.value)")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "1")))
+        (finally
+          (.delete box-file)
+          (.delete box-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))

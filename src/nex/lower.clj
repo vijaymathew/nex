@@ -108,26 +108,6 @@
        vals
        vec))
 
-(defn- qualified-only-classes
-  "The interned class-defs in `source` that merge-visible-classes' bare-name
-   collapse (last-wins, into visible-classes) dropped entirely — e.g. whoever
-   lost the bare-name slot in a same-named collision. Kept OUT of the env's
-   :classes (unlike an earlier version of this fix, which appended them there
-   and — since merge-visible-classes' last-wins result depends on list
-   order — silently changed *which* class won the bare-name slot as a side
-   effect); instead threaded through env as :qualified-only-classes and
-   folded in only by visible-class-map's by-qualified-name index (Phase 3),
-   so bare-name resolution is exactly what it was before this class existed,
-   and a qualified reference (`finance/Account`) still resolves regardless of
-   which class (if either) also owns the bare name."
-  [visible-classes source]
-  (let [already (into #{} (keep :qualified-name) visible-classes)]
-    (into []
-          (comp (filter :qualified-name)
-                (remove (comp already :qualified-name))
-                (distinct))
-          source)))
-
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :unary
     :call :if :when :this :array-literal :map-literal :set-literal
@@ -356,22 +336,18 @@
   - `:generic-runtime-values` map of generic parameter name -> IR expression that yields
     the runtime type token string for that parameter
   - `:with-java?` whether unresolved target calls should lower as JVM host interop
-  - `:skip-contracts?` whether require/ensure/invariant checks lower to no-ops
-  - `:qualified-only-classes` interned class-defs visible only by their
-    qualified identity, not also under `:classes` (docs/proposals/
-    namespaces.md, Phase 3) — see qualified-only-classes"
+  - `:skip-contracts?` whether require/ensure/invariant checks lower to no-ops"
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type old-field-locals
             generic-param-names generic-param-constraints generic-runtime-values
-            with-java? across-cursors globals skip-contracts? qualified-only-classes] :as opts}]
+            with-java? across-cursors globals skip-contracts?] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
     :state-slot (or state-slot 0)
     :next-slot (or next-slot 1)
     :classes (vec (or classes []))
-    :qualified-only-classes (vec (or qualified-only-classes []))
     ;; Which operators any visible class binds with `alias`. Computed once here so
     ;; that lowering an ordinary `a + b` on Integer costs one set membership test
     ;; — and, in the overwhelming case of a program that aliases nothing, the set
@@ -1782,14 +1758,31 @@
    keys, so a qualified reference (`finance/Account`, walked to the string
    \"finance.Account\") resolves to its own class-def here even when the bare
    name `Account` collapses (last-wins, via `into {}` below) to a different
-   one."
+   one.
+
+   A class-def that lost the bare-name collapse may not be present in
+   `(:classes env)` at all: every nested lowering scope (a constructor, a
+   method, a generic-init method, ...) builds its own :classes list
+   independently via its own make-lowering-env call, and none of them thread
+   a separate \"everyone who lost the collapse\" list through — env's own
+   :classes is simply whatever that one call site happened to pass. Falls
+   back to `(:compiled-classes env)`, which — unlike :classes — does reach
+   every scope reliably (lowering cannot proceed at all without it), and
+   embeds each class-def alongside its JVM identity
+   (`nex.compiler.jvm.file/class-metadata-entry`) for exactly this recovery."
   [env]
   (let [by-bare-name (into {} (map (juxt :name identity) (:classes env)))
         by-qualified-name (into {}
                                 (comp (filter :qualified-name)
                                       (map (juxt :qualified-name identity)))
-                                (concat (:classes env) (:qualified-only-classes env)))
-        base (merge by-bare-name by-qualified-name)]
+                                (:classes env))
+        by-qualified-name-from-compiled (into {}
+                                              (keep (fn [[qn meta]]
+                                                      (when (and (:class-def meta)
+                                                                (not (contains? by-qualified-name qn)))
+                                                        [qn (:class-def meta)])))
+                                              (:compiled-classes env))
+        base (merge by-bare-name by-qualified-name by-qualified-name-from-compiled)]
     (reduce-kv (fn [m alias-name _]
                  (if-let [class-def (get base (resolve-type-alias alias-name))]
                    (assoc m alias-name class-def)
@@ -3329,7 +3322,6 @@
                                                (:classes opts)
                                                (keep :class-def visible-functions))
         ctx {:classes visible-classes
-             :qualified-only-classes (qualified-only-classes visible-classes (:classes program))
              :functions visible-functions
              :imports (:imports program)
              :var-types (:var-types opts)}
@@ -6400,7 +6392,6 @@
                                                (:classes opts)
                                                (keep :class-def visible-functions))
         env (make-lowering-env {:classes visible-classes
-                                :qualified-only-classes (qualified-only-classes visible-classes actual-classes)
                                 :functions visible-functions
                                 :imports visible-imports
                                 :compiled-classes (:compiled-classes opts)

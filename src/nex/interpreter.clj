@@ -1159,7 +1159,13 @@
                          {:class-name (:name class-def)
                           :constant constant-name})))
         (let [source-class (:declaring-class constant class-def)
-              cache-key [(:name source-class) constant-name]
+              ;; :qualified-name over bare :name when present (register-qualified-classes!
+              ;; stamps it onto every interned class's registration, alias or
+              ;; not — docs/proposals/namespaces.md, Phase 3): two different
+              ;; interned classes sharing a bare name would otherwise share
+              ;; one cache entry for a same-named constant, each seeing
+              ;; whichever one happened to evaluate and cache first.
+              cache-key [(or (:qualified-name source-class) (:name source-class)) constant-name]
               cache (:constant-cache ctx)]
           ;; A class constant denotes one canonical value for the whole run, so
           ;; evaluate its initializer once and intern the result. Without this an
@@ -1627,12 +1633,25 @@
       which already qualified it under its own path. Unpathed (bare)
       interns leave qualify-name a no-op (qn = name), so this is a silent
       no-op for the vast majority of intern statements, matching the static
-      side's design exactly."
+      side's design exactly.
+
+      Also stamps :qualified-name onto the bare registration itself (without
+      renaming its :name) — eval-node's own :class handling registered it
+      under the bare key just above, with no such marker. A class reached
+      only that way, or via an `intern ... as` alias copied from it
+      (process-intern, below, snapshots whatever is under the bare key at
+      alias-assignment time), otherwise carries no way to tell it apart from
+      a same-bare-named class from a *different* interned module — which is
+      exactly what eval-class-constant's cache-key needs to avoid conflating
+      two classes' constants under one cache entry just because they share a
+      bare name (docs/proposals/namespaces.md, Phase 3)."
      [ctx path direct-classes]
      (doseq [{:keys [name] :as class-def} direct-classes]
        (let [qn (qualify-name path name)]
          (when (not= qn name)
-           (register-class ctx (assoc class-def :name qn :qualified-name qn))))))
+           (register-class ctx (assoc class-def :name qn :qualified-name qn))
+           (when (get @(:classes ctx) name)
+             (swap! (:classes ctx) update name assoc :qualified-name qn))))))
 
 (defn process-intern
      "Load and interpret an external file, then register the class with the given alias."
@@ -3193,7 +3212,24 @@
                                   {:class-name class-name
                                    :expected (count (:generic-params template))
                                    :got (count generic-args)})))
-                (let [specialized (specialize-class template generic-args)]
+                ;; specialize-class computes its own internal spec-name from
+                ;; the TEMPLATE's own :name (:template-name below, e.g. "Box")
+                ;; — the class-def's identity as far as its own body is
+                ;; concerned, unrelated to how THIS call reached it. When
+                ;; class-name is an alias (`intern .../Box as BA`) or a
+                ;; qualified reference, that produces "Box[Integer]" while
+                ;; `spec-name` here (computed from class-name, e.g. "BA") is
+                ;; "BA[Integer]" — a real class-def gets registered, but under
+                ;; a DIFFERENT key than the one register-specialized-class's
+                ;; caller (this same function, just below) is about to look
+                ;; it up by, so the immediately-following object-creation
+                ;; falls through to the Java-interop fallback and fails with
+                ;; "Undefined class". Re-stamping :name to `spec-name` here
+                ;; makes the registry key match what every caller through
+                ;; THIS reference actually asks for; :template-name (the
+                ;; template's own identity) is untouched, so anything that
+                ;; needs to know what this was specialized *from* still can.
+                (let [specialized (assoc (specialize-class template generic-args) :name spec-name)]
                   (register-specialized-class ctx specialized)
                   spec-name))))
           class-name)

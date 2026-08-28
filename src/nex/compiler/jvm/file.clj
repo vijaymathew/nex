@@ -159,12 +159,20 @@
   (vec (remove :closure-runtime-object? (lower/collect-anonymous-class-defs ast))))
 
 (defn- class-metadata-entry
-  [package-root internal-name-suffix bare-name]
+  "class-def is embedded on the returned metadata (docs/proposals/namespaces.md,
+   Phase 3/4) so a class that lost the bare-name collapse can still be
+   recovered by lowering wherever compiled-classes reaches, even from a scope
+   whose own :classes list doesn't happen to carry it — see
+   nex.lower/visible-class-map. Every metadata entry carries it, not only a
+   losing class-def's, since it costs nothing to keep and lowering has no
+   other reason to prefer one source of a class-def over another."
+  [package-root internal-name-suffix bare-name class-def]
   (let [internal-name (format "%s/%s" package-root internal-name-suffix)]
     {:name bare-name
      :internal-name internal-name
      :jvm-name internal-name
-     :binary-name (desc/binary-class-name internal-name)}))
+     :binary-name (desc/binary-class-name internal-name)
+     :class-def class-def}))
 
 (defn- file-class-metadata
   [source-path prepared-ast]
@@ -198,10 +206,11 @@
         ;; interned class, not just colliding ones.
         entry-for (fn [class-def]
                     (if (= class-def (get bare-winner-by-name (:name class-def)))
-                      (class-metadata-entry package-root (:name class-def) (:name class-def))
+                      (class-metadata-entry package-root (:name class-def) (:name class-def) class-def)
                       (class-metadata-entry package-root
                                             (str/replace (:qualified-name class-def) "." "/")
-                                            (:name class-def))))
+                                            (:name class-def)
+                                            class-def)))
         base (into {} (map (fn [cd] [(:name cd) (entry-for cd)])) emitted-classes)
         base (into base
                    (comp (filter :qualified-name)

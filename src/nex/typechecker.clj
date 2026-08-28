@@ -6225,11 +6225,28 @@
        (doseq [{:keys [name type-expr]} (or type-aliases [])]
          (env-add-type-alias env name type-expr))
 
-       ;; First pass: collect all class definitions, allowing user classes to
-       ;; override builtin placeholder names such as Task or Channel. An
-       ;; entry whose bare name is ambiguous is registered raw only, never
-       ;; run through collect-class-info under that key: collect-class-info
-       ;; (and check-class, below) walk a class's own fields/parent chain via
+       ;; First pass: collect every interned class under its qualified
+       ;; identity (see qualified-class-defs) — including one that will go on
+       ;; to lose the bare-name slot below to an ambiguity or another interned
+       ;; class, so `finance/Account` resolves fully even when `Account`
+       ;; alone does not. Runs BEFORE the bare-name pass below deliberately: a
+       ;; class constant's value is type-checked eagerly, inline, right here
+       ;; in collect-class-info — not deferred to check-class like an
+       ;; ordinary method body — so an own-file (bare-name-pass) class whose
+       ;; constant references a qualified/aliased interned class (`default =
+       ;; create finance/Account.make(...)`) needs that qualified registration
+       ;; to already exist at the point its OWN constant is checked, not
+       ;; merely by the time the whole program finishes elaborating.
+       (doseq [class-def qualified-class-defs]
+         (collect-class-info env class-def))
+
+       ;; Second pass: collect the rest of the program's class definitions —
+       ;; the entry file's own classes, allowing them to override builtin
+       ;; placeholder names such as Task or Channel, and every interned
+       ;; class's ordinary bare-name registration. An entry whose bare name is
+       ;; ambiguous is registered raw only, never run through
+       ;; collect-class-info under that key: collect-class-info (and
+       ;; check-class, below) walk a class's own fields/parent chain via
        ;; env-lookup-class on its own name — for an ambiguous name that
        ;; throws immediately, during ordinary registration, before any user
        ;; code has asked for anything (defeating the reference-time design
@@ -6237,19 +6254,12 @@
        ;; registered under the bare key so it notices the collision and
        ;; throws "Ambiguous reference" instead of falling through to a
        ;; misleading "Undefined class" — this raw registration is that, and
-       ;; nothing more; the class's real processing happens safely below,
+       ;; nothing more; the class's real processing already happened above,
        ;; under its qualified key, where no such collision exists.
        (doseq [class-def visible-classes]
          (if (contains? ambiguous-classes (:name class-def))
            (env-add-class env (:name class-def) class-def)
            (collect-class-info env class-def)))
-
-       ;; Also collect every interned class under its qualified identity (see
-       ;; qualified-class-defs) — including one that lost the bare-name slot
-       ;; above to an ambiguity or another interned class, so `finance/Account`
-       ;; still resolves fully even when `Account` alone does not.
-       (doseq [class-def qualified-class-defs]
-         (collect-class-info env class-def))
 
        ;; Undefined-type validation. Runs now that every class, alias and import
        ;; is collected, so forward references resolve. Collects up to a bound of
@@ -6297,22 +6307,25 @@
              (throw (ex-info "Global initialized after first use"
                              {:errors watermark-errors})))))
 
-       ;; Second pass: check class bodies, including normalized function
-       ;; classes. Skipped for an ambiguous bare name for the same reason as
-       ;; the first pass above — its body was already fully checked under
-       ;; its qualified key.
-       (doseq [class-def visible-classes]
-         (when-not (or (contains? skip-body-names (:name class-def))
-                       (contains? ambiguous-classes (:name class-def)))
-           (check-class env class-def)))
-
-       ;; Check every interned class's body again under its qualified
-       ;; identity, for the same reason as the collect-class-info pass above.
-       ;; skip-body-names is bare-name-shaped (a REPL concern; see
+       ;; Second pass: check every interned class's body under its qualified
+       ;; identity, mirroring the collect-class-info ordering above (qualified
+       ;; before bare-name) for consistency, though body-checking itself has
+       ;; no known eager cross-dependency on registration order the way a
+       ;; class constant's value does — undefined-type validation and global
+       ;; registration have already completed for both passes by this point
+       ;; regardless. skip-body-names is bare-name-shaped (a REPL concern; see
        ;; :skip-class-body-names), so it does not apply here — a small,
        ;; accepted extra REPL re-check cost, not a correctness issue.
        (doseq [class-def qualified-class-defs]
          (check-class env class-def))
+
+       ;; Third pass: check the rest of the program's class bodies. Skipped
+       ;; for an ambiguous bare name for the same reason as the first pass
+       ;; above — its body was already fully checked under its qualified key.
+       (doseq [class-def visible-classes]
+         (when-not (or (contains? skip-body-names (:name class-def))
+                       (contains? ambiguous-classes (:name class-def)))
+           (check-class env class-def)))
 
        ;; Check top-level statements in source order when available.
        ;; Fall back to legacy :calls-only programs.
