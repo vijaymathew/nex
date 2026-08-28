@@ -691,6 +691,29 @@
         (when (= 1 (count visible-constraints))
           (first visible-constraints)))))
 
+(defn- class-name-identity
+  "Normalize a bare or qualified class-name string to a common identity for
+   type-equality purposes — `Account` and `finance.Account`
+   (docs/proposals/namespaces.md, Phase 3) name the SAME class whenever
+   `Account` alone isn't ambiguous, and must compare equal: an interned
+   class's actual type never changes depending on which spelling a caller
+   happened to write. Resolves through env-lookup-class (the same choke
+   point every other class-name resolution goes through) and prefers
+   :true-name — the real bare identity check-program's qualified-class-defs
+   stashes there — falling back to the resolved class-def's own :name.
+   A lookup that throws (name not found, or ambiguous — env-lookup-class
+   throws for that, see ambiguous-class-names) or a non-class string
+   (builtins, generic param names) passes through unchanged; an ambiguous
+   bare name reaching here at all means something upstream should already
+   have thrown before two *values* of that type were ever being compared,
+   so silently declining to normalize it here changes nothing observable."
+  [env s]
+  (if (and env (string? s))
+    (if-let [cd (try (env-lookup-class env s) (catch Exception _ nil))]
+      (or (:true-name cd) (:name cd) s)
+      s)
+    s))
+
 (defn types-equal?
   "Check if two types are equal"
   ([type1 type2]
@@ -699,6 +722,8 @@
    (let [t1 (normalize-type type1)
          t2 (normalize-type type2)]
      (or (= t1 t2)
+         (and env (string? t1) (string? t2)
+              (= (class-name-identity env t1) (class-name-identity env t2)))
          ;; Any is compatible with all types
          (or (= t1 "Any") (= t2 "Any"))
          ;; A generic type parameter is opaque: while checking a generic

@@ -2567,13 +2567,27 @@
    none of its ordinary *bare* references (a plain `let x: Circle`, another
    class's `inherit Circle`, a bare match clause) resolve to: a LinkageError
    or a runtime type-tag mismatch for programs that never had a collision at
-   all."
+   all.
+
+   Guards separately against a registry that never computed a qualified
+   entry at all (compiled-classes here comes from whichever caller built it —
+   nex.compiler.jvm.file/file-class-metadata is one, but not the only one;
+   the REPL's own class-compilation path, nex.compiler.jvm.repl, builds its
+   own and was not updated to add qualified-key entries the way
+   file-class-metadata was). There, `(get compiled-classes qualified)` is
+   simply absent — nil, not a differently-valued entry — and treating a
+   missing lookup the same as a genuinely different one wrongly reads
+   \"entirely unregistered\" as \"a collision\", sending an ordinary,
+   non-colliding class down the qualified path into a
+   \"Missing compiled class metadata\" error instead of falling back to the
+   bare name, the only one such a registry actually has metadata for."
   [compiled-classes class-def]
   (let [bare (:name class-def)
-        qualified (:qualified-name class-def)]
-    (if (and qualified
-             (not= (:internal-name (get compiled-classes bare))
-                   (:internal-name (get compiled-classes qualified))))
+        qualified (:qualified-name class-def)
+        qualified-meta (when qualified (get compiled-classes qualified))]
+    (if (and qualified-meta
+             (not= (:internal-name qualified-meta)
+                   (:internal-name (get compiled-classes bare))))
       qualified
       bare)))
 
