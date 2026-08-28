@@ -869,3 +869,139 @@ class Main
           (.delete (io/file tmp-dir "lib" "cc"))
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(defn- spit-widget-lib!
+  "Write a minimal `Widget` class into <tmp-dir>/lib/<path>/Widget.nex — a
+   String `tag` field set from `tag-value`, plus a `greet()` method that
+   reads it. Used to exercise a colliding, aliased qualified class from
+   several different nested lowering scopes (method body, class constant,
+   `inherit` clause) — each builds its own lowering env independently (see
+   `nex.lower/make-lowering-env` call sites), which is exactly the class of
+   bug `file-eval-aliased-collision-used-inside-a-constructor-body-test`,
+   above, found and fixed for the constructor-body case specifically."
+  [tmp-dir path tag-value]
+  (let [dir (io/file tmp-dir "lib" path)
+        f (io/file dir "Widget.nex")]
+    (.mkdirs dir)
+    ;; tag has a default value (not attachable/must-init) so a subclass's own
+    ;; constructor never needs to touch it — Nex only allows a field write from
+    ;; its OWN declaring class, even for a public field, so a subclass writing
+    ;; an inherited field is invalid Nex regardless of namespacing (confirmed
+    ;; separately with a non-colliding, non-interned pair of classes) and
+    ;; would only get in the way of the inherit-parent test below.
+    (spit f (str "class Widget\nfeature\n  tag: String = \"" tag-value
+                 "\"\ncreate\n  make() do end\nfeature\n  greet(): String do result := \"hi from \" + tag end\nend"))
+    f))
+
+(deftest file-eval-aliased-collision-used-inside-a-method-body-test
+  (testing "a path-qualified alias resolving a bare-name collision works when
+            referenced from inside an ordinary METHOD body (not a
+            constructor) — a different make-lowering-env call site
+            (lower-function, shared by methods and free functions) than the
+            constructor-body regression above"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-method-alias-" (System/nanoTime)))
+          a-file (spit-widget-lib! tmp-dir "widgets_a" "a")
+          b-file (spit-widget-lib! tmp-dir "widgets_b" "b")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern widgets_a/Widget as WA
+intern widgets_b/Widget as WB
+
+class Main
+create
+  make() do end
+feature
+  run() do
+    let a := create WA.make
+    let b := create WB.make
+    print(a.greet())
+    print(b.greet())
+  end
+end
+
+let m := create Main.make
+m.run()")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "hi from a"))
+          (is (.contains compiled "hi from b")))
+        (finally
+          (.delete a-file)
+          (.delete b-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "widgets_a"))
+          (.delete (io/file tmp-dir "lib" "widgets_b"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-aliased-collision-used-in-a-class-constant-test
+  (testing "a path-qualified alias resolving a bare-name collision works when
+            referenced from inside a class CONSTANT's initializer — the
+            constant-env make-lowering-env call site inside lower-class-def,
+            distinct from both the constructor-body and method-body cases"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-constant-alias-" (System/nanoTime)))
+          a-file (spit-widget-lib! tmp-dir "widgets_a" "a")
+          b-file (spit-widget-lib! tmp-dir "widgets_b" "b")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern widgets_a/Widget as WA
+intern widgets_b/Widget as WB
+
+class Holder
+feature
+  default_widget = create WA.make
+  describe(): String do result := default_widget.greet() end
+end
+
+let h := create Holder
+print(h.describe())")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "hi from a")))
+        (finally
+          (.delete a-file)
+          (.delete b-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "widgets_a"))
+          (.delete (io/file tmp-dir "lib" "widgets_b"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-aliased-collision-used-as-inherit-parent-test
+  (testing "a path-qualified alias resolving a bare-name collision works as
+            an `inherit` parent, with a subclass calling a method it
+            inherits from that parent — exercises parent-chain metadata
+            resolution (resolve-parent-metas / direct-parent-method-map),
+            architecturally distinct from resolving a class's own identity"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-inherit-alias-" (System/nanoTime)))
+          a-file (spit-widget-lib! tmp-dir "widgets_a" "a")
+          b-file (spit-widget-lib! tmp-dir "widgets_b" "b")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern widgets_a/Widget as WA
+intern widgets_b/Widget as WB
+
+class Special
+inherit WA
+create
+  make() do end
+feature
+  shout(): String do result := greet() + \"!\" end
+end
+
+let s := create Special.make
+print(s.shout())")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "hi from a!")))
+        (finally
+          (.delete a-file)
+          (.delete b-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "widgets_a"))
+          (.delete (io/file tmp-dir "lib" "widgets_b"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
