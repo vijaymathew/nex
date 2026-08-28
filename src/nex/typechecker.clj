@@ -9,6 +9,7 @@
 ;;
 
 (declare env-lookup-type-alias)
+(declare type-error)
 
 (def ^:dynamic *strict-undefined-targets*
   "When true, a member access / call on an unresolved bare-identifier target is a
@@ -25,6 +26,13 @@
     :vars (atom {})
     :methods (atom {})
     :classes (atom {})
+    ;; Bare class names that resolve to more than one distinct interned
+    ;; class ({name -> #{qualified-name ...}}), populated once by
+    ;; check-program from ambiguous-class-names before any lookups happen.
+    ;; Lives on the root env; children reach it via env-root, the same way
+    ;; :globals/:warnings do. See env-lookup-class and
+    ;; docs/proposals/namespaces.md (Phase 2).
+    :ambiguous-classes (atom {})
     :type-aliases (atom {})
     :non-nil-vars (atom #{})
     :across-cursors (atom {})
@@ -115,14 +123,44 @@
                     method-name
                     (assoc (or (get class-methods method-name) {}) arity signature))))))
 
+(defn- ambiguous-class-reference-error
+  "Build the ex-info thrown when class-name resolves to more than one
+   distinct interned class. qualified-names is the #{...} recorded for it in
+   :ambiguous-classes (see ambiguous-class-names).
+
+   Two escape hatches, both real fixes (docs/proposals/namespaces.md, Phase
+   3): reference either one directly by its qualified name
+   (`finance/Account`), or rename one on the way in — `intern billing/Account
+   as Billing_Account` — PROVIDED the intern is path-qualified. A *bare*
+   alias resolves no better than the bare name itself did (nothing to
+   qualify), and — subtler — an aliased intern's :type-expr points at the
+   qualified identity specifically (`nex.interpreter/resolve-interned*`), not
+   the bare one: earlier, before that fix, the alias fell through
+   env-lookup-class's alias fallback to the SAME (still-ambiguous) bare name
+   a direct reference would hit, leaving `intern X as Y` unable to resolve a
+   real collision at all despite looking like exactly the tool for the job."
+  [class-name qualified-names]
+  (let [sorted (sort qualified-names)
+        msg (str "Ambiguous reference to '" class-name "': interned from "
+                 (str/join " and " sorted) ". Reference one directly by its "
+                 "qualified name (e.g. " (first sorted) "), or rename it on "
+                 "the way in with a path-qualified `intern ... as`.")]
+    (ex-info msg {:error (type-error msg)})))
+
 (defn env-lookup-class
   "Look up a class definition in the environment. Falls back to resolving
    class-name as a type alias (e.g. from `intern ... as`, which registers only
    an alias to the real class rather than a nominally distinct duplicate of
-   it) when no class is registered under the literal name."
+   it) when no class is registered under the literal name. Throws when
+   class-name is registered in :ambiguous-classes on the root env — two or
+   more interned classes share this bare name and neither the entry program
+   nor an earlier REPL cell has a same-named class of its own to take
+   precedence (see docs/proposals/namespaces.md, Phase 2)."
   [env class-name]
   (if-let [class-def (get @(:classes env) class-name)]
-    class-def
+    (if-let [qualified-names (get @(:ambiguous-classes (env-root env)) class-name)]
+      (throw (ambiguous-class-reference-error class-name qualified-names))
+      class-def)
     (if (:parent env)
       (env-lookup-class (:parent env) class-name)
       (when-let [aliased (env-lookup-type-alias env class-name)]
@@ -133,6 +171,18 @@
   "Add a class definition to the environment"
   [env class-name class-def]
   (swap! (:classes env) assoc class-name class-def))
+
+(defn- env-raw-class
+  "Fetch whatever is registered under class-name in this exact env's own
+   :classes map — no parent-chain walk, no type-alias fallback, and
+   critically no :ambiguous-classes check. For a caller re-reading a
+   class-def it registered itself moments earlier under this same key (e.g.
+   check-class re-fetching the enriched def collect-class-info just stored):
+   that isn't a bare name someone is asking to *resolve*, so env-lookup-class's
+   ambiguity check is a false trip there — this class-def is not in question,
+   only its latest stored shape is being read back."
+  [env class-name]
+  (get @(:classes env) class-name))
 
 (defn env-add-type-alias
   [env name type-expr]
@@ -263,6 +313,29 @@
 (defn- function-class-defs
   [functions]
   (keep :class-def functions))
+
+(defn- ambiguous-class-names
+  "Bare names that resolve to more than one distinct interned class, from the
+   same pre-dedup list class-defs-by-name-last-wins collapses. A class-def
+   carries :qualified-name (stamped by nex.interpreter/resolve-interned*)
+   exactly when it came in through `intern`; one declared directly in this
+   program, or already established by an earlier REPL cell, has no
+   :qualified-name and always wins outright — so a bare name only counts as
+   ambiguous when EVERY def sharing it is interned and at least two of them
+   have different qualified names. Two `intern` paths that happen to resolve
+   to the same file (a diamond dependency) never reach here as duplicates in
+   the first place: resolve-interned* already dedupes those by canonical file
+   path before returning. Returns {bare-name -> #{qualified-name ...}}, empty
+   when nothing collides. See docs/proposals/namespaces.md, Phase 2."
+  [class-defs]
+  (->> class-defs
+       (group-by :name)
+       (keep (fn [[nm defs]]
+               (when (every? :qualified-name defs)
+                 (let [qualified-names (into #{} (map :qualified-name) defs)]
+                   (when (> (count qualified-names) 1)
+                     [nm qualified-names])))))
+       (into {})))
 
 (defn- type-name-string
   [x]
@@ -618,6 +691,29 @@
         (when (= 1 (count visible-constraints))
           (first visible-constraints)))))
 
+(defn- class-name-identity
+  "Normalize a bare or qualified class-name string to a common identity for
+   type-equality purposes — `Account` and `finance.Account`
+   (docs/proposals/namespaces.md, Phase 3) name the SAME class whenever
+   `Account` alone isn't ambiguous, and must compare equal: an interned
+   class's actual type never changes depending on which spelling a caller
+   happened to write. Resolves through env-lookup-class (the same choke
+   point every other class-name resolution goes through) and prefers
+   :true-name — the real bare identity check-program's qualified-class-defs
+   stashes there — falling back to the resolved class-def's own :name.
+   A lookup that throws (name not found, or ambiguous — env-lookup-class
+   throws for that, see ambiguous-class-names) or a non-class string
+   (builtins, generic param names) passes through unchanged; an ambiguous
+   bare name reaching here at all means something upstream should already
+   have thrown before two *values* of that type were ever being compared,
+   so silently declining to normalize it here changes nothing observable."
+  [env s]
+  (if (and env (string? s))
+    (if-let [cd (try (env-lookup-class env s) (catch Exception _ nil))]
+      (or (:true-name cd) (:name cd) s)
+      s)
+    s))
+
 (defn types-equal?
   "Check if two types are equal"
   ([type1 type2]
@@ -626,6 +722,8 @@
    (let [t1 (normalize-type type1)
          t2 (normalize-type type2)]
      (or (= t1 t2)
+         (and env (string? t1) (string? t2)
+              (= (class-name-identity env t1) (class-name-identity env t2)))
          ;; Any is compatible with all types
          (or (= t1 "Any") (= t2 "Any"))
          ;; A generic type parameter is opaque: while checking a generic
@@ -4202,12 +4300,17 @@
         (check-statement else-env stmt)))))
 
 (defn- find-sealed-subclasses
-  "Return the names of all classes in env that directly inherit from sealed-class-name."
+  "Return the names of all classes in env that directly inherit from
+   sealed-class-name. Reads :true-name over :name (falling back when absent)
+   so a class also reachable through a qualified-only registration (Phase 3,
+   :name there is the qualified string — see check-program's
+   qualified-class-defs) is counted once, under its real bare name, not as an
+   extra variant."
   [env sealed-class-name]
   (->> (visible-class-defs env)
        (filter (fn [class-def]
                  (some #(= (:parent %) sealed-class-name) (:parents class-def))))
-       (map :name)
+       (map #(or (:true-name %) (:name %)))
        set))
 
 (defn match-clause-binding-type
@@ -4277,7 +4380,16 @@
       (doseq [s else] (check-statement env s)))
     (when (and sealed? (not else))
       ;; A guarded clause may not fire, so it does not cover its variant.
-      (let [covered (set (map :class-name (remove :guard clauses)))
+      ;; Resolved through env-lookup-class rather than read off the clause's
+      ;; :class-name literally, so a qualified clause (`when finance/Ok(...)`,
+      ;; docs/proposals/namespaces.md Phase 3 — walked to "finance.Ok") is
+      ;; normalized to the same true bare identity ("Ok") find-sealed-subclasses
+      ;; already reports in `known`; otherwise a qualified clause that in fact
+      ;; covers its variant would still be flagged missing.
+      (let [covered (set (keep (fn [{:keys [class-name]}]
+                                 (let [cd (env-lookup-class env class-name)]
+                                   (or (:true-name cd) (:name cd) class-name)))
+                               (remove :guard clauses)))
             known (find-sealed-subclasses env base-type-name)
             uncovered (set/difference known covered)]
         (when (seq uncovered)
@@ -4903,10 +5015,20 @@
                   section))
               body)
         updated-class-def (assoc class-def :body updated-body)]
-    (env-add-class env name updated-class-def))
+    (env-add-class env name updated-class-def)
 
-  ;; Collect method signatures
-  (doseq [section (:body (env-lookup-class env name))]
+  ;; Collect method signatures. Reads updated-class-def directly rather than
+  ;; re-fetching it via (env-lookup-class env name): when `name` is a bare
+  ;; name flagged ambiguous (docs/proposals/namespaces.md, Phase 2), that
+  ;; lookup throws — and this pass runs unconditionally over every class in
+  ;; `visible-classes`, including the one that happens to win the bare-name
+  ;; collapse, regardless of whether the program ever actually references
+  ;; the bare name. Re-fetching through env-lookup-class turned that into an
+  ;; eager, presence-based throw for every ambiguous pair, defeating the
+  ;; reference-time design Phase 2 was built around; reading the local
+  ;; binding restores it — collect-class-info has this class-def already, it
+  ;; doesn't need to ask the (possibly ambiguous) registry for it back.
+  (doseq [section (:body updated-class-def)]
     (cond
       (= (:type section) :feature-section)
       (doseq [member (:members section)]
@@ -4920,7 +5042,7 @@
       (doseq [ctor (:constructors section)]
         (env-add-method env name (:name ctor)
                        {:params (:params ctor)
-                        :return-type name})))))
+                        :return-type name}))))))
 
 (defn- java-type-parent
   "The reflected Class for parent-name, when it names an imported Java type
@@ -5393,7 +5515,7 @@
 (defn check-class
   "Check a class definition"
   [env {:keys [name body invariant parents generic-params] :as class-def}]
-  (let [class-def (or (env-lookup-class env name) class-def)
+  (let [class-def (or (env-raw-class env name) class-def)
         body (:body class-def)
         invariant (:invariant class-def)
         parents (:parents class-def)
@@ -6041,11 +6163,37 @@
    (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))]
    (let [env (make-type-env)
          normalized-functions (normalize-function-defs classes functions)
-         visible-classes (class-defs-by-name-last-wins
-                          (vec (concat classes (function-class-defs normalized-functions))))
+         all-class-defs (vec (concat classes (function-class-defs normalized-functions)))
+         visible-classes (class-defs-by-name-last-wins all-class-defs)
+         ;; Every interned class-def, under its qualified identity (Phase 3,
+         ;; docs/proposals/namespaces.md) — not just whichever one won the
+         ;; bare-name collapse above. `:name` is swapped to the qualified
+         ;; string so collect-class-info/check-class register its fields,
+         ;; methods and constructors under that (always-unique) key instead
+         ;; of the bare one, with zero risk of tripping the Phase 2 ambiguity
+         ;; check along the way — that check only ever triggers on a bare
+         ;; name. This is what makes `finance/Account` resolvable regardless
+         ;; of whether `Account` alone is currently ambiguous.
+         ;; :true-name preserves the class's real bare :name (e.g. "Ok")
+         ;; underneath the qualified one now occupying :name (e.g.
+         ;; "data.Ok") — anything that enumerates *all* registered classes
+         ;; for identity rather than looking one up by a specific key (e.g.
+         ;; find-sealed-subclasses' match-exhaustiveness check) needs the
+         ;; former: this same underlying class is also reachable through its
+         ;; ordinary bare-name registration, and enumerating it as a second,
+         ;; differently-named entry would count it as an extra sealed variant
+         ;; that does not exist.
+         qualified-class-defs (->> all-class-defs
+                                   (filter :qualified-name)
+                                   (map (fn [cd] (assoc cd :name (:qualified-name cd) :true-name (:name cd))))
+                                   (into [] (distinct)))
+         ambiguous-classes (ambiguous-class-names all-class-defs)
          ;; Names whose bodies should be collected for resolution but not re-checked
          ;; (used by the REPL to avoid re-validating previously defined code).
          skip-body-names (or (:skip-class-body-names opts) #{})]
+     ;; Populate ambiguity info before any lookup can happen — env-lookup-class
+     ;; consults it on every resolved bare name (see ambiguous-class-names).
+     (reset! (:ambiguous-classes env) ambiguous-classes)
      (try
        ;; Reject duplicate free-function definitions before they are collapsed
        ;; last-wins (which would otherwise make the earlier definition silently
@@ -6078,8 +6226,29 @@
          (env-add-type-alias env name type-expr))
 
        ;; First pass: collect all class definitions, allowing user classes to
-       ;; override builtin placeholder names such as Task or Channel.
+       ;; override builtin placeholder names such as Task or Channel. An
+       ;; entry whose bare name is ambiguous is registered raw only, never
+       ;; run through collect-class-info under that key: collect-class-info
+       ;; (and check-class, below) walk a class's own fields/parent chain via
+       ;; env-lookup-class on its own name — for an ambiguous name that
+       ;; throws immediately, during ordinary registration, before any user
+       ;; code has asked for anything (defeating the reference-time design
+       ;; Phase 2 was built around). env-lookup-class still needs *something*
+       ;; registered under the bare key so it notices the collision and
+       ;; throws "Ambiguous reference" instead of falling through to a
+       ;; misleading "Undefined class" — this raw registration is that, and
+       ;; nothing more; the class's real processing happens safely below,
+       ;; under its qualified key, where no such collision exists.
        (doseq [class-def visible-classes]
+         (if (contains? ambiguous-classes (:name class-def))
+           (env-add-class env (:name class-def) class-def)
+           (collect-class-info env class-def)))
+
+       ;; Also collect every interned class under its qualified identity (see
+       ;; qualified-class-defs) — including one that lost the bare-name slot
+       ;; above to an ambiguity or another interned class, so `finance/Account`
+       ;; still resolves fully even when `Account` alone does not.
+       (doseq [class-def qualified-class-defs]
          (collect-class-info env class-def))
 
        ;; Undefined-type validation. Runs now that every class, alias and import
@@ -6128,10 +6297,22 @@
              (throw (ex-info "Global initialized after first use"
                              {:errors watermark-errors})))))
 
-       ;; Second pass: check class bodies, including normalized function classes.
+       ;; Second pass: check class bodies, including normalized function
+       ;; classes. Skipped for an ambiguous bare name for the same reason as
+       ;; the first pass above — its body was already fully checked under
+       ;; its qualified key.
        (doseq [class-def visible-classes]
-         (when-not (contains? skip-body-names (:name class-def))
+         (when-not (or (contains? skip-body-names (:name class-def))
+                       (contains? ambiguous-classes (:name class-def)))
            (check-class env class-def)))
+
+       ;; Check every interned class's body again under its qualified
+       ;; identity, for the same reason as the collect-class-info pass above.
+       ;; skip-body-names is bare-name-shaped (a REPL concern; see
+       ;; :skip-class-body-names), so it does not apply here — a small,
+       ;; accepted extra REPL re-check cost, not a correctness issue.
+       (doseq [class-def qualified-class-defs]
+         (check-class env class-def))
 
        ;; Check top-level statements in source order when available.
        ;; Fall back to legacy :calls-only programs.

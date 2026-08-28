@@ -90,7 +90,7 @@ inheritEntry
     ;
 
 typeName
-    : IDENTIFIER
+    : qualifiedName
     | FUNCTION_TYPE
     ;
 
@@ -153,7 +153,18 @@ type
     | BOOLEAN_TYPE
     | STRING_TYPE
     | functionType
-    | IDENTIFIER typeArgs?
+    | qualifiedName typeArgs?
+    ;
+
+// A class name, optionally qualified by the module path it was `intern`ed
+// under (docs/proposals/namespaces.md) — `finance/Account`, matching the
+// exact `intern finance/Account` spelling that brought it into scope. `/` is
+// reused rather than `.` because `.` is already `createExpression`'s factory-
+// call suffix (`create Account.make(...)`); `/` only ever appears here and in
+// `internStmt`, never inside `expression` (where it means division), so there
+// is no shared parse point for the two meanings to collide.
+qualifiedName
+    : IDENTIFIER ('/' IDENTIFIER)*
     ;
 
 functionType
@@ -480,7 +491,7 @@ oldExpression
     ;
 
 createExpression
-    : CREATE IDENTIFIER genericArgs? ('.' IDENTIFIER ('(' argumentList? ')')?)?
+    : CREATE qualifiedName genericArgs? ('.' IDENTIFIER ('(' argumentList? ')')?)?
     ;
 
 genericArgs

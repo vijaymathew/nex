@@ -19,6 +19,7 @@
 
 (declare nex-format-value)
 (declare eval-node)
+(declare qualify-name)
 (declare object-equals-override)
 (declare runtime-resolve-call-user-method)
 (declare lookup-method-with-inheritance)
@@ -1610,6 +1611,29 @@
                          :class-name class-name
                          :searched-locations locations})))))
 
+(defn- register-qualified-classes!
+     "Also register each of file-ast's own directly-declared classes under its
+      qualified key (path-joined with the bare name, e.g. \"finance.Account\"
+      for `intern finance/Account\" — see qualify-name), mirroring
+      resolve-interned*'s :qualified-name stamping for static analysis, but
+      for the interpreter's own runtime (:classes ctx) registry. This is what
+      lets a qualified reference (`finance/Account`, walked to the string
+      \"finance.Account\" — docs/proposals/namespaces.md, Phase 3) construct a
+      real object under --interpret, or on the compiled backend's
+      LinkageError fallback, exactly as it does for the ordinary bare name.
+      A class transitively interned BY file-ast (not declared in it) is not
+      re-processed here: eval-node already ran file-ast's own :interns before
+      reaching this call, each through its own recursive process-intern,
+      which already qualified it under its own path. Unpathed (bare)
+      interns leave qualify-name a no-op (qn = name), so this is a silent
+      no-op for the vast majority of intern statements, matching the static
+      side's design exactly."
+     [ctx path direct-classes]
+     (doseq [{:keys [name] :as class-def} direct-classes]
+       (let [qn (qualify-name path name)]
+         (when (not= qn name)
+           (register-class ctx (assoc class-def :name qn :qualified-name qn))))))
+
 (defn process-intern
      "Load and interpret an external file, then register the class with the given alias."
      [ctx {:keys [path class-name alias]}]
@@ -1619,6 +1643,7 @@
            file-ast (parser/ast file-content)
            ;; Interpret the file to register its classes
            _ (eval-node ctx file-ast)
+           _ (register-qualified-classes! ctx path (:classes file-ast))
            ;; Look up the class that was registered
            registered-class (get @(:classes ctx) class-name)
            ;; Determine the name to use (alias or original)
@@ -1631,6 +1656,28 @@
          (swap! (:classes ctx) assoc alias registered-class))
        ;; Return the class name that was registered
        intern-name))
+
+(defn- qualify-name
+  "Combine an intern path (`finance`, or a multi-segment `net/http`) with a
+   class or function's own bare name to form its qualified name — the
+   identity a later ambiguity-detection pass will use to tell two
+   same-named-but-unrelated interned classes/functions apart (see
+   docs/proposals/namespaces.md). An unpathed intern (`path` nil or empty,
+   e.g. `intern Account`) yields the bare name unchanged."
+  [path own-name]
+  (if (seq path)
+    (str (str/replace path #"/" ".") "." own-name)
+    own-name))
+
+(defn- stamp-qualified-names
+  "Attach :qualified-name to each class/fn-def declared directly in a
+   just-interned file, using the path that file was interned under. Every
+   class/function in one module shares that module's namespace — not just
+   the one an `intern path/Class` statement happened to name for file
+   lookup — the same way a Java file's package covers every class it
+   declares, not only the one a caller imports by name."
+  [path defs]
+  (mapv #(assoc % :qualified-name (qualify-name path (:name %))) defs))
 
 (defn- resolve-interned*
      "Traverse intern declarations recursively and collect the class
@@ -1659,7 +1706,12 @@
       it here too, a refinement type declared in an interned file (rather
       than the root script) type-checked as an outright \"Undefined type\"
       everywhere it was used, even inside that same interned file's own
-      classes."
+      classes. Every class-def and fn-def returned here also carries a
+      :qualified-name (see qualify-name/stamp-qualified-names above),
+      derived from the path it was interned under. Nothing reads this yet —
+      it exists so a later ambiguity-detection pass has a stable identity to
+      key on, without changing any behavior today (see
+      docs/proposals/namespaces.md, Phase 1)."
      [source-id program seen-files]
      (letfn [(resolve* [current-source current-program seen]
                (let [ctx (assoc (make-context) :debug-source current-source)]
@@ -1672,17 +1724,40 @@
                          :type-aliases type-aliases :seen seen}
                         (let [file-ast (parser/ast (slurp file-path))
                               nested (resolve* canonical file-ast (conj seen canonical))
-                              direct-classes (:classes file-ast)
+                              ;; Classes/functions declared directly in this file are
+                              ;; qualified by the path *this* intern statement used to
+                              ;; reach it; classes/functions coming from `nested` were
+                              ;; already qualified, by their own path, when the inner
+                              ;; recursive call resolved them.
+                              direct-classes (stamp-qualified-names path (:classes file-ast))
                               all-file-classes (concat direct-classes (:classes nested))
                               all-file-imports (concat (:imports file-ast) (:imports nested))
                               ;; Free functions defined in an interned module are
                               ;; brought into scope too, so a library can export
                               ;; helper/combinator functions, not just classes.
-                              all-file-functions (concat (:functions file-ast) (:functions nested))
+                              direct-functions (stamp-qualified-names path (:functions file-ast))
+                              all-file-functions (concat direct-functions (:functions nested))
                               all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
+                              ;; Points at the *qualified* name (qualify-name path
+                              ;; class-name), not the bare class-name — an unpathed
+                              ;; intern makes this a no-op (qualify-name returns the
+                              ;; bare name unchanged when path is empty), but for a
+                              ;; pathed intern (`intern x/A as x_a`) it is the only
+                              ;; way the alias is actually useful when the bare name
+                              ;; collides: a bare :type-expr sends env-lookup-class's
+                              ;; alias fallback through the same (possibly ambiguous)
+                              ;; bare-name resolution a direct `A` reference would hit
+                              ;; — see docs/proposals/namespaces.md, Phase 3 — so
+                              ;; `intern x/A as x_a` alongside `intern y/A as y_a`
+                              ;; left BOTH aliases broken instead of disambiguating
+                              ;; anything. The qualified key is always registered
+                              ;; (Phase 3's qualified-class-defs / stamp-qualified-names
+                              ;; above), ambiguous bare name or not, so resolving
+                              ;; through it instead is strictly safer, not just a fix
+                              ;; for the colliding case.
                               alias-type-alias (when (and alias
                                                           (some #(= (:name %) class-name) all-file-classes))
-                                                 [{:name alias :type-expr class-name}])]
+                                                 [{:name alias :type-expr (qualify-name path class-name)}])]
                           {:classes (into classes all-file-classes)
                            :imports (into imports all-file-imports)
                            :functions (into functions all-file-functions)

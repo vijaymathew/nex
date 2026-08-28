@@ -21,6 +21,22 @@
 ;; Forward declaration for mutual recursion
 (declare transform-node)
 
+(defn qualified-name-text
+  "Extract a class-name reference's text, whether it parsed as a plain
+   IDENTIFIER token (a leaf string) or as a :qualifiedName node (the `type`,
+   `typeName`, and `createExpression` grammar rules all route a class-name
+   reference through `qualifiedName`, docs/proposals/namespaces.md Phase 3).
+   Either way the result is one flat string: a bare `Account` stays exactly
+   `\"Account\"` (unchanged from before qualified names existed), and a
+   qualified `finance/Account` becomes `\"finance.Account\"` — the same
+   dot-joined form nex.interpreter/resolve-interned* stamps as a class-def's
+   :qualified-name, so a qualified reference and the class-def it targets
+   compare equal as plain strings with no further parsing downstream."
+  [node]
+  (if (sequential? node)
+    (transform-node node)
+    (token-text node)))
+
 (defn walk-children
   "Walk all children of a node, skipping the node type tag."
   [node]
@@ -1096,9 +1112,19 @@
                         (= :inheritEntry (first %))))
           (mapv transform-node)))
 
+   :qualifiedName
+   (fn [[_ & tokens]]
+     ;; tokens: IDENTIFIER ('/' IDENTIFIER)* — drop the '/' separators and
+     ;; join what's left with '.'. A single-segment (unqualified) name joins
+     ;; to itself unchanged, so this is a no-op for every reference that
+     ;; isn't actually qualified.
+     (->> tokens
+          (remove #(= "/" %))
+          (str/join ".")))
+
    :typeName
    (fn [[_ name]]
-     name)
+     (qualified-name-text name))
 
    :inheritEntry
    (fn [[_ parent-name & rest]]
@@ -1339,9 +1365,9 @@
                                                  (= :typeArgs (first %)))
                                           rest))]
          (if type-args-node
-           {:base-type (token-text type-name)
+           {:base-type (qualified-name-text type-name)
             :type-args (transform-node type-args-node)}
-           (token-text type-name)))))
+           (qualified-name-text type-name)))))
 
    :functionType
    (fn [[_ & tokens]]
@@ -2175,7 +2201,7 @@
                                           (= :argumentList (first %)))
                                    rest))]
        {:type :create
-        :class-name (token-text class-name)
+        :class-name (qualified-name-text class-name)
         :generic-args generic-args
         :constructor (when has-constructor? constructor-name)
        :args (if args-node

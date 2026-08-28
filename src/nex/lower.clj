@@ -28,6 +28,7 @@
 (declare lower-call-stmt)
 (declare lower-loop-stmt)
 (declare lower-class-def)
+(declare class-self-registration-name)
 (declare if-branch-expression)
 (declare current-class-def)
 (declare class-method-def)
@@ -106,6 +107,26 @@
                {})
        vals
        vec))
+
+(defn- qualified-only-classes
+  "The interned class-defs in `source` that merge-visible-classes' bare-name
+   collapse (last-wins, into visible-classes) dropped entirely — e.g. whoever
+   lost the bare-name slot in a same-named collision. Kept OUT of the env's
+   :classes (unlike an earlier version of this fix, which appended them there
+   and — since merge-visible-classes' last-wins result depends on list
+   order — silently changed *which* class won the bare-name slot as a side
+   effect); instead threaded through env as :qualified-only-classes and
+   folded in only by visible-class-map's by-qualified-name index (Phase 3),
+   so bare-name resolution is exactly what it was before this class existed,
+   and a qualified reference (`finance/Account`) still resolves regardless of
+   which class (if either) also owns the bare name."
+  [visible-classes source]
+  (let [already (into #{} (keep :qualified-name) visible-classes)]
+    (into []
+          (comp (filter :qualified-name)
+                (remove (comp already :qualified-name))
+                (distinct))
+          source)))
 
 (def ^:private expression-node-types
   #{:integer :real :string :char :boolean :nil :identifier :binary :unary
@@ -335,18 +356,22 @@
   - `:generic-runtime-values` map of generic parameter name -> IR expression that yields
     the runtime type token string for that parameter
   - `:with-java?` whether unresolved target calls should lower as JVM host interop
-  - `:skip-contracts?` whether require/ensure/invariant checks lower to no-ops"
+  - `:skip-contracts?` whether require/ensure/invariant checks lower to no-ops
+  - `:qualified-only-classes` interned class-defs visible only by their
+    qualified identity, not also under `:classes` (docs/proposals/
+    namespaces.md, Phase 3) — see qualified-only-classes"
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
             compiled-classes current-class fields this-type old-field-locals
             generic-param-names generic-param-constraints generic-runtime-values
-            with-java? across-cursors globals skip-contracts?] :as opts}]
+            with-java? across-cursors globals skip-contracts? qualified-only-classes] :as opts}]
    {:locals (or locals {})
     :top-level? (if (contains? opts :top-level?) top-level? true)
     :repl? (if (contains? opts :repl?) repl? true)
     :state-slot (or state-slot 0)
     :next-slot (or next-slot 1)
     :classes (vec (or classes []))
+    :qualified-only-classes (vec (or qualified-only-classes []))
     ;; Which operators any visible class binds with `alias`. Computed once here so
     ;; that lowering an ordinary `a + b` on Integer costs one set membership test
     ;; — and, in the overwhelming case of a program that aliases nothing, the set
@@ -1494,7 +1519,23 @@
   them and falls through to the remaining clauses when false."
   [env match-tmp-name clauses else-stmts]
   (if-let [clause (first clauses)]
-    (let [{:keys [class-name var-name body generic-args bindings guard]} clause
+    (let [{:keys [var-name body generic-args bindings guard]} clause
+          ;; Runtime dispatch (nex.compiler.jvm.runtime/runtime-compatible-with?)
+          ;; compares plain Nex type-name *strings* against the value's own
+          ;; embedded runtime type name — not JVM identities, so
+          ;; class-self-registration-name's earlier fix (which only reaches
+          ;; JVM internal names) doesn't cover this by itself. A qualified
+          ;; clause (`when finance/Ok(...)`, docs/proposals/namespaces.md
+          ;; Phase 3 — walked to "finance.Ok") must still normalize to
+          ;; whatever bare/qualified string a non-colliding class's compiled
+          ;; objects actually carry as their runtime type name, the same
+          ;; normalization class-self-registration-name applies for JVM
+          ;; identity — otherwise a real Ok value's runtime name ("Ok") never
+          ;; string-equals the clause's unresolved "finance.Ok" and the
+          ;; clause silently never matches.
+          class-name (if-let [cd (get (visible-class-map env) (:class-name clause))]
+                       (class-self-registration-name (:compiled-classes env) cd)
+                       (:class-name clause))
           bindings (vec (or bindings []))
           subject-type (infer-type env {:type :identifier :name match-tmp-name})
           target-type (match-clause-binding-type env subject-type class-name generic-args)
@@ -1736,9 +1777,19 @@
    the real class (see `nex.interpreter/resolve-interned*`), not a second,
    nominally distinct class-def — so the alias name is added here as an extra
    key onto the *same* class-def value, keeping both names resolvable to one
-   compiled class."
+   compiled class. Also keyed by every interned class-def's :qualified-name
+   (docs/proposals/namespaces.md, Phase 3), alongside the ordinary bare-name
+   keys, so a qualified reference (`finance/Account`, walked to the string
+   \"finance.Account\") resolves to its own class-def here even when the bare
+   name `Account` collapses (last-wins, via `into {}` below) to a different
+   one."
   [env]
-  (let [base (into {} (map (juxt :name identity) (:classes env)))]
+  (let [by-bare-name (into {} (map (juxt :name identity) (:classes env)))
+        by-qualified-name (into {}
+                                (comp (filter :qualified-name)
+                                      (map (juxt :qualified-name identity)))
+                                (concat (:classes env) (:qualified-only-classes env)))
+        base (merge by-bare-name by-qualified-name)]
     (reduce-kv (fn [m alias-name _]
                  (if-let [class-def (get base (resolve-type-alias alias-name))]
                    (assoc m alias-name class-def)
@@ -1877,7 +1928,13 @@
                         (some (fn [{:keys [parent]}]
                                 (lookup-field parent visited'))
                               (:parents class-def)))))))]
-      (lookup-field (:name class-def) #{}))))
+      ;; Prefer :qualified-name (always unique) over the bare :name — the
+      ;; latter may belong, in class-map, to a *different* class-def than
+      ;; class-def itself when two interned classes share a bare name
+      ;; (docs/proposals/namespaces.md, Phase 3): class-map's own bare-name
+      ;; slot holds whichever one won merge-visible-classes' collapse, which
+      ;; is not necessarily this one.
+      (lookup-field (or (:qualified-name class-def) (:name class-def)) #{}))))
 
 (defn- field-write-error-message
   [field-name declaring-class]
@@ -1937,7 +1994,8 @@
                         (some (fn [{:keys [parent]}]
                                 (lookup-method parent visited'))
                               (:parents class-def)))))))]
-      (lookup-method (:name class-def) #{}))))
+      ;; See accessible-field-def just above for why :qualified-name wins.
+      (lookup-method (or (:qualified-name class-def) (:name class-def)) #{}))))
 
 (defn- class-constructor-def
   [class-def constructor-name arity]
@@ -2491,6 +2549,47 @@
   (or (get (:compiled-classes env) class-name)
       (throw (ex-info "Missing compiled class metadata during lowering"
                       {:class-name class-name}))))
+
+(defn- class-self-registration-name
+  "The name class-def should be treated as *its own identity* under during
+   lowering — its JVM internal name, and everything self-referential inside
+   its own body (:current-class, :this-type, runtime type tags — see
+   lower-class-def). Bare :name, unless that name is a genuine collision:
+   compiled-classes' bare-name slot (docs/proposals/namespaces.md, Phase 3/4)
+   holds whichever class won merge-visible-classes'/file-class-metadata's
+   bare-name collapse, which is this same class-def for the overwhelming
+   majority of interned classes (only a real same-bare-name collision loses
+   it to a *different* class-def) — file-class-metadata already gives a
+   winner the SAME internal name under both its bare and qualified keys, so
+   comparing the two tells us which case this is without needing the full
+   class list. Preferring :qualified-name unconditionally here would lower
+   every interned class — not just colliding ones — under a JVM identity
+   none of its ordinary *bare* references (a plain `let x: Circle`, another
+   class's `inherit Circle`, a bare match clause) resolve to: a LinkageError
+   or a runtime type-tag mismatch for programs that never had a collision at
+   all.
+
+   Guards separately against a registry that never computed a qualified
+   entry at all (compiled-classes here comes from whichever caller built it —
+   nex.compiler.jvm.file/file-class-metadata is one, but not the only one;
+   the REPL's own class-compilation path, nex.compiler.jvm.repl, builds its
+   own and was not updated to add qualified-key entries the way
+   file-class-metadata was). There, `(get compiled-classes qualified)` is
+   simply absent — nil, not a differently-valued entry — and treating a
+   missing lookup the same as a genuinely different one wrongly reads
+   \"entirely unregistered\" as \"a collision\", sending an ordinary,
+   non-colliding class down the qualified path into a
+   \"Missing compiled class metadata\" error instead of falling back to the
+   bare name, the only one such a registry actually has metadata for."
+  [compiled-classes class-def]
+  (let [bare (:name class-def)
+        qualified (:qualified-name class-def)
+        qualified-meta (when qualified (get compiled-classes qualified))]
+    (if (and qualified-meta
+             (not= (:internal-name qualified-meta)
+                   (:internal-name (get compiled-classes bare))))
+      qualified
+      bare)))
 
 (defn- user-class-defs
   [program]
@@ -3230,6 +3329,7 @@
                                                (:classes opts)
                                                (keep :class-def visible-functions))
         ctx {:classes visible-classes
+             :qualified-only-classes (qualified-only-classes visible-classes (:classes program))
              :functions visible-functions
              :imports (:imports program)
              :var-types (:var-types opts)}
@@ -6094,7 +6194,21 @@
   [class-def opts]
   (assert-distinct-lowered-methods! (:name class-def) class-def)
   (let [compiled-classes (:compiled-classes opts)
-        class-name (:name class-def)
+        class-name (class-self-registration-name compiled-classes class-def)
+        ;; Every helper this function calls below (lower-constructor,
+        ;; field-info-map, direct-parent-method-map, lower-generic-init-method,
+        ;; lower-invariant-method, lower-function via own-methods, ...) takes
+        ;; class-def directly and independently re-derives "this class's own
+        ;; identity" from its :name — there is no one choke point to fix
+        ;; instead, unlike env-lookup-class/visible-class-map. Rebinding :name
+        ;; to the same qualified class-name here, once, propagates the fix to
+        ;; all of them at the source, the same way check-program's
+        ;; qualified-class-defs does for the typechecker. Confined to this
+        ;; function's own local `class-def` — never written back to the
+        ;; shared class list `env`'s :classes was built from — so it cannot
+        ;; recreate the bulk-enumeration-by-:name hazard that bit
+        ;; find-sealed-subclasses in the typechecker (see ambiguous-class-names).
+        class-def (assoc class-def :name class-name)
         class-meta (class-jvm-meta {:compiled-classes compiled-classes} class-name)
         env (make-lowering-env {:classes (:classes opts)
                                 :functions (:functions opts)
@@ -6286,6 +6400,7 @@
                                                (:classes opts)
                                                (keep :class-def visible-functions))
         env (make-lowering-env {:classes visible-classes
+                                :qualified-only-classes (qualified-only-classes visible-classes actual-classes)
                                 :functions visible-functions
                                 :imports visible-imports
                                 :compiled-classes (:compiled-classes opts)
