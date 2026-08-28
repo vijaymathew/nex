@@ -3212,7 +3212,24 @@
                                   {:class-name class-name
                                    :expected (count (:generic-params template))
                                    :got (count generic-args)})))
-                (let [specialized (specialize-class template generic-args)]
+                ;; specialize-class computes its own internal spec-name from
+                ;; the TEMPLATE's own :name (:template-name below, e.g. "Box")
+                ;; — the class-def's identity as far as its own body is
+                ;; concerned, unrelated to how THIS call reached it. When
+                ;; class-name is an alias (`intern .../Box as BA`) or a
+                ;; qualified reference, that produces "Box[Integer]" while
+                ;; `spec-name` here (computed from class-name, e.g. "BA") is
+                ;; "BA[Integer]" — a real class-def gets registered, but under
+                ;; a DIFFERENT key than the one register-specialized-class's
+                ;; caller (this same function, just below) is about to look
+                ;; it up by, so the immediately-following object-creation
+                ;; falls through to the Java-interop fallback and fails with
+                ;; "Undefined class". Re-stamping :name to `spec-name` here
+                ;; makes the registry key match what every caller through
+                ;; THIS reference actually asks for; :template-name (the
+                ;; template's own identity) is untouched, so anything that
+                ;; needs to know what this was specialized *from* still can.
+                (let [specialized (assoc (specialize-class template generic-args) :name spec-name)]
                   (register-specialized-class ctx specialized)
                   spec-name))))
           class-name)

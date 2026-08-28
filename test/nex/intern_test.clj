@@ -1005,3 +1005,49 @@ print(s.shout())")
           (.delete (io/file tmp-dir "lib" "widgets_b"))
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(deftest file-eval-aliased-generic-class-constructs-with-explicit-type-args-test
+  (testing "an aliased GENERIC class constructs correctly when given explicit
+            type arguments (`create BA[Integer].make(...)`) — regression test
+            for a bug found while testing the collision cases above, on the
+            interpreter specifically: nex.interpreter/create-user-object
+            computes the specialized class's registry key from the reference
+            actually used (`class-name`, e.g. \"BA\" -> \"BA[Integer]\"), but
+            specialize-class computed its OWN internal name from the
+            TEMPLATE's own :name (the alias target's real name, e.g. \"Box\"
+            -> \"Box[Integer]\") and register-specialized-class trusted that
+            instead — a key mismatch that made the freshly-registered
+            specialization unfindable under the name the caller was about to
+            look it up by, falling through to the Java-interop fallback and
+            failing with \"Undefined class\". Not collision-specific — this
+            reproduces with only ONE interned library, no bare-name collision
+            at all — but found via, and fixed alongside, the namespaces work,
+            so covered here for the same reason the other tests in this file
+            are: it is exactly the `intern ... as` combination those changes
+            made it easy to reach."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-generic-alias-" (System/nanoTime)))
+          box-dir (io/file tmp-dir "lib" "boxes")
+          box-file (io/file box-dir "Box.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs box-dir)
+      (spit box-file "class Box[T]
+feature
+  value: T
+create
+  make(v: T) do this.value := v end
+end")
+      (spit main-file "intern boxes/Box as BA
+
+let a := create BA[Integer].make(1)
+print(a.value)")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "1")))
+        (finally
+          (.delete box-file)
+          (.delete box-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
