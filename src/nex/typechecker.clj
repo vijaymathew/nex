@@ -400,13 +400,22 @@
    (->TypeError msg line column)))
 
 (defn format-type-error
-  "Format a type error for display"
-  [{:keys [message line column]}]
+  "Format a type error for display. :source-file (see with-source-file) is
+   present only for an error inside an interned file's own body, never for
+   one in the entry file the user directly ran — the file they're already
+   looking at needs no name, but a line number 60-odd lines into a 7-line
+   entry file, with nothing to say it is actually about a file it interned,
+   is a diagnostic that actively misleads rather than merely under-informs."
+  [{:keys [message line column source-file]}]
   (if line
-    (str "Type error at line " line
+    (str "Type error"
+         (when source-file (str " in " source-file))
+         " at line " line
          (when column (str ", column " column))
          ": " message)
-    (str "Type error: " message)))
+    (str "Type error"
+         (when source-file (str " in " source-file))
+         ": " message)))
 
 (defn- resolve-super-parent-class-name
   "The single direct parent of CURRENT-CLASS, i.e. what `super` resolves to —
@@ -462,6 +471,53 @@
     (f)
     (catch clojure.lang.ExceptionInfo e
       (throw (annotate-type-exception e node)))))
+
+(defn- error-with-source-file
+  [err source-file]
+  (if (and err source-file (nil? (:source-file err)))
+    (assoc err :source-file source-file)
+    err))
+
+(defn- annotate-type-exception-source-file
+  "Stamp :source-file (unless already set — an inner class checked under its
+   own source-file, e.g. by a NESTED with-source-file for a class this one's
+   body itself refers into, wins) onto whichever TypeError(s) an exception
+   carries — a single :error (the common case, most type errors) or a batch
+   :errors (collect-undefined-type-errors, which gathers several at once —
+   see with-source-file, below, for why that one still needs its own,
+   different treatment)."
+  [e source-file]
+  (let [data (ex-data e)]
+    (cond
+      (:error data)
+      (ex-info (ex-message e) (update data :error error-with-source-file source-file) e)
+
+      (:errors data)
+      (ex-info (ex-message e)
+               (update data :errors (fn [errs] (mapv #(error-with-source-file % source-file) errs)))
+               e)
+
+      :else e)))
+
+(defn- with-source-file
+  "Run f, and — when source-file is given — stamp it onto any TypeError(s)
+   an exception escaping f carries (see annotate-type-exception-source-file).
+   check-program wraps each class/function it processes in this, using the
+   :source-file resolve-interned* stamped on it (docs/proposals/
+   namespaces.md): a class or function from an interned file otherwise
+   carries no record of which file it came from once merged into one
+   program, so a type error deep in its own body — a bad field type, a typo
+   in a method — reports a line number with no file to go with it. A nil
+   source-file (every class/function the entry file declares directly,
+   which resolve-interned* never touches) makes this a no-op, exactly as
+   before this existed."
+  [source-file f]
+  (if-not source-file
+    (f)
+    (try
+      (f)
+      (catch clojure.lang.ExceptionInfo e
+        (throw (annotate-type-exception-source-file e source-file))))))
 
 (defn display-type
   "Format a type value for human-readable display."
@@ -5906,11 +5962,24 @@
         errs (volatile! [])
         seen (volatile! #{})
         full? #(>= (count @errs) max-n)
+        ;; The declaration currently being walked, by the two doseqs below —
+        ;; unlike check-program's own class/function loops, this one function
+        ;; walks every declaration in ONE pass and batches every error it
+        ;; finds into a single :errors list (see check-program's "Undefined
+        ;; type(s) referenced" throw), so there is no single class/function
+        ;; boundary check-program's with-source-file could wrap; add! reads
+        ;; this instead, at the point each error is actually recorded, to
+        ;; stamp it with whichever declaration it came from — a class or
+        ;; function from an interned file otherwise reports a line number
+        ;; with no file to go with it (docs/proposals/namespaces.md). nil for
+        ;; a top-level `let`/anonymous function, always from the entry file's
+        ;; own :statements (resolve-interned* never touches those).
+        current-source-file (volatile! nil)
         add! (fn [nm label line]
                (let [msg (str "Undefined type: " nm (when label (str " — " label)))]
                  (when-not (or (full?) (contains? @seen msg))
                    (vswap! seen conj msg)
-                   (vswap! errs conj (type-error msg line)))))
+                   (vswap! errs conj (error-with-source-file (type-error msg line) @current-source-file)))))
         ;; The names a class/function/lambda itself declares as generic
         ;; parameters (`[G, T]`) -- NOT every generic-param name visible
         ;; anywhere in the program. `known-type-name?`/`declared-generic-param?`
@@ -5955,8 +6024,9 @@
                                (check! (str "return type of anonymous function in " owner)
                                        line return-type lambda-generics))))]
     ;; Free functions.
-    (doseq [{:keys [name params return-type generic-params body] line :dbg/line} functions
+    (doseq [{:keys [name params return-type generic-params body source-file] line :dbg/line} functions
             :while (not (full?))]
+      (vreset! current-source-file source-file)
       (let [owner (str "function '" name "'")
             local-generics (generic-param-names generic-params)]
         (check-constraints! generic-params owner line local-generics)
@@ -5964,9 +6034,10 @@
         (check! (str "return type of " owner) line return-type local-generics)
         (check-body-lets! body owner local-generics)))
     ;; Classes (user + interned); generated function classes handled above.
-    (doseq [{:keys [name generic-params parents body] cline :dbg/line} classes
+    (doseq [{:keys [name generic-params parents body source-file] cline :dbg/line} classes
             :when (not (contains? fn-class-names name))
             :while (not (full?))]
+      (vreset! current-source-file source-file)
       (let [cowner (str "class '" name "'")
             local-generics (generic-param-names generic-params)]
         (check-constraints! generic-params cowner cline local-generics)
@@ -5999,7 +6070,10 @@
           (let [owner (str "constructor '" (:name ctor) "' in " cowner)]
             (check-params! (:params ctor) owner (:dbg/line ctor) local-generics)
             (check-body-lets! (:body ctor) owner local-generics)))))
-    ;; Top-level `let` statements.
+    ;; Top-level `let` statements — always the entry file's own :statements
+    ;; (resolve-interned* never touches those; see current-source-file above)
+    ;; — never mind whichever :source-file the classes loop above left set.
+    (vreset! current-source-file nil)
     (doseq [{:keys [name var-type] line :dbg/line} (typed-let-nodes statements)
             :while (not (full?))]
       (check! (str "variable '" name "'") line var-type #{}))
@@ -6238,7 +6312,8 @@
        ;; to already exist at the point its OWN constant is checked, not
        ;; merely by the time the whole program finishes elaborating.
        (doseq [class-def qualified-class-defs]
-         (collect-class-info env class-def))
+         (with-source-file (:source-file class-def)
+           (fn [] (collect-class-info env class-def))))
 
        ;; Second pass: collect the rest of the program's class definitions —
        ;; the entry file's own classes, allowing them to override builtin
@@ -6259,7 +6334,8 @@
        (doseq [class-def visible-classes]
          (if (contains? ambiguous-classes (:name class-def))
            (env-add-class env (:name class-def) class-def)
-           (collect-class-info env class-def)))
+           (with-source-file (:source-file class-def)
+             (fn [] (collect-class-info env class-def)))))
 
        ;; Undefined-type validation. Runs now that every class, alias and import
        ;; is collected, so forward references resolve. Collects up to a bound of
@@ -6317,7 +6393,8 @@
        ;; :skip-class-body-names), so it does not apply here — a small,
        ;; accepted extra REPL re-check cost, not a correctness issue.
        (doseq [class-def qualified-class-defs]
-         (check-class env class-def))
+         (with-source-file (:source-file class-def)
+           (fn [] (check-class env class-def))))
 
        ;; Third pass: check the rest of the program's class bodies. Skipped
        ;; for an ambiguous bare name for the same reason as the first pass
@@ -6325,7 +6402,8 @@
        (doseq [class-def visible-classes]
          (when-not (or (contains? skip-body-names (:name class-def))
                        (contains? ambiguous-classes (:name class-def)))
-           (check-class env class-def)))
+           (with-source-file (:source-file class-def)
+             (fn [] (check-class env class-def)))))
 
        ;; Check top-level statements in source order when available.
        ;; Fall back to legacy :calls-only programs.

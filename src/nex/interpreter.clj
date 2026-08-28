@@ -12,7 +12,8 @@
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap])
-  (:import [java.lang.reflect Field]
+  (:import [clj_antlr ParseError]
+                   [java.lang.reflect Field]
                    [java.nio.charset StandardCharsets]
                    [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException]
                    [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
@@ -1617,6 +1618,33 @@
                          :class-name class-name
                          :searched-locations locations})))))
 
+(defn- parse-interned-file
+  "Parse an interned file's own source, wrapping a ParseError with the
+   file's own path and source text before it escapes this function.
+
+   Without this, a syntax error in an INTERNED file — not the one the user
+   actually ran — propagates as a bare ParseError with no indication of
+   which file it came from. The top-level ParseError handler
+   (`nex.eval/-main`, and `nex.repl`'s equivalent) always re-slurps and
+   formats against the file the user directly ran, on the reasonable
+   assumption that a ParseError could only ever come from parsing THAT
+   file — true before `intern` could pull in a second file to parse, no
+   longer true once it can. The result was a caret pointing at essentially a
+   random position in the *entry* file's text, with the actually-broken
+   file and line never named at all — `nex some_file.nex`, when the syntax
+   error is 60 lines into a library it interns, points at whatever line in
+   `some_file.nex` happens to share a line number with the real one, or past
+   the end of it entirely."
+  [file-path source]
+  (try
+    (parser/ast source)
+    (catch ParseError e
+      (throw (ex-info (str "Syntax error in " file-path)
+                       {:nex/intern-parse-error true
+                        :file-path file-path
+                        :source source
+                        :parse-error e})))))
+
 (defn- register-qualified-classes!
      "Also register each of file-ast's own directly-declared classes under its
       qualified key (path-joined with the bare name, e.g. \"finance.Account\"
@@ -1659,7 +1687,7 @@
      (let [file-path (find-intern-file ctx path class-name)
            ;; Load and parse the external file
            file-content (slurp file-path)
-           file-ast (parser/ast file-content)
+           file-ast (parse-interned-file file-path file-content)
            ;; Interpret the file to register its classes
            _ (eval-node ctx file-ast)
            _ (register-qualified-classes! ctx path (:classes file-ast))
@@ -1694,9 +1722,22 @@
    class/function in one module shares that module's namespace — not just
    the one an `intern path/Class` statement happened to name for file
    lookup — the same way a Java file's package covers every class it
-   declares, not only the one a caller imports by name."
-  [path defs]
-  (mapv #(assoc % :qualified-name (qualify-name path (:name %))) defs))
+   declares, not only the one a caller imports by name.
+
+   Also stamps :source-file with the file's own canonical path. Once
+   merged into one program (nex.eval/augment-ast-with-interns and its
+   compiled/REPL equivalents), a class or function from an interned file
+   carries no other record of which file it actually came from — every
+   :dbg/line on it is only meaningful relative to THAT file's own text, not
+   the entry file's. Without :source-file, a type error inside an interned
+   file's own body reported a line number with no file to go with it — e.g.
+   \"Type error at line 65, column 39: Undefined variable: xs\", where the
+   entry file the user ran is 7 lines long: correct information (line 65 IS
+   where the mistake is), pointing nowhere without knowing which file it's
+   line 65 OF. check-program reads this back to annotate exactly such an
+   error with the file it actually happened in (see with-source-file)."
+  [path source-file defs]
+  (mapv #(assoc % :qualified-name (qualify-name path (:name %)) :source-file source-file) defs))
 
 (defn- resolve-interned*
      "Traverse intern declarations recursively and collect the class
@@ -1741,20 +1782,20 @@
                       (if (contains? seen canonical)
                         {:classes classes :imports imports :functions functions
                          :type-aliases type-aliases :seen seen}
-                        (let [file-ast (parser/ast (slurp file-path))
+                        (let [file-ast (parse-interned-file file-path (slurp file-path))
                               nested (resolve* canonical file-ast (conj seen canonical))
                               ;; Classes/functions declared directly in this file are
                               ;; qualified by the path *this* intern statement used to
                               ;; reach it; classes/functions coming from `nested` were
                               ;; already qualified, by their own path, when the inner
                               ;; recursive call resolved them.
-                              direct-classes (stamp-qualified-names path (:classes file-ast))
+                              direct-classes (stamp-qualified-names path canonical (:classes file-ast))
                               all-file-classes (concat direct-classes (:classes nested))
                               all-file-imports (concat (:imports file-ast) (:imports nested))
                               ;; Free functions defined in an interned module are
                               ;; brought into scope too, so a library can export
                               ;; helper/combinator functions, not just classes.
-                              direct-functions (stamp-qualified-names path (:functions file-ast))
+                              direct-functions (stamp-qualified-names path canonical (:functions file-ast))
                               all-file-functions (concat direct-functions (:functions nested))
                               all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
                               ;; Points at the *qualified* name (qualify-name path

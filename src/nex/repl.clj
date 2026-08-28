@@ -1862,13 +1862,24 @@
          ctx)
 
        (catch clojure.lang.ExceptionInfo e
-         (let [e (unwrap-and-flush-error! e)]
-           (println "Error:" (interp/nex-error-message e))
-           (when-let [data (ex-data e)]
-             (when (contains? data :line)
-               (println "  at line" (:line data))))
-           (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
-                                                    :wrap-expression-fn wrap-expression})
+         (let [e (unwrap-and-flush-error! e)
+               data (ex-data e)]
+           ;; A syntax error in a file THIS input interns, not the input
+           ;; itself (nex.interpreter/parse-interned-file) — arrives wrapped
+           ;; this way, not as a bare ParseError, precisely so it does NOT
+           ;; match the `catch ParseError` clause above: rendering it against
+           ;; `input`'s own text (which the wrapped ParseError's line/column
+           ;; have nothing to do with) is what this branch exists to avoid.
+           (if (:nex/intern-parse-error data)
+             (let [{:keys [file-path source parse-error]} data]
+               (println (str "Syntax error in " file-path ":"))
+               (p/format-parse-errors parse-error source 0))
+             (do
+               (println "Error:" (interp/nex-error-message e))
+               (when (contains? data :line)
+                 (println "  at line" (:line data)))
+               (dbg/maybe-break-on-error! @exec-ctx* e {:read-line-fn read-line-safe
+                                                        :wrap-expression-fn wrap-expression})))
            ctx))
 
        (catch Exception e
