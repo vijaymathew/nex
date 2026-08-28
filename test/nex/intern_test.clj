@@ -803,3 +803,69 @@ end")
           (.delete main-file)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(deftest file-eval-aliased-collision-used-inside-a-constructor-body-test
+  (testing "a path-qualified alias resolving a bare-name collision (two
+            different libraries both named Counter, at multi-segment paths)
+            works when referenced from INSIDE a class's own constructor body,
+            not just at top level — regression test: visible-class-map's
+            qualified-name recovery only reached the top-level lowering env;
+            every nested lowering scope (a constructor, a method, ...) builds
+            its own :classes list independently via its own make-lowering-env
+            call, and the class that lost the bare-name collapse was simply
+            absent from it, so a nested `create C1.make` failed to lower even
+            though the identical top-level reference worked fine"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-nested-alias-" (System/nanoTime)))
+          math-dir (io/file tmp-dir "lib" "math")
+          cc-dir (io/file tmp-dir "lib" "cc" "bb")
+          math-file (io/file math-dir "Counter.nex")
+          cc-file (io/file cc-dir "Counter.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs math-dir)
+      (.mkdirs cc-dir)
+      (spit math-file "class Counter
+  create
+    make() do
+      count := 0
+    end
+  feature
+    count: Integer
+    increment() do
+      count := count + 1
+    end
+    value(): Integer do
+      result := count
+    end
+end")
+      (spit cc-file "class Counter
+create
+  make do print(\"COUNTER\") end
+end")
+      (spit main-file "intern math/Counter as C1
+intern cc/bb/Counter as C
+
+class Main
+  create
+    make() do
+      let c := create C1.make
+      c.increment
+      c.increment
+      print(c.value)
+    end
+  end
+
+  create Main.make")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "2")))
+        (finally
+          (.delete math-file)
+          (.delete cc-file)
+          (.delete main-file)
+          (.delete math-dir)
+          (.delete cc-dir)
+          (.delete (io/file tmp-dir "lib" "cc"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
