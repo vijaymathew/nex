@@ -520,7 +520,16 @@
         (println (str "Main class: " (:main-class result))))
       (System/exit 0)
       (catch Exception e
-        (println "Error:" (.getMessage e))
-        (doseq [line (:errors (ex-data e))]
-          (println line))
+        ;; A syntax error in a file input-file interns, not input-file itself
+        ;; (nex.interpreter/parse-interned-file) — arrives wrapped this way
+        ;; with the actually-broken file's own path/source/ParseError, rather
+        ;; than as a bare ParseError misattributed to input-file.
+        (let [data (ex-data e)]
+          (if (:nex/intern-parse-error data)
+            (let [{:keys [file-path source parse-error]} data]
+              (println (str "Syntax error in " file-path ":"))
+              (p/format-parse-errors parse-error source 0))
+            (do (println "Error:" (.getMessage e))
+                (doseq [line (:errors data)]
+                  (println line)))))
         (System/exit 1)))))

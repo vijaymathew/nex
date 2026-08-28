@@ -12,7 +12,8 @@
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap])
-  (:import [java.lang.reflect Field]
+  (:import [clj_antlr ParseError]
+                   [java.lang.reflect Field]
                    [java.nio.charset StandardCharsets]
                    [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException]
                    [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
@@ -1617,6 +1618,33 @@
                          :class-name class-name
                          :searched-locations locations})))))
 
+(defn- parse-interned-file
+  "Parse an interned file's own source, wrapping a ParseError with the
+   file's own path and source text before it escapes this function.
+
+   Without this, a syntax error in an INTERNED file — not the one the user
+   actually ran — propagates as a bare ParseError with no indication of
+   which file it came from. The top-level ParseError handler
+   (`nex.eval/-main`, and `nex.repl`'s equivalent) always re-slurps and
+   formats against the file the user directly ran, on the reasonable
+   assumption that a ParseError could only ever come from parsing THAT
+   file — true before `intern` could pull in a second file to parse, no
+   longer true once it can. The result was a caret pointing at essentially a
+   random position in the *entry* file's text, with the actually-broken
+   file and line never named at all — `nex some_file.nex`, when the syntax
+   error is 60 lines into a library it interns, points at whatever line in
+   `some_file.nex` happens to share a line number with the real one, or past
+   the end of it entirely."
+  [file-path source]
+  (try
+    (parser/ast source)
+    (catch ParseError e
+      (throw (ex-info (str "Syntax error in " file-path)
+                       {:nex/intern-parse-error true
+                        :file-path file-path
+                        :source source
+                        :parse-error e})))))
+
 (defn- register-qualified-classes!
      "Also register each of file-ast's own directly-declared classes under its
       qualified key (path-joined with the bare name, e.g. \"finance.Account\"
@@ -1659,7 +1687,7 @@
      (let [file-path (find-intern-file ctx path class-name)
            ;; Load and parse the external file
            file-content (slurp file-path)
-           file-ast (parser/ast file-content)
+           file-ast (parse-interned-file file-path file-content)
            ;; Interpret the file to register its classes
            _ (eval-node ctx file-ast)
            _ (register-qualified-classes! ctx path (:classes file-ast))
@@ -1741,7 +1769,7 @@
                       (if (contains? seen canonical)
                         {:classes classes :imports imports :functions functions
                          :type-aliases type-aliases :seen seen}
-                        (let [file-ast (parser/ast (slurp file-path))
+                        (let [file-ast (parse-interned-file file-path (slurp file-path))
                               nested (resolve* canonical file-ast (conj seen canonical))
                               ;; Classes/functions declared directly in this file are
                               ;; qualified by the path *this* intern statement used to

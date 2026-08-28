@@ -232,6 +232,22 @@
         (let [source (try (slurp file) (catch Exception _ ""))]
           (parser/format-parse-errors e source 0))
         (System/exit 1))
+      ;; A syntax error in a file `file` interns, not `file` itself
+      ;; (nex.interpreter/parse-interned-file) — arrives wrapped in an
+      ;; ex-info, not a bare ParseError, precisely so it does NOT match the
+      ;; clause above: rendering it against `file`'s own source (which the
+      ;; ParseError's line/column have nothing to do with) is what this
+      ;; case exists to avoid. Any other ex-info (a type error, say) falls
+      ;; through to the same rendering the generic `catch Exception` below
+      ;; already gives it.
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (if (:nex/intern-parse-error data)
+            (let [{:keys [file-path source parse-error]} data]
+              (println (str "Syntax error in " file-path ":"))
+              (parser/format-parse-errors parse-error source 0))
+            (println "Error:" (interp/nex-error-message e)))
+          (System/exit 1)))
       (catch Exception e
         (println "Error:" (interp/nex-error-message e))
         (System/exit 1)))))

@@ -1051,3 +1051,63 @@ print(a.value)")
           (.delete main-file)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(deftest file-eval-syntax-error-in-interned-file-names-that-file-test
+  (testing "a syntax error in a file the entry program INTERNS (not the file
+            it was actually run on) is reported against the interned file's
+            own path and source — not silently misattributed to the entry
+            file, which is all a bare ParseError (carrying only a line/column,
+            no file identity) leaves the top-level handler able to assume once
+            more than one file can be involved in a single run. Regression
+            test for exactly this: `nex ds.nex` reported a syntax error 60
+            lines into an interned library as \"Line 7\" of ds.nex itself (ds.nex
+            is 7 lines long), pointing a caret at the END of an unrelated
+            assert statement — nex.interpreter/parse-interned-file now wraps
+            the ParseError with the file/source it actually came from, on
+            both backends (type-checking runs first regardless), checked here
+            via the raw exception rather than captured stdout, since the
+            point is what the THROWN diagnostic identifies, not how a
+            particular caller happens to print it (see nex.eval/-main and
+            nex.repl/eval-code for the two that do)."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-intern-syntax-error-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "broken_lib")
+          lib-file (io/file lib-dir "Oops.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      ;; `elseif ... := ...` — `:=` (assignment) where a boolean condition
+      ;; (comparison `=`) is required — a real, if easy to miss, mistake, not
+      ;; a contrived one; this is what surfaced the bug (docs/proposals/
+      ;; namespaces.md is unrelated — a plain, non-generic class is enough).
+      (spit lib-file "class Oops
+feature
+  check(n: Integer): Boolean do
+    if n = 0 then
+      result := true
+    elseif n := 1 then
+      result := false
+    end
+  end
+end")
+      (spit main-file "intern broken_lib/Oops
+
+let o := create Oops
+print(o.check(0))")
+      (try
+        (doseq [interpret? [false true]]
+          (let [ex (try (e/eval-file (.getPath main-file) {:interpret? interpret?})
+                        nil
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex) (str "expected a syntax error, interpret?=" interpret?))
+            (when ex
+              (let [data (ex-data ex)]
+                (is (:nex/intern-parse-error data))
+                (is (= (.getCanonicalPath lib-file) (:file-path data)))
+                (let [rendered (with-out-str
+                                 (p/format-parse-errors (:parse-error data) (:source data) 0))]
+                  (is (.contains rendered "elseif n := 1 then")))))))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
