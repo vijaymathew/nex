@@ -1111,3 +1111,93 @@ print(o.check(0))")
           (.delete main-file)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(deftest file-eval-type-error-inside-interned-file-names-that-file-test
+  (testing "a type error deep in an interned file's own method body (an
+            undefined variable, found during check-class) is reported
+            against that file's own path, on both backends — regression test
+            for the same class of bug as the interned-syntax-error test
+            above, one layer later: `nex ds.nex` reported \"Type error at
+            line 65, column 39: Undefined variable: xs\" with no indication
+            that line 65 belonged to a library ds.nex interned, not ds.nex
+            itself (7 lines long). nex.interpreter/resolve-interned* now
+            stamps :source-file onto every class/function it returns
+            (alongside :qualified-name), and check-program wraps each one's
+            processing in nex.typechecker/with-source-file, which — unlike
+            the interned-syntax-error case, an exception thrown once per
+            file being parsed — annotates whichever TypeError(s) escape,
+            unless already stamped by an inner, more specific
+            with-source-file for a DIFFERENT interned class this one's own
+            body happens to reference."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-interned-type-error-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "thing_lib")
+          lib-file (io/file lib-dir "Thing.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit lib-file "class Thing
+feature
+  greet(): String do
+    result := \"hi \" + missing_name
+  end
+create
+  make() do end
+end")
+      (spit main-file "intern thing_lib/Thing
+
+let t := create Thing
+print(t.greet())")
+      (try
+        (doseq [interpret? [false true]]
+          (let [ex (try (e/eval-file (.getPath main-file) {:interpret? interpret?})
+                        nil
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex) (str "expected a type error, interpret?=" interpret?))
+            (when ex
+              (is (.contains (.getMessage ex) (.getCanonicalPath lib-file)))
+              (is (.contains (.getMessage ex) "Undefined variable: missing_name"))
+              (is (not (.contains (.getMessage ex) (.getCanonicalPath main-file)))
+                  "must not ALSO be misattributed to the entry file"))))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-undefined-type-inside-interned-file-names-that-file-test
+  (testing "an undefined TYPE reference (a field's declared type naming a
+            class that doesn't exist) inside an interned file is reported
+            against that file's own path — collect-undefined-type-errors is
+            a separate, whole-program, batch pass (not one class/function at
+            a time like with-source-file above), so it needed its own
+            per-declaration :source-file tracking rather than reusing
+            with-source-file's wrapping."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-interned-undefined-type-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "thing_lib")
+          lib-file (io/file lib-dir "Thing.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit lib-file "class Thing
+feature
+  bad: No_Such_Type
+create
+  make() do end
+end")
+      (spit main-file "intern thing_lib/Thing
+
+let t := create Thing")
+      (try
+        (doseq [interpret? [false true]]
+          (let [ex (try (e/eval-file (.getPath main-file) {:interpret? interpret?})
+                        nil
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex) (str "expected a type error, interpret?=" interpret?))
+            (when ex
+              (is (.contains (.getMessage ex) (.getCanonicalPath lib-file)))
+              (is (.contains (.getMessage ex) "Undefined type: No_Such_Type")))))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))

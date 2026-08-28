@@ -1722,9 +1722,22 @@
    class/function in one module shares that module's namespace — not just
    the one an `intern path/Class` statement happened to name for file
    lookup — the same way a Java file's package covers every class it
-   declares, not only the one a caller imports by name."
-  [path defs]
-  (mapv #(assoc % :qualified-name (qualify-name path (:name %))) defs))
+   declares, not only the one a caller imports by name.
+
+   Also stamps :source-file with the file's own canonical path. Once
+   merged into one program (nex.eval/augment-ast-with-interns and its
+   compiled/REPL equivalents), a class or function from an interned file
+   carries no other record of which file it actually came from — every
+   :dbg/line on it is only meaningful relative to THAT file's own text, not
+   the entry file's. Without :source-file, a type error inside an interned
+   file's own body reported a line number with no file to go with it — e.g.
+   \"Type error at line 65, column 39: Undefined variable: xs\", where the
+   entry file the user ran is 7 lines long: correct information (line 65 IS
+   where the mistake is), pointing nowhere without knowing which file it's
+   line 65 OF. check-program reads this back to annotate exactly such an
+   error with the file it actually happened in (see with-source-file)."
+  [path source-file defs]
+  (mapv #(assoc % :qualified-name (qualify-name path (:name %)) :source-file source-file) defs))
 
 (defn- resolve-interned*
      "Traverse intern declarations recursively and collect the class
@@ -1776,13 +1789,13 @@
                               ;; reach it; classes/functions coming from `nested` were
                               ;; already qualified, by their own path, when the inner
                               ;; recursive call resolved them.
-                              direct-classes (stamp-qualified-names path (:classes file-ast))
+                              direct-classes (stamp-qualified-names path canonical (:classes file-ast))
                               all-file-classes (concat direct-classes (:classes nested))
                               all-file-imports (concat (:imports file-ast) (:imports nested))
                               ;; Free functions defined in an interned module are
                               ;; brought into scope too, so a library can export
                               ;; helper/combinator functions, not just classes.
-                              direct-functions (stamp-qualified-names path (:functions file-ast))
+                              direct-functions (stamp-qualified-names path canonical (:functions file-ast))
                               all-file-functions (concat direct-functions (:functions nested))
                               all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
                               ;; Points at the *qualified* name (qualify-name path
