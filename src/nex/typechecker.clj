@@ -128,23 +128,23 @@
    distinct interned class. qualified-names is the #{...} recorded for it in
    :ambiguous-classes (see ambiguous-class-names).
 
-   `intern X as Y` does NOT resolve this: Y is a synonym alongside X, not a
-   replacement for it (that is what keeps a diamond-dependency import a
-   single real class rather than reintroducing the duplicate-class bug the
-   alias fix closed) — so the original bare name X, the one actually
-   colliding here, is still claimed by its real class either way. Until
-   qualified references ship (docs/proposals/namespaces.md, Phase 3), the
-   only fix is to avoid interning both colliding names into the same
-   program."
+   Two escape hatches, both real fixes (docs/proposals/namespaces.md, Phase
+   3): reference either one directly by its qualified name
+   (`finance/Account`), or rename one on the way in — `intern billing/Account
+   as Billing_Account` — PROVIDED the intern is path-qualified. A *bare*
+   alias resolves no better than the bare name itself did (nothing to
+   qualify), and — subtler — an aliased intern's :type-expr points at the
+   qualified identity specifically (`nex.interpreter/resolve-interned*`), not
+   the bare one: earlier, before that fix, the alias fell through
+   env-lookup-class's alias fallback to the SAME (still-ambiguous) bare name
+   a direct reference would hit, leaving `intern X as Y` unable to resolve a
+   real collision at all despite looking like exactly the tool for the job."
   [class-name qualified-names]
   (let [sorted (sort qualified-names)
         msg (str "Ambiguous reference to '" class-name "': interned from "
-                 (str/join " and " sorted) ". `intern X as Y` will not "
-                 "resolve this — Y is a synonym alongside X, it doesn't take "
-                 "X's bare name away from the collision. Avoid interning "
-                 "both under this name in the same program for now; a "
-                 "qualified-reference syntax to disambiguate this directly "
-                 "is proposed (see docs/proposals/namespaces.md, Phase 3).")]
+                 (str/join " and " sorted) ". Reference one directly by its "
+                 "qualified name (e.g. " (first sorted) "), or rename it on "
+                 "the way in with a path-qualified `intern ... as`.")]
     (ex-info msg {:error (type-error msg)})))
 
 (defn env-lookup-class

@@ -1738,9 +1738,26 @@
                               direct-functions (stamp-qualified-names path (:functions file-ast))
                               all-file-functions (concat direct-functions (:functions nested))
                               all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
+                              ;; Points at the *qualified* name (qualify-name path
+                              ;; class-name), not the bare class-name — an unpathed
+                              ;; intern makes this a no-op (qualify-name returns the
+                              ;; bare name unchanged when path is empty), but for a
+                              ;; pathed intern (`intern x/A as x_a`) it is the only
+                              ;; way the alias is actually useful when the bare name
+                              ;; collides: a bare :type-expr sends env-lookup-class's
+                              ;; alias fallback through the same (possibly ambiguous)
+                              ;; bare-name resolution a direct `A` reference would hit
+                              ;; — see docs/proposals/namespaces.md, Phase 3 — so
+                              ;; `intern x/A as x_a` alongside `intern y/A as y_a`
+                              ;; left BOTH aliases broken instead of disambiguating
+                              ;; anything. The qualified key is always registered
+                              ;; (Phase 3's qualified-class-defs / stamp-qualified-names
+                              ;; above), ambiguous bare name or not, so resolving
+                              ;; through it instead is strictly safer, not just a fix
+                              ;; for the colliding case.
                               alias-type-alias (when (and alias
                                                           (some #(= (:name %) class-name) all-file-classes))
-                                                 [{:name alias :type-expr class-name}])]
+                                                 [{:name alias :type-expr (qualify-name path class-name)}])]
                           {:classes (into classes all-file-classes)
                            :imports (into imports all-file-imports)
                            :functions (into functions all-file-functions)

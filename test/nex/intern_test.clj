@@ -554,29 +554,80 @@ print(c.tag)")
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
-(deftest file-eval-intern-as-alias-does-not-resolve-ambiguity-test
-  (testing "`intern X as Y` does not resolve a same-named collision: Y is a
-            synonym alongside X (the diamond-dependency alias fix), not a
-            replacement for X, so X's bare name is still claimed by its real
-            class and still collides"
-    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-alias-no-fix-" (System/nanoTime)))
+(deftest file-eval-path-qualified-intern-as-alias-resolves-collision-test
+  (testing "`intern billing/Account as Billing_Account` DOES resolve a
+            same-named collision, on both backends — Billing_Account's
+            :type-expr points at the qualified identity \"billing.Account\"
+            (nex.interpreter/resolve-interned*), not the bare, still-ambiguous
+            \"Account\", so referencing only the alias never touches the bare
+            name at all"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-alias-fix-" (System/nanoTime)))
           finance-file (spit-account-lib! tmp-dir "finance" "balance")
           billing-file (spit-account-lib! tmp-dir "billing" "id")
           main-file (io/file tmp-dir "main.nex")]
       (spit main-file "intern finance/Account
 intern billing/Account as Billing_Account
 
-let b := create Billing_Account.make(2)")
+let b := create Billing_Account.make(2)
+print(b.id)")
       (try
-        (let [error (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file) {})))
-              message (str (ex-message error) (some-> error ex-data str))]
-          (is (.contains message "Ambiguous reference to 'Account'")))
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "2")))
         (finally
           (.delete finance-file)
           (.delete billing-file)
           (.delete main-file)
           (.delete (io/file tmp-dir "lib" "finance"))
           (.delete (io/file tmp-dir "lib" "billing"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-both-sides-aliased-intern-resolves-collision-test
+  (testing "both colliding interns aliased (`intern x/A as x_a`, `intern
+            y/A as y_a`) each resolve to their OWN class independently, on
+            both backends — neither alias falls through to the shared,
+            ambiguous bare name `A`"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-both-aliased-" (System/nanoTime)))
+          x-dir (io/file tmp-dir "lib" "x")
+          y-dir (io/file tmp-dir "lib" "y")
+          x-file (io/file x-dir "A.nex")
+          y-file (io/file y-dir "A.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs x-dir)
+      (.mkdirs y-dir)
+      (spit x-file "class A
+feature
+  tag: String
+create
+  make(t: String) do this.tag := t end
+end")
+      (spit y-file "class A
+feature
+  label: String
+create
+  make(l: String) do this.label := l end
+end")
+      (spit main-file "intern x/A as x_a
+intern y/A as y_a
+
+let p := create x_a.make(\"from-x\")
+let q := create y_a.make(\"from-y\")
+print(p.tag)
+print(q.label)")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "from-x"))
+          (is (.contains compiled "from-y")))
+        (finally
+          (.delete x-file)
+          (.delete y-file)
+          (.delete main-file)
+          (.delete x-dir)
+          (.delete y-dir)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
