@@ -244,9 +244,15 @@
     (:items @(:state s))
     (seq s)))
 (defn nex-set-contains [s v]
-  (if (portable-set? s)
-    (set-bucket-member? (:index @(:state s)) v)
-    (boolean (some #(value-equals? % v) (nex-set-seq s)))))
+  (cond
+    (portable-set? s) (set-bucket-member? (:index @(:state s)) v)
+    ;; No richer equality bound: the common case, where s is a compiled-
+    ;; backend host LinkedHashSet whose elements already carry Nex-correct
+    ;; equals/hashCode (emit.clj's :object-equals/:object-hash-code override
+    ;; on every user class; boxed scalars match natively) -- trust the host
+    ;; Set's own O(1)-average lookup instead of a linear value-equals? scan.
+    (nil? *value-equals*) (.contains ^java.util.Set s v)
+    :else (boolean (some #(value-equals? % v) (nex-set-seq s)))))
 (defn nex-set-size [s]
   (if (portable-set? s)
     (count (:items @(:state s)))
@@ -273,20 +279,28 @@
    aliases observe the update. A duplicate per Nex value-equality is a no-op,
    preserving the set's no-duplicates invariant."
   [s v]
-  (if (portable-set? s)
-    (swap! (:state s) set-conj v)
-    (when-not (some #(value-equals? % v) (nex-set-seq s))
-      (.add ^java.util.Set s v)))
+  (cond
+    (portable-set? s) (swap! (:state s) set-conj v)
+    ;; See nex-set-contains: with no bound override, the host Set's own
+    ;; equals/hashCode already decide membership correctly, so its native add
+    ;; (itself a no-op on a duplicate) replaces the linear pre-check + add.
+    (nil? *value-equals*) (.add ^java.util.Set s v)
+    :else (when-not (some #(value-equals? % v) (nex-set-seq s))
+            (.add ^java.util.Set s v)))
   nil)
 
 (defn nex-set-remove!
   "Remove the element Nex-equal to v from s, mutating it in place. A value
    with no match is a no-op."
   [s v]
-  (if (portable-set? s)
-    (swap! (:state s) set-disj v)
-    (doseq [e (filterv #(value-equals? % v) (vec (nex-set-seq s)))]
-      (.remove ^java.util.Set s e)))
+  (cond
+    (portable-set? s) (swap! (:state s) set-disj v)
+    ;; See nex-set-contains: with no bound override, the host Set's own
+    ;; equals/hashCode already decide membership correctly, so a single
+    ;; native remove replaces the linear scan + removal loop.
+    (nil? *value-equals*) (.remove ^java.util.Set s v)
+    :else (doseq [e (filterv #(value-equals? % v) (vec (nex-set-seq s)))]
+            (.remove ^java.util.Set s e)))
   nil)
 
 ;; Bitwise operators are a 32-bit island: they mask operands to int32 and the

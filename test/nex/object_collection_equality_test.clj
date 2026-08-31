@@ -63,6 +63,46 @@ let b := create K.make(1, \"second\")
     (is (= ["true"] (both (str keyed-class
                                "print(#{a}.contains(create K.make(1, \"third\")))"))))))
 
+(deftest set-add-uses-equals-override
+  (testing "`.add` treats an equal-but-not-identical element as a duplicate (a no-op)"
+    (is (= ["1" "true"]
+           (both (str keyed-class
+                      "let s: Set[K] := #{}
+s.add(a)
+s.add(create K.make(1, \"third\"))
+print(s.size)
+print(s.contains(b))"))))))
+
+(deftest set-remove-uses-equals-override
+  (testing "`.remove` deletes the element the override calls equal, not just an identical reference"
+    (is (= ["0" "false" "true"]
+           (both (str keyed-class
+                      "let s: Set[K] := #{a}
+s.remove(create K.make(1, \"third\"))
+print(s.size)
+print(s.contains(a))
+print(s.is_empty())"))))))
+
+(deftest set-remove-scalar-parity
+  (testing "`.remove` on plain scalar elements agrees across backends"
+    (is (= ["2" "false" "true"]
+           (both "let s: Set[Integer] := #{1, 2, 3}
+s.remove(3)
+print(s.size)
+print(s.contains(3))
+print(s.contains(2))")))))
+
+(deftest set-binary-ops-use-equals-override
+  (testing "union/difference/intersection/symmetric_difference honour the override on both backends"
+    (is (= ["1" "0" "1" "0"]
+           (both (str keyed-class
+                      "let x: Set[K] := #{a}
+let y: Set[K] := #{create K.make(1, \"third\")}
+print(x.union(y).size)
+print(x.difference(y).size)
+print(x.intersection(y).size)
+print(x.symmetric_difference(y).size)"))))))
+
 (deftest map-keys-use-equals-override
   (testing "an equal key replaces rather than adds, and looks up"
     (is (= ["1" "\"two\""]
