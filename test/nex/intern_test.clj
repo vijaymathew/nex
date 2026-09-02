@@ -1201,3 +1201,74 @@ let t := create Thing")
           (.delete main-file)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(deftest cli-run-resolves-nested-path-qualified-intern-from-a-sibling-lib-directory-test
+  (testing "a `nex script.nex` run resolves a path-qualified intern reached
+            transitively (script -> lib A -> lib B), where B sits in a
+            *different* lib subdirectory than A, not just alongside it.
+
+            This exercises the real `bin/nex` CLI path specifically: it
+            exports the project root via the NEX_USER_DIR env var and never
+            sets the `nex.user.dir` system property (that's REPL-only), so
+            it has to run as a subprocess — nex.interpreter/find-intern-file
+            reads System/getenv directly, which this JVM's in-process tests
+            can't fake (see examples-smoke-test's run-failure-with-nex-user-dir
+            for the same constraint). Before the fix, intern-search-roots only
+            fell back to the `nex.user.dir` property, so a nested intern (one
+            resolved while a just-interned lib file's own :debug-source, not
+            the script's, was current) lost the project root entirely once it
+            needed a lib/<path> outside its own directory: source-dir pointed
+            at the interning file's own directory and pwd resolved to
+            NEX_HOME (bin/nex cd's there before starting the JVM), so
+            lib/transactions/account.nex could not reach lib/units/Money.nex."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-nested-intern-" (System/nanoTime)))
+          money-dir (io/file tmp-dir "lib" "units")
+          money-file (io/file money-dir "Money.nex")
+          account-dir (io/file tmp-dir "lib" "transactions")
+          account-file (io/file account-dir "account.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs money-dir)
+      (.mkdirs account-dir)
+      (spit money-file "class Money
+create
+  make(a: Real) do
+    amount := a
+  end
+feature
+  amount: Real
+end")
+      (spit account-file "intern units/Money
+
+class Account
+create
+  make(b: Money) do
+    balance := b
+  end
+feature
+  balance: Money
+end")
+      (spit main-file "intern transactions/account as Account
+
+let a := create Account.make(create Money.make(100.0))
+print(a.balance.amount)")
+      (try
+        (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
+                                  (into-array String
+                                              ["java" "-cp" (System/getProperty "java.class.path")
+                                               "clojure.main" "-m" "nex.eval" (.getPath main-file)]))]
+          (.put (.environment pb) "NEX_USER_DIR" (.getPath tmp-dir))
+          (.redirectErrorStream pb true)
+          (let [proc (.start pb)
+                output (slurp (.getInputStream proc))
+                code (.waitFor proc)]
+            (is (not (.contains output "Cannot find intern file")) output)
+            (is (zero? code) output)
+            (is (.contains output "100.0") output)))
+        (finally
+          (.delete money-file)
+          (.delete money-dir)
+          (.delete account-file)
+          (.delete account-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
