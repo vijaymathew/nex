@@ -1873,6 +1873,34 @@
      ([source-id program seen-files]
       (:functions (resolve-interned* source-id program seen-files))))
 
+(defn duplicate-function-names
+  "Names appearing more than once in FN-DEFS, in first-occurrence order.
+
+   A single file's own duplicate free-function definitions are already
+   caught by the walker at parse time (its :program rule computes
+   :duplicate-functions and collapses :functions to one def per name before
+   either ever reaches here), so calling this on an intern-merged function
+   list (this file's own :functions concatenated with every interned file's,
+   via resolve-interned-functions) only ever surfaces a NEW collision: two
+   different files, reached via separate `intern`s, that each define a
+   function under the same bare name. There is no way to rename either one
+   on the way in today — `intern ... as` aliases a class, not a function
+   (see nex.interpreter/process-intern and resolve-interned*'s own
+   alias-type-alias, both of which only ever match against a file's
+   :classes).
+
+   nex.eval/augment-ast-with-interns and nex.compiler.jvm.file's own union
+   this into the merged program's :duplicate-functions, which
+   nex.typechecker/check-program already throws a clear \"Function 'x' is
+   defined more than once\" diagnostic for — without this, two colliding
+   interned functions type-checked as an unrelated program and only failed
+   at bytecode emission, as an opaque JVM ClassFormatError naming a mangled
+   method, not the user's actual function name."
+  [fn-defs]
+  (let [names (map :name fn-defs)
+        freq (frequencies names)]
+    (vec (filter #(> (get freq %) 1) (distinct names)))))
+
 (defn resolve-interned-type-aliases
      "Resolve intern declarations to the `declare type` aliases (including
       refinement types) they bring into scope for static analysis

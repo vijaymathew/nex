@@ -554,6 +554,82 @@ print(c.tag)")
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
+(defn- spit-function-lib!
+  "Write a single free function `<name>` into
+   <tmp-dir>/lib/<path>/<name>.nex — `intern <path>/<name>` resolves against
+   this layout (see find-intern-file). BODY-EXPR is the function's `result :=
+   <expr>` right-hand side, so two libs can each define a same-named function
+   with a different, checkable behavior."
+  [tmp-dir path name body-expr]
+  (let [dir (io/file tmp-dir "lib" path)
+        f (io/file dir (str name ".nex"))]
+    (.mkdirs dir)
+    (spit f (str "function " name "(n: Integer): Integer do result := " body-expr " end"))
+    f))
+
+;; Unlike a class, a colliding free function has no path-qualified escape
+;; hatch today — `intern ... as` only ever aliases a class (see
+;; nex.interpreter/duplicate-function-names and process-intern/
+;; resolve-interned*'s alias-type-alias, both of which match only against a
+;; file's :classes). Two interned functions sharing a bare name used to slip
+;; straight past type-checking (nothing merged :duplicate-functions across
+;; the intern boundary) and fail only once lowering emitted two same-named,
+;; same-arity methods into one class file — an opaque JVM ClassFormatError
+;; naming a mangled method, not the user's function.
+(deftest file-eval-cross-file-duplicate-function-is-a-compile-error-test
+  (testing "two interned modules exporting the same bare function name is a
+            compile-time \"defined more than once\" error, on both backends,
+            not a JVM ClassFormatError at bytecode emission"
+    (doseq [interpret? [false true]]
+      (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                             (str "nex-ns-fn-collision-" (System/nanoTime) "-" interpret?))
+            lib1-file (spit-function-lib! tmp-dir "lib1" "foo" "n + 1")
+            lib2-file (spit-function-lib! tmp-dir "lib2" "foo" "n - 1")
+            main-file (io/file tmp-dir "main.nex")]
+        (spit main-file "intern lib1/foo
+intern lib2/foo
+
+print(foo(10))")
+        (try
+          (let [ex (is (thrown? clojure.lang.ExceptionInfo
+                                (e/eval-file (.getPath main-file) {:interpret? interpret?})))
+                message (ex-message ex)]
+            (is (.contains message "Function 'foo' is defined more than once") message)
+            (is (not (.contains message "ClassFormatError")) message))
+          (finally
+            (.delete lib1-file)
+            (.delete lib2-file)
+            (.delete main-file)
+            (.delete (io/file tmp-dir "lib" "lib1"))
+            (.delete (io/file tmp-dir "lib" "lib2"))
+            (.delete (io/file tmp-dir "lib"))
+            (.delete tmp-dir)))))))
+
+(deftest file-eval-cross-file-sibling-functions-unaffected-by-collision-check-test
+  (testing "a non-colliding function from an interned file is unaffected —
+            the collision check only ever flags a NAME that actually repeats"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-no-collision-" (System/nanoTime)))
+          lib1-file (spit-function-lib! tmp-dir "lib1" "foo" "n + 1")
+          lib2-file (spit-function-lib! tmp-dir "lib2" "bar" "n - 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern lib1/foo
+intern lib2/bar
+
+print(foo(10))
+print(bar(10))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file) {}))]
+          (is (= "11\n9\n" output)))
+        (finally
+          (.delete lib1-file)
+          (.delete lib2-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "lib1"))
+          (.delete (io/file tmp-dir "lib" "lib2"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
 (deftest file-eval-path-qualified-intern-as-alias-resolves-collision-test
   (testing "`intern billing/Account as Billing_Account` DOES resolve a
             same-named collision, on both backends — Billing_Account's

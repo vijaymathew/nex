@@ -111,17 +111,27 @@
    a refinement declared in one file and used (in a `let`/param/return/field,
    or a `convert` target) in another was invisible to that pass the first
    time around. See nex.walker/inject-refinement-checks and
-   /resolve-convert-aliases for why re-running both here is safe."
+   /resolve-convert-aliases for why re-running both here is safe.
+
+   Also extends :duplicate-functions across the merge — two files reached
+   via separate `intern`s that each define a function under the same bare
+   name (there's no `as`-aliasing for a function to rename either one, see
+   nex.interpreter/duplicate-function-names) previously type-checked as an
+   unrelated program and only failed at bytecode emission, as an opaque JVM
+   ClassFormatError naming a mangled method rather than a function name."
   [source-id ast]
   (let [intern-classes (interp/resolve-interned-classes source-id ast)
         intern-functions (interp/resolve-interned-functions source-id ast)
         intern-imports (interp/resolve-interned-imports source-id ast)
         intern-type-aliases (interp/resolve-interned-type-aliases source-id ast)
         merged-imports (merge-import-like-nodes intern-imports (:imports ast))
+        merged-functions (vec (concat intern-functions (:functions ast)))
         merged (assoc ast
                       :imports merged-imports
                       :classes (vec (concat intern-classes (:classes ast)))
-                      :functions (vec (concat intern-functions (:functions ast)))
+                      :functions merged-functions
+                      :duplicate-functions (vec (distinct (concat (:duplicate-functions ast)
+                                                                   (interp/duplicate-function-names merged-functions))))
                       :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))]
     (-> merged
         walker/resolve-convert-aliases

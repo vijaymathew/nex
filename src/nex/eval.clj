@@ -12,15 +12,23 @@
 
 (defn- augment-ast-with-interns
   [source-id ast]
-  (assoc ast
-         :classes (vec (concat (interp/resolve-interned-classes source-id ast)
-                               (:classes ast)))
-         :functions (vec (concat (interp/resolve-interned-functions source-id ast)
-                                 (:functions ast)))
-         :imports (vec (concat (interp/resolve-interned-imports source-id ast)
-                               (:imports ast)))
-         :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
-                                    (:type-aliases ast)))))
+  (let [merged-functions (vec (concat (interp/resolve-interned-functions source-id ast)
+                                      (:functions ast)))]
+    (assoc ast
+           :classes (vec (concat (interp/resolve-interned-classes source-id ast)
+                                 (:classes ast)))
+           :functions merged-functions
+           ;; This file's own same-file duplicates (already collapsed into
+           ;; merged-functions, and already flagged in :duplicate-functions
+           ;; by the walker at parse time) plus any NEW collision the merge
+           ;; itself introduces — two interned files defining the same bare
+           ;; function name. See nex.interpreter/duplicate-function-names.
+           :duplicate-functions (vec (distinct (concat (:duplicate-functions ast)
+                                                        (interp/duplicate-function-names merged-functions))))
+           :imports (vec (concat (interp/resolve-interned-imports source-id ast)
+                                 (:imports ast)))
+           :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
+                                      (:type-aliases ast))))))
 
 (defn- type-check-ast!
   [source-id ast]
