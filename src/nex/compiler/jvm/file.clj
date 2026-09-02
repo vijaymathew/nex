@@ -11,7 +11,8 @@
             [nex.interpreter :as interp]
             [nex.lower :as lower]
             [nex.parser :as p]
-            [nex.typechecker :as tc])
+            [nex.typechecker :as tc]
+            [nex.walker :as walker])
   (:import [java.io ByteArrayInputStream File FileInputStream]
            [java.util.jar JarEntry JarFile JarOutputStream Manifest]))
 
@@ -103,17 +104,28 @@
             incoming)))
 
 (defn- augment-ast-with-interns
+  "Merge every interned file's classes/functions/imports/type-aliases into
+   AST. Also re-runs the refinement pass (convert-target rejection, then
+   narrowing-site checks — same order as the per-file walk) on the merged
+   result: each file was walked on its own before intern-resolution ran, so
+   a refinement declared in one file and used (in a `let`/param/return/field,
+   or a `convert` target) in another was invisible to that pass the first
+   time around. See nex.walker/inject-refinement-checks and
+   /resolve-convert-aliases for why re-running both here is safe."
   [source-id ast]
   (let [intern-classes (interp/resolve-interned-classes source-id ast)
         intern-functions (interp/resolve-interned-functions source-id ast)
         intern-imports (interp/resolve-interned-imports source-id ast)
         intern-type-aliases (interp/resolve-interned-type-aliases source-id ast)
-        merged-imports (merge-import-like-nodes intern-imports (:imports ast))]
-    (assoc ast
-           :imports merged-imports
-           :classes (vec (concat intern-classes (:classes ast)))
-           :functions (vec (concat intern-functions (:functions ast)))
-           :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))))
+        merged-imports (merge-import-like-nodes intern-imports (:imports ast))
+        merged (assoc ast
+                      :imports merged-imports
+                      :classes (vec (concat intern-classes (:classes ast)))
+                      :functions (vec (concat intern-functions (:functions ast)))
+                      :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))]
+    (-> merged
+        walker/resolve-convert-aliases
+        walker/inject-refinement-checks)))
 
 (defn- debug-location
   [x]
@@ -124,11 +136,22 @@
     (and (map? x) (:line x))
     [(:line x) (:column x)]
 
-    :else
+    ;; `x` reaches here as ex-data or an ex-data value, which is not always a
+    ;; node map — walker.clj's refinement/convert-alias rejections carry a
+    ;; plain string message (`{:error "..."}`), and `select-keys` throws on
+    ;; anything but a map (or nil), so both non-map shapes need handling
+    ;; before falling through to it.
+    (map? x)
     (some debug-location
           (concat
            (vals (select-keys x [:expr :stmt :value :target :left :right :condition]))
-           (when (sequential? x) x)))))
+           (when (sequential? x) x)))
+
+    (sequential? x)
+    (some debug-location x)
+
+    :else
+    nil))
 
 (defn- format-exception-diagnostics
   [^Exception e]

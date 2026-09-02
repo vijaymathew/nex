@@ -590,32 +590,46 @@
   {:type :identifier :name name})
 
 (defn- expand-refinement-lets
-  "Expand each `let x: R := …` in a statement vector into [the-let, check]."
+  "Expand each `let x: R := …` in a statement vector into [the-let, check].
+
+   Skips a `:let` already marked :refinement-checked — inject-refinement-checks
+   can run a second time over the same node (see its own docstring for why),
+   and without this guard a narrowing site local to one file would pick up a
+   duplicate check on the second pass."
   [stmts refinements]
   (vec (mapcat
         (fn [s]
           (if-let [r (and (map? s) (= :let (:type s))
+                          (not (:refinement-checked s))
                           (get refinements (refinement-name (:var-type s))))]
-            [s (make-refinement-check (refinement-name (:var-type s)) r (identifier-node (:name s)))]
+            [(assoc s :refinement-checked true)
+             (make-refinement-check (refinement-name (:var-type s)) r (identifier-node (:name s)))]
             [s]))
         stmts)))
 
 (defn- add-param-return-checks
   "Prepend a check for each refinement-typed parameter and append one for a
-  refinement return type (on `result`)."
+  refinement return type (on `result`).
+
+   A no-op when NODE is already marked :refinement-checks-injected? — see
+   expand-refinement-lets for why a second injection pass needs this guard."
   [node refinements]
-  (let [param-checks (keep (fn [p]
-                             (when-let [r (get refinements (refinement-name (:type p)))]
-                               (make-refinement-check (refinement-name (:type p)) r (identifier-node (:name p)))))
-                           (:params node))
-        ret-name (refinement-name (:return-type node))
-        ret-r (get refinements ret-name)
-        ret-check (when ret-r (make-refinement-check ret-name ret-r (identifier-node "result")))]
-    (if (or (seq param-checks) ret-check)
-      (assoc node :body (vec (concat param-checks
-                                     (or (:body node) [])
-                                     (when ret-check [ret-check]))))
-      node)))
+  (if (:refinement-checks-injected? node)
+    node
+    (let [param-checks (keep (fn [p]
+                               (when-let [r (get refinements (refinement-name (:type p)))]
+                                 (make-refinement-check (refinement-name (:type p)) r (identifier-node (:name p)))))
+                             (:params node))
+          ret-name (refinement-name (:return-type node))
+          ret-r (get refinements ret-name)
+          ret-check (when ret-r (make-refinement-check ret-name ret-r (identifier-node "result")))]
+      (if (or (seq param-checks) ret-check)
+        (assoc node
+               :refinement-checks-injected? true
+               :body (vec (concat param-checks
+                                  (or (:body node) [])
+                                  (when ret-check [ret-check]))))
+        (assoc node :refinement-checks-injected? true)))))
 
 ;; `convert` (and the type patterns that desugar to it) tests a *runtime* type.
 ;; A `declare type` alias names no runtime type, so the test could never match:
@@ -669,9 +683,21 @@
                                    type-expr)))
       node)))
 
-(defn- resolve-convert-aliases
+(defn resolve-convert-aliases
   "Rewrite every `convert` whose target names a plain alias to name the alias's
-  base type, and reject one whose target names a refinement."
+  base type, and reject one whose target names a refinement.
+
+   Public so a later pass over a program with more type-aliases in scope than
+   its own file had at parse time (an intern-merged program — see
+   nex.compiler.jvm.file/augment-ast-with-interns) can re-run this: a
+   `convert x to y: R` naming a refinement R declared in a different,
+   interned file was invisible to `aliases` here at that file's own parse
+   time, so it silently passed through unresolved and unrejected instead of
+   raising the same 'refinement type, so it cannot be used as a runtime type
+   test' error a same-file refinement already gets. Safe to call twice: a
+   `:convert` this already resolved now names its base type (or a name that
+   is itself not a refinement), which `aliases` either doesn't contain or
+   maps to itself, so a second pass is a no-op for it."
   [program]
   (let [aliases (into {} (map (juxt :name identity) (:type-aliases program)))]
     (if (empty? aliases)
@@ -724,14 +750,20 @@
   through `this`: the tree-walking interpreter's own object value-semantics
   (a mutation write-back can leave a stale copy of an object reachable
   through an outer binding) cannot yet be trusted to see a field as freshly
-  written from inside the very statement that just wrote it."
+  written from inside the very statement that just wrote it.
+
+   A no-op when STMT is already marked :refinement-checked — see
+   expand-refinement-lets for why a second injection pass needs this guard;
+   the rewritten assignment below carries the mark forward so a later pass
+   doesn't wrap it a second time."
   [stmt field-refinements shadowed]
-  (when-let [field-name (assign-target-field-name stmt shadowed)]
-    (when-let [r (get field-refinements field-name)]
-      (let [tmp (str "__field_check_" (swap! next-fn-id inc) "__")]
-        [{:type :let :name tmp :var-type nil :value (:value stmt)}
-         (assoc stmt :value (identifier-node tmp))
-         (make-refinement-check field-name r (identifier-node tmp))]))))
+  (when-not (:refinement-checked stmt)
+    (when-let [field-name (assign-target-field-name stmt shadowed)]
+      (when-let [r (get field-refinements field-name)]
+        (let [tmp (str "__field_check_" (swap! next-fn-id inc) "__")]
+          [{:type :let :name tmp :var-type nil :value (:value stmt)}
+           (assoc stmt :value (identifier-node tmp) :refinement-checked true)
+           (make-refinement-check field-name r (identifier-node tmp))])))))
 
 (defn- inject-field-checks-in-body
   "Insert a refinement check after each statement in STMTS that narrows a
@@ -785,7 +817,18 @@
 (defn inject-refinement-checks
   "Rewrite a walked program, injecting predicate checks at every refinement
   narrowing site (let bindings, parameters, returns, and field assignments)
-  throughout the tree."
+  throughout the tree.
+
+   Runs once per file at parse time, so it only ever sees that file's own
+   `:type-aliases` — a refinement declared in a file reached only via
+   `intern` is invisible here, and a narrowing site that uses it gets no
+   check. `nex.compiler.jvm.file/augment-ast-with-interns` re-runs this on
+   the intern-merged program (every reachable file's classes/functions/
+   type-aliases combined) so those cross-file narrowing sites are covered
+   too. Safe to call twice on the same program: expand-refinement-lets,
+   add-param-return-checks, and narrow-field-assignment each skip a node
+   already marked from a prior pass, so a same-file narrowing site checked
+   here already is left alone rather than double-checked."
   [program]
   (let [refinements (collect-refinements program)]
     (if (empty? refinements)
