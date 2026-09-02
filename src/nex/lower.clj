@@ -992,8 +992,15 @@
                      (class-method-def call-name (count (:args expr)))
                      function-return-type))))
        (get builtin-free-function-return-types (:method expr))
+       ;; A bare call whose :method is a dot-qualified name
+       ;; (nex.walker/resolve-qualified-function-calls already rewrote
+       ;; `trade.ship(x)` to :method "trade.ship" before this ever runs)
+       ;; only matches an interned fn-def's :qualified-name, never its bare
+       ;; :name — check both, mirroring nex.typechecker/check-program's own
+       ;; dual var registration for the same reason.
        (when-let [fn-def (some (fn [fn-def]
-                                 (when (and (= (:name fn-def) (:method expr))
+                                 (when (and (or (= (:name fn-def) (:method expr))
+                                                (= (:qualified-name fn-def) (:method expr)))
                                             (= (count (or (:params fn-def) []))
                                                (count (:args expr))))
                                    fn-def))
@@ -1031,6 +1038,34 @@
 (defn- lowered-instance-method-name
   [method-def]
   (str "__method_" (:name method-def) "$arity" (count (:params method-def))))
+
+(defn- lowered-top-level-function-emitted-name
+  "lowered-instance-method-name for a top-level FN-DEF specifically — every
+   top-level function is emitted as a direct method on the single shared
+   Program class (unlike an ordinary class's methods, each already
+   namespaced by living inside its own class), so two interned files
+   declaring the same bare function name would otherwise emit the identical
+   JVM method name here — a separate collision from the *wrapper class's*
+   own name (nex.walker/qualify-interned-function-class-names).
+
+   Only mangles the name (:qualified-name, sanitized: a JVM method name
+   cannot contain '.') when qualify-interned-function-class-names actually
+   renamed this fn-def's :class-name — i.e. only on a genuine collision,
+   the same gating it applies and for the same reason: mangling every
+   interned function's method name unconditionally, not just a colliding
+   one's, broke generic free functions like data/Result's result_map (see
+   qualify-interned-function-class-names's docstring). :class-name differing
+   from the plain `<name>_Function` parse-time default is how a caller here
+   (which only ever sees this one fn-def, not the whole merged list
+   qualify-interned-function-class-names compared against) can tell that
+   happened."
+  [fn-def]
+  (if (and (:qualified-name fn-def)
+           (:class-name fn-def)
+           (not= (:class-name fn-def) (str (:name fn-def) "_Function")))
+    (lowered-instance-method-name
+     (assoc fn-def :name (str/replace (:qualified-name fn-def) "." "_")))
+    (lowered-instance-method-name fn-def)))
 
 (defn- lowered-constructor-method-name
   [ctor-def]
@@ -5461,9 +5496,10 @@
     (if (or (:declaration-only? fn-def)
             (:deferred? fn-def))
       (ir/fn-node {:name (:name fn-def)
+                   :qualified-name (:qualified-name fn-def)
                    :owner unit-name
                    :emitted-name (if (:class-name fn-def)
-                                   (lowered-instance-method-name fn-def)
+                                   (lowered-top-level-function-emitted-name fn-def)
                                    (lowered-function-method-name fn-def))
                    :params params
                    :return-type return-type
@@ -5530,9 +5566,10 @@
                             (last body))
                           nil)]
         (ir/fn-node {:name (:name fn-def)
+                     :qualified-name (:qualified-name fn-def)
                      :owner unit-name
                      :emitted-name (if (:class-name fn-def)
-                                     (lowered-instance-method-name fn-def)
+                                     (lowered-top-level-function-emitted-name fn-def)
                                      (lowered-function-method-name fn-def))
                      :params params
                      :return-type return-type

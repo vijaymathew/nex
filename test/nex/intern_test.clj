@@ -567,19 +567,23 @@ print(c.tag)")
     (spit f (str "function " name "(n: Integer): Integer do result := " body-expr " end"))
     f))
 
-;; Unlike a class, a colliding free function has no path-qualified escape
-;; hatch today — `intern ... as` only ever aliases a class (see
-;; nex.interpreter/duplicate-function-names and process-intern/
+;; Unlike a class, a colliding free function has no `intern ... as` escape
+;; hatch — that only ever aliases a class (see process-intern and
 ;; resolve-interned*'s alias-type-alias, both of which match only against a
-;; file's :classes). Two interned functions sharing a bare name used to slip
-;; straight past type-checking (nothing merged :duplicate-functions across
-;; the intern boundary) and fail only once lowering emitted two same-named,
-;; same-arity methods into one class file — an opaque JVM ClassFormatError
-;; naming a mangled method, not the user's function.
-(deftest file-eval-cross-file-duplicate-function-is-a-compile-error-test
-  (testing "two interned modules exporting the same bare function name is a
-            compile-time \"defined more than once\" error, on both backends,
-            not a JVM ClassFormatError at bytecode emission"
+;; file's :classes). Instead, `trade.ship(x)`-style dot-qualified calls
+;; (nex.walker/resolve-qualified-function-calls, nex.typechecker/check-
+;; program's own ambiguous-function tracking) let two colliding interned
+;; functions coexist: a *bare* reference to the colliding name is rejected
+;; with a clear "Ambiguous reference" error, at the call site that actually
+;; uses it, not the whole program merely for having interned both — and
+;; each one is still reachable by its qualified name. This used to slip
+;; straight past type-checking entirely and fail only once lowering emitted
+;; two same-named, same-arity methods into one class file — an opaque JVM
+;; ClassFormatError naming a mangled method, not the user's function.
+(deftest file-eval-cross-file-bare-function-collision-is-an-ambiguous-reference-error-test
+  (testing "a bare call to a name interned from two files is a compile-time
+            \"Ambiguous reference\" error, on both backends, not a JVM
+            ClassFormatError at bytecode emission"
     (doseq [interpret? [false true]]
       (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
                              (str "nex-ns-fn-collision-" (System/nanoTime) "-" interpret?))
@@ -594,7 +598,9 @@ print(foo(10))")
           (let [ex (is (thrown? clojure.lang.ExceptionInfo
                                 (e/eval-file (.getPath main-file) {:interpret? interpret?})))
                 message (ex-message ex)]
-            (is (.contains message "Function 'foo' is defined more than once") message)
+            (is (.contains message "Ambiguous reference to 'foo'") message)
+            (is (.contains message "lib1.foo") message)
+            (is (.contains message "lib2.foo") message)
             (is (not (.contains message "ClassFormatError")) message))
           (finally
             (.delete lib1-file)
@@ -604,6 +610,86 @@ print(foo(10))")
             (.delete (io/file tmp-dir "lib" "lib2"))
             (.delete (io/file tmp-dir "lib"))
             (.delete tmp-dir)))))))
+
+(deftest file-eval-cross-file-function-collision-resolves-via-qualified-call-test
+  (testing "each colliding interned function is still reachable — by its
+            qualified name (`lib1.foo(x)`/`lib2.foo(x)`), on the compiled
+            backend (nex.walker/resolve-qualified-function-calls is a
+            compiled-backend-only rewrite; --interpret still hits the
+            pre-existing, unrelated limitation of resolving a function-only
+            intern target at all — see process-intern)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-qualified-call-" (System/nanoTime)))
+          lib1-file (spit-function-lib! tmp-dir "lib1" "foo" "n + 1")
+          lib2-file (spit-function-lib! tmp-dir "lib2" "foo" "n - 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern lib1/foo
+intern lib2/foo
+
+print(lib1.foo(10))
+print(lib2.foo(10))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file)))]
+          (is (= "11\n9\n" output)))
+        (finally
+          (.delete lib1-file)
+          (.delete lib2-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "lib1"))
+          (.delete (io/file tmp-dir "lib" "lib2"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-function-call-resolves-nested-path-test
+  (testing "a multi-segment intern path resolves as a nested dot-chain call
+            (`trade.core.ship(x)`), not just a single-segment one — even
+            with no collision at all, since a qualified call works whether
+            or not the bare name would have"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-nested-path-" (System/nanoTime)))
+          lib-file (spit-function-lib! tmp-dir "trade/core" "ship" "n * 100")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern trade/core/ship
+
+print(trade.core.ship(3))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file)))]
+          (is (= "300\n" output)))
+        (finally
+          (.delete lib-file)
+          (.delete (io/file tmp-dir "lib" "trade" "core"))
+          (.delete (io/file tmp-dir "lib" "trade"))
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-function-call-yields-to-a-same-named-local-test
+  (testing "a bound local/param sharing the intern path's leading segment
+            always wins — `trade.ship(x)` stays an ordinary (rejected as
+            undefined) member-call chain on the local, never reinterpreted
+            as the module path, anywhere the local's name is in scope at
+            all (nex.walker/collect-possibly-bound-names is a coarse,
+            whole-program check, not a precise per-scope one)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-shadow-" (System/nanoTime)))
+          lib-file (spit-function-lib! tmp-dir "trade" "ship" "n + 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern trade/ship
+
+function use(trade: Integer): Integer do
+  result := trade + 1
+end
+
+print(trade.ship(10))")
+      (try
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file))))]
+          (is (.contains (ex-message ex) "Undefined variable: trade") (ex-message ex)))
+        (finally
+          (.delete lib-file)
+          (.delete (io/file tmp-dir "lib" "trade"))
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
 
 (deftest file-eval-cross-file-sibling-functions-unaffected-by-collision-check-test
   (testing "a non-colliding function from an interned file is unaffected —

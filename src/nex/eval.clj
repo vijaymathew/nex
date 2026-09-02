@@ -7,28 +7,32 @@
             [nex.typechecker :as tc]
             [nex.types.runtime :as rt]
             [nex.compiler.jvm.file :as jvm-file]
-            [nex.compiler.jvm.classloader :as loader])
+            [nex.compiler.jvm.classloader :as loader]
+            [nex.walker :as walker])
   (:import [clj_antlr ParseError]))
 
 (defn- augment-ast-with-interns
+  "Merge every interned file's classes/functions/imports/type-aliases, then
+   re-run walker/qualify-interned-function-class-names and
+   walker/resolve-qualified-function-calls on the merge — see
+   nex.compiler.jvm.file's own copy of this function for why (in short: two
+   interned files defining the same bare function name are left to coexist,
+   resolved by qualified name at each call site, rather than rejected
+   outright the moment both are interned — which also needs each one's
+   synthetic wrapper class renamed uniquely, or bytecode emission collides
+   regardless of qualification)."
   [source-id ast]
-  (let [merged-functions (vec (concat (interp/resolve-interned-functions source-id ast)
-                                      (:functions ast)))]
-    (assoc ast
-           :classes (vec (concat (interp/resolve-interned-classes source-id ast)
-                                 (:classes ast)))
-           :functions merged-functions
-           ;; This file's own same-file duplicates (already collapsed into
-           ;; merged-functions, and already flagged in :duplicate-functions
-           ;; by the walker at parse time) plus any NEW collision the merge
-           ;; itself introduces — two interned files defining the same bare
-           ;; function name. See nex.interpreter/duplicate-function-names.
-           :duplicate-functions (vec (distinct (concat (:duplicate-functions ast)
-                                                        (interp/duplicate-function-names merged-functions))))
-           :imports (vec (concat (interp/resolve-interned-imports source-id ast)
-                                 (:imports ast)))
-           :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
-                                      (:type-aliases ast))))))
+  (-> (assoc ast
+             :classes (vec (concat (interp/resolve-interned-classes source-id ast)
+                                   (:classes ast)))
+             :functions (walker/qualify-interned-function-class-names
+                         (vec (concat (interp/resolve-interned-functions source-id ast)
+                                      (:functions ast))))
+             :imports (vec (concat (interp/resolve-interned-imports source-id ast)
+                                   (:imports ast)))
+             :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
+                                       (:type-aliases ast))))
+      walker/resolve-qualified-function-calls))
 
 (defn- type-check-ast!
   [source-id ast]

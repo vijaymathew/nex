@@ -105,37 +105,46 @@
 
 (defn- augment-ast-with-interns
   "Merge every interned file's classes/functions/imports/type-aliases into
-   AST. Also re-runs the refinement pass (convert-target rejection, then
-   narrowing-site checks — same order as the per-file walk) on the merged
-   result: each file was walked on its own before intern-resolution ran, so
-   a refinement declared in one file and used (in a `let`/param/return/field,
-   or a `convert` target) in another was invisible to that pass the first
-   time around. See nex.walker/inject-refinement-checks and
-   /resolve-convert-aliases for why re-running both here is safe.
+   AST. Also re-runs, on the merged result, passes that each ran once per
+   file at parse time — before intern-resolution had merged anything — so
+   each only ever saw that one file's own declarations:
 
-   Also extends :duplicate-functions across the merge — two files reached
-   via separate `intern`s that each define a function under the same bare
-   name (there's no `as`-aliasing for a function to rename either one, see
-   nex.interpreter/duplicate-function-names) previously type-checked as an
-   unrelated program and only failed at bytecode emission, as an opaque JVM
-   ClassFormatError naming a mangled method rather than a function name."
+   - walker/qualify-interned-function-class-names: two interned files
+     defining the same bare function name emitted the SAME synthetic
+     wrapper class name (derived from the bare name alone at parse time) —
+     a JVM ClassFormatError at bytecode emission, regardless of whether
+     either was ever called. Renaming it from each fn-def's :qualified-name
+     instead (unique per intern path) has to happen before either of the
+     next two passes see :functions.
+   - walker/resolve-convert-aliases and walker/inject-refinement-checks: a
+     refinement declared in one file and used (`let`/param/return/field, or
+     a `convert` target) in another was invisible to the refinement pass
+     the first time around.
+   - walker/resolve-qualified-function-calls: with the class-name collision
+     above fixed, two interned files defining the same bare function name
+     can coexist rather than being an unconditional compile error (there's
+     no `intern ... as` for a function the way there is for a class) —
+     callable via their qualified name (`trade.ship(x)`/`other.ship(x)`);
+     nex.typechecker/check-program's own ambiguous-function tracking
+     (mirroring its existing ambiguous-class one) rejects only an actual
+     *bare*, still-ambiguous reference, at that call site, not the whole
+     program merely for having interned both."
   [source-id ast]
   (let [intern-classes (interp/resolve-interned-classes source-id ast)
         intern-functions (interp/resolve-interned-functions source-id ast)
         intern-imports (interp/resolve-interned-imports source-id ast)
         intern-type-aliases (interp/resolve-interned-type-aliases source-id ast)
         merged-imports (merge-import-like-nodes intern-imports (:imports ast))
-        merged-functions (vec (concat intern-functions (:functions ast)))
         merged (assoc ast
                       :imports merged-imports
                       :classes (vec (concat intern-classes (:classes ast)))
-                      :functions merged-functions
-                      :duplicate-functions (vec (distinct (concat (:duplicate-functions ast)
-                                                                   (interp/duplicate-function-names merged-functions))))
+                      :functions (walker/qualify-interned-function-class-names
+                                  (vec (concat intern-functions (:functions ast))))
                       :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))]
     (-> merged
         walker/resolve-convert-aliases
-        walker/inject-refinement-checks)))
+        walker/inject-refinement-checks
+        walker/resolve-qualified-function-calls)))
 
 (defn- debug-location
   [x]

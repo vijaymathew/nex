@@ -709,6 +709,140 @@
            n))
        program))))
 
+(defn qualify-interned-function-class-names
+  "An interned function's synthetic wrapper class name (build-function-node
+   derives it as `<bare-name>_Function`, e.g. `ship_Function`) is computed
+   at parse time from its bare :name alone, before intern-merging could
+   know whether another file declares a same-named function too. Two
+   interned files that both declare `function ship(...)` therefore emit the
+   IDENTICAL synthetic class name into the merged program — a JVM
+   ClassFormatError (duplicate method) at bytecode-emission time.
+
+   Only rename an fn-def whose :class-name actually collides with another
+   fn-def's in FUNCTIONS — to one derived from its :qualified-name instead,
+   unique per intern path by construction — leaving every non-colliding
+   interned function's :class-name (and its nested :class-def's :name, kept
+   in lockstep, since lowering reads the class name from both places)
+   exactly as parsed. This is deliberately narrower than 'rename every
+   interned function unconditionally': that first version broke generic
+   free functions like data/Result's result_map — something downstream
+   (still unidentified) depends on an unqualified interned function's
+   wrapper class keeping its parse-time name, and renaming it unconditionally
+   surfaced as `Undefined class: Ok[U,E]` resolving result_map's own body.
+   Since only a genuine collision needs a distinct name at all, gating this
+   on one avoids that whole class of regression for the overwhelmingly
+   common (non-colliding) case, at no cost to what this exists to fix."
+  [functions]
+  (let [class-name-freq (frequencies (keep :class-name functions))]
+    (mapv (fn [fn-def]
+            (if (and (:qualified-name fn-def)
+                     (> (get class-name-freq (:class-name fn-def) 0) 1))
+              (let [unique-class-name (str (str/replace (:qualified-name fn-def) "." "_") "_Function")]
+                (-> fn-def
+                    (assoc :class-name unique-class-name)
+                    (assoc-in [:class-def :name] unique-class-name)))
+              fn-def))
+          functions)))
+
+;;
+;; dot-qualified free-function calls (`trade.ship(x)`, `trade.core.ship(x)`)
+;;
+;; A function has no `path/name` syntax the way a class does — `/` means
+;; division in expression position, and calling a function IS an expression,
+;; unlike a class reference (confined to a type position or `create`'s
+;; target, neither of which is `expression` grammar). So qualification here
+;; reuses `.`, resolved semantically rather than syntactically: `trade.ship`
+;; parses as an ordinary method-call chain (`nex.walker`'s existing
+;; memberAccess/callSuffix folding), and is only reinterpreted as a
+;; module-qualified call when its ROOT identifier fails to resolve as a
+;; value at all — a bound local/param/field of that name always wins,
+;; exactly like Python resolving `os.path` against a local named `os`
+;; before ever considering the `os` module.
+;;
+;; That resolution decision has to happen once, as an AST rewrite, not
+;; inside the typechecker's per-node inference: the same merged AST feeds
+;; both type-checking and lowering (nex.compiler.jvm.file/compile-ast), and
+;; whatever the typechecker alone decided about a node would never reach
+;; lowering — a `:call` node either says `trade.ship(x)` or it says
+;; `trade.ship` the qualified name, consistently, before either backend
+;; looks at it. See nex.compiler.jvm.file/augment-ast-with-interns and
+;; nex.eval's own copy, which call this on the intern-merged program (after
+;; every reachable function's :qualified-name is known) for the same reason
+;; inject-refinement-checks and resolve-convert-aliases are re-run there.
+
+(defn- collect-dotted-call-segments
+  "TARGET's chain of identifier hops, oldest-first (`[\"trade\"]` for a plain
+   identifier, `[\"trade\" \"core\"]` for `trade.core`), or nil if TARGET is
+   anything else — a real expression, a call with its own arguments partway
+   through the chain, `this`, `super`, and so on. Only a pure, argument-free
+   chain of member accesses is even a *candidate* for a qualified-function
+   reinterpretation; nothing else is touched.
+
+   Mirrors how nex.walker's own :postfixPart folding already unwraps a
+   plain-identifier target to its bare name string (see call-target) — a
+   one-hop chain (`trade.ship`) arrives here as TARGET = the string
+   \"trade\" directly, not a node; only a longer chain nests further :call
+   nodes."
+  [target]
+  (cond
+    (string? target) [target]
+    (and (map? target) (= :call (:type target)) (false? (:has-parens target))
+         (empty? (:args target)))
+    (some-> (collect-dotted-call-segments (:target target))
+            (conj (:method target)))
+    :else nil))
+
+(defn- collect-possibly-bound-names
+  "Every :name appearing anywhere in PROGRAM — a deliberately coarse,
+   whole-program over-approximation (same technique as body-let-names) of
+   'could this identifier be a real local/param/field/class/function
+   somewhere', used only to decide whether a dotted call chain's ROOT
+   segment is safe to reinterpret as a module path.
+
+   Over-inclusive is the safe direction here: a name wrongly treated as
+   'possibly bound' just leaves a genuinely qualifiable call unrewritten,
+   falling through to the ordinary (today's) 'Undefined variable' error —
+   the same outcome as before this feature existed. Under-inclusive would
+   risk silently stealing a real variable's meaning, which is why this
+   doesn't try to be a precise scope analysis."
+  [program]
+  (into #{}
+        (comp (filter map?) (keep :name))
+        (tree-seq coll? seq program)))
+
+(defn resolve-qualified-function-calls
+  "Rewrite a `path.name(...)` / `path.sub.name(...)` call whose root fails
+   ordinary resolution into an ordinary bare call naming the qualified
+   function directly (`{:target nil :method \"path.name\" ...}`) — from
+   there it type-checks and lowers exactly like any other free-function
+   call; nothing downstream needs to know this rewrite happened at all.
+
+   PROGRAM must already carry every reachable function's :qualified-name
+   (stamped by nex.interpreter/resolve-interned* on the intern-merged
+   :functions list) — this only rewrites a call whose full dotted name
+   matches one of those, so it is a no-op until this program interns
+   something. Safe to call twice: a rewritten call has :target nil, which
+   collect-dotted-call-segments never matches, so a second pass leaves it
+   alone."
+  [program]
+  (let [qualified-fn-names (into #{} (comp (filter :qualified-name) (map :qualified-name))
+                                 (:functions program))]
+    (if (empty? qualified-fn-names)
+      program
+      (let [possibly-bound (collect-possibly-bound-names program)]
+        (walk/postwalk
+         (fn [n]
+           (if (and (map? n) (= :call (:type n)) (:target n))
+             (if-let [segments (collect-dotted-call-segments (:target n))]
+               (let [qualified-name (str/join "." (conj (vec segments) (:method n)))]
+                 (if (and (contains? qualified-fn-names qualified-name)
+                          (not (contains? possibly-bound (first segments))))
+                   (assoc n :target nil :method qualified-name)
+                   n))
+               n)
+             n))
+         program)))))
+
 (defn- class-field-refinements
   "field-name -> refinement info, for CLASS-NODE's own (non-constant) fields
   declared with a refinement type."
