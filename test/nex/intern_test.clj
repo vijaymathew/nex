@@ -716,6 +716,153 @@ print(bar(10))")
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
+(deftest file-eval-own-function-shadows-ambiguous-interned-name-test
+  (testing "a function declared directly in the entry file always wins over a
+            same-named interned function — ambiguity is only ever between two
+            *interned* functions, never against the file's own definitions,
+            the exact function-side analog of
+            file-eval-own-class-shadows-ambiguous-interned-name-test"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-own-wins-" (System/nanoTime)))
+          lib1-file (spit-function-lib! tmp-dir "lib1" "foo" "n + 1")
+          lib2-file (spit-function-lib! tmp-dir "lib2" "foo" "n - 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern lib1/foo
+intern lib2/foo
+
+function foo(n: Integer): Integer do result := n * 100 end
+
+print(foo(10))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file) {}))]
+          (is (not (.contains output "Ambiguous reference")))
+          (is (= "1000\n" output)))
+        (finally
+          (.delete lib1-file)
+          (.delete lib2-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "lib1"))
+          (.delete (io/file tmp-dir "lib" "lib2"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-function-sharing-a-file-with-an-interned-class-is-interned-too-test
+  (testing "`intern path/Class` brings in the whole file, not just the class
+            named after the path — a free function declared alongside that
+            class in the same file arrives too, under its own bare name"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-sharing-file-" (System/nanoTime)))
+          dir (io/file tmp-dir "lib" "billing")
+          lib-file (io/file dir "Account.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs dir)
+      (spit lib-file "class Account
+feature
+  id: Integer
+create
+  make(v: Integer) do id := v end
+end
+
+function summarize(n: Integer): String do result := \"account \" + n.to_string end")
+      (spit main-file "intern billing/Account
+
+let a := create Account.make(1)
+print(a.id)
+print(summarize(5))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file) {}))]
+          (is (= "1\n\"account 5\"\n" output)))
+        (finally
+          (.delete lib-file)
+          (.delete dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-intern-as-does-not-alias-a-function-test
+  (testing "`intern path/name as alias` only ever renames a class — a
+            function is unaffected: the alias name stays undefined, and the
+            bare name keeps working exactly as if `as` had never been written"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-as-noop-" (System/nanoTime)))
+          lib-file (spit-function-lib! tmp-dir "lib1" "foo" "n + 1")
+          bare-call-file (io/file tmp-dir "bare.nex")
+          alias-call-file (io/file tmp-dir "alias.nex")]
+      (spit bare-call-file "intern lib1/foo as foo1
+
+print(foo(10))")
+      (spit alias-call-file "intern lib1/foo as foo1
+
+print(foo1(10))")
+      (try
+        (let [bare-output (with-out-str (e/eval-file (.getPath bare-call-file) {}))]
+          (is (= "11\n" bare-output)
+              "the bare name still works, unaffected by the `as`"))
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo
+                              (e/eval-file (.getPath alias-call-file) {})))]
+          (is (.contains (ex-message ex) "Undefined function: foo1") (ex-message ex)))
+        (finally
+          (.delete lib-file)
+          (.delete (io/file tmp-dir "lib" "lib1"))
+          (.delete bare-call-file)
+          (.delete alias-call-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-function-call-matches-exact-dotted-name-not-a-prefix-test
+  (testing "a single-segment and a multi-segment interned path can each
+            define a function named `ship` without either qualified call
+            reaching the wrong one — nex.walker/resolve-qualified-function-
+            calls matches the whole `.`-chain exactly against one function's
+            own qualified name; there is no prefix search to get confused by
+            (the concern that motivated the discarded underscore-based
+            design, not the `.`-chain one actually built — a chain's own
+            syntax already fixes where the path ends and the call begins)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-exact-match-" (System/nanoTime)))
+          top-file (spit-function-lib! tmp-dir "trade" "ship" "n + 1")
+          nested-file (spit-function-lib! tmp-dir "trade/core" "ship" "n * 100")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern trade/ship
+intern trade/core/ship
+
+print(trade.ship(10))
+print(trade.core.ship(10))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file) {}))]
+          (is (= "11\n1000\n" output)))
+        (finally
+          (.delete top-file)
+          (.delete nested-file)
+          (.delete (io/file tmp-dir "lib" "trade" "core"))
+          (.delete (io/file tmp-dir "lib" "trade"))
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-function-call-checks-argument-types-test
+  (testing "a qualified call type-checks its arguments exactly like an
+            ordinary one — nex.walker/resolve-qualified-function-calls
+            rewrites the AST before type-checking runs, so a bad argument is
+            still caught, not silently accepted just because the call was
+            written qualified"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-qualified-arg-check-" (System/nanoTime)))
+          lib-file (spit-function-lib! tmp-dir "trade" "ship" "n + 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern trade/ship
+
+print(trade.ship(\"not a number\"))")
+      (try
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file) {})))]
+          (is (.contains (ex-message ex) "Type checking failed") (ex-message ex)))
+        (finally
+          (.delete lib-file)
+          (.delete (io/file tmp-dir "lib" "trade"))
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
 (deftest file-eval-path-qualified-intern-as-alias-resolves-collision-test
   (testing "`intern billing/Account as Billing_Account` DOES resolve a
             same-named collision, on both backends — Billing_Account's
