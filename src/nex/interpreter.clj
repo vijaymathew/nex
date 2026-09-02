@@ -1561,13 +1561,30 @@
 (defn- intern-search-roots
      "Return directories to search for project-local interned classes.
       Prefer the currently loaded source file's directory when available, then
-      fall back to the user's original working directory."
+      fall back to the user's original working directory.
+
+      That fallback matters most for a NESTED intern: when a just-interned
+      lib file (say lib/transactions/account.nex) itself interns a
+      path-qualified module (`intern units/Money`), :debug-source has moved
+      to account.nex's own path, so source-dir becomes lib/transactions —
+      not the project root units/Money.nex is actually relative to. Without
+      user-dir, the only other root searched is `pwd`, which for a plain
+      `nex script.nex` invocation is NEX_HOME (the CLI `cd`s there before
+      starting the JVM), not the user's project directory. This only
+      appeared to work when an interned lib happened to sit in the very
+      same directory as the module it, in turn, interned.
+
+      The `nex.user.dir` system property is set by the REPL; a plain
+      `nex script.nex` run instead exports the project root via the
+      NEX_USER_DIR env var (see bin/nex) and never sets the property, so
+      both are checked here."
      [ctx]
      (let [source-dir (when-let [source (:debug-source ctx)]
                         (let [f (clojure.java.io/file source)]
                           (when (.isAbsolute f)
                             (.getParentFile f))))
-           user-dir (when-let [udir (System/getProperty "nex.user.dir")]
+           user-dir (when-let [udir (or (System/getProperty "nex.user.dir")
+                                        (System/getenv "NEX_USER_DIR"))]
                       (clojure.java.io/file udir))
            pwd (clojure.java.io/file ".")]
        (->> [source-dir user-dir pwd]

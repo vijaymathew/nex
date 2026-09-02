@@ -1236,9 +1236,17 @@
   (:jvm-type expr))
 
 (defn- emit-register-repl-fn!
-  [^MethodVisitor mv state-slot owner-internal-name fn-node]
+  "Registers FN-NODE into the running program's functions map under
+   KEY-NAME — see its caller, which registers under both FN-NODE's plain
+   :name and its :qualified-name (when different) so a bare call to a
+   non-colliding interned function AND a dot-qualified call to any interned
+   function (nex.walker/resolve-qualified-function-calls already rewrote
+   `trade.ship(x)` to a bare call naming \"trade.ship\" by the time this
+   runs) each find the same registration under whichever name they call it
+   by."
+  [^MethodVisitor mv state-slot owner-internal-name key-name fn-node]
   (emit-state-load-functions-map! mv state-slot)
-  (.visitLdcInsn mv ^String (:name fn-node))
+  (.visitLdcInsn mv ^String key-name)
   (.visitLdcInsn mv (Type/getObjectType owner-internal-name))
   (.visitLdcInsn mv ^String (:emitted-name fn-node))
   (.visitInsn mv Opcodes/ICONST_2)
@@ -2785,8 +2793,10 @@
           local-ranges (atom {})]
       (binding [*local-debug-ranges* local-ranges]
         (.visitLabel mv start-label)
-        (doseq [fn-node functions]
-          (emit-register-repl-fn! mv 0 owner fn-node))
+        (doseq [fn-node functions
+                key-name (distinct [(:name fn-node) (:qualified-name fn-node)])
+                :when key-name]
+          (emit-register-repl-fn! mv 0 owner key-name fn-node))
         (doseq [stmt body]
           (emit-stmt! mv stmt 0))
         (.visitInsn mv Opcodes/ACONST_NULL)

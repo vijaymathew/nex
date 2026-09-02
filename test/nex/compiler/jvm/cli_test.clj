@@ -107,6 +107,66 @@ worker.await")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest cli-compile-jvm-resolves-nested-path-qualified-intern-test
+  (testing "bin/nex compile jvm resolves a path-qualified intern reached
+            transitively (main.nex -> lib/transaction/account.nex ->
+            lib/units/money.nex), where money.nex sits in a *different* lib
+            subdirectory than account.nex.
+
+            `nex <file>` (cmd_run_script) exports NEX_USER_DIR so
+            nex.interpreter/find-intern-file can fall back to the project
+            root once a narrowing site is reached transitively — the
+            interning file's own directory (lib/transaction) is the wrong
+            root for a `lib/units/...` lookup. `nex compile jvm`
+            (cmd_compile) never exported it, so this same program failed
+            with 'Cannot find intern file for units/Money' through compile
+            even though `nex <file>` already ran it fine."
+    (let [tmp-dir (unique-tmp-dir "nex-cli-jvm-nested-intern")
+          units-dir (io/file tmp-dir "lib" "units")
+          transaction-dir (io/file tmp-dir "lib" "transaction")
+          money-file (io/file units-dir "Money.nex")
+          account-file (io/file transaction-dir "account.nex")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "build")
+          expected-jar (io/file out-dir "main.jar")]
+      (try
+        (.mkdirs units-dir)
+        (.mkdirs transaction-dir)
+        (spit money-file "class Money
+create
+  make(a: Real) do
+    amount := a
+  end
+feature
+  amount: Real
+end")
+        (spit account-file "intern units/Money
+
+class Account
+create
+  make(b: Money) do
+    balance := b
+  end
+feature
+  balance: Money
+end")
+        (spit main-file "intern transaction/account as Account
+
+let a := create Account.make(create Money.make(100.0))
+print(a.balance.amount)")
+        (let [{:keys [exit out]} (run-process! (.getPath tmp-dir)
+                                                nex-bin "compile" "jvm"
+                                                (.getPath main-file) (.getPath out-dir))]
+          (is (not (str/includes? out "Cannot find intern file")) out)
+          (is (= 0 exit) out)
+          (is (.exists expected-jar))
+          (let [{run-exit :exit run-out :out} (run-process! (.getPath tmp-dir) "java" "-jar" (.getPath expected-jar))]
+            (is (= 0 run-exit) run-out)
+            (is (= "100.0" (str/trim run-out)))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest cli-run-script-type-error-diagnostics-test
   (testing "bin/nex <file.nex> typechecks before execution"
     (let [tmp-dir (unique-tmp-dir "nex-cli-run-script-type-error")

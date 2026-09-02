@@ -554,6 +554,168 @@ print(c.tag)")
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
+(defn- spit-function-lib!
+  "Write a single free function `<name>` into
+   <tmp-dir>/lib/<path>/<name>.nex — `intern <path>/<name>` resolves against
+   this layout (see find-intern-file). BODY-EXPR is the function's `result :=
+   <expr>` right-hand side, so two libs can each define a same-named function
+   with a different, checkable behavior."
+  [tmp-dir path name body-expr]
+  (let [dir (io/file tmp-dir "lib" path)
+        f (io/file dir (str name ".nex"))]
+    (.mkdirs dir)
+    (spit f (str "function " name "(n: Integer): Integer do result := " body-expr " end"))
+    f))
+
+;; Unlike a class, a colliding free function has no `intern ... as` escape
+;; hatch — that only ever aliases a class (see process-intern and
+;; resolve-interned*'s alias-type-alias, both of which match only against a
+;; file's :classes). Instead, `trade.ship(x)`-style dot-qualified calls
+;; (nex.walker/resolve-qualified-function-calls, nex.typechecker/check-
+;; program's own ambiguous-function tracking) let two colliding interned
+;; functions coexist: a *bare* reference to the colliding name is rejected
+;; with a clear "Ambiguous reference" error, at the call site that actually
+;; uses it, not the whole program merely for having interned both — and
+;; each one is still reachable by its qualified name. This used to slip
+;; straight past type-checking entirely and fail only once lowering emitted
+;; two same-named, same-arity methods into one class file — an opaque JVM
+;; ClassFormatError naming a mangled method, not the user's function.
+(deftest file-eval-cross-file-bare-function-collision-is-an-ambiguous-reference-error-test
+  (testing "a bare call to a name interned from two files is a compile-time
+            \"Ambiguous reference\" error, on both backends, not a JVM
+            ClassFormatError at bytecode emission"
+    (doseq [interpret? [false true]]
+      (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                             (str "nex-ns-fn-collision-" (System/nanoTime) "-" interpret?))
+            lib1-file (spit-function-lib! tmp-dir "lib1" "foo" "n + 1")
+            lib2-file (spit-function-lib! tmp-dir "lib2" "foo" "n - 1")
+            main-file (io/file tmp-dir "main.nex")]
+        (spit main-file "intern lib1/foo
+intern lib2/foo
+
+print(foo(10))")
+        (try
+          (let [ex (is (thrown? clojure.lang.ExceptionInfo
+                                (e/eval-file (.getPath main-file) {:interpret? interpret?})))
+                message (ex-message ex)]
+            (is (.contains message "Ambiguous reference to 'foo'") message)
+            (is (.contains message "lib1.foo") message)
+            (is (.contains message "lib2.foo") message)
+            (is (not (.contains message "ClassFormatError")) message))
+          (finally
+            (.delete lib1-file)
+            (.delete lib2-file)
+            (.delete main-file)
+            (.delete (io/file tmp-dir "lib" "lib1"))
+            (.delete (io/file tmp-dir "lib" "lib2"))
+            (.delete (io/file tmp-dir "lib"))
+            (.delete tmp-dir)))))))
+
+(deftest file-eval-cross-file-function-collision-resolves-via-qualified-call-test
+  (testing "each colliding interned function is still reachable — by its
+            qualified name (`lib1.foo(x)`/`lib2.foo(x)`), on the compiled
+            backend (nex.walker/resolve-qualified-function-calls is a
+            compiled-backend-only rewrite; --interpret still hits the
+            pre-existing, unrelated limitation of resolving a function-only
+            intern target at all — see process-intern)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-qualified-call-" (System/nanoTime)))
+          lib1-file (spit-function-lib! tmp-dir "lib1" "foo" "n + 1")
+          lib2-file (spit-function-lib! tmp-dir "lib2" "foo" "n - 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern lib1/foo
+intern lib2/foo
+
+print(lib1.foo(10))
+print(lib2.foo(10))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file)))]
+          (is (= "11\n9\n" output)))
+        (finally
+          (.delete lib1-file)
+          (.delete lib2-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "lib1"))
+          (.delete (io/file tmp-dir "lib" "lib2"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-function-call-resolves-nested-path-test
+  (testing "a multi-segment intern path resolves as a nested dot-chain call
+            (`trade.core.ship(x)`), not just a single-segment one — even
+            with no collision at all, since a qualified call works whether
+            or not the bare name would have"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-nested-path-" (System/nanoTime)))
+          lib-file (spit-function-lib! tmp-dir "trade/core" "ship" "n * 100")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern trade/core/ship
+
+print(trade.core.ship(3))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file)))]
+          (is (= "300\n" output)))
+        (finally
+          (.delete lib-file)
+          (.delete (io/file tmp-dir "lib" "trade" "core"))
+          (.delete (io/file tmp-dir "lib" "trade"))
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-function-call-yields-to-a-same-named-local-test
+  (testing "a bound local/param sharing the intern path's leading segment
+            always wins — `trade.ship(x)` stays an ordinary (rejected as
+            undefined) member-call chain on the local, never reinterpreted
+            as the module path, anywhere the local's name is in scope at
+            all (nex.walker/collect-possibly-bound-names is a coarse,
+            whole-program check, not a precise per-scope one)"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-shadow-" (System/nanoTime)))
+          lib-file (spit-function-lib! tmp-dir "trade" "ship" "n + 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern trade/ship
+
+function use(trade: Integer): Integer do
+  result := trade + 1
+end
+
+print(trade.ship(10))")
+      (try
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file))))]
+          (is (.contains (ex-message ex) "Undefined variable: trade") (ex-message ex)))
+        (finally
+          (.delete lib-file)
+          (.delete (io/file tmp-dir "lib" "trade"))
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-cross-file-sibling-functions-unaffected-by-collision-check-test
+  (testing "a non-colliding function from an interned file is unaffected —
+            the collision check only ever flags a NAME that actually repeats"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-no-collision-" (System/nanoTime)))
+          lib1-file (spit-function-lib! tmp-dir "lib1" "foo" "n + 1")
+          lib2-file (spit-function-lib! tmp-dir "lib2" "bar" "n - 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern lib1/foo
+intern lib2/bar
+
+print(foo(10))
+print(bar(10))")
+      (try
+        (let [output (with-out-str (e/eval-file (.getPath main-file) {}))]
+          (is (= "11\n9\n" output)))
+        (finally
+          (.delete lib1-file)
+          (.delete lib2-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "lib1"))
+          (.delete (io/file tmp-dir "lib" "lib2"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
 (deftest file-eval-path-qualified-intern-as-alias-resolves-collision-test
   (testing "`intern billing/Account as Billing_Account` DOES resolve a
             same-named collision, on both backends — Billing_Account's
@@ -1198,6 +1360,77 @@ let t := create Thing")
         (finally
           (.delete lib-file)
           (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest cli-run-resolves-nested-path-qualified-intern-from-a-sibling-lib-directory-test
+  (testing "a `nex script.nex` run resolves a path-qualified intern reached
+            transitively (script -> lib A -> lib B), where B sits in a
+            *different* lib subdirectory than A, not just alongside it.
+
+            This exercises the real `bin/nex` CLI path specifically: it
+            exports the project root via the NEX_USER_DIR env var and never
+            sets the `nex.user.dir` system property (that's REPL-only), so
+            it has to run as a subprocess — nex.interpreter/find-intern-file
+            reads System/getenv directly, which this JVM's in-process tests
+            can't fake (see examples-smoke-test's run-failure-with-nex-user-dir
+            for the same constraint). Before the fix, intern-search-roots only
+            fell back to the `nex.user.dir` property, so a nested intern (one
+            resolved while a just-interned lib file's own :debug-source, not
+            the script's, was current) lost the project root entirely once it
+            needed a lib/<path> outside its own directory: source-dir pointed
+            at the interning file's own directory and pwd resolved to
+            NEX_HOME (bin/nex cd's there before starting the JVM), so
+            lib/transactions/account.nex could not reach lib/units/Money.nex."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-nested-intern-" (System/nanoTime)))
+          money-dir (io/file tmp-dir "lib" "units")
+          money-file (io/file money-dir "Money.nex")
+          account-dir (io/file tmp-dir "lib" "transactions")
+          account-file (io/file account-dir "account.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs money-dir)
+      (.mkdirs account-dir)
+      (spit money-file "class Money
+create
+  make(a: Real) do
+    amount := a
+  end
+feature
+  amount: Real
+end")
+      (spit account-file "intern units/Money
+
+class Account
+create
+  make(b: Money) do
+    balance := b
+  end
+feature
+  balance: Money
+end")
+      (spit main-file "intern transactions/account as Account
+
+let a := create Account.make(create Money.make(100.0))
+print(a.balance.amount)")
+      (try
+        (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
+                                  (into-array String
+                                              ["java" "-cp" (System/getProperty "java.class.path")
+                                               "clojure.main" "-m" "nex.eval" (.getPath main-file)]))]
+          (.put (.environment pb) "NEX_USER_DIR" (.getPath tmp-dir))
+          (.redirectErrorStream pb true)
+          (let [proc (.start pb)
+                output (slurp (.getInputStream proc))
+                code (.waitFor proc)]
+            (is (not (.contains output "Cannot find intern file")) output)
+            (is (zero? code) output)
+            (is (.contains output "100.0") output)))
+        (finally
+          (.delete money-file)
+          (.delete money-dir)
+          (.delete account-file)
+          (.delete account-dir)
           (.delete main-file)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))

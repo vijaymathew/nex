@@ -7,20 +7,32 @@
             [nex.typechecker :as tc]
             [nex.types.runtime :as rt]
             [nex.compiler.jvm.file :as jvm-file]
-            [nex.compiler.jvm.classloader :as loader])
+            [nex.compiler.jvm.classloader :as loader]
+            [nex.walker :as walker])
   (:import [clj_antlr ParseError]))
 
 (defn- augment-ast-with-interns
+  "Merge every interned file's classes/functions/imports/type-aliases, then
+   re-run walker/qualify-interned-function-class-names and
+   walker/resolve-qualified-function-calls on the merge — see
+   nex.compiler.jvm.file's own copy of this function for why (in short: two
+   interned files defining the same bare function name are left to coexist,
+   resolved by qualified name at each call site, rather than rejected
+   outright the moment both are interned — which also needs each one's
+   synthetic wrapper class renamed uniquely, or bytecode emission collides
+   regardless of qualification)."
   [source-id ast]
-  (assoc ast
-         :classes (vec (concat (interp/resolve-interned-classes source-id ast)
-                               (:classes ast)))
-         :functions (vec (concat (interp/resolve-interned-functions source-id ast)
-                                 (:functions ast)))
-         :imports (vec (concat (interp/resolve-interned-imports source-id ast)
-                               (:imports ast)))
-         :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
-                                    (:type-aliases ast)))))
+  (-> (assoc ast
+             :classes (vec (concat (interp/resolve-interned-classes source-id ast)
+                                   (:classes ast)))
+             :functions (walker/qualify-interned-function-class-names
+                         (vec (concat (interp/resolve-interned-functions source-id ast)
+                                      (:functions ast))))
+             :imports (vec (concat (interp/resolve-interned-imports source-id ast)
+                                   (:imports ast)))
+             :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
+                                       (:type-aliases ast))))
+      walker/resolve-qualified-function-calls))
 
 (defn- type-check-ast!
   [source-id ast]
@@ -84,19 +96,32 @@
   "Report a compile failure as what it actually is.
 
    A marked gap (`:nex/unsupported`) is a valid program the backend cannot yet
-   handle: --interpret is a real workaround. Anything else reaching here is a
-   compiler defect — the typechecker already accepted this program — so asking
-   the user to work around it silently would be wrong; it should be reported.
-   Both name the construct and the line where they can."
+   handle: --interpret is a real workaround. A walker rejection (`:error` —
+   nex.walker's own convention, e.g. `resolve-convert-alias` rejecting a
+   refinement used as a runtime type test) is a deliberate diagnosis of the
+   program itself, already phrased for the user; report it verbatim, the same
+   way the same rejection reads when it fires at parse time for a same-file
+   case instead of here (a cross-file one, reached via
+   nex.compiler.jvm.file/augment-ast-with-interns re-running the walker pass
+   post-intern-resolution). Anything else reaching here is a genuine compiler
+   defect — the typechecker already accepted this program — so asking the
+   user to work around it silently would be wrong; it should be reported.
+   All three name the construct and the line where they can."
   [e]
   (let [detail (str/join " " (remove nil? [(ex-message e)
                                            (some->> (diagnostic-details e)
                                                     (format "(%s)"))
                                            (diagnostic-location e)]))]
-    (if (:nex/unsupported (ex-data e))
+    (cond
+      (:nex/unsupported (ex-data e))
       (str "this program uses a construct the compiled backend does not support"
            " yet: " detail
            "\n  Run it with --interpret to use the tree-walking interpreter.")
+
+      (:error (ex-data e))
+      (ex-message e)
+
+      :else
       (str "internal error in the compiled backend: " detail
            "\n  This is a defect in Nex, not in your program — please report it"
            " at " issue-url

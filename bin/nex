@@ -103,6 +103,15 @@ cmd_repl() {
 }
 
 cmd_compile() {
+    # `intern`'s path-qualified lookup (`units/Money`) falls back to
+    # NEX_USER_DIR for the project root — needed once a narrowing site is
+    # reached transitively (script -> lib A -> lib B, B in a different lib/
+    # subdirectory than A), where the immediately-interning file's own
+    # directory isn't the right root (see nex.interpreter/intern-search-
+    # roots). cmd_run_script exports this; cmd_compile didn't, so `nex
+    # compile jvm` failed on exactly the programs `nex <file>` already ran.
+    export NEX_USER_DIR="$USER_DIR"
+
     local classpath=""
     local skip_contracts=""
     local -a positional=()

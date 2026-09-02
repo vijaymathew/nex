@@ -1,5 +1,6 @@
 (ns nex.refinement-test
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [nex.eval :as e]
             [nex.parser :as p]
@@ -400,3 +401,123 @@ print(u.where = \"vijay\")")))))
     (is (thrown-with-msg?
          Exception #"Unexpected \"whree\""
          (p/ast "declare type Quantity = Integer whree n: n > 0")))))
+
+;; ─── Refinements declared in an interned file ────────────────────────────────
+;;
+;; inject-refinement-checks (and resolve-convert-aliases's refinement
+;; rejection) run once per file, at parse time — before `intern` has merged
+;; anything in. A refinement declared in one file and narrowed (let/param/
+;; return/field) or runtime-type-tested (`convert`) in a file that interns it
+;; was therefore invisible to both passes: no check, no rejection, values
+;; silently sailed through unchecked. nex.compiler.jvm.file/augment-ast-with-
+;; interns now re-runs both passes on the intern-merged program.
+
+(defn- write-lib-and-main!
+  "tmp-dir/lib/units/Currency.nex := LIB-SRC, tmp-dir/main.nex :=
+   `intern units/Currency\\n\\n` + MAIN-SRC — a path-qualified intern (the
+   `lib/<path>/<file>` layout `find-intern-file` resolves relative to the
+   entry file's own directory), not a bare one. Returns the main file."
+  [lib-src main-src]
+  (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                         (str "nex-cross-file-refinement-" (System/nanoTime)))
+        lib-dir (io/file tmp-dir "lib" "units")
+        lib-file (io/file lib-dir "Currency.nex")
+        main-file (io/file tmp-dir "main.nex")]
+    (.mkdirs lib-dir)
+    (spit lib-file lib-src)
+    (spit main-file (str "intern units/Currency\n\n" main-src))
+    main-file))
+
+(defn- run-cross-file
+  "Run MAIN-FILE (see write-lib-and-main!) through the real `nex <file>` path
+   (nex.eval/eval-file — the compiled backend, same as the CLI's default),
+   returning its printed output, or {:error <message>} if it raised."
+  [^java.io.File main-file]
+  (try
+    {:output (with-out-str (e/eval-file (.getPath main-file)))}
+    (catch Exception ex
+      {:error (ex-message ex)})
+    (finally
+      (let [tmp-dir (.getParentFile main-file)
+            units-dir (io/file tmp-dir "lib" "units")]
+        (doseq [f (.listFiles units-dir)] (.delete f))
+        (.delete units-dir)
+        (.delete (io/file tmp-dir "lib"))
+        (.delete main-file)
+        (.delete tmp-dir)))))
+
+(deftest cross-file-refinement-narrowing-is-enforced-test
+  (testing "a let narrowing into a refinement declared in an interned file raises,
+            same as if the refinement were declared in the entry file itself"
+    (let [main-file (write-lib-and-main!
+                      "declare type Currency_Code = String where s: s.length() = 3"
+                      "let code: Currency_Code := \"USDX\"\nprint(code)")]
+      (is (= "Refinement Currency_Code violated" (:error (run-cross-file main-file)))))))
+
+(deftest cross-file-refinement-narrowing-passes-for-valid-value-test
+  (testing "the same interned refinement accepts a value satisfying its predicate"
+    (let [main-file (write-lib-and-main!
+                      "declare type Currency_Code = String where s: s.length() = 3"
+                      "let code: Currency_Code := \"USD\"\nprint(code)")]
+      (is (= "\"USD\"\n" (:output (run-cross-file main-file)))))))
+
+(deftest cross-file-refinement-parameter-is-enforced-test
+  (testing "a refinement declared in an interned file is checked at a
+            parameter boundary, not just a bare let"
+    (let [main-file (write-lib-and-main!
+                      "declare type Quantity = Integer where n: n > 0"
+                      "function use(x: Quantity): Integer do result := x end
+print(use(5))")]
+      (is (= "5\n" (:output (run-cross-file main-file)))))
+    (let [main-file (write-lib-and-main!
+                      "declare type Quantity = Integer where n: n > 0"
+                      "function use(x: Quantity): Integer do result := x end
+print(use(-1))")]
+      (is (= "Refinement Quantity violated" (:error (run-cross-file main-file)))))))
+
+(deftest cross-file-refinement-field-assignment-is-enforced-test
+  (testing "a refinement declared in an interned file is checked at a field
+            assignment (`this.field := v`) in a class declared in the entry file"
+    (let [main-file (write-lib-and-main!
+                      "declare type Quantity = Integer where n: n > 0"
+                      "class Box
+  create make(v: Integer) do this.q := v end
+  feature q: Quantity
+end
+print(create Box.make(7).q)")]
+      (is (= "7\n" (:output (run-cross-file main-file)))))
+    (let [main-file (write-lib-and-main!
+                      "declare type Quantity = Integer where n: n > 0"
+                      "class Box
+  create make(v: Integer) do this.q := v end
+  feature q: Quantity
+end
+print(create Box.make(-5).q)")]
+      ;; A field-assignment check names the *field*, not the refinement type
+      ;; (unlike let/param/return, which name the type) — a pre-existing,
+      ;; same-file quirk (see narrow-field-assignment's make-refinement-check
+      ;; call), reproduced here rather than fixed, since it's orthogonal to
+      ;; cross-file enforcement working at all.
+      (is (= "Refinement q violated" (:error (run-cross-file main-file)))))))
+
+(deftest cross-file-convert-to-refinement-is-rejected-test
+  (testing "`convert x to y: R` is rejected the same way whether R is declared
+            in the entry file or reached via intern — not silently accepted"
+    (let [main-file (write-lib-and-main!
+                      "declare type Quantity = Integer where n: n > 0"
+                      "let x: Any := 5
+if convert x to y: Quantity then print(y) end")
+          {:keys [error]} (run-cross-file main-file)]
+      (is (some? error) "convert to an interned refinement must be rejected")
+      (is (re-find #"`Quantity` is a refinement type" (or error "")) error)
+      (is (not (re-find #"internal error in the compiled backend" (or error "")))
+          "a deliberate rejection must not be reported as a compiler defect"))))
+
+(deftest cross-file-convert-to-plain-alias-still-resolves-test
+  (testing "a non-refinement alias reached via intern still resolves in a
+            convert target, same as a same-file one already does"
+    (let [main-file (write-lib-and-main!
+                      "declare type Count = Integer"
+                      "let x: Any := 5
+if convert x to y: Count then print(\"matched \" + y.to_string) else print(\"no match\") end")]
+      (is (= "\"matched 5\"\n" (:output (run-cross-file main-file)))))))

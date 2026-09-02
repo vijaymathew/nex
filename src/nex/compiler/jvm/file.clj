@@ -11,7 +11,8 @@
             [nex.interpreter :as interp]
             [nex.lower :as lower]
             [nex.parser :as p]
-            [nex.typechecker :as tc])
+            [nex.typechecker :as tc]
+            [nex.walker :as walker])
   (:import [java.io ByteArrayInputStream File FileInputStream]
            [java.util.jar JarEntry JarFile JarOutputStream Manifest]))
 
@@ -103,17 +104,47 @@
             incoming)))
 
 (defn- augment-ast-with-interns
+  "Merge every interned file's classes/functions/imports/type-aliases into
+   AST. Also re-runs, on the merged result, passes that each ran once per
+   file at parse time — before intern-resolution had merged anything — so
+   each only ever saw that one file's own declarations:
+
+   - walker/qualify-interned-function-class-names: two interned files
+     defining the same bare function name emitted the SAME synthetic
+     wrapper class name (derived from the bare name alone at parse time) —
+     a JVM ClassFormatError at bytecode emission, regardless of whether
+     either was ever called. Renaming it from each fn-def's :qualified-name
+     instead (unique per intern path) has to happen before either of the
+     next two passes see :functions.
+   - walker/resolve-convert-aliases and walker/inject-refinement-checks: a
+     refinement declared in one file and used (`let`/param/return/field, or
+     a `convert` target) in another was invisible to the refinement pass
+     the first time around.
+   - walker/resolve-qualified-function-calls: with the class-name collision
+     above fixed, two interned files defining the same bare function name
+     can coexist rather than being an unconditional compile error (there's
+     no `intern ... as` for a function the way there is for a class) —
+     callable via their qualified name (`trade.ship(x)`/`other.ship(x)`);
+     nex.typechecker/check-program's own ambiguous-function tracking
+     (mirroring its existing ambiguous-class one) rejects only an actual
+     *bare*, still-ambiguous reference, at that call site, not the whole
+     program merely for having interned both."
   [source-id ast]
   (let [intern-classes (interp/resolve-interned-classes source-id ast)
         intern-functions (interp/resolve-interned-functions source-id ast)
         intern-imports (interp/resolve-interned-imports source-id ast)
         intern-type-aliases (interp/resolve-interned-type-aliases source-id ast)
-        merged-imports (merge-import-like-nodes intern-imports (:imports ast))]
-    (assoc ast
-           :imports merged-imports
-           :classes (vec (concat intern-classes (:classes ast)))
-           :functions (vec (concat intern-functions (:functions ast)))
-           :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))))
+        merged-imports (merge-import-like-nodes intern-imports (:imports ast))
+        merged (assoc ast
+                      :imports merged-imports
+                      :classes (vec (concat intern-classes (:classes ast)))
+                      :functions (walker/qualify-interned-function-class-names
+                                  (vec (concat intern-functions (:functions ast))))
+                      :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))]
+    (-> merged
+        walker/resolve-convert-aliases
+        walker/inject-refinement-checks
+        walker/resolve-qualified-function-calls)))
 
 (defn- debug-location
   [x]
@@ -124,11 +155,22 @@
     (and (map? x) (:line x))
     [(:line x) (:column x)]
 
-    :else
+    ;; `x` reaches here as ex-data or an ex-data value, which is not always a
+    ;; node map — walker.clj's refinement/convert-alias rejections carry a
+    ;; plain string message (`{:error "..."}`), and `select-keys` throws on
+    ;; anything but a map (or nil), so both non-map shapes need handling
+    ;; before falling through to it.
+    (map? x)
     (some debug-location
           (concat
            (vals (select-keys x [:expr :stmt :value :target :left :right :condition]))
-           (when (sequential? x) x)))))
+           (when (sequential? x) x)))
+
+    (sequential? x)
+    (some debug-location x)
+
+    :else
+    nil))
 
 (defn- format-exception-diagnostics
   [^Exception e]

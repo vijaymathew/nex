@@ -33,6 +33,17 @@
     ;; :globals/:warnings do. See env-lookup-class and
     ;; docs/proposals/namespaces.md (Phase 2).
     :ambiguous-classes (atom {})
+    ;; Same idea as :ambiguous-classes, for free functions: bare names that
+    ;; resolve to more than one distinct interned function
+    ;; ({name -> #{qualified-name ...}}), populated once by check-program
+    ;; from ambiguous-function-names. See check-call's bare-call branch,
+    ;; which is where a reference to one of these names is actually
+    ;; rejected (mirroring env-lookup-class's ambiguous-classes check) —
+    ;; there is no single env-lookup-function to hook the way classes have
+    ;; env-lookup-class, since a bare call resolves through the generic
+    ;; env-lookup-var (a free function is registered there as a variable
+    ;; naming its synthesized call-dispatch class).
+    :ambiguous-functions (atom {})
     :type-aliases (atom {})
     :non-nil-vars (atom #{})
     :across-cursors (atom {})
@@ -145,6 +156,23 @@
                  (str/join " and " sorted) ". Reference one directly by its "
                  "qualified name (e.g. " (first sorted) "), or rename it on "
                  "the way in with a path-qualified `intern ... as`.")]
+    (ex-info msg {:error (type-error msg)})))
+
+(defn- ambiguous-function-reference-error
+  "Build the ex-info thrown when a bare call resolves to more than one
+   distinct interned function. qualified-names is the #{...} recorded for
+   it in :ambiguous-functions (see ambiguous-function-names).
+
+   Unlike a class, a function has no `intern ... as` escape hatch — the
+   alias mechanism only ever matches against a file's :classes (see
+   nex.interpreter/resolve-interned* and process-intern) — so the only
+   route out is the qualified call itself
+   (nex.walker/resolve-qualified-function-calls): `trade.ship(x)`."
+  [fn-name qualified-names]
+  (let [sorted (sort qualified-names)
+        msg (str "Ambiguous reference to '" fn-name "': interned from "
+                 (str/join " and " sorted) ". Call one directly by its "
+                 "qualified name, e.g. " (first sorted) "(...).")]
     (ex-info msg {:error (type-error msg)})))
 
 (defn env-lookup-class
@@ -329,6 +357,24 @@
    when nothing collides. See docs/proposals/namespaces.md, Phase 2."
   [class-defs]
   (->> class-defs
+       (group-by :name)
+       (keep (fn [[nm defs]]
+               (when (every? :qualified-name defs)
+                 (let [qualified-names (into #{} (map :qualified-name) defs)]
+                   (when (> (count qualified-names) 1)
+                     [nm qualified-names])))))
+       (into {})))
+
+(defn- ambiguous-function-names
+  "The free-function analog of ambiguous-class-names: bare names that
+   resolve to more than one distinct interned function, from the pre-dedup
+   normalized-functions list (two interned files defining the same bare
+   function name concatenate into it, unlike a same-file duplicate, which
+   the walker already collapses to one def before this is even reached). A
+   function declared directly in this program (or an earlier REPL cell) has
+   no :qualified-name and always wins outright, exactly like a class."
+  [fn-defs]
+  (->> fn-defs
        (group-by :name)
        (keep (fn [[nm defs]]
                (when (every? :qualified-name defs)
@@ -3199,6 +3245,15 @@
       (check-create env (assoc target :args args)))
     (if target
       (check-target-call env expr)
+      ;; A bare call to a name interned from more than one file — reject it
+      ;; here, before either the builtin-checker or env-lookup-var lookup
+      ;; below would silently resolve to whichever fn-def happened to
+      ;; register last (see check-program's function-variable registration
+      ;; loop). A builtin name is never in :ambiguous-functions (only
+      ;; interned user fn-defs populate it), so this can't misfire there.
+      (do
+        (when-let [qualified-names (get @(:ambiguous-functions (env-root env)) method)]
+          (throw (ambiguous-function-reference-error method qualified-names)))
       ;; Function call (built-in like print/type_of/type_is) or function object call
       (if-let [checker (get builtin-call-checkers method)]
         (checker env args)
@@ -3351,7 +3406,7 @@
             (doseq [arg args] (check-expression env arg))
             (throw (ex-info (str "Undefined function: " method)
                             {:error (type-error
-                                     (str "Undefined function: " method))})))))))))
+                                     (str "Undefined function: " method))}))))))))))
 
 (defn- check-create-array
   [env {:keys [generic-args constructor args]}]
@@ -6262,12 +6317,18 @@
                                    (map (fn [cd] (assoc cd :name (:qualified-name cd) :true-name (:name cd))))
                                    (into [] (distinct)))
          ambiguous-classes (ambiguous-class-names all-class-defs)
+         ;; The free-function analog — normalized-functions, not
+         ;; all-class-defs: a function's OWN bare :name, not its
+         ;; synthesized, always-unique :class-name (which ambiguous-classes
+         ;; already covers and could never find ambiguous).
+         ambiguous-functions (ambiguous-function-names normalized-functions)
          ;; Names whose bodies should be collected for resolution but not re-checked
          ;; (used by the REPL to avoid re-validating previously defined code).
          skip-body-names (or (:skip-class-body-names opts) #{})]
      ;; Populate ambiguity info before any lookup can happen — env-lookup-class
      ;; consults it on every resolved bare name (see ambiguous-class-names).
      (reset! (:ambiguous-classes env) ambiguous-classes)
+     (reset! (:ambiguous-functions env) ambiguous-functions)
      (try
        ;; Reject duplicate free-function definitions before they are collapsed
        ;; last-wins (which would otherwise make the earlier definition silently
@@ -6359,7 +6420,18 @@
        (doseq [[var-name var-type] (:var-types opts)]
          (env-add-var env var-name (expand-type-aliases env var-type)))
 
-       ;; Register function variables (name -> generated class)
+       ;; Register function variables (name -> generated class): the bare
+       ;; name, always (an ambiguous one just gets whichever fn-def visits
+       ;; last — harmless, since a bare call to it is rejected below before
+       ;; this registration is ever consulted, exactly how the analogous
+       ;; ambiguous-class registration a few lines up is "raw, so
+       ;; env-lookup-var finds *something* to be ambiguous about" rather
+       ;; than a real pick), and additionally the qualified name for every
+       ;; interned function — this is what makes `trade.ship(x)` resolvable
+       ;; at all: nex.walker/resolve-qualified-function-calls already
+       ;; rewrote it to an ordinary bare call naming "trade.ship" by the
+       ;; time this program reaches check-program, so it needs a real var
+       ;; registered under that exact key like any other free function.
        (doseq [fn-def normalized-functions]
          (let [arity (count (:params fn-def))]
            (when (> arity 32)
@@ -6368,7 +6440,9 @@
                              {:error (type-error
                                       (str "Function " (:name fn-def)
                                            " must have at most 32 parameters"))}))))
-         (env-add-var env (:name fn-def) (:class-name fn-def)))
+         (env-add-var env (:name fn-def) (:class-name fn-def))
+         (when (:qualified-name fn-def)
+           (env-add-var env (:qualified-name fn-def) (:class-name fn-def))))
 
        ;; Register top-level `let` globals so class and function bodies can read
        ;; them (§7), and enforce the def-before-use watermark before those bodies
