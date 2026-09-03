@@ -5225,18 +5225,33 @@
       (builtin-runtime-receiver-type? env target-type)
       (lower-builtin-receiver-call env expr target-expr target-type arg-irs)
 
-      ;; Generic type parameter with a constraint (e.g. T -> Comparable)
-      ;; Dispatch through the constraint type's builtin methods at runtime
-      (when-let [constraint (get (:generic-param-constraints env)
-                                 (base-type-name target-type))]
-        (contains? builtin-runtime-receiver-types constraint))
-      (lower-generic-builtin-constrained-call env expr target-expr target-type arg-irs)
-
       ;; Generic type parameter constrained by a *user* class (e.g. `[T ->
       ;; Addable]`). The receiver is an ordinary Nex object at runtime, so
       ;; dispatch dynamically the way any user-class call does; the
       ;; constraint supplies the routine's declared signature, which is
       ;; what the typechecker already checked the call against.
+      ;;
+      ;; Checked BEFORE the builtin-constrained branch below, not after: a
+      ;; bound's name is not reserved just because it happens to collide
+      ;; with a builtin-runtime-receiver-type's own name (`Comparable`,
+      ;; `Task`, `Channel`, ...) — a user's own `deferred class Comparable`
+      ;; is exactly as overridable here as it already is everywhere else a
+      ;; user definition shadows a builtin placeholder (see check-program's
+      ;; own "an entry file's own classes... override builtin placeholder
+      ;; names such as Task or Channel"). Checking user-constrained first
+      ;; means a real match here — the constraint resolves to a REAL class
+      ;; in visible-class-map that actually declares the called method or
+      ;; field — always wins; the builtin branch is reached only when no
+      ;; such user class exists, exactly the ordinary (and far more common)
+      ;; case of a genuinely builtin bound like the checked-in `T ->
+      ;; Comparable` example that compares with `>`. Before this fix, the
+      ;; builtin branch ran first and matched unconditionally on the name
+      ;; alone, so a user's own same-named class was silently never
+      ;; reached at all — its own real method looked up via the wrong
+      ;; (builtin, reflection-free) dispatch and failing at runtime with
+      ;; "Method not found on type", even though the identical call
+      ;; compiled and ran correctly the moment the class was renamed to
+      ;; anything that didn't collide with a builtin name.
       (when-let [constraint-def (some->> (get (:generic-param-constraints env)
                                              (base-type-name target-type))
                                         (get (visible-class-map env)))]
@@ -5244,6 +5259,13 @@
                                    (count (:args expr)))
             (accessible-field-def env constraint-def (:method expr))))
       (lower-generic-user-constrained-call env expr target-expr target-type arg-irs)
+
+      ;; Generic type parameter with a constraint (e.g. T -> Comparable)
+      ;; Dispatch through the constraint type's builtin methods at runtime
+      (when-let [constraint (get (:generic-param-constraints env)
+                                 (base-type-name target-type))]
+        (contains? builtin-runtime-receiver-types constraint))
+      (lower-generic-builtin-constrained-call env expr target-expr target-type arg-irs)
 
       :else
       (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
