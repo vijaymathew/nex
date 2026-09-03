@@ -6,6 +6,7 @@
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as compiled-runtime]
             [nex.debugger :as dbg]
+            [nex.lower :as lower]
             [nex.typechecker :as tc]
             [clojure.string :as str]
             [clojure.edn :as edn]
@@ -1739,6 +1740,23 @@
       (doseq [stmt (:body method-def)]
         (when (and (map? stmt) (= (:type stmt) :let))
           (let [remembered-type (or (:var-type stmt)
+                                    ;; Checked before infer-expression-type,
+                                    ;; not after — see nex.lower/box-let-type
+                                    ;; and nex.compiler.jvm.repl/sync-var-
+                                    ;; types-from-ast! for the identical fix
+                                    ;; and why: infer-expression-type type-
+                                    ;; checks the WHOLE body in an isolated,
+                                    ;; standalone env, and throws (silently
+                                    ;; swallowed, returning nil here) the
+                                    ;; moment that body references a sibling
+                                    ;; closure elaborated alongside it — a
+                                    ;; self- or mutually-recursive closure-
+                                    ;; let. Without this, such a closure's
+                                    ;; type was never remembered here at
+                                    ;; all, so it was simply unresolvable —
+                                    ;; not merely erased to Any — from any
+                                    ;; later, separate REPL cell.
+                                    (lower/anonymous-function-signature-type (:value stmt))
                                     (tc/infer-expression-type
                                      (:value stmt)
                                      {:classes (vals @(:classes exec-ctx))

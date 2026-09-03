@@ -885,6 +885,34 @@
                                    (:var-name (:value stmt))
                                    (tc/detachable-version (:target-type (:value stmt)))))
              (let [nex-type (or (:var-type stmt)
+                                ;; A closure literal's own signature is
+                                ;; always fully determined by what's
+                                ;; written on it, regardless of what its
+                                ;; body references — checked BEFORE the
+                                ;; infer-expression-type fallback below,
+                                ;; not after, for the same reason
+                                ;; nex.lower/box-let-type and
+                                ;; rewrite-statement-for-closures read a
+                                ;; closure-let's type this way: infer-
+                                ;; expression-type type-checks the WHOLE
+                                ;; body in an isolated, standalone env to
+                                ;; infer a closure's type, and throws
+                                ;; (silently swallowed, falling back to
+                                ;; "Any" right here) the moment that body
+                                ;; references a sibling closure elaborated
+                                ;; alongside it — a self- or mutually-
+                                ;; recursive closure-let is exactly that
+                                ;; shape. Without this, THIS session's own
+                                ;; cross-cell type registry (rt/state-set-
+                                ;; type!) persisted "Any" for such a
+                                ;; closure, so calling it from a LATER,
+                                ;; separate cell dispatched against the
+                                ;; erased type instead of its real
+                                ;; Function(...) signature — "Method not
+                                ;; found: call1" even though the very same
+                                ;; call already worked correctly within
+                                ;; the cell that defined it.
+                                (lower/anonymous-function-signature-type (:value stmt))
                                 (tc/infer-expression-type
                                  (:value stmt)
                                  {:classes (inference-classes-for-session session)

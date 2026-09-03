@@ -2727,6 +2727,7 @@
 (declare rewrite-expression-for-closures)
 (declare rewrite-statement-for-closures)
 (declare rewrite-statements-for-closures)
+(declare anonymous-function-signature-type)
 (declare rewrite-statements-for-closures*)
 (declare sync-callable-into-class-def)
 
@@ -3033,7 +3034,26 @@
                   (:value stmt))
           value' (rewrite-expression-for-closures ctx local-types captures value)
           stmt' (assoc stmt :value value')
+          ;; anonymous-function-signature-type first, from the ORIGINAL
+          ;; (pre-rewrite) `value` — not infer-prepass-type on the
+          ;; already-rewritten `value'` — for the identical reason
+          ;; box-let-type reads a boxed closure-let's type the same way:
+          ;; infer-prepass-type type-checks the whole body in an
+          ;; isolated, standalone env, which throws (silently swallowed,
+          ;; falling back to "Any") the moment that body references a
+          ;; sibling closure elaborated together with this one (self- or
+          ;; mutual recursion) — a name that isolated check knows nothing
+          ;; about. Without this, an untyped mutually-recursive closure's
+          ;; own LOCAL-TYPES entry (what a SIBLING closure sees when IT
+          ;; captures this one) silently erased to "Any" too, one call
+          ;; site short of box-let-type's own (the backward-referenced
+          ;; half of a mutual pair is never boxed, so it relied on this
+          ;; exact var-type instead) — a lowering-time crash or, further
+          ;; downstream (a REPL session persisting this var-type across
+          ;; cells), a "Method not found" call dispatched against the
+          ;; erased "Any" type in a later, separate cell.
           var-type (or (:var-type stmt)
+                       (anonymous-function-signature-type value)
                        (infer-prepass-type ctx local-types value'))]
       [stmt' (assoc local-types (:name stmt) var-type)])
 
@@ -3541,41 +3561,41 @@
                 (map (juxt :name identity)))
           stmts)))
 
+(defn anonymous-function-signature-type
+  "A Function(...) type read directly off an :anonymous-function EXPR's
+   own :params/:return-type — nil for any other node shape. Mirrors
+   nex.typechecker/anonymous-function-provisional-signature exactly, and
+   exists for the identical reason: EXPR's signature is always fully
+   determined by what's written on the literal itself, regardless of
+   what its body references — unlike infer-prepass-type (via
+   tc/infer-expression-type), which type-checks the WHOLE body in an
+   isolated, standalone env to infer a closure's type, and so throws
+   (silently, swallowed by its own try/catch, falling back to \"Any\")
+   the moment that body references a sibling closure the isolated check
+   knows nothing about — exactly the shape of a mutually- or forward-
+   referencing closure. Callers needing an untyped closure-let's type use
+   this FIRST, falling back to infer-prepass-type only when EXPR isn't a
+   closure literal at all."
+  [expr]
+  (when (and (map? expr) (= :anonymous-function (:type expr)))
+    {:base-type "Function"
+     :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
+     :return-type (or (:return-type expr) "Any")}))
+
 (defn- box-let-type
   "The Nex type to instantiate Closure_Mut_Box[T] at for a boxed :let —
-   its own declared :var-type when present, otherwise T is read directly
-   off the closure literal's own :params/:return-type when the value is
-   an :anonymous-function (matching nex.typechecker/anonymous-function-
-   provisional-signature — see below for why this can't go through the
-   ordinary infer-prepass-type path other boxed :lets use), or inferred
-   the ordinary way for any other kind of value. Falls back to \"Any\"
-   only when inference itself cannot determine one; T is erased to Object
-   on the JVM regardless, so \"Any\" here costs a convert at an unusual,
-   untyped-let use site, never a lowering failure.
-
-   infer-prepass-type (via tc/infer-expression-type) type-checks the
-   WHOLE closure body in an isolated, standalone env — not just reads its
-   signature — to infer an :anonymous-function's type. That is fine for a
-   closure whose body only touches its own parameters, but this function
-   runs specifically for a FORWARD-referenced closure-let, one sibling
-   closure in the same block calling another: the callee's own body may
-   itself call back into a sibling (`b` calling `a`, where `a` calls `b`
-   forward and is therefore what triggered `b`'s own boxing) — a name
-   that isolated, standalone check knows nothing about, so it throws,
-   infer-prepass-type's own try/catch swallows the failure, and this
-   silently fell back to \"Any\" — erasing the box's real element type and
-   leaving nex.lower/infer-type unable to determine what invoking the
-   boxed value returns at the very call site that made this whole
-   mechanism necessary in the first place. Reading the signature directly
-   off the literal (params/return-type are always present as written,
-   regardless of what the body references) sidesteps that entirely."
+   its own declared :var-type when present, otherwise its
+   anonymous-function-signature-type (see there for why this can't go
+   through the ordinary infer-prepass-type path other boxed :lets use),
+   or inferred the ordinary way for any other kind of value. Falls back
+   to \"Any\" only when inference itself cannot determine one; T is
+   erased to Object on the JVM regardless, so \"Any\" here costs a
+   convert at an unusual, untyped-let use site, never a lowering
+   failure."
   [ctx local-types let-stmt]
   (let [value (:value let-stmt)]
     (or (:var-type let-stmt)
-        (when (and (map? value) (= :anonymous-function (:type value)))
-          {:base-type "Function"
-           :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params value))
-           :return-type (or (:return-type value) "Any")})
+        (anonymous-function-signature-type value)
         (infer-prepass-type ctx local-types value)
         "Any")))
 
