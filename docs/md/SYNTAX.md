@@ -187,8 +187,32 @@ end
 print(double(5))                 -- 10
 ```
 
-For mutually recursive functions, declare the signatures first and define the
-bodies afterwards:
+Every function in a program is checked against every other function's
+signature regardless of which is written first, so mutually recursive
+functions need no forward declaration at all:
+
+```nex
+function is_even(n: Integer): Boolean do
+  if n = 0 then
+    result := true
+  else
+    result := is_odd(n - 1)
+  end
+end
+
+function is_odd(n: Integer): Boolean do
+  if n = 0 then
+    result := false
+  else
+    result := is_even(n - 1)
+  end
+end
+```
+
+`declare function` is available separately, to pin a function's signature
+explicitly at a point before its real definition — useful for documentation,
+or when the definition is far away — and the later definition is checked
+against it exactly:
 
 ```nex
 declare function is_even(n: Integer): Boolean
@@ -211,7 +235,18 @@ function is_odd(n: Integer): Boolean do
 end
 ```
 
-The later definition must match the earlier declaration exactly.
+Mutual recursion between `let`-bound closures works the same way: consecutive
+closure-literal `let`s in one block are elaborated together, so any of them
+may call any other, and one may call itself:
+
+```nex
+let is_even := fn(n: Integer): Boolean do
+  if n = 0 then result := true else result := is_odd(n - 1) end
+end
+let is_odd := fn(n: Integer): Boolean do
+  if n = 0 then result := false else result := is_even(n - 1) end
+end
+```
 
 ### No default arguments
 

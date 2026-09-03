@@ -3543,16 +3543,41 @@
 
 (defn- box-let-type
   "The Nex type to instantiate Closure_Mut_Box[T] at for a boxed :let —
-   its own declared :var-type when present, otherwise inferred from its
-   (pre-rewrite) initializer the same way an ordinary untyped :let's type
-   is inferred elsewhere in this pass. Falls back to \"Any\" only when
-   inference itself cannot determine one; T is erased to Object on the JVM
-   regardless, so \"Any\" here costs a convert at an unusual, untyped-let
-   use site, never a lowering failure."
+   its own declared :var-type when present, otherwise T is read directly
+   off the closure literal's own :params/:return-type when the value is
+   an :anonymous-function (matching nex.typechecker/anonymous-function-
+   provisional-signature — see below for why this can't go through the
+   ordinary infer-prepass-type path other boxed :lets use), or inferred
+   the ordinary way for any other kind of value. Falls back to \"Any\"
+   only when inference itself cannot determine one; T is erased to Object
+   on the JVM regardless, so \"Any\" here costs a convert at an unusual,
+   untyped-let use site, never a lowering failure.
+
+   infer-prepass-type (via tc/infer-expression-type) type-checks the
+   WHOLE closure body in an isolated, standalone env — not just reads its
+   signature — to infer an :anonymous-function's type. That is fine for a
+   closure whose body only touches its own parameters, but this function
+   runs specifically for a FORWARD-referenced closure-let, one sibling
+   closure in the same block calling another: the callee's own body may
+   itself call back into a sibling (`b` calling `a`, where `a` calls `b`
+   forward and is therefore what triggered `b`'s own boxing) — a name
+   that isolated, standalone check knows nothing about, so it throws,
+   infer-prepass-type's own try/catch swallows the failure, and this
+   silently fell back to \"Any\" — erasing the box's real element type and
+   leaving nex.lower/infer-type unable to determine what invoking the
+   boxed value returns at the very call site that made this whole
+   mechanism necessary in the first place. Reading the signature directly
+   off the literal (params/return-type are always present as written,
+   regardless of what the body references) sidesteps that entirely."
   [ctx local-types let-stmt]
-  (or (:var-type let-stmt)
-      (infer-prepass-type ctx local-types (:value let-stmt))
-      "Any"))
+  (let [value (:value let-stmt)]
+    (or (:var-type let-stmt)
+        (when (and (map? value) (= :anonymous-function (:type value)))
+          {:base-type "Function"
+           :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params value))
+           :return-type (or (:return-type value) "Any")})
+        (infer-prepass-type ctx local-types value)
+        "Any")))
 
 (defn- box-read
   "A bare read of a boxed name — `total` -> `total.value` — as the same

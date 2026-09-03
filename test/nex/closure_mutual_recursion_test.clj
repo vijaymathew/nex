@@ -193,3 +193,39 @@ check_is_odd(99)")
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Undefined function or method: is_odd"
                                  (e/eval-file (.getPath f) opts))))
         (finally (.delete f))))))
+
+(deftest untyped-mutually-recursive-closure-lets-called-from-top-level-test
+  (testing "mutually recursive closures with NO `let`-level Function(...)
+            annotation — just the closure literals' own inline
+            param/return types — called from top-level statements after
+            both are declared. Regression test for a real bug this exact
+            program hit outside the test suite: nex.lower/box-let-type's
+            fallback for an untyped boxed :let went through
+            infer-prepass-type (tc/infer-expression-type), which
+            type-checks a WHOLE :anonymous-function body in an isolated,
+            standalone env to infer its type — not just reads its
+            signature. That is fine for a closure whose body only touches
+            its own parameters, but the forward-referenced closure here
+            (`is_odd`, boxed because `is_even` — declared first — calls
+            it) itself calls BACK into `is_even`, a name that isolated,
+            standalone check knows nothing about; it threw, infer-
+            prepass-type's own try/catch swallowed the failure, and
+            box-let-type silently fell back to \"Any\" for the box's
+            element type — erasing the real Function(...) signature and
+            leaving nex.lower/infer-type unable to determine what
+            `is_odd(10)`, called from a bare top-level statement, actually
+            returns: \"Unable to infer expression type during lowering\".
+            Every earlier mutual-recursion test in this file used an
+            EXPLICIT `let is_even: Function(Integer): Boolean := ...`
+            annotation, which bypasses infer-prepass-type entirely (via
+            box-let-type's own first branch) and so never exercised this
+            path at all — this test's whole point is the untyped case."
+    (is (= ["true" "false"]
+           (both "let is_even := fn(n: Integer): Boolean do
+  if n = 0 then result := true else result := is_odd(n - 1) end
+end
+let is_odd := fn(n: Integer): Boolean do
+  if n = 0 then result := false else result := is_even(n - 1) end
+end
+print(is_even(10))
+print(is_odd(10))")))))
