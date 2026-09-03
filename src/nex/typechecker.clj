@@ -4246,6 +4246,25 @@
     (when (= target "result")
       (maybe-update-spawn-result! env val-type))))
 
+(defn- anonymous-function-provisional-signature
+  "A Function(...) type for an :anonymous-function EXPR, computed directly
+   from its own (possibly still-unannotated) :params/:return-type — the
+   same shape check-expr-anonymous-function's own return value uses (see
+   there). check-let registers this as NAME's type BEFORE the closure's
+   own body is type-checked, so a self-referential call inside that body
+   (`let fact := fn(n) do ... fact(n-1) ... end`) resolves NAME as an
+   ordinary Function-valued local — exactly like calling any other local
+   holding a Function value, which check-call already supports; the only
+   missing piece was NAME simply not being in scope yet while its own
+   body was checked. An untyped param/return falls back to \"Any\", same
+   as everywhere else an omission reaches this point unresolved -- a
+   recursive call still type-checks, just with less precision, rather
+   than failing to resolve NAME at all."
+  [expr]
+  {:base-type "Function"
+   :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
+   :return-type (or (:return-type expr) "Any")})
+
 (defn check-let
   "Check a let statement"
   [env {:keys [name var-type value synthetic] :as stmt}]
@@ -4259,6 +4278,17 @@
                      "in one block may not share a name.")]
         (throw (ex-info msg {:error (type-error msg)})))
       (swap! (:let-names env) conj name)))
+  ;; A closure literal may reference its OWN let-bound name recursively —
+  ;; register NAME with a provisional signature before checking VALUE, not
+  ;; after, so `fact` resolves inside its own body. Every other :let RHS
+  ;; keeps ordinary sequential-let semantics (an outer `x` is what `let x
+  ;; := x + 1` sees, never the new binding); this is a deliberate, narrow
+  ;; exception for the one case where seeing yourself is exactly the point
+  ;; (the same convention a JS named function expression's own name gets
+  ;; inside its own body). Harmless if VALUE never actually calls itself —
+  ;; this only ever makes NAME resolve somewhere it previously did not.
+  (when (and (string? name) (map? value) (= :anonymous-function (:type value)))
+    (env-add-var env name (or var-type (anonymous-function-provisional-signature value))))
   (let [val-type (if var-type
                    (check-expression-with-expected env value var-type)
                    (check-expression env value))

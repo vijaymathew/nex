@@ -2976,11 +2976,62 @@
 
     :else expr))
 
+(defn- rewrite-self-recursive-calls
+  "Rewrite a bare, self-recursive call to SELF-NAME (`fact(n-1)` inside the
+   body of `let fact := fn(n) do ... fact(n-1) ... end`) into a bare call
+   to `callN` instead — the exact shape a plain `self_method(...)` call
+   already lowers through (nex.lower/lower-call-without-target's first
+   branch, `class-method-def (current-class-def env) ...`), since callN IS
+   a real member of this closure's own class-def (attach-capture-fields).
+   No new AST/IR node type, no env threading into the later lowering
+   pass — the rename alone is enough, because JVM `this` inside a
+   closure's own callN method already refers to the closure instance
+   itself.
+
+   A plain recursive-descent walk, not clojure.walk/postwalk: it must NOT
+   descend into a nested `:anonymous-function`'s own :body at all — a
+   deeper closure reached inside this one (a call argument, say) has its
+   own, unrelated scope, and if IT also happens to bare-call something
+   named SELF-NAME, that reference is not this closure calling itself.
+   Stopping at that boundary is what keeps this rewrite correctly scoped
+   without any ctx-threading (and its leak risk) between closures at
+   different nesting depths."
+  [self-name node]
+  (cond
+    (and (map? node) (= :anonymous-function (:type node)))
+    node
+
+    (and (map? node) (= :call (:type node)) (nil? (:target node)) (= self-name (:method node)))
+    (assoc node
+           :method (str "call" (count (:args node)))
+           :args (mapv #(rewrite-self-recursive-calls self-name %) (:args node)))
+
+    (map? node)
+    (into (empty node) (map (fn [[k v]] [k (rewrite-self-recursive-calls self-name v)])) node)
+
+    (vector? node)
+    (mapv #(rewrite-self-recursive-calls self-name %) node)
+
+    (seq? node)
+    (map #(rewrite-self-recursive-calls self-name %) node)
+
+    :else node))
+
 (defn- rewrite-statement-for-closures
   [ctx local-types captures stmt]
   (case (:type stmt)
     :let
-    (let [value' (rewrite-expression-for-closures ctx local-types captures (:value stmt))
+    ;; A closure literal directly assigned to a `let` may call itself
+    ;; recursively by that name (`let fact := fn(n) do ... fact(n-1) ...
+    ;; end` — see nex.typechecker/check-let, which now lets this
+    ;; type-check by pre-registering the name). Renamed to a bare callN
+    ;; call BEFORE the ordinary closure rewrite below ever runs, so that
+    ;; pass's own capture/`this` handling stays entirely unaware self-
+    ;; recursion exists at all — see rewrite-self-recursive-calls.
+    (let [value (if (and (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
+                  (update (:value stmt) :body #(rewrite-self-recursive-calls (:name stmt) %))
+                  (:value stmt))
+          value' (rewrite-expression-for-closures ctx local-types captures value)
           stmt' (assoc stmt :value value')
           var-type (or (:var-type stmt)
                        (infer-prepass-type ctx local-types value'))]
