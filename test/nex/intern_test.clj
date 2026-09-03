@@ -691,6 +691,33 @@ print(trade.ship(10))")
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
+(deftest file-eval-qualified-call-with-wrong-method-name-is-undefined-function-not-variable-test
+  (testing "a qualified call whose base IS a real intern-path prefix but
+            whose method name is wrong (typo'd or nonexistent) reports
+            'Undefined function: trade.shpi' — not the misleading 'Undefined
+            variable: trade' that nex.typechecker/reject-undefined-target!
+            used to fall back to whenever the qualified-name rewrite
+            (nex.walker/resolve-qualified-function-calls) found no exact
+            match, even though 'trade' itself is a perfectly good module
+            reference and the real problem is the method name"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-wrong-method-" (System/nanoTime)))
+          lib-file (spit-function-lib! tmp-dir "trade" "ship" "n + 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern trade/ship
+
+print(trade.shpi(10))")
+      (try
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file))))]
+          (is (.contains (ex-message ex) "Undefined function: trade.shpi") (ex-message ex))
+          (is (not (.contains (ex-message ex) "Undefined variable")) (ex-message ex)))
+        (finally
+          (.delete lib-file)
+          (.delete (io/file tmp-dir "lib" "trade"))
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
 (deftest file-eval-cross-file-sibling-functions-unaffected-by-collision-check-test
   (testing "a non-colliding function from an interned file is unaffected —
             the collision check only ever flags a NAME that actually repeats"
