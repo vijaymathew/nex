@@ -934,10 +934,21 @@
    parent: `class Over_Amount inherit Spec[Draft]` carries no arguments of its
    own, yet instantiates `Spec` at `[Draft]`. It equally handles arguments that
    are threaded (`C[T] inherit P[T]`), reordered, or nested (`C[T] inherit
-   P[Array[T]]`)."
+   P[Array[T]]`).
+
+   Compares names through class-name-identity, not raw `=` — SUPER-NAME may
+   be written bare while a step of the walk (SUB-NAME itself, or a `parent`
+   string found along the way) is qualified, e.g. `inherit flex/Spec[T]`
+   walked to \"flex.Spec\" against a parameter typed bare `Spec[Integer]`.
+   Both denote the same class whenever the bare name isn't itself ambiguous
+   (see class-name-identity) — without this normalization here, a generic
+   heir reached through a qualified `inherit` clause was rejected as not
+   conforming to its own parent's bare-named parameterized type, the exact
+   generic-type analog of the fix class-subtype? needed for non-generic
+   inheritance."
   [env sub-name sub-args super-name seen]
   (cond
-    (= sub-name super-name) (vec sub-args)
+    (= (class-name-identity env sub-name) (class-name-identity env super-name)) (vec sub-args)
     (contains? seen sub-name) nil
     :else
     (when-let [class-def (env-lookup-class env sub-name)]
@@ -4451,13 +4462,26 @@
    so a class also reachable through a qualified-only registration (Phase 3,
    :name there is the qualified string — see check-program's
    qualified-class-defs) is counted once, under its real bare name, not as an
-   extra variant."
+   extra variant.
+
+   Matches a heir's :parent through class-name-identity, not raw `=` — a
+   heir declared with a QUALIFIED `inherit` clause (`inherit flex/Shape`,
+   walked to the :parent string \"flex.Shape\") is exactly as much a variant
+   of bare `Shape` as one declared `inherit Shape` directly, the same
+   identity class-subtype? and ancestor-instantiation already normalize for
+   ordinary and generic subtyping. Without this, such a heir was silently
+   missing from `known` here, so check-match's exhaustiveness check never
+   flagged it as an uncovered variant — a `match` on a sealed type could
+   omit a real variant entirely and still compile, so long as that variant
+   happened to be reached through a qualified `inherit`."
   [env sealed-class-name]
-  (->> (visible-class-defs env)
-       (filter (fn [class-def]
-                 (some #(= (:parent %) sealed-class-name) (:parents class-def))))
-       (map #(or (:true-name %) (:name %)))
-       set))
+  (let [sealed-identity (class-name-identity env sealed-class-name)]
+    (->> (visible-class-defs env)
+         (filter (fn [class-def]
+                   (some #(= (class-name-identity env (:parent %)) sealed-identity)
+                         (:parents class-def))))
+         (map #(or (:true-name %) (:name %)))
+         set)))
 
 (defn match-clause-binding-type
   "Reconstruct a match clause's type with generic arguments carried over from the
