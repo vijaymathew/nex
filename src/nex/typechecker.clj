@@ -2610,8 +2610,24 @@
 ;; Java name inside `with java` — is an undefined variable. Without this the
 ;; member access slips through type-checking with a nil/Any target type and
 ;; fails later (cryptically in the JVM lowering, or only at runtime).
+;;
+;; A call-shaped target (`target.method(...)`) gets a more specific message
+;; when TARGET is itself a real intern-path prefix — some other qualified
+;; function is registered as "target.something" — but "target.method" isn't:
+;; that's a misspelled/nonexistent function under a real module, not a
+;; missing variable, and "Undefined variable: transaction" for
+;; `transaction.fullfill(...)` sent a user chasing the wrong identifier
+;; (nex.walker/resolve-qualified-function-calls already rewrote any exact
+;; "target.method" match to an ordinary call before this ever runs, so
+;; finding no such var here means either name really is wrong). This must
+;; NOT fire when "target.method" exactly matches a registered qualified name:
+;; that combination reaching here at all means the rewrite pass deliberately
+;; declined it (collect-possibly-bound-names saw TARGET used as a real
+;; local/param somewhere in the program and conservatively refused to steal
+;; its meaning) — "Undefined variable" is the correct, intentional message
+;; for that shadowing case.
 (defn- reject-undefined-target!
-  [env {:keys [target]} {:keys [across-item-type with-java? current-class target-type]}]
+  [env {:keys [target method]} {:keys [across-item-type with-java? current-class target-type]}]
   (when (and *strict-undefined-targets*
              (string? target)
              (nil? target-type)
@@ -2627,8 +2643,15 @@
              (not (#{"this" "Current"} target))
              (not (and current-class
                        (lookup-class-method env current-class target 0 current-class))))
-    (throw (ex-info (str "Undefined variable: " target)
-                    {:error (type-error (str "Undefined variable: " target))}))))
+    (let [vars @(:vars env)
+          qualified-name (when method (str target "." method))]
+      (if (and qualified-name
+               (not (contains? vars qualified-name))
+               (some #(str/starts-with? % (str target ".")) (keys vars)))
+        (throw (ex-info (str "Undefined function: " qualified-name)
+                        {:error (type-error (str "Undefined function: " qualified-name))}))
+        (throw (ex-info (str "Undefined variable: " target)
+                        {:error (type-error (str "Undefined variable: " target))}))))))
 
 (defn- reject-unguarded-detachable-target!
   [_env {:keys [method]} {:keys [class-target target-detachable? guarded? normalized-target]}]
