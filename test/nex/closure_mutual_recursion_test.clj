@@ -149,3 +149,47 @@ print(double_then_inc(2))")))))
 let sub_one := fn (x: Integer): Integer do result := x - 1 end
 print(add_one(6))
 print(sub_one(4))")))))
+
+(deftest mutual-recursion-name-shadowed-elsewhere-is-cleanly-rejected-test
+  (testing "one of the two mutually-recursive names ALSO reused as an
+            unrelated closure's own parameter, elsewhere in the same
+            block, must be cleanly rejected at type-check time — not
+            accepted and then misbehave at runtime. Regression test for a
+            two-sided bug found while documenting this feature: nex.lower/
+            forward-boxed-closure-names already excluded a shadowed name
+            from boxing (mirroring box-candidate-lets' own shadow guard
+            for the mutation case), but nex.typechecker/
+            register-closure-let-signatures! had no matching exclusion —
+            so the program type-checked (the shadowed name resolved as a
+            Function value on the strength of that pre-registration
+            alone) while lowering correctly declined to back it with a
+            real box, producing a runtime crash reaching for an
+            uninitialized value instead of the clean rejection ordinary
+            sequential-let semantics should give a genuine forward
+            reference. Both sides now share the same shadow exclusion
+            (shadowed-closure-let-names / shadowed-anywhere-names), so
+            the shadowed name simply falls back to check-let's ordinary,
+            unmodified handling, which correctly rejects it."
+    (let [f (java.io.File/createTempFile "closure_mutual_shadow" ".nex")]
+      (try
+        (spit f "let is_even := fn (n: Integer): Boolean do
+  if n = 0 then
+    result := true
+  else
+    result := is_odd(n - 1)
+  end
+end
+let is_odd := fn (n: Integer): Boolean do
+  if n = 0 then
+    result := false
+  else
+    result := is_even(n - 1)
+  end
+end
+let check_is_odd := fn (is_odd: Integer) do print(is_odd) end
+print(is_even(10))
+check_is_odd(99)")
+        (doseq [opts [{} {:interpret? true}]]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Undefined function or method: is_odd"
+                                 (e/eval-file (.getPath f) opts))))
+        (finally (.delete f))))))

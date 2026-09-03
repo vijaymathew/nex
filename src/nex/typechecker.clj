@@ -4265,12 +4265,45 @@
    :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
    :return-type (or (:return-type expr) "Any")})
 
+(defn- shadowed-closure-let-names
+  "Every name declared more than once anywhere in STMTS — as a :let (at
+   any depth) or as an :anonymous-function's own parameter — mirroring
+   nex.lower/shadowed-anywhere-names exactly, and needed for the identical
+   reason on the typechecking side: register-closure-let-signatures!
+   below has no scope tracking of its own, so without this it could not
+   tell a closure's own same-named parameter, or an unrelated nested
+   `let` reusing the name, from a genuine mutual-recursion reference.
+   Left unexcluded, such a name type-checked as a resolvable Function
+   value on the strength of THIS pre-registration alone, while the
+   lowering side's own, separately-added shadow guard (for the identical
+   reason) correctly declined to back it with a real box — a program that
+   type-checked but then read an uninitialized/incorrect value at
+   runtime, worse than the plain rejection ordinary sequential-let
+   semantics (rule 4.16) would have given it. Excluding the name here
+   restores exactly that: check-let's own ordinary, unmodified handling,
+   which correctly rejects a genuine forward reference to it."
+  [stmts]
+  (->> (tree-seq coll? seq stmts)
+       (filter map?)
+       (keep (fn [n]
+               (case (:type n)
+                 :let (:name n)
+                 :anonymous-function (seq (keep :name (:params n)))
+                 nil)))
+       (mapcat (fn [n] (if (coll? n) n [n])))
+       frequencies
+       (keep (fn [[name n]] (when (> n 1) name)))
+       set))
+
 (defn- register-closure-let-signatures!
   "Pre-register every DIRECT closure-literal `:let` in STMTS (not
    descending into nested if/loop/match/etc. bodies — those are checked in
    their own child env by their own check-* function, which calls
    check-statements again there) with a provisional Function(...) signature,
-   BEFORE any of STMTS is type-checked.
+   BEFORE any of STMTS is type-checked. Excludes any name shadowed
+   elsewhere in STMTS (see shadowed-closure-let-names) — mutual/self
+   recursion under that name simply does not apply, falling back to
+   check-let's own ordinary (unmodified) handling of it.
 
    This is the multi-name analog of check-let's own single-name
    pre-registration: `let is_even := fn(n) do ... is_odd(n - 1) ... end`
@@ -4286,11 +4319,13 @@
    already worked without this (an already-real object by construction
    time) — registering it again here is harmless, only ever redundant."
   [env stmts]
-  (doseq [stmt stmts]
-    (when (and (map? stmt) (= :let (:type stmt)) (string? (:name stmt))
-               (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
-      (env-add-var env (:name stmt)
-                   (or (:var-type stmt) (anonymous-function-provisional-signature (:value stmt)))))))
+  (let [shadowed (shadowed-closure-let-names stmts)]
+    (doseq [stmt stmts]
+      (when (and (map? stmt) (= :let (:type stmt)) (string? (:name stmt))
+                 (not (contains? shadowed (:name stmt)))
+                 (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
+        (env-add-var env (:name stmt)
+                     (or (:var-type stmt) (anonymous-function-provisional-signature (:value stmt))))))))
 
 (defn check-statements
   "Check STMTS in ENV in order, first pre-registering every direct

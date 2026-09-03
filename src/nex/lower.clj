@@ -3650,12 +3650,32 @@
    read or bare call) inside a SIBLING closure-let declared EARLIER in
    STMTS — the set that needs Closure_Mut_Box treatment so the earlier
    closure can hold an indirect reference to something that does not
-   exist yet at its own construction time."
+   exist yet at its own construction time.
+
+   Excludes any name shadowed elsewhere in STMTS (see shadowed-anywhere-
+   names — the same guard box-candidate-lets already applies to the
+   mutation-boxing case) for the identical reason: rewrite-forward-
+   references, like rewrite-boxed-references, is a single shape-agnostic
+   postwalk with no scope tracking of its own, so it cannot tell a
+   shadowing occurrence (a different closure's own same-named parameter,
+   or an unrelated `let` reusing the name) from a genuine forward
+   reference. Without this, a name doing double duty as both a mutual-
+   recursion participant and a plain unrelated parameter elsewhere in the
+   same block hit a lowering-time crash the moment that occurrence was
+   rewritten into a box read it cannot type-check against — the same
+   crash class shadowed-anywhere-names was introduced to close off for
+   mutation boxing. Excluding the name here means self- and mutual
+   recursion between closures simply do not apply for that one name, with
+   the ordinary (already-correct) ambient behavior taking over — never a
+   crash."
   [stmts]
   (let [lets (closure-let-names stmts)
+        shadowed (shadowed-anywhere-names stmts)
         name->index (into {}
                           (keep-indexed (fn [i s]
-                                          (when (contains? lets (:name s)) [(:name s) i])))
+                                          (when (and (contains? lets (:name s))
+                                                     (not (contains? shadowed (:name s))))
+                                            [(:name s) i])))
                           stmts)]
     (into #{}
           (mapcat (fn [[name let-stmt]]
@@ -3666,7 +3686,7 @@
                                          (> (get name->index ref-name) i))
                                 ref-name))
                             refs))))
-          lets)))
+          (select-keys lets (keys name->index)))))
 
 (defn- rewrite-forward-references
   "Rewrite every bare read/call/write of a name in BOXED-NAMES throughout
