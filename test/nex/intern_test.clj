@@ -1147,6 +1147,100 @@ print(describe(create Square.make(3)))")
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
+(deftest file-eval-match-bound-generic-field-resolves-through-qualified-inherit-test
+  (testing "a match clause's bound variable, whose class inherits its sealed
+            parent GENERICALLY through a QUALIFIED `inherit` clause
+            (`inherit pathA/Box[U]`, walked to the :parent string
+            \"pathA.Box\"), still gets its generic field types substituted
+            from the matched subject's real type arguments — not erased to
+            Any. Regression test: nex.typechecker/match-clause-binding-type
+            matched a clause class's `:parent` against the subject's base
+            type with raw `=`, so \"pathA.Box\" never matched a lookup for
+            the bare `Box` the enclosing function actually matched on; the
+            function silently fell back to the unsubstituted bare class
+            name, so `f.value` (declared `value: U`) came back typed Any
+            instead of Integer inside the clause body — a real type-safety
+            hole (an Integer operation on Any slips past normal checking)
+            hiding behind what looks like a harmless fallback path. Same
+            identity gap as class-subtype?, ancestor-instantiation, and
+            find-sealed-subclasses, one level up in generic binding-type
+            reconstruction."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-match-generic-qualified-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "pathA")
+          lib-file (io/file lib-dir "Box.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit lib-file "sealed deferred class Box[T]
+end
+
+class Full[U] inherit pathA/Box[U]
+feature
+  value: U
+create make(v: U) do value := v end
+end
+
+class Empty[U] inherit pathA/Box[U]
+end")
+      (spit main-file "intern pathA/Box
+
+function unwrap(b: Box[Integer]): Integer
+do
+  match b of
+    Full as f then result := f.value + 1
+    Empty as e then result := 0
+  end
+end
+
+print(unwrap(create Full[Integer].make(42)))")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "43")))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-self-inheritance-via-qualified-self-reference-is-rejected-test
+  (testing "`class Loop inherit p/Loop` — a class naming ITSELF as its own
+            parent, but through its own qualified path rather than bare —
+            is still rejected as self-inheritance. Hardening test for
+            nex.typechecker/check-inheritance, which now compares PARENT
+            against CLASS-NAME through class-name-identity rather than raw
+            `=`, the same normalization class-subtype?, ancestor-
+            instantiation, find-sealed-subclasses and match-clause-binding-
+            type all needed for their own equivalent comparisons. This
+            specific case was independently caught even before that fix
+            (the qualified-registration pass always compares two identically
+            -qualified spellings), but check-inheritance's comparisons are
+            now consistent with the rest of the identity-normalized checks
+            rather than relying on that coincidence."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-self-inherit-qualified-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "p")
+          lib-file (io/file lib-dir "Loop.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit lib-file "class Loop inherit p/Loop
+feature x: Integer
+end")
+      (spit main-file "intern p/Loop
+
+print(1)")
+      (try
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file) {})))]
+          (is (.contains (ex-message ex) "cannot inherit from itself") (ex-message ex)))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
 (deftest file-eval-diamond-dependency-is-not-ambiguous-test
   (testing "two different `intern` paths that resolve to the SAME canonical
             file (a diamond dependency) are not a collision — resolve-interned*

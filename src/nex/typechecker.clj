@@ -4488,7 +4488,19 @@
   matched subject. Given subject `Parent[A…]` and clause class `C` declared
   `C[G…] inherit Parent[P…]`, map each `Gᵢ` to the subject arg at the position
   where `Pⱼ = Gᵢ`. Falls back to the bare class name when it cannot be resolved
-  (raw subject, unknown class, or an indirect/ mismatched inherit)."
+  (raw subject, unknown class, or an indirect/ mismatched inherit).
+
+  Matches `C`'s own `:parent` entry through class-name-identity, not raw `=`
+  — `C` may declare `inherit path/Parent[P…]` (a qualified reference,
+  walked to a :parent string like \"path.Parent\") while SUBJECT-BASE is the
+  bare `Parent` the enclosing function actually matched on, or vice versa.
+  Both spellings name the same class; without normalizing here, this fell
+  through to the bare-class-name fallback and every generic field on the
+  bound clause variable came back erased to \"Any\" instead of the subject's
+  real element type — the same identity gap already fixed for ordinary and
+  generic subtyping (class-subtype?, ancestor-instantiation) and sealed
+  match exhaustiveness (find-sealed-subclasses), one level up in generic
+  binding-type reconstruction."
   [env subject-type class-name]
   (let [subject (normalize-type subject-type)
         subject-base (if (map? subject) (:base-type subject) subject)
@@ -4496,7 +4508,8 @@
         class-def (when (string? class-name) (env-lookup-class env class-name))
         gparams (map :name (:generic-params class-def))]
     (if (and (seq subject-args) (seq gparams))
-      (let [parent-entry (some #(when (= (:parent %) subject-base) %)
+      (let [subject-base-identity (class-name-identity env subject-base)
+            parent-entry (some #(when (= (class-name-identity env (:parent %)) subject-base-identity) %)
                                (:parents class-def))
             parent-args (map #(if (map? %) (:base-type %) %) (:generic-args parent-entry))]
         (if (and parent-entry (= (count parent-args) (count subject-args)))
@@ -5302,22 +5315,35 @@
 (defn check-inheritance
   "Check that inheritance declarations are valid"
   [env class-name parents]
-  (letfn [(cycle-path [start-parent]
-            (letfn [(visit [current path seen]
-                      (cond
-                        (= current class-name)
-                        (conj path current)
+  ;; class-name-identity-normalized once, up front: cycle-path's own walk and
+  ;; the self-inheritance check below both compare a chain-walked :parent
+  ;; string against CLASS-NAME, and that :parent string may be qualified
+  ;; ("path.Loop") even when CLASS-NAME is bare ("Loop") or vice versa — the
+  ;; same class reached back through a different spelling than the one this
+  ;; particular pass (check-program registers every interned class under
+  ;; both its bare AND qualified identity, running this check once per key)
+  ;; happens to be validating it under. Comparing raw strings let a genuine
+  ;; self- or cyclic-inheritance escape detection whenever the closing edge
+  ;; of the cycle used the "other" spelling — the same identity gap already
+  ;; fixed for ordinary and generic subtyping, sealed match exhaustiveness,
+  ;; and generic match-clause binding.
+  (let [class-identity (class-name-identity env class-name)]
+    (letfn [(cycle-path [start-parent]
+              (letfn [(visit [current path seen]
+                        (cond
+                          (= (class-name-identity env current) class-identity)
+                          (conj path current)
 
-                        (contains? seen current)
-                        nil
+                          (contains? seen current)
+                          nil
 
-                        :else
-                        (when-let [class-def (env-lookup-class env current)]
-                          (let [seen' (conj seen current)
-                                path' (conj path current)]
-                            (some #(visit (:parent %) path' seen')
-                                  (:parents class-def))))))]
-              (visit start-parent [class-name] #{class-name})))]
+                          :else
+                          (when-let [class-def (env-lookup-class env current)]
+                            (let [seen' (conj seen current)
+                                  path' (conj path current)]
+                              (some #(visit (:parent %) path' seen')
+                                    (:parents class-def))))))]
+                (visit start-parent [class-name] #{class-name})))]
   (doseq [{:keys [parent]} parents]
     ;; Check that parent class exists: a Nex class, a builtin, or an imported
     ;; Java interface or class (docs/proposals/java-interop.md). The
@@ -5330,7 +5356,7 @@
         (throw (ex-info (str "Parent class " parent " not found for class " class-name)
                         {:error (type-error
                                  (str "Undefined parent class: " parent))}))))
-    (when (= parent class-name)
+    (when (= (class-name-identity env parent) class-identity)
       (throw (ex-info (str "Class " class-name " cannot inherit from itself")
                       {:error (type-error
                                (str "Class " class-name " cannot inherit from itself"))})))
@@ -5353,7 +5379,7 @@
                                (str "Class " class-name " inherits more than one concrete Java class ("
                                     (str/join ", " concrete-java-parents)
                                     ") — the JVM allows extending only one."))}))))
-  (check-java-interface-conformance env class-name parents)))
+  (check-java-interface-conformance env class-name parents))))
 
 (defn- substitute-method-types
   "Apply a generic substitution map to a method member's parameter and return
