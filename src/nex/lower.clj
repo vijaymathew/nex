@@ -3466,14 +3466,24 @@
 
 (defn- names-touched-inside-closures
   "Every name read (`:identifier`) or written (`:assign` target) inside any
-   `:anonymous-function` literal reachable in STMTS — a boxing candidate
-   must actually be visible to some closure, or boxing it only adds
-   overhead to ordinary same-scope mutation (a loop counter, an
-   accumulator no closure ever touches) that never needed sharing."
+   `:anonymous-function` OR `:spawn` body reachable in STMTS — a boxing
+   candidate must actually be visible to some closure, or boxing it only
+   adds overhead to ordinary same-scope mutation (a loop counter, an
+   accumulator no closure ever touches) that never needed sharing.
+
+   `:spawn` is included alongside `:anonymous-function` for the same
+   reason: nex.lower/rewrite-expression-for-closures' own `:spawn` case
+   wraps a spawn body into a synthetic anonymous-function LATER, during
+   the ordinary closure-capture rewrite — a plain `:spawn` node here, at
+   this earlier detection pass, is not yet that shape, so without this it
+   was invisible to boxing entirely: `let total := 0 / spawn do total :=
+   total + 5 end / t.await / print(total)` silently kept reading the
+   pre-spawn value even after `.await` — which blocks until the task
+   finishes — guarantees the mutation already happened."
   [stmts]
   (into #{}
         (comp (filter map?)
-              (filter #(= :anonymous-function (:type %)))
+              (filter #(contains? #{:anonymous-function :spawn} (:type %)))
               (mapcat (fn [fn-node]
                         (into []
                               (comp (filter map?)

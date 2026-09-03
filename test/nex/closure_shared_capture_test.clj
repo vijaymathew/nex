@@ -201,3 +201,40 @@ do
 end
 
 print(outer()())")))))
+
+(deftest spawn-mutating-a-captured-variable-is-visible-after-await-test
+  (testing "a `spawn` block that reassigns a captured outer local, awaited
+            before the enclosing scope reads it back, sees the mutation —
+            `.await` blocks until the task finishes, so there is no
+            question of a race here, only whether the write is visible at
+            all. Regression test: names-touched-inside-closures only ever
+            recognized an `:anonymous-function` node — a plain `:spawn`
+            node is not yet wrapped into that shape at the point this
+            detection pass runs (nex.lower/rewrite-expression-for-
+            closures' own `:spawn` case does that wrapping LATER), so a
+            spawn body was invisible to boxing entirely and the mutation
+            was silently lost, exactly the original shared-capture bug
+            this file is about — just for `spawn` instead of `fn(...)`"
+    (is (= ["5"]
+           (both "let total := 0
+let t: Task := spawn do
+  total := total + 5
+end
+t.await
+print(total)")))))
+
+(deftest spawn-inside-a-function-mutating-a-local-is-visible-after-await-test
+  (testing "the same spawn-capture fix works for a local declared inside a
+            function body, not just at the top level, and the function
+            can return the mutated value after awaiting the task"
+    (is (= ["10"]
+           (both "function compute(): Integer
+do
+  let acc := 1
+  let t: Task := spawn do
+    acc := acc * 10
+  end
+  t.await
+  result := acc
+end
+print(compute())")))))
