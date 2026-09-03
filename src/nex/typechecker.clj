@@ -883,14 +883,26 @@
                     sub)
             super (or (when-not (env-lookup-class env super)
                         (generic-param-constraint env super))
-                      super)]
+                      super)
+            ;; A parent recorded via a qualified `inherit` clause (`inherit
+            ;; flex/Rule`, walked to the :parent string "flex.Rule") must
+            ;; still match a SUPER written bare ("Rule") — the same identity
+            ;; normalization types-equal? already applies to a direct
+            ;; comparison (see class-name-identity), needed again here since
+            ;; the ancestor walk compares :parent strings that types-equal?
+            ;; never sees. Without it, a class inherited through its
+            ;; qualified name was accepted everywhere BUT as an argument to a
+            ;; parameter typed with the same class's bare name — "Expected
+            ;; Rule, got Percent_Off" even though Percent_Off truly does
+            ;; inherit Rule, just spelled "flex/Rule" at the inherit site.
+            super-identity (class-name-identity env super)]
         (letfn [(sub? [current seen]
                 (if (contains? seen current)
                   false
                   (if-let [class-def (env-lookup-class env current)]
                     (let [parents (map :parent (:parents class-def))
                           seen (conj seen current)]
-                      (or (some #(= % super) parents)
+                      (or (some #(= (class-name-identity env %) super-identity) parents)
                           (some #(sub? % seen) parents)))
                     false)))]
           (sub? sub #{}))))))

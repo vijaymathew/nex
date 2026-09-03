@@ -2032,6 +2032,20 @@
            %)
         (class-constructors class-def)))
 
+(defn- parent-field-name
+  "JVM field name backing PARENT's composition slot on a heir class -- see
+   direct-parent-field-map's docstring for what that slot is. PARENT is an
+   ordinary Nex class-name string, but may be a qualified one ('flex.Rule',
+   from an `inherit flex/Rule` clause resolved per docs/proposals/namespaces.md
+   Phase 3) -- a '.' is illegal in a JVM field name, so it is mangled to '_'
+   the same way an interned free function's :qualified-name already is
+   (function-jvm-name, above). Every call site that builds this field's name
+   goes through here, so a lookup by name (composition-fields, reflectively
+   scanning by the \"_parent_\" prefix) never needs to reverse the mangling --
+   it only ever needs the field's declared name to match what was written."
+  [parent]
+  (str "_parent_" (str/replace parent "." "_")))
+
 (defn- resolve-parent-metas
   [env class-def]
   (->> (:parents class-def)
@@ -2043,7 +2057,7 @@
                     :jvm-name (:jvm-name compiled)
                     :internal-name (:internal-name compiled)
                     :binary-name (:binary-name compiled)
-                    :composition-field (str "_parent_" parent)
+                    :composition-field (parent-field-name parent)
                     :deferred? (boolean (:deferred? parent-def))}))))
        (remove nil?)
        vec))
@@ -2083,7 +2097,7 @@
   (reduce (fn [m {:keys [parent generic-args]}]
             (if-let [parent-def (and (get (:compiled-classes env) parent)
                                      (get (visible-class-map env) parent))]
-              (let [composition-field (str "_parent_" parent)
+              (let [composition-field (parent-field-name parent)
                     parent-params (mapv :name (:generic-params parent-def))
                     ;; An inherited field is declared in the parent's generic
                     ;; parameters, which need not match the heir's: restate it in
@@ -2319,7 +2333,7 @@
             (if-let [parent-def (and (get (:compiled-classes env) parent)
                                      (get (visible-class-map env) parent))]
               (let [parent-meta (class-jvm-meta env parent)
-                    composition-field (str "_parent_" parent)]
+                    composition-field (parent-field-name parent)]
                 (reduce (fn [m2 method-def]
                           (if (contains? m2 [(:name method-def) (count (or (:params method-def) []))])
                             m2
@@ -4430,7 +4444,7 @@
   [env expr parent-name parent-def arg-irs]
   (let [parent-meta (class-jvm-meta env parent-name)
         target-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                     (str "_parent_" parent-name)
+                                     (parent-field-name parent-name)
                                      (ir/this-node (:this-type env)
                                                    (exact-class-jvm-type env (:this-type env)))
                                      parent-name
@@ -4500,7 +4514,7 @@
                           (lowered-instance-method-name method-def)
                           (desc/repl-instance-method-descriptor)
                           (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                             (str "_parent_" class-target-name)
+                                             (parent-field-name class-target-name)
                                              (ir/this-node (:this-type env)
                                                            (exact-class-jvm-type env (:this-type env)))
                                              class-target-name
@@ -5200,7 +5214,7 @@
           receiver-ir (if own-class?
                         (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
                         (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                           (str "_parent_" owner)
+                                           (parent-field-name owner)
                                            (ir/this-node (:this-type env)
                                                          (exact-class-jvm-type env (:this-type env)))
                                            owner
@@ -5750,7 +5764,7 @@
     (if-let [shim-parent (:shim-parent ctor-def)]
       (let [parent-meta (class-jvm-meta {:compiled-classes compiled-classes} shim-parent)
             target-ir (ir/field-get-node (:internal-name (class-jvm-meta {:compiled-classes compiled-classes} class-name))
-                                         (str "_parent_" shim-parent)
+                                         (parent-field-name shim-parent)
                                          (ir/this-node class-name
                                                        (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
                                          shim-parent
