@@ -967,6 +967,280 @@ print(q.label)")
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
+(deftest interpret-nested-bare-intern-resolves-relative-to-its-own-file-test
+  (testing "under --interpret, a BARE `intern Sibling` inside a file that was
+            itself reached through a path-qualified intern resolves relative
+            to THAT FILE's own directory, not the entry script's — the
+            interpreted-mode analog of
+            file-eval-diamond-dependency-is-not-ambiguous-test, which only
+            ever exercised the compiled backend. Regression test:
+            nex.interpreter/process-intern evaluated a just-loaded file's AST
+            without ever updating ctx's :debug-source to that file's own
+            path first, so intern-search-roots (which explicitly documents
+            this exact nested-intern scenario as its reason to exist) kept
+            resolving every nested intern relative to the ENTRY file's
+            directory, however deep the nesting — 'Cannot find intern file
+            for Sibling' even though Sibling.nex sits right next to the file
+            that interns it. The static analysis path (resolve-interned*,
+            what the compiled backend and type-checking both use) already
+            rebinds :debug-source per recursive call, so this bug was
+            invisible on the compiled backend; only --interpret builds a
+            single shared ctx it forgets to update."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-interpret-nested-bare-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "pathA")
+          sibling-file (io/file lib-dir "Sibling.nex")
+          wrapper-file (io/file lib-dir "Wrapper.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit sibling-file "class Sibling
+feature
+  tag: String
+create
+  make() do tag := \"sibling\" end
+end")
+      (spit wrapper-file "intern Sibling
+
+class Wrapper
+feature
+  greet(): String do result := create Sibling.make.tag end
+end")
+      (spit main-file "intern pathA/Wrapper
+
+let w := create Wrapper
+print(w.greet)")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (not (.contains interpreted "Cannot find intern file for Sibling")) interpreted)
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "sibling")))
+        (finally
+          (.delete sibling-file)
+          (.delete wrapper-file)
+          (.delete main-file)
+          (.delete lib-dir)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-generic-inherit-conforms-to-bare-generic-param-type-test
+  (testing "a class reached through a QUALIFIED generic `inherit` clause
+            (`inherit flex/Spec[Integer]`, walked to a :parent string
+            \"flex.Spec\") still conforms to a parameter typed with the
+            SAME class's bare, non-qualified generic name (`Spec[Integer]`)
+            — the generic-type analog of
+            file-eval-qualified-reference-to-non-colliding-class-test,
+            which only ever covered non-parameterized types. Regression
+            test: nex.typechecker/ancestor-instantiation (which walks a
+            generic heir's `inherit` chain looking for the target base
+            class) compared class names with raw `=`, so \"flex.Spec\"
+            never matched a lookup for bare \"Spec\" even though
+            class-name-identity — used everywhere else two spellings of the
+            same class must compare equal — already normalizes exactly
+            this pair. class-subtype? needed the identical fix for
+            non-generic inheritance; this is the same defect one level up,
+            in the parameterized-type conformance path
+            (generic-class-conforms?) that only generic classes go through."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-qualified-generic-inherit-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "flex")
+          lib-file (io/file lib-dir "Spec.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit lib-file "deferred class Spec[T]
+feature holds(item: T): Boolean deferred
+end
+
+class Over_Amount inherit flex/Spec[Integer]
+feature
+  threshold: Integer
+create make(t: Integer) do threshold := t end
+feature
+  holds(item: Integer): Boolean do result := item >= threshold end
+end
+
+function check(s: Spec[Integer], x: Integer): Boolean do result := s.holds(x) end")
+      (spit main-file "intern flex/Spec
+
+print(check(create Over_Amount.make(10), 15))")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "true")))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-sealed-match-exhaustiveness-covers-qualified-inherit-heir-test
+  (testing "a sealed hierarchy's variant declared with a QUALIFIED `inherit`
+            clause (`inherit shapes/Shape`, walked to the :parent string
+            \"shapes.Shape\") still counts toward match exhaustiveness
+            against the bare sealed type name (`Shape`) — omitting it from
+            a `match` with no `else` must be rejected as non-exhaustive,
+            exactly as if the variant had been declared `inherit Shape`
+            directly. Regression test: nex.typechecker/find-sealed-
+            subclasses compared a heir's :parent with raw `=`, so
+            \"shapes.Shape\" never matched a lookup for bare \"Shape\" —
+            such a heir was silently absent from the known-variants set, so
+            a match omitting it compiled and ran anyway instead of being
+            rejected. The same identity gap class-subtype? and
+            ancestor-instantiation needed fixing for ordinary and generic
+            subtyping, one level up in the exhaustiveness check that only
+            sealed `match` goes through."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-sealed-qualified-inherit-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "shapes")
+          lib-file (io/file lib-dir "Shape.nex")
+          non-exhaustive-file (io/file tmp-dir "non_exhaustive.nex")
+          exhaustive-file (io/file tmp-dir "exhaustive.nex")]
+      (.mkdirs lib-dir)
+      (spit lib-file "sealed deferred class Shape
+end
+
+class Circle inherit shapes/Shape
+feature radius: Integer create make(r: Integer) do radius := r end
+end
+
+class Square inherit shapes/Shape
+feature side: Integer create make(s: Integer) do side := s end
+end")
+      (spit non-exhaustive-file "intern shapes/Shape
+
+function describe(s: Shape): String
+do
+  match s of
+    Circle as c then result := \"circle\"
+  end
+end
+
+print(describe(create Circle.make(5)))")
+      (spit exhaustive-file "intern shapes/Shape
+
+function describe(s: Shape): String
+do
+  match s of
+    Circle as c then result := \"circle\"
+    Square as sq then result := \"square\"
+  end
+end
+
+print(describe(create Circle.make(5)))
+print(describe(create Square.make(3)))")
+      (try
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath non-exhaustive-file) {})))]
+          (is (.contains (ex-message ex) "does not cover all variants") (ex-message ex))
+          (is (.contains (ex-message ex) "Square") (ex-message ex)))
+        (let [compiled (with-out-str (e/eval-file (.getPath exhaustive-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath exhaustive-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "circle"))
+          (is (.contains compiled "square")))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete non-exhaustive-file)
+          (.delete exhaustive-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-match-bound-generic-field-resolves-through-qualified-inherit-test
+  (testing "a match clause's bound variable, whose class inherits its sealed
+            parent GENERICALLY through a QUALIFIED `inherit` clause
+            (`inherit pathA/Box[U]`, walked to the :parent string
+            \"pathA.Box\"), still gets its generic field types substituted
+            from the matched subject's real type arguments — not erased to
+            Any. Regression test: nex.typechecker/match-clause-binding-type
+            matched a clause class's `:parent` against the subject's base
+            type with raw `=`, so \"pathA.Box\" never matched a lookup for
+            the bare `Box` the enclosing function actually matched on; the
+            function silently fell back to the unsubstituted bare class
+            name, so `f.value` (declared `value: U`) came back typed Any
+            instead of Integer inside the clause body — a real type-safety
+            hole (an Integer operation on Any slips past normal checking)
+            hiding behind what looks like a harmless fallback path. Same
+            identity gap as class-subtype?, ancestor-instantiation, and
+            find-sealed-subclasses, one level up in generic binding-type
+            reconstruction."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-match-generic-qualified-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "pathA")
+          lib-file (io/file lib-dir "Box.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit lib-file "sealed deferred class Box[T]
+end
+
+class Full[U] inherit pathA/Box[U]
+feature
+  value: U
+create make(v: U) do value := v end
+end
+
+class Empty[U] inherit pathA/Box[U]
+end")
+      (spit main-file "intern pathA/Box
+
+function unwrap(b: Box[Integer]): Integer
+do
+  match b of
+    Full as f then result := f.value + 1
+    Empty as e then result := 0
+  end
+end
+
+print(unwrap(create Full[Integer].make(42)))")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (= interpreted compiled) "compiled and interpreted output must agree")
+          (is (.contains compiled "43")))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
+(deftest file-eval-self-inheritance-via-qualified-self-reference-is-rejected-test
+  (testing "`class Loop inherit p/Loop` — a class naming ITSELF as its own
+            parent, but through its own qualified path rather than bare —
+            is still rejected as self-inheritance. Hardening test for
+            nex.typechecker/check-inheritance, which now compares PARENT
+            against CLASS-NAME through class-name-identity rather than raw
+            `=`, the same normalization class-subtype?, ancestor-
+            instantiation, find-sealed-subclasses and match-clause-binding-
+            type all needed for their own equivalent comparisons. This
+            specific case was independently caught even before that fix
+            (the qualified-registration pass always compares two identically
+            -qualified spellings), but check-inheritance's comparisons are
+            now consistent with the rest of the identity-normalized checks
+            rather than relying on that coincidence."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-self-inherit-qualified-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "p")
+          lib-file (io/file lib-dir "Loop.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit lib-file "class Loop inherit p/Loop
+feature x: Integer
+end")
+      (spit main-file "intern p/Loop
+
+print(1)")
+      (try
+        (let [ex (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file) {})))]
+          (is (.contains (ex-message ex) "cannot inherit from itself") (ex-message ex)))
+        (finally
+          (.delete lib-file)
+          (.delete lib-dir)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
+
 (deftest file-eval-diamond-dependency-is-not-ambiguous-test
   (testing "two different `intern` paths that resolve to the SAME canonical
             file (a diamond dependency) are not a collision — resolve-interned*

@@ -934,10 +934,21 @@
    parent: `class Over_Amount inherit Spec[Draft]` carries no arguments of its
    own, yet instantiates `Spec` at `[Draft]`. It equally handles arguments that
    are threaded (`C[T] inherit P[T]`), reordered, or nested (`C[T] inherit
-   P[Array[T]]`)."
+   P[Array[T]]`).
+
+   Compares names through class-name-identity, not raw `=` — SUPER-NAME may
+   be written bare while a step of the walk (SUB-NAME itself, or a `parent`
+   string found along the way) is qualified, e.g. `inherit flex/Spec[T]`
+   walked to \"flex.Spec\" against a parameter typed bare `Spec[Integer]`.
+   Both denote the same class whenever the bare name isn't itself ambiguous
+   (see class-name-identity) — without this normalization here, a generic
+   heir reached through a qualified `inherit` clause was rejected as not
+   conforming to its own parent's bare-named parameterized type, the exact
+   generic-type analog of the fix class-subtype? needed for non-generic
+   inheritance."
   [env sub-name sub-args super-name seen]
   (cond
-    (= sub-name super-name) (vec sub-args)
+    (= (class-name-identity env sub-name) (class-name-identity env super-name)) (vec sub-args)
     (contains? seen sub-name) nil
     :else
     (when-let [class-def (env-lookup-class env sub-name)]
@@ -4235,6 +4246,68 @@
     (when (= target "result")
       (maybe-update-spawn-result! env val-type))))
 
+(defn- anonymous-function-provisional-signature
+  "A Function(...) type for an :anonymous-function EXPR, computed directly
+   from its own (possibly still-unannotated) :params/:return-type — the
+   same shape check-expr-anonymous-function's own return value uses (see
+   there). check-let registers this as NAME's type BEFORE the closure's
+   own body is type-checked, so a self-referential call inside that body
+   (`let fact := fn(n) do ... fact(n-1) ... end`) resolves NAME as an
+   ordinary Function-valued local — exactly like calling any other local
+   holding a Function value, which check-call already supports; the only
+   missing piece was NAME simply not being in scope yet while its own
+   body was checked. An untyped param/return falls back to \"Any\", same
+   as everywhere else an omission reaches this point unresolved -- a
+   recursive call still type-checks, just with less precision, rather
+   than failing to resolve NAME at all."
+  [expr]
+  {:base-type "Function"
+   :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
+   :return-type (or (:return-type expr) "Any")})
+
+(defn- register-closure-let-signatures!
+  "Pre-register every DIRECT closure-literal `:let` in STMTS (not
+   descending into nested if/loop/match/etc. bodies — those are checked in
+   their own child env by their own check-* function, which calls
+   check-statements again there) with a provisional Function(...) signature,
+   BEFORE any of STMTS is type-checked.
+
+   This is the multi-name analog of check-let's own single-name
+   pre-registration: `let is_even := fn(n) do ... is_odd(n - 1) ... end`
+   declared before `let is_odd := fn(n) do ... end` needs `is_odd` already
+   resolvable while checking `is_even`'s body — not just a closure seeing
+   itself, but one closure seeing a SIBLING declared later in the same
+   block, exactly how ordinary top-level `function is_even(...) ... end` /
+   `function is_odd(...) ... end` already resolve each other regardless of
+   order (check-program registers every function's signature before
+   checking any body — this gives closures the same guarantee). Declaration
+   order is otherwise irrelevant here: this scans the whole list up front,
+   so a closure may just as well reference one declared BEFORE it, which
+   already worked without this (an already-real object by construction
+   time) — registering it again here is harmless, only ever redundant."
+  [env stmts]
+  (doseq [stmt stmts]
+    (when (and (map? stmt) (= :let (:type stmt)) (string? (:name stmt))
+               (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
+      (env-add-var env (:name stmt)
+                   (or (:var-type stmt) (anonymous-function-provisional-signature (:value stmt)))))))
+
+(defn check-statements
+  "Check STMTS in ENV in order, first pre-registering every direct
+   closure-literal `:let` (see register-closure-let-signatures!) so
+   mutually (or self-) recursive closures resolve each other regardless of
+   declaration order. Used at the scopes where this matters in practice —
+   top-level statements, a function/method body, a constructor body — not
+   at every single statement-list site in the checker (an if/loop/match
+   branch's own body still calls check-statement directly, one statement
+   at a time): a closure declared inside a conditional/loop branch is a
+   narrower, rarer case, deliberately left with the ordinary sequential-
+   let behavior rather than widening this change to every call site."
+  [env stmts]
+  (register-closure-let-signatures! env stmts)
+  (doseq [stmt stmts]
+    (check-statement env stmt)))
+
 (defn check-let
   "Check a let statement"
   [env {:keys [name var-type value synthetic] :as stmt}]
@@ -4248,6 +4321,17 @@
                      "in one block may not share a name.")]
         (throw (ex-info msg {:error (type-error msg)})))
       (swap! (:let-names env) conj name)))
+  ;; A closure literal may reference its OWN let-bound name recursively —
+  ;; register NAME with a provisional signature before checking VALUE, not
+  ;; after, so `fact` resolves inside its own body. Every other :let RHS
+  ;; keeps ordinary sequential-let semantics (an outer `x` is what `let x
+  ;; := x + 1` sees, never the new binding); this is a deliberate, narrow
+  ;; exception for the one case where seeing yourself is exactly the point
+  ;; (the same convention a JS named function expression's own name gets
+  ;; inside its own body). Harmless if VALUE never actually calls itself —
+  ;; this only ever makes NAME resolve somewhere it previously did not.
+  (when (and (string? name) (map? value) (= :anonymous-function (:type value)))
+    (env-add-var env name (or var-type (anonymous-function-provisional-signature value))))
   (let [val-type (if var-type
                    (check-expression-with-expected env value var-type)
                    (check-expression env value))
@@ -4451,20 +4535,45 @@
    so a class also reachable through a qualified-only registration (Phase 3,
    :name there is the qualified string — see check-program's
    qualified-class-defs) is counted once, under its real bare name, not as an
-   extra variant."
+   extra variant.
+
+   Matches a heir's :parent through class-name-identity, not raw `=` — a
+   heir declared with a QUALIFIED `inherit` clause (`inherit flex/Shape`,
+   walked to the :parent string \"flex.Shape\") is exactly as much a variant
+   of bare `Shape` as one declared `inherit Shape` directly, the same
+   identity class-subtype? and ancestor-instantiation already normalize for
+   ordinary and generic subtyping. Without this, such a heir was silently
+   missing from `known` here, so check-match's exhaustiveness check never
+   flagged it as an uncovered variant — a `match` on a sealed type could
+   omit a real variant entirely and still compile, so long as that variant
+   happened to be reached through a qualified `inherit`."
   [env sealed-class-name]
-  (->> (visible-class-defs env)
-       (filter (fn [class-def]
-                 (some #(= (:parent %) sealed-class-name) (:parents class-def))))
-       (map #(or (:true-name %) (:name %)))
-       set))
+  (let [sealed-identity (class-name-identity env sealed-class-name)]
+    (->> (visible-class-defs env)
+         (filter (fn [class-def]
+                   (some #(= (class-name-identity env (:parent %)) sealed-identity)
+                         (:parents class-def))))
+         (map #(or (:true-name %) (:name %)))
+         set)))
 
 (defn match-clause-binding-type
   "Reconstruct a match clause's type with generic arguments carried over from the
   matched subject. Given subject `Parent[A…]` and clause class `C` declared
   `C[G…] inherit Parent[P…]`, map each `Gᵢ` to the subject arg at the position
   where `Pⱼ = Gᵢ`. Falls back to the bare class name when it cannot be resolved
-  (raw subject, unknown class, or an indirect/ mismatched inherit)."
+  (raw subject, unknown class, or an indirect/ mismatched inherit).
+
+  Matches `C`'s own `:parent` entry through class-name-identity, not raw `=`
+  — `C` may declare `inherit path/Parent[P…]` (a qualified reference,
+  walked to a :parent string like \"path.Parent\") while SUBJECT-BASE is the
+  bare `Parent` the enclosing function actually matched on, or vice versa.
+  Both spellings name the same class; without normalizing here, this fell
+  through to the bare-class-name fallback and every generic field on the
+  bound clause variable came back erased to \"Any\" instead of the subject's
+  real element type — the same identity gap already fixed for ordinary and
+  generic subtyping (class-subtype?, ancestor-instantiation) and sealed
+  match exhaustiveness (find-sealed-subclasses), one level up in generic
+  binding-type reconstruction."
   [env subject-type class-name]
   (let [subject (normalize-type subject-type)
         subject-base (if (map? subject) (:base-type subject) subject)
@@ -4472,7 +4581,8 @@
         class-def (when (string? class-name) (env-lookup-class env class-name))
         gparams (map :name (:generic-params class-def))]
     (if (and (seq subject-args) (seq gparams))
-      (let [parent-entry (some #(when (= (:parent %) subject-base) %)
+      (let [subject-base-identity (class-name-identity env subject-base)
+            parent-entry (some #(when (= (class-name-identity env (:parent %)) subject-base-identity) %)
                                (:parents class-def))
             parent-args (map #(if (map? %) (:base-type %) %) (:generic-args parent-entry))]
         (if (and parent-entry (= (count parent-args) (count subject-args)))
@@ -4999,8 +5109,7 @@
                                    (str "Precondition must be Boolean, got " cond-type))})))))
 
     ;; Check method body
-    (doseq [stmt body]
-      (check-statement method-env stmt))
+    (check-statements method-env body)
 
     ;; Check rescue clause
     (when rescue
@@ -5063,8 +5172,7 @@
                                      (str "Precondition must be Boolean, got " cond-type))}))))))
 
     ;; Check body
-    (doseq [stmt body]
-      (check-statement ctor-env stmt))
+    (check-statements ctor-env body)
 
     ;; Check postconditions
     (doseq [assertion ensure]
@@ -5278,22 +5386,35 @@
 (defn check-inheritance
   "Check that inheritance declarations are valid"
   [env class-name parents]
-  (letfn [(cycle-path [start-parent]
-            (letfn [(visit [current path seen]
-                      (cond
-                        (= current class-name)
-                        (conj path current)
+  ;; class-name-identity-normalized once, up front: cycle-path's own walk and
+  ;; the self-inheritance check below both compare a chain-walked :parent
+  ;; string against CLASS-NAME, and that :parent string may be qualified
+  ;; ("path.Loop") even when CLASS-NAME is bare ("Loop") or vice versa — the
+  ;; same class reached back through a different spelling than the one this
+  ;; particular pass (check-program registers every interned class under
+  ;; both its bare AND qualified identity, running this check once per key)
+  ;; happens to be validating it under. Comparing raw strings let a genuine
+  ;; self- or cyclic-inheritance escape detection whenever the closing edge
+  ;; of the cycle used the "other" spelling — the same identity gap already
+  ;; fixed for ordinary and generic subtyping, sealed match exhaustiveness,
+  ;; and generic match-clause binding.
+  (let [class-identity (class-name-identity env class-name)]
+    (letfn [(cycle-path [start-parent]
+              (letfn [(visit [current path seen]
+                        (cond
+                          (= (class-name-identity env current) class-identity)
+                          (conj path current)
 
-                        (contains? seen current)
-                        nil
+                          (contains? seen current)
+                          nil
 
-                        :else
-                        (when-let [class-def (env-lookup-class env current)]
-                          (let [seen' (conj seen current)
-                                path' (conj path current)]
-                            (some #(visit (:parent %) path' seen')
-                                  (:parents class-def))))))]
-              (visit start-parent [class-name] #{class-name})))]
+                          :else
+                          (when-let [class-def (env-lookup-class env current)]
+                            (let [seen' (conj seen current)
+                                  path' (conj path current)]
+                              (some #(visit (:parent %) path' seen')
+                                    (:parents class-def))))))]
+                (visit start-parent [class-name] #{class-name})))]
   (doseq [{:keys [parent]} parents]
     ;; Check that parent class exists: a Nex class, a builtin, or an imported
     ;; Java interface or class (docs/proposals/java-interop.md). The
@@ -5306,7 +5427,7 @@
         (throw (ex-info (str "Parent class " parent " not found for class " class-name)
                         {:error (type-error
                                  (str "Undefined parent class: " parent))}))))
-    (when (= parent class-name)
+    (when (= (class-name-identity env parent) class-identity)
       (throw (ex-info (str "Class " class-name " cannot inherit from itself")
                       {:error (type-error
                                (str "Class " class-name " cannot inherit from itself"))})))
@@ -5329,7 +5450,7 @@
                                (str "Class " class-name " inherits more than one concrete Java class ("
                                     (str/join ", " concrete-java-parents)
                                     ") — the JVM allows extending only one."))}))))
-  (check-java-interface-conformance env class-name parents)))
+  (check-java-interface-conformance env class-name parents))))
 
 (defn- substitute-method-types
   "Apply a generic substitution map to a method member's parameter and return
@@ -6517,8 +6638,7 @@
        ;; Check top-level statements in source order when available.
        ;; Fall back to legacy :calls-only programs.
        (if (seq statements)
-         (doseq [stmt statements]
-           (check-statement env stmt))
+         (check-statements env statements)
          (doseq [call calls]
            (check-expression env call)))
 

@@ -12,10 +12,12 @@
 
   Unsupported nodes fail fast with ex-info."
   (:require [clojure.string :as str]
+            [clojure.walk :as walk]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.types.builtins :as bi]
             [nex.types.bootstrap :as bootstrap]
             [nex.ir :as ir]
+            [nex.parser :as parser]
             [nex.typechecker :as tc])
   (:import [org.objectweb.asm Type]))
 
@@ -2974,11 +2976,62 @@
 
     :else expr))
 
+(defn- rewrite-self-recursive-calls
+  "Rewrite a bare, self-recursive call to SELF-NAME (`fact(n-1)` inside the
+   body of `let fact := fn(n) do ... fact(n-1) ... end`) into a bare call
+   to `callN` instead — the exact shape a plain `self_method(...)` call
+   already lowers through (nex.lower/lower-call-without-target's first
+   branch, `class-method-def (current-class-def env) ...`), since callN IS
+   a real member of this closure's own class-def (attach-capture-fields).
+   No new AST/IR node type, no env threading into the later lowering
+   pass — the rename alone is enough, because JVM `this` inside a
+   closure's own callN method already refers to the closure instance
+   itself.
+
+   A plain recursive-descent walk, not clojure.walk/postwalk: it must NOT
+   descend into a nested `:anonymous-function`'s own :body at all — a
+   deeper closure reached inside this one (a call argument, say) has its
+   own, unrelated scope, and if IT also happens to bare-call something
+   named SELF-NAME, that reference is not this closure calling itself.
+   Stopping at that boundary is what keeps this rewrite correctly scoped
+   without any ctx-threading (and its leak risk) between closures at
+   different nesting depths."
+  [self-name node]
+  (cond
+    (and (map? node) (= :anonymous-function (:type node)))
+    node
+
+    (and (map? node) (= :call (:type node)) (nil? (:target node)) (= self-name (:method node)))
+    (assoc node
+           :method (str "call" (count (:args node)))
+           :args (mapv #(rewrite-self-recursive-calls self-name %) (:args node)))
+
+    (map? node)
+    (into (empty node) (map (fn [[k v]] [k (rewrite-self-recursive-calls self-name v)])) node)
+
+    (vector? node)
+    (mapv #(rewrite-self-recursive-calls self-name %) node)
+
+    (seq? node)
+    (map #(rewrite-self-recursive-calls self-name %) node)
+
+    :else node))
+
 (defn- rewrite-statement-for-closures
   [ctx local-types captures stmt]
   (case (:type stmt)
     :let
-    (let [value' (rewrite-expression-for-closures ctx local-types captures (:value stmt))
+    ;; A closure literal directly assigned to a `let` may call itself
+    ;; recursively by that name (`let fact := fn(n) do ... fact(n-1) ...
+    ;; end` — see nex.typechecker/check-let, which now lets this
+    ;; type-check by pre-registering the name). Renamed to a bare callN
+    ;; call BEFORE the ordinary closure rewrite below ever runs, so that
+    ;; pass's own capture/`this` handling stays entirely unaware self-
+    ;; recursion exists at all — see rewrite-self-recursive-calls.
+    (let [value (if (and (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
+                  (update (:value stmt) :body #(rewrite-self-recursive-calls (:name stmt) %))
+                  (:value stmt))
+          value' (rewrite-expression-for-closures ctx local-types captures value)
           stmt' (assoc stmt :value value')
           var-type (or (:var-type stmt)
                        (infer-prepass-type ctx local-types value'))]
@@ -3359,6 +3412,371 @@
       (update :functions resolve-functions-anonymous-function-context-types)
       (update :classes #(mapv resolve-class-anonymous-function-context-types %))))
 
+;; --- Shared mutable captures ---
+;;
+;; A closure's captures are ordinary VALUE snapshots taken at construction
+;; time (see lower-expr-anonymous-function/make-captured-function-object):
+;; each `fn(...)` literal gets its own private copy of whatever an outer
+;; variable currently holds. That is correct for a captured variable no
+;; closure ever reassigns, and even for ONE closure that both reads and
+;; writes its own capture (repeat calls to that SAME closure instance see
+;; its own prior writes, since it's the same object's own field). It breaks
+;; the moment TWO SEPARATE closures are meant to share one mutable variable
+;; — `let total := 0 / let add := fn(x) do total := total + x end / let
+;; peek := fn() do result := total end` — each closure snapshots its own
+;; copy of `total` at its own construction, so `add`'s writes are invisible
+;; to `peek`, and to the enclosing scope's own later reads of `total`.
+;;
+;; The fix below does not touch the capture-passing machinery at all —
+;; captures already pass whatever VALUE an identifier currently holds, and
+;; an object reference is already correctly shared by every closure (and
+;; the enclosing scope) that holds it. Instead, a `:let`-declared local
+;; that is (a) reassigned anywhere reachable from its scope (directly, or
+;; inside a nested closure) and (b) referenced inside at least one nested
+;; closure, is rewritten so the VALUE it holds is a tiny synthetic boxed
+;; object (Closure_Mut_Box[T], one `value: T` field) instead of the bare
+;; scalar/value — every bare read of that name becomes a `.value` field
+;; read, every `:=` write becomes a `.value :=` field write, and the
+;; closure's existing by-reference capture semantics do the rest.
+(def ^:private closure-mut-box-class-name "Closure_Mut_Box")
+
+(def ^:private closure-mut-box-class-def
+  "The Closure_Mut_Box[T] class-def, parsed once from real Nex source (not
+   hand-built AST) so its shape always matches whatever the parser/walker
+   currently produce for an ordinary generic class."
+  (delay
+    (first (:classes (parser/ast
+                       (str "class " closure-mut-box-class-name "[T]\n"
+                            "create\n"
+                            "  make(v: T) do value := v end\n"
+                            "feature\n"
+                            "  value: T\n"
+                            "  set(v: T) do value := v end\n"
+                            "end"))))))
+
+(defn- box-target-names
+  "Every name a bare `:=` reassigns anywhere reachable in STMTS (including
+   inside a nested closure's own body) — a candidate for boxing must be
+   reassigned somewhere, or there is nothing for sibling closures (or the
+   enclosing scope) to ever see change."
+  [stmts]
+  (into #{}
+        (comp (filter map?) (filter #(= :assign (:type %))) (keep :target))
+        (tree-seq coll? seq stmts)))
+
+(defn- names-touched-inside-closures
+  "Every name read (`:identifier`) or written (`:assign` target) inside any
+   `:anonymous-function` OR `:spawn` body reachable in STMTS — a boxing
+   candidate must actually be visible to some closure, or boxing it only
+   adds overhead to ordinary same-scope mutation (a loop counter, an
+   accumulator no closure ever touches) that never needed sharing.
+
+   `:spawn` is included alongside `:anonymous-function` for the same
+   reason: nex.lower/rewrite-expression-for-closures' own `:spawn` case
+   wraps a spawn body into a synthetic anonymous-function LATER, during
+   the ordinary closure-capture rewrite — a plain `:spawn` node here, at
+   this earlier detection pass, is not yet that shape, so without this it
+   was invisible to boxing entirely: `let total := 0 / spawn do total :=
+   total + 5 end / t.await / print(total)` silently kept reading the
+   pre-spawn value even after `.await` — which blocks until the task
+   finishes — guarantees the mutation already happened."
+  [stmts]
+  (into #{}
+        (comp (filter map?)
+              (filter #(contains? #{:anonymous-function :spawn} (:type %)))
+              (mapcat (fn [fn-node]
+                        (into []
+                              (comp (filter map?)
+                                    (mapcat (fn [n]
+                                              (case (:type n)
+                                                :identifier [(:name n)]
+                                                :assign [(:target n)]
+                                                nil))))
+                              (tree-seq coll? seq (:body fn-node))))))
+        (tree-seq coll? seq stmts)))
+
+(defn- shadowed-anywhere-names
+  "Every name declared more than once anywhere in STMTS — as a :let (at
+   any depth: a top-level one, or one nested inside an if/loop/match/case/
+   scoped-block/closure body) or as an :anonymous-function's own param —
+   found via a flat count across the whole subtree. rewrite-boxed-
+   references has no scope tracking of its own (a single shape-agnostic
+   postwalk, deliberately, to stay simple): it cannot tell a nested
+   re-declaration of a boxed name (a closure's own same-named parameter, or
+   an unrelated inner `let total := ...` shadowing the outer boxed one)
+   from a genuine reference to the boxed variable, and would rewrite the
+   shadowing occurrence's every read/write into a `.value` field access
+   too — a lowering-time crash the moment that occurrence is used as its
+   own (unboxed) type. Excluding any such name from boxing entirely is the
+   safe fallback: it leaves the pre-existing snapshot-per-closure behavior
+   in place for that one name (no worse than before this fix), rather than
+   emitting AST a shadowed occurrence cannot type-check against."
+  [stmts]
+  (->> (tree-seq coll? seq stmts)
+       (filter map?)
+       (keep (fn [n]
+               (case (:type n)
+                 :let (:name n)
+                 :anonymous-function (seq (keep :name (:params n)))
+                 nil)))
+       (mapcat (fn [n] (if (coll? n) n [n])))
+       frequencies
+       (keep (fn [[name n]] (when (> n 1) name)))
+       set))
+
+(defn- box-candidate-lets
+  "The {name -> let-stmt} map of every `:let` appearing directly (not
+   nested inside an if/loop/etc.) in STMTS whose name needs boxing per
+   box-target-names/names-touched-inside-closures, excluding any name
+   shadowed anywhere in STMTS (see shadowed-anywhere-names)."
+  [stmts]
+  (let [reassigned (box-target-names stmts)
+        touched-in-closure (names-touched-inside-closures stmts)
+        shadowed (shadowed-anywhere-names stmts)]
+    (into {}
+          (comp (filter #(= :let (:type %)))
+                (filter #(and (contains? reassigned (:name %))
+                              (contains? touched-in-closure (:name %))
+                              (not (contains? shadowed (:name %)))))
+                (map (juxt :name identity)))
+          stmts)))
+
+(defn- box-let-type
+  "The Nex type to instantiate Closure_Mut_Box[T] at for a boxed :let —
+   its own declared :var-type when present, otherwise inferred from its
+   (pre-rewrite) initializer the same way an ordinary untyped :let's type
+   is inferred elsewhere in this pass. Falls back to \"Any\" only when
+   inference itself cannot determine one; T is erased to Object on the JVM
+   regardless, so \"Any\" here costs a convert at an unusual, untyped-let
+   use site, never a lowering failure."
+  [ctx local-types let-stmt]
+  (or (:var-type let-stmt)
+      (infer-prepass-type ctx local-types (:value let-stmt))
+      "Any"))
+
+(defn- box-read
+  "A bare read of a boxed name — `total` -> `total.value` — as the same
+   shape an ordinary bare field access already lowers through (see
+   rewrite-expression-for-closures' own `this`-field-read rewrite)."
+  [name]
+  {:type :call :target {:type :identifier :name name} :method "value"
+   :args [] :has-parens false})
+
+(defn- box-write
+  "A `:=` write to a boxed name — `total := v` -> `total.set(v)` — a
+   METHOD call, not a direct `.value := v` field write: Nex enforces that
+   a field is writable only from within its own declaring class (see
+   nex.lower/lower-member-assign-stmt's encapsulation check), and this
+   write can happen from code that is not Closure_Mut_Box itself and is
+   not always inside a closure body either — a forward-referenced
+   closure-let's box (see box-forward-referenced-closures) is filled in
+   by a plain top-level/function/method statement, nowhere near any
+   closure's own runtime-object bypass for that same check. A public
+   method has no such restriction, so routing every box write through one
+   (set(v), declared alongside the field) sidesteps it uniformly, for a
+   write from inside a closure body or from ordinary surrounding code
+   alike."
+  [name value]
+  {:type :call :target {:type :identifier :name name} :method "set" :args [value] :has-parens true})
+
+(defn- rewrite-boxed-references
+  "Rewrite every bare read/write of a name in BOXED-NAMES throughout STMTS
+   (including inside nested closures) into the field access box-read/
+   box-write build, then wrap each boxing :let's own initializer in a
+   Closure_Mut_Box construction. A single clojure.walk/postwalk handles
+   every :identifier/:assign occurrence regardless of which statement or
+   expression shape it sits inside — the same technique
+   nex.walker/resolve-qualified-function-calls uses for its own
+   whole-program, shape-agnostic rewrite."
+  [boxed-names stmts]
+  (walk/postwalk
+   (fn [n]
+     (cond
+       (and (map? n) (= :identifier (:type n)) (contains? boxed-names (:name n)))
+       (box-read (:name n))
+
+       (and (map? n) (= :assign (:type n)) (contains? boxed-names (:target n)))
+       (box-write (:target n) (:value n))
+
+       :else n))
+   stmts))
+
+;; --- Mutually recursive closures ---
+;;
+;; `let is_even := fn(n) do ... is_odd(n - 1) ... end / let is_odd :=
+;; fn(n) do ... is_even(n - 1) ... end` — is_even's own construction
+;; happens before is_odd's `:let` is even reached, so an ordinary capture
+;; of "is_odd" (a snapshot of whatever that name currently holds) would
+;; capture nothing at all. Unlike the shared-mutable-capture case above,
+;; there is no existing value to box in place: the box itself must be
+;; created (holding a placeholder nil) BEFORE either closure is built, so
+;; is_even can capture a reference to the box rather than to is_odd
+;; itself, and is_odd's own construction later fills that same box in.
+;; Reuses the identical Closure_Mut_Box[T]/box-read/box-write machinery
+;; the mutation case already established — the "tie the knot" trick is
+;; entirely in how the box gets hoisted and split from its original `:let`
+;; below, not in any new box representation.
+
+(defn- closure-let-names
+  "The {name -> let-stmt} map of every DIRECT closure-literal :let in
+   STMTS — the same direct-only scope box-candidate-lets uses."
+  [stmts]
+  (into {}
+        (comp (filter #(and (map? %) (= :let (:type %))))
+              (filter #(and (map? (:value %)) (= :anonymous-function (:type (:value %)))))
+              (map (juxt :name identity)))
+        stmts))
+
+(defn- bare-references-in
+  "Every name read (:identifier) or bare-called (:call with a nil target)
+   inside NODE — not descending into a nested :anonymous-function's own
+   :body, matching names-touched-inside-closures' own scope-stopping walk,
+   but applied to a single closure's body instead of a whole statement
+   list."
+  [node]
+  (into #{}
+        (comp (filter map?)
+              (mapcat (fn [n]
+                        (cond
+                          (= :identifier (:type n)) [(:name n)]
+                          (and (= :call (:type n)) (nil? (:target n)) (:method n)) [(:method n)]
+                          :else nil))))
+        (tree-seq (fn [x] (and (coll? x) (not (and (map? x) (= :anonymous-function (:type x))))))
+                  seq
+                  node)))
+
+(defn- forward-boxed-closure-names
+  "Names of STMTS' own direct closure-lets that are referenced (a bare
+   read or bare call) inside a SIBLING closure-let declared EARLIER in
+   STMTS — the set that needs Closure_Mut_Box treatment so the earlier
+   closure can hold an indirect reference to something that does not
+   exist yet at its own construction time."
+  [stmts]
+  (let [lets (closure-let-names stmts)
+        name->index (into {}
+                          (keep-indexed (fn [i s]
+                                          (when (contains? lets (:name s)) [(:name s) i])))
+                          stmts)]
+    (into #{}
+          (mapcat (fn [[name let-stmt]]
+                    (let [i (get name->index name)
+                          refs (bare-references-in (:body (:value let-stmt)))]
+                      (keep (fn [ref-name]
+                              (when (and (contains? name->index ref-name)
+                                         (> (get name->index ref-name) i))
+                                ref-name))
+                            refs))))
+          lets)))
+
+(defn- rewrite-forward-references
+  "Rewrite every bare read/call/write of a name in BOXED-NAMES throughout
+   STMTS into the box-read/box-write/invoke-through-the-box shape — the
+   forward-reference analog of rewrite-boxed-references, with one more
+   case: a bare CALL to a boxed name (`is_odd(n - 1)`) becomes an
+   invocation of whatever the box currently holds (`is_odd.value(n - 1)`,
+   built as target=box-read, method=nil, has-parens=true — the same shape
+   `(expr)(...)`/a chained call already parses to), not a plain field
+   read: the box holds a Function value, and this closure means to CALL
+   it, not merely observe it."
+  [boxed-names stmts]
+  (walk/postwalk
+   (fn [n]
+     (cond
+       (and (map? n) (= :call (:type n)) (nil? (:target n)) (contains? boxed-names (:method n)))
+       {:type :call :target (box-read (:method n)) :method nil :args (:args n) :has-parens true}
+
+       (and (map? n) (= :assign (:type n)) (contains? boxed-names (:target n)))
+       (box-write (:target n) (:value n))
+
+       (and (map? n) (= :identifier (:type n)) (contains? boxed-names (:name n)))
+       (box-read (:name n))
+
+       :else n))
+   stmts))
+
+(defn- box-forward-referenced-closures
+  "Entry point: given CTX/LOCAL-TYPES (as box-mutable-closure-captures)
+   and STMTS, rewrite every forward-referenced closure-let (see
+   forward-boxed-closure-names) into a Closure_Mut_Box hoisted to the top
+   of STMTS — filled in later, at the boxed closure's own original
+   position, by a plain `:=` write instead of a `:let` — so an earlier
+   sibling closure can capture the box (and thus, indirectly, whatever
+   gets written into it) before the real value exists. Runs BEFORE
+   box-mutable-closure-captures: once this rewrite replaces a forward-
+   referenced name's :identifier/:assign occurrences with :call/:member-
+   assign shapes, that pass's own :identifier/:assign-based detection
+   naturally finds nothing left to re-box for the same name."
+  [ctx local-types stmts]
+  (let [boxed (forward-boxed-closure-names stmts)]
+    (if (empty? boxed)
+      stmts
+      (let [lets (closure-let-names stmts)
+            box-types (into {}
+                            (map (fn [name] [name (box-let-type ctx local-types (get lets name))]))
+                            boxed)
+            split-stmts (mapv (fn [s]
+                                (if (and (map? s) (= :let (:type s)) (contains? boxed (:name s)))
+                                  {:type :assign :target (:name s) :value (:value s)}
+                                  s))
+                              stmts)
+            hoisted (mapv (fn [name]
+                            {:type :let
+                             :name name
+                             :var-type {:base-type closure-mut-box-class-name :type-args [(get box-types name)]}
+                             :value {:type :create
+                                     :class-name closure-mut-box-class-name
+                                     :generic-args [(get box-types name)]
+                                     :constructor "make"
+                                     :args [{:type :nil}]}})
+                          boxed)]
+        (rewrite-forward-references boxed (vec (concat hoisted split-stmts)))))))
+
+(defn- box-mutable-closure-captures
+  "Entry point: given CTX (the same shape rewrite-callable-for-closures
+   builds) and LOCAL-TYPES (params already in scope), rewrite STMTS so
+   every :let a closure needs to share mutably with a sibling closure — or
+   with the enclosing scope's own later reads — is backed by a
+   Closure_Mut_Box instead of a bare value. Runs once per scope (top-level
+   statements, a function body, a method/constructor body) BEFORE the
+   ordinary closure-capture rewrite, which needs no changes of its own:
+   capturing a boxed name already captures the shared box object by
+   reference, exactly like capturing any other Nex object."
+  [ctx local-types stmts]
+  (let [candidates (box-candidate-lets stmts)]
+    (if (empty? candidates)
+      stmts
+      (let [boxed-names (set (keys candidates))
+            ;; Types are resolved against the ORIGINAL (pre-rewrite) lets,
+            ;; threading local-types forward exactly like the ordinary
+            ;; closure-rewrite :let case does, so a later boxed let's own
+            ;; initializer can still refer to an earlier one's declared type.
+            box-types (loop [remaining stmts lt local-types acc {}]
+                        (if (empty? remaining)
+                          acc
+                          (let [s (first remaining)]
+                            (if (and (map? s) (= :let (:type s)) (contains? candidates (:name s)))
+                              (recur (rest remaining)
+                                     (assoc lt (:name s) (box-let-type ctx lt s))
+                                     (assoc acc (:name s) (box-let-type ctx lt s)))
+                              (recur (rest remaining)
+                                     (if (and (map? s) (= :let (:type s)) (:name s))
+                                       (assoc lt (:name s) (or (:var-type s) (infer-prepass-type ctx lt (:value s))))
+                                       lt)
+                                     acc)))))
+            rewritten (rewrite-boxed-references boxed-names stmts)]
+        (mapv (fn [s]
+                (if (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
+                  (let [t (get box-types (:name s))]
+                    (assoc s
+                           :var-type {:base-type closure-mut-box-class-name :type-args [t]}
+                           :value {:type :create
+                                   :class-name closure-mut-box-class-name
+                                   :generic-args [t]
+                                   :constructor "make"
+                                   :args [(:value s)]}))
+                  s))
+              rewritten)))))
+
 (defn prepare-program-for-closures
   [program opts]
   (let [program (binding [*type-aliases* (merge *type-aliases*
@@ -3374,16 +3792,51 @@
              :functions visible-functions
              :imports (:imports program)
              :var-types (:var-types opts)}
+        any-boxed? (atom false)
+        box (fn [local-types stmts]
+              (let [forward-boxed (forward-boxed-closure-names stmts)
+                    stmts (if (seq forward-boxed)
+                            (do (reset! any-boxed? true)
+                                (box-forward-referenced-closures ctx local-types stmts))
+                            stmts)
+                    candidates (box-candidate-lets stmts)]
+                (when (seq candidates) (reset! any-boxed? true))
+                (box-mutable-closure-captures ctx local-types stmts)))
+        boxed-functions (mapv (fn [f]
+                                (update f :body #(box (initial-var-types (:params f)) %)))
+                              (:functions program))
         rewritten-functions (mapv #(rewrite-callable-for-closures ctx % (:var-types opts))
-                                  (:functions program))
+                                  boxed-functions)
+        boxed-statements (box (:var-types opts) (:statements program))
         [rewritten-statements _ _] (rewrite-statements-for-closures (assoc ctx :functions (vec (concat rewritten-functions (:functions opts))))
                                                                     (:var-types opts)
-                                                                    (:statements program))
-        rewritten-classes (mapv #(rewrite-class-for-closures ctx %) (:classes program))]
-    (assoc program
-           :functions rewritten-functions
-           :statements rewritten-statements
-           :classes rewritten-classes)))
+                                                                    boxed-statements)
+        boxed-classes (mapv (fn [class-def]
+                              (update class-def :body
+                                      (fn [sections]
+                                        (mapv (fn [section]
+                                                (case (:type section)
+                                                  :feature-section
+                                                  (update section :members
+                                                          (fn [members]
+                                                            (mapv (fn [member]
+                                                                    (if (= :method (:type member))
+                                                                      (update member :body #(box (initial-var-types (:params member)) %))
+                                                                      member))
+                                                                  members)))
+                                                  :constructors
+                                                  (update section :constructors
+                                                          (fn [ctors]
+                                                            (mapv #(update % :body (fn [b] (box (initial-var-types (:params %)) b))) ctors)))
+                                                  section))
+                                              sections))))
+                            (:classes program))
+        rewritten-classes (mapv #(rewrite-class-for-closures ctx %) boxed-classes)]
+    (cond-> program
+      true (assoc :functions rewritten-functions
+                   :statements rewritten-statements
+                   :classes rewritten-classes)
+      @any-boxed? (update :classes #(conj % @closure-mut-box-class-def)))))
 
 (defn collect-anonymous-class-defs
   [node]
@@ -4772,18 +5225,33 @@
       (builtin-runtime-receiver-type? env target-type)
       (lower-builtin-receiver-call env expr target-expr target-type arg-irs)
 
-      ;; Generic type parameter with a constraint (e.g. T -> Comparable)
-      ;; Dispatch through the constraint type's builtin methods at runtime
-      (when-let [constraint (get (:generic-param-constraints env)
-                                 (base-type-name target-type))]
-        (contains? builtin-runtime-receiver-types constraint))
-      (lower-generic-builtin-constrained-call env expr target-expr target-type arg-irs)
-
       ;; Generic type parameter constrained by a *user* class (e.g. `[T ->
       ;; Addable]`). The receiver is an ordinary Nex object at runtime, so
       ;; dispatch dynamically the way any user-class call does; the
       ;; constraint supplies the routine's declared signature, which is
       ;; what the typechecker already checked the call against.
+      ;;
+      ;; Checked BEFORE the builtin-constrained branch below, not after: a
+      ;; bound's name is not reserved just because it happens to collide
+      ;; with a builtin-runtime-receiver-type's own name (`Comparable`,
+      ;; `Task`, `Channel`, ...) — a user's own `deferred class Comparable`
+      ;; is exactly as overridable here as it already is everywhere else a
+      ;; user definition shadows a builtin placeholder (see check-program's
+      ;; own "an entry file's own classes... override builtin placeholder
+      ;; names such as Task or Channel"). Checking user-constrained first
+      ;; means a real match here — the constraint resolves to a REAL class
+      ;; in visible-class-map that actually declares the called method or
+      ;; field — always wins; the builtin branch is reached only when no
+      ;; such user class exists, exactly the ordinary (and far more common)
+      ;; case of a genuinely builtin bound like the checked-in `T ->
+      ;; Comparable` example that compares with `>`. Before this fix, the
+      ;; builtin branch ran first and matched unconditionally on the name
+      ;; alone, so a user's own same-named class was silently never
+      ;; reached at all — its own real method looked up via the wrong
+      ;; (builtin, reflection-free) dispatch and failing at runtime with
+      ;; "Method not found on type", even though the identical call
+      ;; compiled and ran correctly the moment the class was renamed to
+      ;; anything that didn't collide with a builtin name.
       (when-let [constraint-def (some->> (get (:generic-param-constraints env)
                                              (base-type-name target-type))
                                         (get (visible-class-map env)))]
@@ -4791,6 +5259,13 @@
                                    (count (:args expr)))
             (accessible-field-def env constraint-def (:method expr))))
       (lower-generic-user-constrained-call env expr target-expr target-type arg-irs)
+
+      ;; Generic type parameter with a constraint (e.g. T -> Comparable)
+      ;; Dispatch through the constraint type's builtin methods at runtime
+      (when-let [constraint (get (:generic-param-constraints env)
+                                 (base-type-name target-type))]
+        (contains? builtin-runtime-receiver-types constraint))
+      (lower-generic-builtin-constrained-call env expr target-expr target-type arg-irs)
 
       :else
       (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))

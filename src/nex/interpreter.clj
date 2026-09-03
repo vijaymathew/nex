@@ -1705,8 +1705,21 @@
            ;; Load and parse the external file
            file-content (slurp file-path)
            file-ast (parse-interned-file file-path file-content)
-           ;; Interpret the file to register its classes
-           _ (eval-node ctx file-ast)
+           ;; Interpret the file under ITS OWN :debug-source, not the
+           ;; caller's — intern-search-roots (see its docstring) resolves a
+           ;; NESTED intern relative to :debug-source's directory, so a bare
+           ;; `intern Line_Item` inside this just-loaded file must see
+           ;; FILE-PATH's own directory, not wherever the file that interned
+           ;; *this* one happened to live. ctx's mutable state (:classes,
+           ;; :output, ...) is all atoms, so assoc-ing a new :debug-source
+           ;; here shares every one of them unchanged — only the source-path
+           ;; bookkeeping differs for the duration of this nested eval.
+           ;; Without this, every nested intern resolved relative to the
+           ;; ENTRY script's directory instead, however many levels deep —
+           ;; the static analysis path (resolve-interned*, used for type
+           ;; checking and the compiled backend) already gets this right by
+           ;; rebinding :debug-source the same way per recursive call.
+           _ (eval-node (assoc ctx :debug-source file-path) file-ast)
            _ (register-qualified-classes! ctx path (:classes file-ast))
            ;; Look up the class that was registered
            registered-class (get @(:classes ctx) class-name)

@@ -1,8 +1,10 @@
 (ns nex.bounded-generics-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
-            [nex.compiler.jvm.file :as file]))
+            [nex.compiler.jvm.file :as file]
+            [nex.eval :as e]))
 
 ;; Eiffel-style constrained genericity: `function f[T -> Bound](…)` lets the body
 ;; call the routines of `Bound` on a value of type `T`. The typechecker has always
@@ -100,3 +102,74 @@ let shapes: Array[Shape] := [create Square.make(3), create Circle.make(2)]
 end
 let ns: Array[Integer] := [3, 9, 4]
 print(largest(ns, 0))"))))
+
+(defn- both
+  "Printed output of CODE, asserted identical on both backends, and returned
+   as the compiled backend's output (a vector of lines). Unlike compiles?
+   above (which only checks that lowering does not throw), this actually
+   RUNS the compiled backend — needed for the test below, whose bug was a
+   runtime failure (a reflective method lookup landing on the wrong
+   dispatch table), not a lowering-time one; compiles? alone would not
+   have caught it."
+  [code]
+  (let [f (java.io.File/createTempFile "bounded_generics" ".nex")]
+    (try
+      (spit f code)
+      (let [compiled (str/split-lines (str/trim-newline (with-out-str (e/eval-file (.getPath f) {}))))
+            interpreted (str/split-lines (str/trim-newline (with-out-str (e/eval-file (.getPath f) {:interpret? true}))))]
+        (is (= interpreted compiled) "compiled and interpreted output must agree")
+        compiled)
+      (finally (.delete f)))))
+
+(deftest bounded-generic-bound-shadowing-a-builtin-name-dispatches-to-the-user-class-test
+  (testing "a user-defined class named the SAME as a builtin-runtime-
+            receiver-type (`Comparable`, `Task`, `Channel`, ...) still
+            works as a bound — `[T -> Comparable]` must call the USER's
+            own `Comparable.less_than`, not silently dispatch through the
+            fixed, reflection-free builtin-Comparable runtime table (which
+            has no idea the call even exists). Regression test: nex.lower/
+            lower-general-receiver-call checked the builtin-constrained
+            branch before the user-constrained one, so ANY bound whose
+            name happened to collide with a builtin-runtime-receiver-type
+            matched there unconditionally on the name alone — the user's
+            own class, and its own real `less_than` method, was never
+            reached at all. Renaming the bound to anything that didn't
+            collide (e.g. `Rankable`) always worked; only the SPELLING
+            collision broke it, which is exactly why this needs its own
+            class-per-name coverage rather than relying on the pre-
+            existing `bounded-generic-with-a-builtin-bound-still-works`
+            test above, which uses the untouched, real builtin Comparable
+            protocol via `>`, not a same-named user override."
+    (is (= ["7"]
+           (both "deferred class Comparable
+feature
+  less_than(other: Comparable): Boolean deferred
+end
+
+class Score inherit Comparable
+feature
+  v: Integer
+create
+  make(x: Integer) do v := x end
+feature
+  less_than(other: Comparable): Boolean
+  do
+    if convert other to o: Score then
+      result := v < o.v
+    else
+      result := false
+    end
+  end
+end
+
+function best[T -> Comparable](a: T, b: T): T
+do
+  if a.less_than(b) then
+    result := b
+  else
+    result := a
+  end
+end
+
+let w := best(create Score.make(3), create Score.make(7))
+if convert w to ws: Score then print(ws.v) end")))))
