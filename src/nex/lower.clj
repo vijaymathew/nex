@@ -3451,6 +3451,7 @@
                             "  make(v: T) do value := v end\n"
                             "feature\n"
                             "  value: T\n"
+                            "  set(v: T) do value := v end\n"
                             "end"))))))
 
 (defn- box-target-names
@@ -3552,11 +3553,21 @@
    :args [] :has-parens false})
 
 (defn- box-write
-  "A `:=` write to a boxed name — `total := v` -> `total.value := v` —
-   the same shape an ordinary field write already lowers through (see
-   rewrite-statement-for-closures' own `this`-field-write rewrite)."
+  "A `:=` write to a boxed name — `total := v` -> `total.set(v)` — a
+   METHOD call, not a direct `.value := v` field write: Nex enforces that
+   a field is writable only from within its own declaring class (see
+   nex.lower/lower-member-assign-stmt's encapsulation check), and this
+   write can happen from code that is not Closure_Mut_Box itself and is
+   not always inside a closure body either — a forward-referenced
+   closure-let's box (see box-forward-referenced-closures) is filled in
+   by a plain top-level/function/method statement, nowhere near any
+   closure's own runtime-object bypass for that same check. A public
+   method has no such restriction, so routing every box write through one
+   (set(v), declared alongside the field) sidesteps it uniformly, for a
+   write from inside a closure body or from ordinary surrounding code
+   alike."
   [name value]
-  {:type :member-assign :object {:type :identifier :name name} :field "value" :value value})
+  {:type :call :target {:type :identifier :name name} :method "set" :args [value] :has-parens true})
 
 (defn- rewrite-boxed-references
   "Rewrite every bare read/write of a name in BOXED-NAMES throughout STMTS
@@ -3579,6 +3590,136 @@
 
        :else n))
    stmts))
+
+;; --- Mutually recursive closures ---
+;;
+;; `let is_even := fn(n) do ... is_odd(n - 1) ... end / let is_odd :=
+;; fn(n) do ... is_even(n - 1) ... end` — is_even's own construction
+;; happens before is_odd's `:let` is even reached, so an ordinary capture
+;; of "is_odd" (a snapshot of whatever that name currently holds) would
+;; capture nothing at all. Unlike the shared-mutable-capture case above,
+;; there is no existing value to box in place: the box itself must be
+;; created (holding a placeholder nil) BEFORE either closure is built, so
+;; is_even can capture a reference to the box rather than to is_odd
+;; itself, and is_odd's own construction later fills that same box in.
+;; Reuses the identical Closure_Mut_Box[T]/box-read/box-write machinery
+;; the mutation case already established — the "tie the knot" trick is
+;; entirely in how the box gets hoisted and split from its original `:let`
+;; below, not in any new box representation.
+
+(defn- closure-let-names
+  "The {name -> let-stmt} map of every DIRECT closure-literal :let in
+   STMTS — the same direct-only scope box-candidate-lets uses."
+  [stmts]
+  (into {}
+        (comp (filter #(and (map? %) (= :let (:type %))))
+              (filter #(and (map? (:value %)) (= :anonymous-function (:type (:value %)))))
+              (map (juxt :name identity)))
+        stmts))
+
+(defn- bare-references-in
+  "Every name read (:identifier) or bare-called (:call with a nil target)
+   inside NODE — not descending into a nested :anonymous-function's own
+   :body, matching names-touched-inside-closures' own scope-stopping walk,
+   but applied to a single closure's body instead of a whole statement
+   list."
+  [node]
+  (into #{}
+        (comp (filter map?)
+              (mapcat (fn [n]
+                        (cond
+                          (= :identifier (:type n)) [(:name n)]
+                          (and (= :call (:type n)) (nil? (:target n)) (:method n)) [(:method n)]
+                          :else nil))))
+        (tree-seq (fn [x] (and (coll? x) (not (and (map? x) (= :anonymous-function (:type x))))))
+                  seq
+                  node)))
+
+(defn- forward-boxed-closure-names
+  "Names of STMTS' own direct closure-lets that are referenced (a bare
+   read or bare call) inside a SIBLING closure-let declared EARLIER in
+   STMTS — the set that needs Closure_Mut_Box treatment so the earlier
+   closure can hold an indirect reference to something that does not
+   exist yet at its own construction time."
+  [stmts]
+  (let [lets (closure-let-names stmts)
+        name->index (into {}
+                          (keep-indexed (fn [i s]
+                                          (when (contains? lets (:name s)) [(:name s) i])))
+                          stmts)]
+    (into #{}
+          (mapcat (fn [[name let-stmt]]
+                    (let [i (get name->index name)
+                          refs (bare-references-in (:body (:value let-stmt)))]
+                      (keep (fn [ref-name]
+                              (when (and (contains? name->index ref-name)
+                                         (> (get name->index ref-name) i))
+                                ref-name))
+                            refs))))
+          lets)))
+
+(defn- rewrite-forward-references
+  "Rewrite every bare read/call/write of a name in BOXED-NAMES throughout
+   STMTS into the box-read/box-write/invoke-through-the-box shape — the
+   forward-reference analog of rewrite-boxed-references, with one more
+   case: a bare CALL to a boxed name (`is_odd(n - 1)`) becomes an
+   invocation of whatever the box currently holds (`is_odd.value(n - 1)`,
+   built as target=box-read, method=nil, has-parens=true — the same shape
+   `(expr)(...)`/a chained call already parses to), not a plain field
+   read: the box holds a Function value, and this closure means to CALL
+   it, not merely observe it."
+  [boxed-names stmts]
+  (walk/postwalk
+   (fn [n]
+     (cond
+       (and (map? n) (= :call (:type n)) (nil? (:target n)) (contains? boxed-names (:method n)))
+       {:type :call :target (box-read (:method n)) :method nil :args (:args n) :has-parens true}
+
+       (and (map? n) (= :assign (:type n)) (contains? boxed-names (:target n)))
+       (box-write (:target n) (:value n))
+
+       (and (map? n) (= :identifier (:type n)) (contains? boxed-names (:name n)))
+       (box-read (:name n))
+
+       :else n))
+   stmts))
+
+(defn- box-forward-referenced-closures
+  "Entry point: given CTX/LOCAL-TYPES (as box-mutable-closure-captures)
+   and STMTS, rewrite every forward-referenced closure-let (see
+   forward-boxed-closure-names) into a Closure_Mut_Box hoisted to the top
+   of STMTS — filled in later, at the boxed closure's own original
+   position, by a plain `:=` write instead of a `:let` — so an earlier
+   sibling closure can capture the box (and thus, indirectly, whatever
+   gets written into it) before the real value exists. Runs BEFORE
+   box-mutable-closure-captures: once this rewrite replaces a forward-
+   referenced name's :identifier/:assign occurrences with :call/:member-
+   assign shapes, that pass's own :identifier/:assign-based detection
+   naturally finds nothing left to re-box for the same name."
+  [ctx local-types stmts]
+  (let [boxed (forward-boxed-closure-names stmts)]
+    (if (empty? boxed)
+      stmts
+      (let [lets (closure-let-names stmts)
+            box-types (into {}
+                            (map (fn [name] [name (box-let-type ctx local-types (get lets name))]))
+                            boxed)
+            split-stmts (mapv (fn [s]
+                                (if (and (map? s) (= :let (:type s)) (contains? boxed (:name s)))
+                                  {:type :assign :target (:name s) :value (:value s)}
+                                  s))
+                              stmts)
+            hoisted (mapv (fn [name]
+                            {:type :let
+                             :name name
+                             :var-type {:base-type closure-mut-box-class-name :type-args [(get box-types name)]}
+                             :value {:type :create
+                                     :class-name closure-mut-box-class-name
+                                     :generic-args [(get box-types name)]
+                                     :constructor "make"
+                                     :args [{:type :nil}]}})
+                          boxed)]
+        (rewrite-forward-references boxed (vec (concat hoisted split-stmts)))))))
 
 (defn- box-mutable-closure-captures
   "Entry point: given CTX (the same shape rewrite-callable-for-closures
@@ -3643,7 +3784,12 @@
              :var-types (:var-types opts)}
         any-boxed? (atom false)
         box (fn [local-types stmts]
-              (let [candidates (box-candidate-lets stmts)]
+              (let [forward-boxed (forward-boxed-closure-names stmts)
+                    stmts (if (seq forward-boxed)
+                            (do (reset! any-boxed? true)
+                                (box-forward-referenced-closures ctx local-types stmts))
+                            stmts)
+                    candidates (box-candidate-lets stmts)]
                 (when (seq candidates) (reset! any-boxed? true))
                 (box-mutable-closure-captures ctx local-types stmts)))
         boxed-functions (mapv (fn [f]

@@ -4265,6 +4265,49 @@
    :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
    :return-type (or (:return-type expr) "Any")})
 
+(defn- register-closure-let-signatures!
+  "Pre-register every DIRECT closure-literal `:let` in STMTS (not
+   descending into nested if/loop/match/etc. bodies — those are checked in
+   their own child env by their own check-* function, which calls
+   check-statements again there) with a provisional Function(...) signature,
+   BEFORE any of STMTS is type-checked.
+
+   This is the multi-name analog of check-let's own single-name
+   pre-registration: `let is_even := fn(n) do ... is_odd(n - 1) ... end`
+   declared before `let is_odd := fn(n) do ... end` needs `is_odd` already
+   resolvable while checking `is_even`'s body — not just a closure seeing
+   itself, but one closure seeing a SIBLING declared later in the same
+   block, exactly how ordinary top-level `function is_even(...) ... end` /
+   `function is_odd(...) ... end` already resolve each other regardless of
+   order (check-program registers every function's signature before
+   checking any body — this gives closures the same guarantee). Declaration
+   order is otherwise irrelevant here: this scans the whole list up front,
+   so a closure may just as well reference one declared BEFORE it, which
+   already worked without this (an already-real object by construction
+   time) — registering it again here is harmless, only ever redundant."
+  [env stmts]
+  (doseq [stmt stmts]
+    (when (and (map? stmt) (= :let (:type stmt)) (string? (:name stmt))
+               (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
+      (env-add-var env (:name stmt)
+                   (or (:var-type stmt) (anonymous-function-provisional-signature (:value stmt)))))))
+
+(defn check-statements
+  "Check STMTS in ENV in order, first pre-registering every direct
+   closure-literal `:let` (see register-closure-let-signatures!) so
+   mutually (or self-) recursive closures resolve each other regardless of
+   declaration order. Used at the scopes where this matters in practice —
+   top-level statements, a function/method body, a constructor body — not
+   at every single statement-list site in the checker (an if/loop/match
+   branch's own body still calls check-statement directly, one statement
+   at a time): a closure declared inside a conditional/loop branch is a
+   narrower, rarer case, deliberately left with the ordinary sequential-
+   let behavior rather than widening this change to every call site."
+  [env stmts]
+  (register-closure-let-signatures! env stmts)
+  (doseq [stmt stmts]
+    (check-statement env stmt)))
+
 (defn check-let
   "Check a let statement"
   [env {:keys [name var-type value synthetic] :as stmt}]
@@ -5066,8 +5109,7 @@
                                    (str "Precondition must be Boolean, got " cond-type))})))))
 
     ;; Check method body
-    (doseq [stmt body]
-      (check-statement method-env stmt))
+    (check-statements method-env body)
 
     ;; Check rescue clause
     (when rescue
@@ -5130,8 +5172,7 @@
                                      (str "Precondition must be Boolean, got " cond-type))}))))))
 
     ;; Check body
-    (doseq [stmt body]
-      (check-statement ctor-env stmt))
+    (check-statements ctor-env body)
 
     ;; Check postconditions
     (doseq [assertion ensure]
@@ -6597,8 +6638,7 @@
        ;; Check top-level statements in source order when available.
        ;; Fall back to legacy :calls-only programs.
        (if (seq statements)
-         (doseq [stmt statements]
-           (check-statement env stmt))
+         (check-statements env statements)
          (doseq [call calls]
            (check-expression env call)))
 
