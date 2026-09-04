@@ -692,8 +692,6 @@
                     {:from-jvm-type from-jvm-type
                      :to-jvm-type to-jvm-type}))))
 
-(declare emit-expr!)
-
 (defn- emit-as-int!
   "Emit `expr` and narrow its result to a 32-bit int, inserting L2I when it is a
    64-bit Nex Integer (:long). Used for the JVM int positions: collection indices,
@@ -858,7 +856,6 @@
     (.visitInsn mv Opcodes/ICONST_1)
     (.visitLabel mv end-label)))
 
-(declare emit-expr!)
 (declare emit-binary!)
 (declare emit-compare!)
 (declare emit-stmt!)

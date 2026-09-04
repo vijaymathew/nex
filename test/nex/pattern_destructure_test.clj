@@ -451,7 +451,7 @@ end
   end
 end
 print(d(create Box.make(create Circle.make(7))))
-print(d(create Box.make(\"hello\")))")))))) 
+print(d(create Box.make(\"hello\")))"))))))
 
 (deftest type-pattern-accepts-a-builtin-type-name
   (testing "a builtin type keyword is spellable in a pattern"

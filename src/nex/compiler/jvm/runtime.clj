@@ -6,7 +6,6 @@
             [nex.types.builtins :as bi]
             [nex.types.concurrency :as conc]
             [nex.types.bootstrap :as bootstrap]
-            [nex.types.bootstrap :as bootstrap]
             [nex.types.datetime :as dt]
             [nex.types.http :as http]
             [nex.types.json :as json-types]

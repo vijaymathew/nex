@@ -166,7 +166,7 @@ end")
           anon-expr (-> prepared :functions first :body second :value)]
       (is (= [{:name "x" :type "Integer"}] (:captures anon-expr)))
       (is (true? (:closure-runtime-object? (:class-def anon-expr))))
-      (is (true? (:closure-runtime-object? anon-class)))))) 
+      (is (true? (:closure-runtime-object? anon-class))))))
 
 (deftest prepare-program-for-captured-call-target-closures-test
   (testing "closure preparation captures outer variables used as raw call targets"

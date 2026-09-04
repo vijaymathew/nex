@@ -127,7 +127,7 @@ end")))))
     end
 end")]
       (is (= ["\"caught me\""] (:output result)))
-      (is (nil? (:exception result)))))) 
+      (is (nil? (:exception result))))))
 
 (deftest rescue-with-retry-test
   (testing "rescue with retry re-executes body"

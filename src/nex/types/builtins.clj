@@ -15,8 +15,8 @@
             [nex.types.http :as http]
             [nex.types.concurrency :as conc])
   (:import [java.nio.charset StandardCharsets]
-                   [java.util.concurrent CompletableFuture ExecutionException TimeUnit TimeoutException CancellationException]
-                   [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
+           [java.util.concurrent CompletableFuture ExecutionException TimeUnit TimeoutException CancellationException]
+           [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
 (declare nex-format-value)
 (declare call-builtin-method)

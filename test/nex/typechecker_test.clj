@@ -581,7 +581,7 @@ end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (:success result))
-      (is (empty? (:errors result)))))) 
+      (is (empty? (:errors result))))))
 
 (deftest test-generic-constraint-enforced
   (testing "Generic constraints should be enforced"
@@ -608,7 +608,7 @@ end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (not (:success result)))
-      (is (seq (:errors result)))))) 
+      (is (seq (:errors result))))))
 
 (deftest test-generic-constructor-arg-mismatch
   (testing "Constructor args must respect resolved generic types"
@@ -635,7 +635,7 @@ end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (not (:success result)))
-      (is (seq (:errors result)))))) 
+      (is (seq (:errors result))))))
 
 (deftest test-function-typecheck
   (testing "Function definitions and calls should typecheck"
@@ -668,7 +668,7 @@ end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (not (:success result)))
-      (is (seq (:errors result)))))) 
+      (is (seq (:errors result))))))
 
 (deftest test-explicit-generic-function-call-infers-type-params-from-arguments
   (testing "Explicit generic free-function calls infer type parameters from argument types"

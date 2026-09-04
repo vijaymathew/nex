@@ -64,7 +64,7 @@
                        (swap! locals conj {:name local-name
                                            :index index
                                            :start-order (get @label-order (System/identityHashCode start))
-                                           :end-order (get @label-order (System/identityHashCode end))})))))) 
+                                           :end-order (get @label-order (System/identityHashCode end))}))))))
              0)
     @locals))
 
@@ -463,7 +463,7 @@ end")
           parent-field (.getDeclaredField square-cls "_parent_Shape")]
       (is (= "java.lang.Object" (.getName (.getSuperclass square-cls))))
       (is (= shape-cls (.getType parent-field)))
-      (is (= "_parent_Shape" (.getName parent-field)))))) 
+      (is (= "_parent_Shape" (.getName parent-field))))))
 
 (deftest compile-multi-parent-class-emits-composition-fields-test
   (testing "compiled classes with multiple parents emit one composition field per parent"
