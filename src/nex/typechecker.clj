@@ -4627,6 +4627,62 @@
           class-name))
       class-name)))
 
+(defn- field-type-check-guaranteed?
+  "True when narrowing FIELD into TARGET-TYPE is guaranteed to succeed --
+   FIELD's own declared type on CLASS-NAME, with CLASS-NAME's generic
+   parameters substituted per BINDING-TYPE's resolved type-args (the same
+   substitution match-clause-binding-type already worked out for the bound
+   variable itself — a generic variant's field is declared in terms of its
+   own `T`, not the subject's real element type, so comparing it unsubstituted
+   would reject e.g. `Ok2(value: Integer)` against `Result2[Integer, String]`
+   even though `value` really is an Integer there), already satisfies
+   TARGET-TYPE. That makes the field-type pattern this desugared from
+   (nex.walker's top-level-field-type-checks) unable to actually fail, even
+   though it still runs -- and binds the field -- via the same `convert`
+   mechanism a genuinely narrowing one does. False (not proven, treated
+   conservatively as fallible) when the field can't be found at all; that
+   is a different, earlier error this pass doesn't need to duplicate."
+  [env class-name binding-type {:keys [field target-type]}]
+  (when-let [declared (lookup-class-field env class-name field)]
+    (let [class-def (env-lookup-class env class-name)
+          gparams (map #(type-name-string (:name %)) (:generic-params class-def))
+          type-args (when (map? binding-type) (:type-args binding-type))
+          resolved-declared (if (and (seq gparams) (seq type-args) (= (count gparams) (count type-args)))
+                              (substitute-type-params declared (zipmap gparams type-args))
+                              declared)
+          resolved-base (let [n (normalize-type resolved-declared)]
+                          (if (map? n) (:base-type n) n))]
+      ;; types-compatible? is deliberately lenient for Any *as a source*
+      ;; (an Any-typed value is allowed to flow anywhere, pending a runtime
+      ;; check) -- exactly the leniency a real narrowing convert exists to
+      ;; resolve, and exactly the case this predicate must call unproven:
+      ;; still resolved (T substituted to Any, say) after generic
+      ;; substitution is the one shape that can never be "guaranteed"
+      ;; regardless of what types-compatible? would say about it.
+      (and (not= resolved-base "Any")
+           (types-compatible? env resolved-declared target-type)))))
+
+(defn- clause-may-not-fire?
+  "True when CLAUSE might not fire for its variant -- a real `if` guard, or
+   a field-type pattern that isn't provably a no-op -- so it must not count
+   toward match exhaustiveness. `:guard` itself (the AST that actually
+   *runs*) is not the signal here: a field-type pattern's narrowing
+   `convert` stays in `:guard` unconditionally (it is also how the pattern's
+   binding gets its value), whether or not the checker can prove it always
+   succeeds -- see nex.walker's :matchClause and top-level-field-type-checks
+   for the full split -- including a nested `field: T(...)` (sub-patterns
+   present), which contributes nothing to :field-type-checks and is instead
+   signaled by :has-nested-field-pattern?, unconditionally treated as a
+   real, unproven guard (proving it trivial would need this same reasoning
+   applied one field deeper, which this pass does not attempt). BINDING-TYPE
+   is the clause's own resolved bound-variable type (as check-match's main
+   pass already computes it, per match-clause-binding-type) -- needed to
+   substitute a generic variant's field type before comparing."
+  [env {:keys [class-name explicit-guard? field-type-checks has-nested-field-pattern?]} binding-type]
+  (or explicit-guard?
+      has-nested-field-pattern?
+      (some #(not (field-type-check-guaranteed? env class-name binding-type %)) field-type-checks)))
+
 (defn check-match
   "Type-check a match statement over a sealed type."
   [env {:keys [expr clauses else]}]
@@ -4670,17 +4726,26 @@
     (when else
       (doseq [s else] (check-statement env s)))
     (when (and sealed? (not else))
-      ;; A guarded clause may not fire, so it does not cover its variant.
+      ;; A clause that may not fire does not cover its variant -- see
+      ;; clause-may-not-fire? for what that means once a field-type pattern
+      ;; is in the mix (its guard-shaped `convert` doesn't automatically
+      ;; disqualify a clause the way a real `if` guard does).
       ;; Resolved through env-lookup-class rather than read off the clause's
       ;; :class-name literally, so a qualified clause (`when finance/Ok(...)`,
       ;; docs/proposals/namespaces.md Phase 3 — walked to "finance.Ok") is
       ;; normalized to the same true bare identity ("Ok") find-sealed-subclasses
       ;; already reports in `known`; otherwise a qualified clause that in fact
       ;; covers its variant would still be flagged missing.
-      (let [covered (set (keep (fn [{:keys [class-name]}]
+      (let [not-guarded (remove (fn [{:keys [class-name generic-args] :as clause}]
+                                  (let [binding-type (if (seq generic-args)
+                                                       {:base-type class-name :type-args generic-args}
+                                                       (match-clause-binding-type env expr-type class-name))]
+                                    (clause-may-not-fire? env clause binding-type)))
+                                clauses)
+            covered (set (keep (fn [{:keys [class-name]}]
                                  (let [cd (env-lookup-class env class-name)]
                                    (or (:true-name cd) (:name cd) class-name)))
-                               (remove :guard clauses)))
+                               not-guarded))
             known (find-sealed-subclasses env base-type-name)
             uncovered (set/difference known covered)]
         (when (seq uncovered)

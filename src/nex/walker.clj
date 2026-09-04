@@ -1041,6 +1041,37 @@
    {:bindings [] :guards [] :body-binds []}
    field-patterns))
 
+(defn- top-level-field-type-checks
+  "The bare `field: T` (no sub-patterns) entries directly in FIELD-PATTERNS
+  -- exactly the shape process-field-patterns turns into a fallible-looking
+  `convert` guard conjunct, and exactly the shape the typechecker can prove
+  is a no-op: whether narrowing FIELD (whose own declared type on the
+  matched variant is already known) into T can only ever succeed. A nested
+  `field: T(...)` (with sub-patterns) is excluded: proving *its* convert
+  always succeeds would need this same reasoning applied one field deeper,
+  which the typechecker does not attempt -- it still counts as a real
+  guard, correctly, for exhaustiveness, same as before."
+  [field-patterns]
+  (vec (keep (fn [{:keys [kind field type generic-args subpatterns]}]
+               (when (and (= kind :nested) (empty? subpatterns))
+                 {:field field
+                  :target-type (if generic-args
+                                 {:base-type type :type-args generic-args}
+                                 type)}))
+             field-patterns)))
+
+(defn- has-nested-field-pattern?
+  "True when any of FIELD-PATTERNS is a `field: T(...)` (sub-patterns
+  present) rather than a bare `field: T` -- the shape top-level-field-type-
+  checks above deliberately excludes, so a clause built from nothing but
+  these needs its own signal: it still has a real, unmodeled guard
+  component in it (see clause-may-not-fire? in nex.typechecker), even
+  though it contributes nothing to :field-type-checks."
+  [field-patterns]
+  (boolean (some (fn [{:keys [kind subpatterns]}]
+                   (and (= kind :nested) (seq subpatterns)))
+                 field-patterns)))
+
 (def node-handlers
   {:program
    (fn [[_ & nodes]]
@@ -1767,6 +1798,17 @@
             :var-name var-name
             :bindings bindings
             :guard guard
+            ;; `:guard` above is what actually runs -- a field-type pattern's
+            ;; narrowing `convert` is also how its binding gets its value, so
+            ;; it must stay in there unconditionally, even when the checker
+            ;; can prove it never fails. These two are for the checker's
+            ;; exhaustiveness pass only, which needs to tell "may not fire"
+            ;; (a real `if`, or a field-type pattern actually narrowing a
+            ;; wider declared type) apart from "always fires, just also
+            ;; narrows/binds a value" (see check-match/clause-may-not-fire?).
+            :explicit-guard? (boolean explicit-guard)
+            :field-type-checks (top-level-field-type-checks field-patterns)
+            :has-nested-field-pattern? (has-nested-field-pattern? field-patterns)
             :body (into (vec body-binds) body)}))))
 
    :selectStatement
