@@ -447,10 +447,24 @@
                              :target name
                              :value {:type :identifier :name (str "arg__" (inc i))}})
                           payload)))
-        feature-section (when (seq fields)
+        ;; Enum members are canonical named constants (per the enum-union
+        ;; doc), so each gets a `to_string` returning its own declared name —
+        ;; otherwise `print(Color.Red)` falls through to the default
+        ;; `#<Red object>` object rendering, which defeats the point of a
+        ;; named enumeration. Plain (non-enum) union variants are untouched:
+        ;; enrichment stays opt-in, so they keep the default rendering.
+        to-string-method (when enum-ordinal
+                            {:type :method :name "to_string"
+                             :params nil :return-type "String" :alias nil
+                             :note nil :require nil
+                             :body [{:type :assign :target "result"
+                                     :value {:type :string :value var-name}}]
+                             :declaration-only? false :ensure nil :rescue nil})
+        feature-section (when (or (seq fields) to-string-method)
                           {:type :feature-section
                            :visibility {:type :public}
-                           :members fields})
+                           :members (vec (concat fields
+                                                  (when to-string-method [to-string-method])))})
         constructor {:type :constructor
                      :name "make"
                      :params (when (seq ctor-params) ctor-params)

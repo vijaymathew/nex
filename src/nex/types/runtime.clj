@@ -176,9 +176,12 @@
     (doseq [[k v] pairs] (nex-map-put m k v))
     m))
 (defn nex-host-map-from
-  "Build a host-backed map (the representation the compiled backend uses)."
+  "Build a host-backed map (the representation the compiled backend uses).
+   LinkedHashMap, not HashMap: `pairs` arrives in the source map's own
+   insertion order (see nex-clone-value), and a plain HashMap would scramble
+   it to hash-bucket order."
   [pairs]
-  (let [m (java.util.HashMap.)] (doseq [[k v] pairs] (.put m k v)) m))
+  (let [m (java.util.LinkedHashMap.)] (doseq [[k v] pairs] (.put m k v)) m))
 (defn nex-map-str [formatter m]
   (str "{"
        (str/join ", " (map (fn [[k v]] (str (formatter k) ": " (formatter v)))

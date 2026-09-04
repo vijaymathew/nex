@@ -21,6 +21,17 @@
 (def ^:private atom-internal-name "clojure/lang/Atom")
 (def ^:private arraylist-internal-name "java/util/ArrayList")
 (def ^:private hashmap-internal-name "java/util/HashMap")
+;; Map values are typed/cast/described as plain HashMap throughout this file
+;; (hashmap-internal-name, above) since that's the wider, already-pervasive
+;; static type -- but the two sites that actually allocate a fresh instance
+;; (a `{...}` literal, and a Map-typed field's zero-value) construct a
+;; LinkedHashMap instead: HashMap iterates in hash-bucket order, not
+;; insertion order, which diverged from the interpreter's portable map (which
+;; does preserve insertion order) -- `m.keys()` on the same `put` sequence
+;; came back in a different order per backend. LinkedHashMap IS-A HashMap, so
+;; every existing CHECKCAST/INVOKEVIRTUAL against hashmap-internal-name still
+;; resolves correctly against it; only the allocation site needs to change.
+(def ^:private linkedhashmap-internal-name "java/util/LinkedHashMap")
 (def ^:private linkedhashset-internal-name "java/util/LinkedHashSet")
 (def ^:private rt-internal-name "clojure/lang/RT")
 (def ^:private var-internal-name "clojure/lang/Var")
@@ -451,9 +462,9 @@
 
         (= (ir/object-jvm-type "java/util/HashMap") jvm-type)
         (do
-          (.visitTypeInsn mv Opcodes/NEW hashmap-internal-name)
+          (.visitTypeInsn mv Opcodes/NEW linkedhashmap-internal-name)
           (.visitInsn mv Opcodes/DUP)
-          (.visitMethodInsn mv Opcodes/INVOKESPECIAL hashmap-internal-name "<init>" "()V" false))
+          (.visitMethodInsn mv Opcodes/INVOKESPECIAL linkedhashmap-internal-name "<init>" "()V" false))
 
         (= (ir/object-jvm-type "java/util/LinkedHashSet") jvm-type)
         (do
@@ -1202,9 +1213,9 @@
 
 (defn- emit-map-literal!
   [^MethodVisitor mv expr state-slot]
-  (.visitTypeInsn mv Opcodes/NEW hashmap-internal-name)
+  (.visitTypeInsn mv Opcodes/NEW linkedhashmap-internal-name)
   (.visitInsn mv Opcodes/DUP)
-  (.visitMethodInsn mv Opcodes/INVOKESPECIAL hashmap-internal-name "<init>" "()V" false)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL linkedhashmap-internal-name "<init>" "()V" false)
   (doseq [{:keys [key value]} (:entries expr)]
     (.visitInsn mv Opcodes/DUP)
     (emit-boxed-expr-for-storage! mv key state-slot)

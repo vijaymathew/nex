@@ -835,18 +835,22 @@
 
    :Map
    {"get"         ^{:returns :value :signatures [{:params [{:name "key" :type "K"}] :return-type "V"}]}
+                  ;; A stored value can legitimately be nil (e.g. a Map[String,
+                  ;; Any] round-tripped from JSON, where a `null` becomes a
+                  ;; present key with a nil value) — checking `(nil? v)` alone
+                  ;; can't tell that apart from an absent key, so it's the
+                  ;; presence check itself (`nex-map-contains-key`) that
+                  ;; decides, not the retrieved value.
                   (fn [m key & _]
-                    (let [v (nex-map-get m key)]
-                      (if (nil? v)
-                        (report-contract-violation Precondition "key_must_exist" "has_key")
-                        v)))
+                    (if (nex-map-contains-key m key)
+                      (nex-map-get m key)
+                      (report-contract-violation Precondition "key_must_exist" "has_key")))
     "try_get"      ^{:returns :value
                      :signatures [{:params [{:name "key" :type "K"} {:name "default" :type "V"}] :return-type "V"}]}
                    (fn [m key default & _]
-                    (let [v (nex-map-get m key)]
-                      (if (nil? v)
-                        default
-                        v)))
+                    (if (nex-map-contains-key m key)
+                      (nex-map-get m key)
+                      default))
     "put"          ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}]}
                    (fn [m key val & _] (nex-map-put m key val))
     "set"          ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}]}

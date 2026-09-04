@@ -707,7 +707,11 @@
   [v]
   (cond
     (rt/nex-map? v)
-    (let [^java.util.Map m (java.util.HashMap.)]
+    ;; LinkedHashMap, not HashMap: `rt/nex-map-entries` yields the portable
+    ;; map's own insertion order (e.g. object-key order from json_parse), and
+    ;; a plain HashMap would scramble it to hash-bucket order the moment a
+    ;; portable map crosses into the compiled backend's representation.
+    (let [^java.util.Map m (java.util.LinkedHashMap.)]
       (doseq [[k val] (rt/nex-map-entries v)]
         (.put m (portable-value->compiled k) (portable-value->compiled val)))
       m)
@@ -2083,7 +2087,7 @@
   [value]
   (cond
     (instance? java.util.Map value)
-    (java.util.HashMap. ^java.util.Map value)
+    (java.util.LinkedHashMap. ^java.util.Map value)
 
     (instance? java.util.Collection value)
     (java.util.ArrayList. ^java.util.Collection value)
@@ -2148,13 +2152,18 @@
   (rt/nex-set-remove! s v))
 
 (defn map-get
+  ;; A stored value can legitimately be nil (e.g. a Map[String, Any]
+  ;; round-tripped from JSON, where a `null` becomes a present key with a
+  ;; nil value) — checking `(nil? v)` alone can't tell that apart from an
+  ;; absent key, so it's `map-contains-key` that decides presence, not the
+  ;; retrieved value. Mirrors the interpreter's identical fix in
+  ;; nex.types.builtins's :Map "get".
   [state m key]
-  (let [v (if (rt/nex-map? m)
-            (rt/nex-map-get m key)
-            (hashmap-deep-get m key nil))]
-    (if (nil? v)
-      (bi/report-contract-violation bi/Precondition "key_must_exist" "has_key")
-      v)))
+  (if (map-contains-key m key)
+    (if (rt/nex-map? m)
+      (rt/nex-map-get m key)
+      (hashmap-deep-get m key nil))
+    (bi/report-contract-violation bi/Precondition "key_must_exist" "has_key")))
 
 (defn map-try-get
   [state m key default]

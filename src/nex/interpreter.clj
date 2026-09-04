@@ -2003,8 +2003,21 @@
                              (nex-map? coll)   (do (nex-map-put coll idx value) true)
                              :else false))
 
+                         ;; `target` must actually be a value-bearing expression
+                         ;; here, not a bare class name: `Origin.POINT` (a
+                         ;; class-constant access) parses to this exact shape
+                         ;; (`{:target "Origin" :method "POINT" :has-parens
+                         ;; false}`), and `eval-target` on the string "Origin"
+                         ;; is a plain `env-lookup` — which throws "Undefined
+                         ;; variable: Origin", since a class name is never an
+                         ;; env binding. A class constant isn't a writable
+                         ;; slot anyway, so skip straight to the alias-based
+                         ;; `:else` fallback below rather than resolving
+                         ;; `target` at all.
                          (and (false? has-parens)
-                              target)
+                              target
+                              (not (and (string? target)
+                                        (lookup-class-if-exists ctx target))))
                          (let [parent (eval-target target)]
                            (if (and (nex-object? parent)
                                     (contains? (:fields parent) (keyword method)))
@@ -2433,7 +2446,33 @@
       (invoke-nex-object-call ctx target target-name method obj has-parens arg-values)
 
       (get-type-name obj)
-      (call-builtin-method ctx (or target-name target) obj method arg-values)
+      ;; `get-type-name` classifies by JVM class alone (`nex-array?` etc. are
+      ;; literally `instance? java.util.ArrayList`), so a *real* Java
+      ;; ArrayList/HashMap/LinkedHashSet obtained via `with "java"` interop
+      ;; (`create ArrayList`, an interned collection returned from a Java
+      ;; API, ...) is indistinguishable at this point from Nex's own
+      ;; Array/Map/Set, which reuse those same JVM classes as their runtime
+      ;; representation. A method name Nex's builtin type doesn't define —
+      ;; `size` (Nex arrays use `length`), `containsKey`, `remove(Object)`,
+      ;; `isEmpty`, ... — used to hard-crash here with "Method not found on
+      ;; type", even though the real Java object plainly has it. Inside a
+      ;; `with "java"` block, fall back to real reflection before giving up.
+      ;; This does NOT fix the inverse: a method name that collides with a
+      ;; same-named Nex builtin method (`add`, `get`, `contains`, ...) still
+      ;; silently dispatches to the Nex builtin's semantics rather than the
+      ;; real Java method — those happen to agree for the common collection
+      ;; operations, but are not guaranteed to. A real fix needs these two
+      ;; representations kept distinguishable at the value level; out of
+      ;; scope here.
+      (if (:with-java? ctx)
+        (try
+          (call-builtin-method ctx (or target-name target) obj method arg-values)
+          (catch clojure.lang.ExceptionInfo e
+            (if (and (= method (:method (ex-data e)))
+                     (str/starts-with? (.getMessage e) "Method not found on type"))
+              (java-call-method ctx obj method arg-values)
+              (throw e))))
+        (call-builtin-method ctx (or target-name target) obj method arg-values))
 
       :else
       (invoke-compiled-object-call ctx obj method has-parens arg-values))))

@@ -165,3 +165,28 @@ end")))))
   " reserved "
 end")))
           (str "variant named " reserved " should be rejected")))))
+
+(deftest enum-member-to-string-is-its-declared-name
+  (testing "print(Color.Red)/.to_string() renders the member's own name, not
+            the default #<Red object> fallback — a member is a canonical
+            named constant, so the default anonymous-object rendering
+            defeats the point of naming it"
+    (let [{:keys [compiled interpreted]}
+          (both-backends (str color-enum
+                               "print(Color.Red)
+print(Color.Red.to_string())
+print(\"val: \" + Color.Green.to_string())"))]
+      (is (= ["Red" "\"Red\"" "\"val: Green\""] compiled))
+      (is (= ["Red" "\"Red\"" "\"val: Green\""] interpreted)))))
+
+(deftest plain-union-variant-print-is-unaffected-by-enum-to-string
+  (testing "enrichment stays opt-in: a plain (non-enum) union variant keeps
+            the default #<Name object> rendering, since it never gets the
+            enum-only to_string override"
+    (let [{:keys [compiled interpreted]}
+          (both-backends "union Shape
+  Circle
+end
+print(create Circle.make())")]
+      (is (= ["#<Circle object>"] compiled))
+      (is (= ["#<Circle object>"] interpreted)))))
