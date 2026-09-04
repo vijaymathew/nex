@@ -1152,7 +1152,22 @@
                            (type-name-set (:return-type fn-def))))]
     (set (remove #(or (contains? class-names %)
                       (tc/builtin-type? %)
-                      (str/starts-with? % "__"))
+                      (str/starts-with? % "__")
+                      ;; A `declare type X = ...` alias name (`RR` for
+                      ;; `Function(Real): Real`, say) is neither a known
+                      ;; class nor a builtin type name, so without this it
+                      ;; was wrongly treated as an unbound generic
+                      ;; placeholder — infer-free-function-return-type then
+                      ;; "inferred" a binding for it from whatever type an
+                      ;; argument happened to carry (e.g. the synthetic
+                      ;; `<name>_Function` wrapper-class type of a bare
+                      ;; top-level-function-reference argument) and
+                      ;; substituted that bogus binding into the function's
+                      ;; own declared (aliased) return type, leaking a
+                      ;; nonsense type name like "square_Function" into
+                      ;; codegen and crashing lowering with "Unsupported ...
+                      ;; target access" at the call site.
+                      (contains? *type-aliases* %))
                  names))))
 
 (defn- merge-inferred-generic-bindings

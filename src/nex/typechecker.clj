@@ -4449,16 +4449,45 @@
         (check-statement final-else-env stmt)))))
 
 (defn check-loop
-  "Check a loop statement"
-  [env {:keys [init condition variant invariant body] :as stmt}]
+  "Check a `from ... until ... [invariant ...] [variant ...] do ... end`
+   loop statement (also how `repeat`/`across` desugar — see
+   nex.walker/handle-repeat-statement and handle-across-statement).
+
+   The AST key for the exit test is `:until`, not `:condition` — every
+   loop-node producer in nex.walker (handle-loop-statement,
+   handle-repeat-statement, handle-across-statement) has always used
+   `:until`; this function's own destructure named the wrong key, so `(when
+   condition ...)` never ran and no loop's until/invariant/variant clause
+   was ever type-checked: not for well-typedness (a non-Boolean until
+   test), and not even for basic soundness (an undefined variable
+   referenced only inside one). A bad reference there surfaced, if at all,
+   only much later and far less clearly — an opaque \"Unable to infer
+   expression type during lowering\" internal-compiler-error report on a
+   program that should have failed type-checking outright."
+  [env {:keys [init until variant invariant body] :as stmt}]
   (let [loop-env (make-type-env env)]
     (doseq [s init] (check-statement loop-env s))
-    (when condition
-      (let [cond-type (check-expression loop-env condition)]
+    (when until
+      (let [cond-type (check-expression loop-env until)]
         (when-not (or (= cond-type "Boolean") (= cond-type "Void"))
-          (throw (ex-info "Loop condition must be Boolean"
+          (throw (ex-info "Loop until condition must be Boolean"
                           {:error (type-error
-                                   (str "Loop condition must be Boolean, got " cond-type))})))))
+                                   (str "Loop until condition must be Boolean, got "
+                                        (display-type cond-type)))})))))
+    (doseq [{:keys [condition]} invariant]
+      (let [cond-type (check-expression loop-env condition)]
+        (when-not (= cond-type "Boolean")
+          (throw (ex-info "Loop invariant must be Boolean"
+                          {:error (type-error
+                                   (str "Loop invariant must be Boolean, got "
+                                        (display-type cond-type)))})))))
+    (when variant
+      (let [variant-type (check-expression loop-env variant)]
+        (when-not (= (attachable-type variant-type) "Integer")
+          (throw (ex-info "Loop variant must be Integer"
+                          {:error (type-error
+                                   (str "Loop variant must be Integer, got "
+                                        (display-type variant-type)))})))))
     (doseq [stmt body] (check-statement loop-env stmt))))
 
 (defn- select-clause-op
