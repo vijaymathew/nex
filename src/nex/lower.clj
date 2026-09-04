@@ -67,8 +67,9 @@
 (declare ctor-forwards-java-super-args?)
 (declare resolve-imported-java-type)
 (declare resolve-java-class-by-name)
-(declare resolve-java-overload)
+(declare resolve-java-call-target)
 (declare resolved-param-classes-joined)
+(declare resolved-varargs-descriptor)
 
 (defn- invalid-bare-create-call-ex
   [class-name]
@@ -4656,24 +4657,41 @@
         arg-irs (mapv #(lower-expression env %) (:args expr))
         ^Class klass (resolve-java-class-by-name env class-name)
         resolution (when klass
-                    (resolve-java-overload
+                    (resolve-java-call-target
                      env
-                     (->> (.getConstructors klass)
-                          (filter (fn [^java.lang.reflect.Constructor c]
-                                   (= (alength (.getParameterTypes c)) (count arg-irs)))))
+                     (.getConstructors klass)
                      (mapv :nex-type arg-irs)
                      (str "create " class-name)))]
-    (if (and resolution (not= resolution :bail))
+    (cond
+      (and (vector? resolution) (= :fixed (first resolution)))
       (ir/call-runtime-node "java-create-object-resolved"
                             (into [(ir/const-node (.getName klass)
                                                   "String"
                                                   (ir/object-jvm-type "java/lang/String"))
-                                   (ir/const-node (resolved-param-classes-joined resolution)
+                                   (ir/const-node (resolved-param-classes-joined (second resolution))
                                                   "String"
                                                   (ir/object-jvm-type "java/lang/String"))]
                                   arg-irs)
                             nex-type
                             jvm-type)
+
+      (and (vector? resolution) (= :varargs (first resolution)))
+      (let [[fixed-classes-joined component-class-name] (resolved-varargs-descriptor (second resolution))]
+        (ir/call-runtime-node "java-create-object-resolved-varargs"
+                              (into [(ir/const-node (.getName klass)
+                                                    "String"
+                                                    (ir/object-jvm-type "java/lang/String"))
+                                     (ir/const-node fixed-classes-joined
+                                                    "String"
+                                                    (ir/object-jvm-type "java/lang/String"))
+                                     (ir/const-node component-class-name
+                                                    "String"
+                                                    (ir/object-jvm-type "java/lang/String"))]
+                                    arg-irs)
+                              nex-type
+                              jvm-type))
+
+      :else
       (ir/call-runtime-node "java-create-object"
                             (into [(ir/const-node class-name
                                                   "String"
@@ -5223,15 +5241,15 @@
                                (resolve-java-class-by-name env base))]
           (into {} (map-indexed (fn [i k] [k i]) (class-and-supertypes natural))))))))
 
-(defn- applicable-candidate?
-  [^java.lang.reflect.Executable candidate arg-ranks]
+(defn- applicable-params?
+  [params arg-ranks]
   (every? (fn [[ranks ^Class param]] (contains? ranks param))
-          (map vector arg-ranks (.getParameterTypes candidate))))
+          (map vector arg-ranks params)))
 
-(defn- candidate-rank-vector
-  [^java.lang.reflect.Executable candidate arg-ranks]
+(defn- params-rank-vector
+  [params arg-ranks]
   (mapv (fn [ranks ^Class param] (get ranks param))
-        arg-ranks (.getParameterTypes candidate)))
+        arg-ranks params))
 
 (defn- dominates?
   "True when RANKS-A is at least as specific as RANKS-B in every argument
@@ -5241,64 +5259,189 @@
   (and (every? true? (map <= ranks-a ranks-b))
        (some true? (map < ranks-a ranks-b))))
 
-(defn- resolve-java-overload
-  "Resolve the single most-specific applicable candidate among CANDIDATES
-   (java.lang.reflect.Method or Constructor, all already filtered to the
-   same name/arity/static-ness by the caller) for arguments of the given
-   Nex ARG-TYPES, in call order.
+(defn- pick-most-specific
+  "The single most-specific applicable candidate among CANDIDATES for
+   arguments of the given Nex ARG-TYPES, in call order -- shared by the
+   fixed-arity resolver (resolve-java-overload) and the varargs resolver
+   (resolve-java-varargs-overload) below, which differ only in how a
+   candidate's own per-argument Class list is computed (PARAMS-FN).
 
-   Returns the winning Executable, or :bail -- fall back to the existing
-   runtime-reflective dispatch, unchanged -- whenever there isn't real
-   ambiguity to resolve (fewer than 2 non-varargs candidates), an argument's
-   Nex type isn't precise enough to reason about safely, or nothing this
-   pass modeled turns out to be applicable. Throws only for a genuine,
-   remaining tie between two-or-more equally specific applicable
-   candidates -- see the namespace-level comment above for why that's the
-   one case this pass reports as a compile-time error rather than bailing."
+   Returns the winning candidate, or :bail -- fall back to the existing
+   runtime-reflective dispatch, unchanged -- whenever an argument's Nex
+   type isn't precise enough to reason about safely, or nothing this pass
+   modeled turns out to be applicable. Throws only for a genuine, remaining
+   tie between two-or-more equally specific applicable candidates -- see
+   the namespace-level comment above for why that's the one case this pass
+   reports as a compile-time error rather than bailing."
+  [env candidates params-fn arg-types call-desc]
+  (let [arg-ranks (mapv #(arg-class-ranks env %) arg-types)]
+    (if (some nil? arg-ranks)
+      :bail
+      (let [applicable (filter #(applicable-params? (params-fn %) arg-ranks) candidates)]
+        (if (empty? applicable)
+          :bail
+          (let [ranked (map (fn [c] [c (params-rank-vector (params-fn c) arg-ranks)]) applicable)
+                maximal (filter (fn [[c ranks]]
+                                  (not-any? (fn [[c2 ranks2]]
+                                             (and (not= c c2) (dominates? ranks2 ranks)))
+                                           ranked))
+                                ranked)]
+            (case (count maximal)
+              1 (ffirst maximal)
+              (throw (ex-info
+                      (str "Ambiguous overload of " call-desc
+                           ": " (count maximal) " equally specific Java "
+                           "candidates match the given argument types — "
+                           (str/join ", " (map (comp str first) maximal)))
+                      {:call call-desc
+                       :candidates (mapv (comp str first) maximal)})))))))))
+
+(defn- dedupe-candidates
+  "Deduped by parameter-type signature, not identity: `getMethods` can
+   return more than one Method for what a caller would consider one
+   overload -- most commonly a covariant-return bridge method
+   (StringBuilder.append(String) really does appear twice: the declared one
+   returning StringBuilder, and a synthetic bridge inherited from
+   AbstractStringBuilder returning it, same params). Two candidates with
+   identical parameter types are never a real ambiguity, whichever survives
+   the dedupe calls identically."
+  [candidates]
+  (->> candidates
+      (remove #(and (instance? java.lang.reflect.Method %)
+                    (.isBridge ^java.lang.reflect.Method %)))
+      (map (fn [^java.lang.reflect.Executable e]
+             [(vec (.getParameterTypes e)) e]))
+      (into {})
+      vals))
+
+(defn- resolve-java-overload
+  "Resolve the single most-specific applicable *fixed-arity* candidate
+   among CANDIDATES (java.lang.reflect.Method or Constructor, already
+   filtered to the same name/arity/static-ness by the caller). :bail
+   whenever there isn't real ambiguity to resolve (fewer than 2
+   candidates) -- see pick-most-specific for the rest."
   [env candidates arg-types call-desc]
-  (let [;; Deduped by parameter-type signature, not identity: `getMethods`
-        ;; can return more than one Method for what a caller would consider
-        ;; one overload -- most commonly a covariant-return bridge method
-        ;; (StringBuilder.append(String) really does appear twice: the
-        ;; declared one returning StringBuilder, and a synthetic bridge
-        ;; inherited from AbstractStringBuilder returning it, same params).
-        ;; Two candidates with identical parameter types are never a real
-        ;; ambiguity, whichever survives the dedupe calls identically.
-        non-varargs (->> candidates
-                         (remove #(.isVarArgs ^java.lang.reflect.Executable %))
-                         (remove #(and (instance? java.lang.reflect.Method %)
-                                       (.isBridge ^java.lang.reflect.Method %)))
-                         (map (fn [^java.lang.reflect.Executable e]
-                                [(vec (.getParameterTypes e)) e]))
-                         (into {})
-                         vals)]
+  (let [non-varargs (dedupe-candidates (remove #(.isVarArgs ^java.lang.reflect.Executable %) candidates))]
     (if (< (count non-varargs) 2)
       :bail
-      (let [arg-ranks (mapv #(arg-class-ranks env %) arg-types)]
-        (if (some nil? arg-ranks)
-          :bail
-          (let [applicable (filter #(applicable-candidate? % arg-ranks) non-varargs)]
-            (if (empty? applicable)
-              :bail
-              (let [ranked (map (fn [c] [c (candidate-rank-vector c arg-ranks)]) applicable)
-                    maximal (filter (fn [[c ranks]]
-                                      (not-any? (fn [[c2 ranks2]]
-                                                 (and (not= c c2) (dominates? ranks2 ranks)))
-                                               ranked))
-                                    ranked)]
-                (case (count maximal)
-                  1 (ffirst maximal)
-                  (throw (ex-info
-                          (str "Ambiguous overload of " call-desc
-                               ": " (count maximal) " equally specific Java "
-                               "candidates match the given argument types — "
-                               (str/join ", " (map (comp str first) maximal)))
-                          {:call call-desc
-                           :candidates (mapv (comp str first) maximal)})))))))))))
+      (pick-most-specific env non-varargs
+                          (fn [^java.lang.reflect.Executable e] (vec (.getParameterTypes e)))
+                          arg-types call-desc))))
+
+;; ---------------------------------------------------------------------------
+;; Varargs
+;;
+;; clojure.lang.Reflector -- the mechanism every Java interop call still
+;; ultimately dispatches through, even a compile-time-resolved one -- does
+;; no varargs collapsing at all: `Arrays.asList(1, 2, 3)` fails outright
+;; ("No matching method asList found taking 3 args"), since Reflector
+;; matches by *declared* arity only. The only shape it accepts for a
+;; varargs method is a pre-built array passed as the single trailing
+;; argument -- which Nex has no way to construct, having no first-class
+;; Java array type of its own (Array[T] is backed by ArrayList, not T[]).
+;; So unlike the fixed-arity overload fix above (which only had to pick the
+;; *right* Method among ones Reflector could already reach), varargs
+;; support has to make these calls reachable at all: resolve which varargs
+;; candidate applies, then actually build the trailing array at the call
+;; site (see java-call-method-resolved-varargs et al. in
+;; nex.compiler.jvm.runtime).
+;;
+;; Real Java overload resolution only ever considers a varargs candidate in
+;; its third, least-preferred phase -- a fixed-arity match always wins when
+;; one applies, full stop, never compared on specificity against a varargs
+;; one. resolve-java-call-target below encodes that as a strict priority
+;; order rather than one flat comparison pool: try resolve-java-overload
+;; over the fixed-arity candidates first, and only when that finds nothing
+;; to work with does resolve-java-varargs-overload get tried at all.
+
+(defn- vararg-effective-params
+  "CANDIDATE's per-argument Class list against an actual call of
+   ACTUAL-ARG-COUNT arguments: its own fixed leading parameters unchanged,
+   plus its trailing array parameter's component type repeated once for
+   every argument beyond the fixed prefix."
+  [^java.lang.reflect.Executable candidate actual-arg-count]
+  (let [declared (.getParameterTypes candidate)
+        fixed-count (dec (alength declared))
+        ^Class array-type (aget declared fixed-count)
+        component (.getComponentType array-type)
+        trailing-count (- actual-arg-count fixed-count)]
+    (into (vec (take fixed-count declared)) (repeat trailing-count component))))
+
+(defn- resolve-java-varargs-overload
+  [env candidates arg-types call-desc]
+  (let [actual-arg-count (count arg-types)
+        candidates (dedupe-candidates candidates)]
+    (pick-most-specific env candidates
+                        #(vararg-effective-params % actual-arg-count)
+                        arg-types call-desc)))
+
+(defn- resolve-java-call-target
+  "Resolve a Java call -- instance method, static method, or constructor --
+   against ALL-CANDIDATES (every Method/Constructor on the owning class
+   with the right name and static-ness, arity unfiltered) for arguments of
+   the given Nex ARG-TYPES. A fixed-arity match is always tried first and
+   always preferred when it applies (see the varargs section above);
+   varargs candidates are only even considered when no fixed-arity
+   candidate does.
+
+   Returns :bail, [:fixed <Executable>], or [:varargs <Executable>]; throws
+   only for a genuine tie -- see pick-most-specific."
+  [env all-candidates arg-types call-desc]
+  (let [actual-arg-count (count arg-types)
+        fixed (filter (fn [^java.lang.reflect.Executable e]
+                        (and (not (.isVarArgs e))
+                             (= (alength (.getParameterTypes e)) actual-arg-count)))
+                      all-candidates)
+        vararg (filter (fn [^java.lang.reflect.Executable e]
+                         (and (.isVarArgs e)
+                              (<= (dec (alength (.getParameterTypes e))) actual-arg-count)))
+                       all-candidates)]
+    (cond
+      (>= (count fixed) 2)
+      (let [r (resolve-java-overload env fixed arg-types call-desc)]
+        (if (= r :bail) :bail [:fixed r]))
+
+      ;; A single fixed-arity candidate, no varargs alternative at this
+      ;; arity: today's plain "not enough candidates to bother" case,
+      ;; unchanged -- Reflector already dispatches this correctly on its
+      ;; own.
+      (and (= (count fixed) 1) (empty? vararg))
+      :bail
+
+      ;; A fixed-arity candidate AND one-or-more varargs candidates both
+      ;; textually apply at this exact arity. JLS would still prefer the
+      ;; fixed one, but replaying that precisely needs its own
+      ;; applicability check on the fixed candidate here too -- a class
+      ;; overloading a plain method against a varargs one at the exact
+      ;; same call arity is rare enough that this is left as a bail
+      ;; (deferring to the existing runtime dispatch) rather than adding
+      ;; that check for a corner this narrow.
+      (and (= (count fixed) 1) (seq vararg))
+      :bail
+
+      (empty? vararg)
+      :bail
+
+      :else
+      (let [r (resolve-java-varargs-overload env vararg arg-types call-desc)]
+        (if (= r :bail) :bail [:varargs r])))))
 
 (defn- resolved-param-classes-joined
   [^java.lang.reflect.Executable resolved]
   (str/join "," (map #(.getName ^Class %) (.getParameterTypes resolved))))
+
+(defn- resolved-varargs-descriptor
+  "[fixed-param-classes-joined component-class-name] for a resolved
+   varargs Executable -- the encoding java-call-method-resolved-varargs et
+   al. (nex.compiler.jvm.runtime) expect: the fixed leading parameters
+   exactly like a fixed-arity resolution, plus the single component class
+   every trailing actual argument gets collected against."
+  [^java.lang.reflect.Executable resolved]
+  (let [declared (.getParameterTypes resolved)
+        fixed-count (dec (alength declared))
+        ^Class array-type (aget declared fixed-count)]
+    [(str/join "," (map #(.getName ^Class %) (take fixed-count declared)))
+     (.getName (.getComponentType array-type))]))
 
 (defn- lower-class-constant-or-static-field
   [env expr class-target-name]
@@ -5339,18 +5482,17 @@
     (if (:has-parens expr)
       (let [method-name (:method expr)
             ^Class owner-class (resolve-java-class-by-name env java-static-owner)
+            same-name-static (when owner-class
+                              (->> (.getMethods owner-class)
+                                   (filter (fn [^java.lang.reflect.Method m]
+                                            (and (= (.getName m) method-name)
+                                                 (java.lang.reflect.Modifier/isStatic (.getModifiers m)))))))
             resolution (when owner-class
-                        (resolve-java-overload
-                         env
-                         (->> (.getMethods owner-class)
-                              (remove #(.isBridge ^java.lang.reflect.Method %))
-                              (filter (fn [^java.lang.reflect.Method m]
-                                       (and (= (.getName m) method-name)
-                                            (= (alength (.getParameterTypes m)) (count arg-irs))
-                                            (java.lang.reflect.Modifier/isStatic (.getModifiers m))))))
-                         (mapv :nex-type arg-irs)
+                        (resolve-java-call-target
+                         env same-name-static (mapv :nex-type arg-irs)
                          (str java-static-owner "." method-name)))]
-        (if (and resolution (not= resolution :bail))
+        (cond
+          (and (vector? resolution) (= :fixed (first resolution)))
           (ir/call-runtime-node "java-call-static-resolved"
                                 (into [(ir/const-node java-static-owner
                                                       "String"
@@ -5358,12 +5500,33 @@
                                        (ir/const-node method-name
                                                       "String"
                                                       (ir/object-jvm-type "java/lang/String"))
-                                       (ir/const-node (resolved-param-classes-joined resolution)
+                                       (ir/const-node (resolved-param-classes-joined (second resolution))
                                                       "String"
                                                       (ir/object-jvm-type "java/lang/String"))]
                                       arg-irs)
                                 nex-type
                                 jvm-type)
+
+          (and (vector? resolution) (= :varargs (first resolution)))
+          (let [[fixed-classes-joined component-class-name] (resolved-varargs-descriptor (second resolution))]
+            (ir/call-runtime-node "java-call-static-resolved-varargs"
+                                  (into [(ir/const-node java-static-owner
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node method-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node fixed-classes-joined
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node component-class-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))]
+                                        arg-irs)
+                                  nex-type
+                                  jvm-type))
+
+          :else
           (ir/call-runtime-node "java-call-static"
                                 (into [(ir/const-node java-static-owner
                                                       "String"
@@ -5439,21 +5602,20 @@
             ;; of routing everything through an `Any`-typed local (there is
             ;; no way for the typechecker to know a real Java type there,
             ;; see lower-general-receiver-call) leaves this nil, and
-            ;; resolve-java-overload is never even attempted.
+            ;; resolve-java-call-target is never even attempted.
             receiver-base (base-type-name (resolve-type-alias (infer-type-or-any env target-expr)))
             ^Class receiver-class (resolve-java-class-by-name env receiver-base)
+            same-name-instance (when receiver-class
+                                (->> (.getMethods receiver-class)
+                                     (filter (fn [^java.lang.reflect.Method m]
+                                              (and (= (.getName m) method-name)
+                                                   (not (java.lang.reflect.Modifier/isStatic (.getModifiers m))))))))
             resolution (when receiver-class
-                        (resolve-java-overload
-                         env
-                         (->> (.getMethods receiver-class)
-                              (remove #(.isBridge ^java.lang.reflect.Method %))
-                              (filter (fn [^java.lang.reflect.Method m]
-                                       (and (= (.getName m) method-name)
-                                            (= (alength (.getParameterTypes m)) (count arg-irs))
-                                            (not (java.lang.reflect.Modifier/isStatic (.getModifiers m)))))))
-                         (mapv :nex-type arg-irs)
+                        (resolve-java-call-target
+                         env same-name-instance (mapv :nex-type arg-irs)
                          (str receiver-base "." method-name)))]
-        (if (and resolution (not= resolution :bail))
+        (cond
+          (and (vector? resolution) (= :fixed (first resolution)))
           (ir/call-runtime-node "java-call-method-resolved"
                                 (into [(ir/const-node method-name
                                                       "String"
@@ -5461,13 +5623,35 @@
                                        (ir/const-node (.getName receiver-class)
                                                       "String"
                                                       (ir/object-jvm-type "java/lang/String"))
-                                       (ir/const-node (resolved-param-classes-joined resolution)
+                                       (ir/const-node (resolved-param-classes-joined (second resolution))
                                                       "String"
                                                       (ir/object-jvm-type "java/lang/String"))
                                        target-ir]
                                       arg-irs)
                                 nex-type
                                 jvm-type)
+
+          (and (vector? resolution) (= :varargs (first resolution)))
+          (let [[fixed-classes-joined component-class-name] (resolved-varargs-descriptor (second resolution))]
+            (ir/call-runtime-node "java-call-method-resolved-varargs"
+                                  (into [(ir/const-node method-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node (.getName receiver-class)
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node fixed-classes-joined
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node component-class-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         target-ir]
+                                        arg-irs)
+                                  nex-type
+                                  jvm-type))
+
+          :else
           (ir/call-runtime-node "java-call-method"
                                 (into [(ir/const-node method-name
                                                       "String"

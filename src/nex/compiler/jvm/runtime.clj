@@ -441,6 +441,80 @@
         coerced (mapv coerce-arg-for-resolved-param param-classes args)]
     (.newInstance c (to-array coerced))))
 
+;; ---------------------------------------------------------------------------
+;; Varargs (see the "Varargs" section of nex.lower). clojure.lang.Reflector
+;; -- and even a resolved single-Method getMethod/invoke pair, above -- has
+;; no way to call a varargs method with loose trailing arguments: Java
+;; reflection requires the array to already be built and passed as the
+;; final actual argument. FIXED-CLASSES-JOINED/COMPONENT-CLASS-NAME are
+;; exactly what nex.lower's resolve-java-call-target already resolved at
+;; compile time: the fixed leading parameters (as for a plain resolved
+;; call), plus the single component type every trailing Nex argument
+;; collects against.
+
+(defn- array-class-of
+  "^Class for COMPONENT-CLASS[] -- java.lang.reflect.Array is the only
+   portable way to obtain this without a compile-time array-type literal,
+   since COMPONENT-CLASS is only known by name at this point."
+  ^Class [^Class component-class]
+  (.getClass (java.lang.reflect.Array/newInstance component-class 0)))
+
+(defn- build-varargs-array
+  [^Class component-class values]
+  (let [n (count values)
+        arr (java.lang.reflect.Array/newInstance component-class n)]
+    (dotimes [i n]
+      (java.lang.reflect.Array/set arr i (coerce-arg-for-resolved-param component-class (nth values i))))
+    arr))
+
+(defn- resolve-declared-varargs-method
+  "The real java.lang.reflect.Method/Constructor this call resolved to:
+   FIXED-CLASSES followed by the array type itself (COMPONENT-CLASS[]) --
+   getMethod/getConstructor need the *declared* signature, not the
+   per-argument component type resolve-java-call-target matched trailing
+   arguments against."
+  [fixed-classes component-class]
+  (conj (vec fixed-classes) (array-class-of component-class)))
+
+(defn java-call-method-resolved-varargs
+  [_state method-name receiver-class-name fixed-classes-joined component-class-name target args]
+  (let [^Class owner (Class/forName ^String receiver-class-name)
+        fixed-classes (resolve-param-classes fixed-classes-joined)
+        ^Class component-class (resolve-one-param-class component-class-name)
+        fixed-count (count fixed-classes)
+        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
+                                                (into-array Class (resolve-declared-varargs-method
+                                                                    fixed-classes component-class)))
+        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
+        varargs-array (build-varargs-array component-class (drop fixed-count args))]
+    (.invoke m target (to-array (conj (vec coerced-fixed) varargs-array)))))
+
+(defn java-call-static-resolved-varargs
+  [_state class-name method-name fixed-classes-joined component-class-name args]
+  (let [^Class owner (Class/forName ^String class-name)
+        fixed-classes (resolve-param-classes fixed-classes-joined)
+        ^Class component-class (resolve-one-param-class component-class-name)
+        fixed-count (count fixed-classes)
+        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
+                                                (into-array Class (resolve-declared-varargs-method
+                                                                    fixed-classes component-class)))
+        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
+        varargs-array (build-varargs-array component-class (drop fixed-count args))]
+    (.invoke m nil (to-array (conj (vec coerced-fixed) varargs-array)))))
+
+(defn java-create-object-resolved-varargs
+  [_state class-name fixed-classes-joined component-class-name args]
+  (let [^Class klass (Class/forName ^String class-name)
+        fixed-classes (resolve-param-classes fixed-classes-joined)
+        ^Class component-class (resolve-one-param-class component-class-name)
+        fixed-count (count fixed-classes)
+        ^java.lang.reflect.Constructor c (.getConstructor klass
+                                                          (into-array Class (resolve-declared-varargs-method
+                                                                              fixed-classes component-class)))
+        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
+        varargs-array (build-varargs-array component-class (drop fixed-count args))]
+    (.newInstance c (to-array (conj (vec coerced-fixed) varargs-array)))))
+
 (defn spawn-function-object
   [state fn-obj]
   (make-task
@@ -2493,6 +2567,18 @@
    "java-create-object-resolved"
    (fn [state args] (java-create-object-resolved state (nth args 0) (nth args 1)
                                                   (vec (drop 2 args))))
+
+   "java-call-method-resolved-varargs"
+   (fn [state args] (java-call-method-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
+                                                        (nth args 3) (nth args 4) (vec (drop 5 args))))
+
+   "java-call-static-resolved-varargs"
+   (fn [state args] (java-call-static-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
+                                                        (nth args 3) (vec (drop 4 args))))
+
+   "java-create-object-resolved-varargs"
+   (fn [state args] (java-create-object-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
+                                                          (vec (drop 3 args))))
 
    "spawn-function-object"
    (fn [state args] (spawn-function-object state (first args)))

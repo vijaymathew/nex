@@ -151,3 +151,47 @@ end")
   (testing "resolution needs the receiver's static Java class; an Any-typed receiver (the with-\"java\" idiom the typechecker cannot give a real Java type) bails cleanly rather than erroring, same as before this fix"
     (is (= ["2"] (run-compiled any-typed-receiver-still-bails-program)))
     (is (= ["2"] (run-interpreted any-typed-receiver-still-bails-program)))))
+
+;; ─── Varargs (see the "Varargs" section of nex.lower) ────────────────────
+
+(def varargs-static-call-program
+  "import java.util.Arrays
+
+with \"java\" do
+  print(Arrays.asList().toString())
+  print(Arrays.asList(1).toString())
+  print(Arrays.asList(1, 2, 3, 4, 5).toString())
+end")
+
+(deftest varargs-static-call-collects-trailing-args-into-an-array-test
+  ;; clojure.lang.Reflector -- the mechanism even a resolved single-Method
+  ;; call still invokes through -- cannot call a varargs method with loose
+  ;; trailing arguments at all: it matches by declared arity only, and
+  ;; Arrays.asList(Object...) declares exactly one (array) parameter.
+  ;; Covers the zero-, one-, and multi-trailing-argument shapes, since the
+  ;; array-building is the genuinely new code path here.
+  (testing "Arrays.asList(...) with 0, 1, and 5 trailing arguments all build the right array and dispatch correctly"
+    (is (= ["\"[]\"" "\"[1]\"" "\"[1, 2, 3, 4, 5]\""] (run-compiled varargs-static-call-program)))))
+
+(def varargs-interpreter-still-cannot-call-test-program
+  "import java.util.Arrays
+
+with \"java\" do
+  print(Arrays.asList(1, 2, 3))
+end")
+
+(deftest varargs-interpreter-still-fails-unchanged-test
+  (testing "the interpreter has no compile-time phase to resolve a varargs call against, so it still fails exactly as before this fix — a known, documented backend asymmetry, not a regression"
+    (is (thrown-with-msg? Exception #"No matching method asList found taking 3 args"
+                          (run-interpreted varargs-interpreter-still-cannot-call-test-program)))))
+
+(def varargs-with-fixed-prefix-program
+  "import java.text.MessageFormat
+
+with \"java\" do
+  print(MessageFormat.format(\"{0} and {1}\", \"a\", \"b\"))
+end")
+
+(deftest varargs-with-a-fixed-leading-parameter-test
+  (testing "MessageFormat.format(String pattern, Object... args) resolves its fixed leading parameter normally and collects only the trailing arguments into the vararg array"
+    (is (= ["\"a and b\""] (run-compiled varargs-with-fixed-prefix-program)))))
