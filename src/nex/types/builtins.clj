@@ -1737,7 +1737,8 @@
        (throw (ex-info "datetime_format_iso expects exactly 1 argument" {:function "datetime_format_iso"})))
      (dt/datetime-format-iso (first args)))})
 
-(def path-builtins
+(def path-query-builtins
+  "Read-only path inspection and navigation."
   {"path_exists"
    (fn [_ctx & args]
      (when (not= (count args) 1)
@@ -1798,7 +1799,15 @@
      (when (not= (count args) 2)
        (throw (ex-info "path_child expects exactly 2 arguments" {:function "path_child"})))
      (rt/path-child (str (first args)) (str (second args))))
-   "path_create_file"
+   "path_list"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "path_list expects exactly 1 argument" {:function "path_list"})))
+     (rt/path-list (str (first args))))})
+
+(def path-mutation-builtins
+  "Filesystem-mutating path operations (create/delete/copy/move)."
+  {"path_create_file"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "path_create_file expects exactly 1 argument" {:function "path_create_file"})))
@@ -1832,8 +1841,11 @@
    (fn [_ctx & args]
      (when (not= (count args) 2)
        (throw (ex-info "path_move expects exactly 2 arguments" {:function "path_move"})))
-     (rt/path-move (str (first args)) (str (second args))))
-   "path_read_text"
+     (rt/path-move (str (first args)) (str (second args))))})
+
+(def path-io-builtins
+  "Whole-file text read/write helpers."
+  {"path_read_text"
    (fn [_ctx & args]
      (when (not= (count args) 1)
        (throw (ex-info "path_read_text expects exactly 1 argument" {:function "path_read_text"})))
@@ -1847,12 +1859,10 @@
    (fn [_ctx & args]
      (when (not= (count args) 2)
        (throw (ex-info "path_append_text expects exactly 2 arguments" {:function "path_append_text"})))
-     (rt/path-append-text (str (first args)) (str (second args))))
-   "path_list"
-   (fn [_ctx & args]
-     (when (not= (count args) 1)
-       (throw (ex-info "path_list expects exactly 1 argument" {:function "path_list"})))
-     (rt/path-list (str (first args))))})
+     (rt/path-append-text (str (first args)) (str (second args))))})
+
+(def path-builtins
+  (merge path-query-builtins path-mutation-builtins path-io-builtins))
 
 (def file-builtins
   {"text_file_open_read"
