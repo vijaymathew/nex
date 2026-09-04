@@ -330,6 +330,117 @@
     (.set field target value)
     nil))
 
+;; ---------------------------------------------------------------------------
+;; Java calls resolved at compile time (see the "Compile-time Java overload
+;; resolution" section of nex.lower). java-call-method/-static and
+;; java-create-object above resolve the target Method/Constructor at RUNTIME
+;; via clojure.lang.Reflector, which performs no real overload resolution --
+;; when a name is overloaded, it reliably prefers a wider reference-type
+;; (Object) candidate over a more specific primitive/numeric one
+;; (java.util.ArrayList.remove(int)/(Object) is the textbook case). The
+;; *-resolved variants below are used instead whenever nex.lower already
+;; picked the single applicable candidate at compile time: PARAM-CLASSES-
+;; JOINED is that candidate's exact parameter-type descriptor (comma-joined
+;; binary class names, primitives spelled "int"/"long"/etc.), which pins an
+;; unambiguous getMethod/getConstructor lookup here and drives per-argument
+;; coercion to that exact type -- fixing both the wrong-overload selection
+;; and the separate reflective invoke failure a resolved-but-uncoerced call
+;; would still hit (Nex's Integer is uniformly a boxed Long; Method.invoke
+;; requires an exact wrapper-class match per parameter, so a boxed Long
+;; reflectively invoking an `int` parameter throws IllegalArgumentException
+;; even once the right Method has been found).
+
+(defn- resolve-one-param-class
+  ^Class [^String name]
+  (case name
+    "int" Integer/TYPE
+    "long" Long/TYPE
+    "short" Short/TYPE
+    "byte" Byte/TYPE
+    "float" Float/TYPE
+    "double" Double/TYPE
+    "boolean" Boolean/TYPE
+    "char" Character/TYPE
+    (Class/forName name)))
+
+(defn- resolve-param-classes
+  [^String joined]
+  (if (or (nil? joined) (zero? (.length joined)))
+    []
+    (mapv resolve-one-param-class (str/split joined #","))))
+
+(defn- coerce-arg-for-resolved-param
+  "ARG, as Nex represents it natively (a boxed Long for Integer, a boxed
+   Double for Real, ...), converted to the exact wrapper/primitive class
+   PARAM-CLASS declares. Reference-typed parameters need no conversion --
+   ARG is already the right runtime object (a java.lang.String, a compiled
+   Nex object instance implementing the target interface directly via
+   bytecode `implements`, an ArrayList/LinkedHashMap/LinkedHashSet, ...) and
+   reflection widens a reference argument to a wider declared parameter type
+   on its own. Narrowing a numeric argument is checked, not truncated --
+   raises a clear error rather than silently wrapping, matching how Nex's
+   own arithmetic already treats overflow (see emit.clj's checked negation)."
+  [^Class param-class arg]
+  (cond
+    (or (= param-class Integer/TYPE) (= param-class Integer))
+    (let [l (long arg)]
+      (when (or (> l Integer/MAX_VALUE) (< l Integer/MIN_VALUE))
+        (throw (ex-info (str "Value " l " does not fit in a Java int parameter")
+                        {:value l :target-type "int"})))
+      (int l))
+
+    (or (= param-class Short/TYPE) (= param-class Short))
+    (let [l (long arg)]
+      (when (or (> l Short/MAX_VALUE) (< l Short/MIN_VALUE))
+        (throw (ex-info (str "Value " l " does not fit in a Java short parameter")
+                        {:value l :target-type "short"})))
+      (short l))
+
+    (or (= param-class Byte/TYPE) (= param-class Byte))
+    (let [l (long arg)]
+      (when (or (> l Byte/MAX_VALUE) (< l Byte/MIN_VALUE))
+        (throw (ex-info (str "Value " l " does not fit in a Java byte parameter")
+                        {:value l :target-type "byte"})))
+      (byte l))
+
+    (or (= param-class Long/TYPE) (= param-class Long))
+    (long arg)
+
+    (or (= param-class Float/TYPE) (= param-class Float))
+    (float arg)
+
+    (or (= param-class Double/TYPE) (= param-class Double))
+    (double arg)
+
+    :else
+    arg))
+
+(defn java-call-method-resolved
+  [_state method-name receiver-class-name param-classes-joined target args]
+  (let [^Class owner (Class/forName ^String receiver-class-name)
+        param-classes (resolve-param-classes param-classes-joined)
+        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
+                                                (into-array Class param-classes))
+        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
+    (.invoke m target (to-array coerced))))
+
+(defn java-call-static-resolved
+  [_state class-name method-name param-classes-joined args]
+  (let [^Class owner (Class/forName ^String class-name)
+        param-classes (resolve-param-classes param-classes-joined)
+        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
+                                                (into-array Class param-classes))
+        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
+    (.invoke m nil (to-array coerced))))
+
+(defn java-create-object-resolved
+  [_state class-name param-classes-joined args]
+  (let [^Class klass (Class/forName ^String class-name)
+        param-classes (resolve-param-classes param-classes-joined)
+        ^java.lang.reflect.Constructor c (.getConstructor klass (into-array Class param-classes))
+        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
+    (.newInstance c (to-array coerced))))
+
 (defn spawn-function-object
   [state fn-obj]
   (make-task
@@ -2370,6 +2481,18 @@
 
    "java-set-field"
    (fn [_state args] (java-set-field! (first args) (second args) (nth args 2)))
+
+   "java-call-method-resolved"
+   (fn [state args] (java-call-method-resolved state (nth args 0) (nth args 1) (nth args 2)
+                                                (nth args 3) (vec (drop 4 args))))
+
+   "java-call-static-resolved"
+   (fn [state args] (java-call-static-resolved state (nth args 0) (nth args 1) (nth args 2)
+                                                (vec (drop 3 args))))
+
+   "java-create-object-resolved"
+   (fn [state args] (java-create-object-resolved state (nth args 0) (nth args 1)
+                                                  (vec (drop 2 args))))
 
    "spawn-function-object"
    (fn [state args] (spawn-function-object state (first args)))
