@@ -706,7 +706,24 @@
    :identifier         infer-type-identifier
    :create             infer-type-create
    :this               infer-type-this
-   :anonymous-function (constantly "Function")
+   ;; A bare "Function" string here (the pre-fix shape) discards the
+   ;; lambda's own signature — so a `let good_enough := fn(g: Real):
+   ;; Boolean do ... end` local's inferred nex-type carried no
+   ;; :return-type, and a later `good_enough(guess)` call
+   ;; (infer-call-type -> function-object-binding-type) fell into the "no
+   ;; map, so Any" branch, lowering the call's :jvm-type as Object instead
+   ;; of :boolean. Used directly as an `if`/`when` test, that Object value
+   ;; reached emit-stmt-if!'s boolean check unconverted and crashed with
+   ;; "If statement test did not lower to boolean" — a real bug only in
+   ;; the compiled backend (the interpreter has no such static jvm-type
+   ;; step). Mirrors the richer shape
+   ;; nex.typechecker/anonymous-function-provisional-signature already
+   ;; uses for the identical reason on the typechecking side.
+   :anonymous-function (fn [_ expr]
+                         {:base-type "Function"
+                          :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")})
+                                             (:params expr))
+                          :return-type (or (:return-type expr) "Any")})
    :spawn              infer-type-spawn
    :binary             infer-type-binary
    :unary              infer-type-unary

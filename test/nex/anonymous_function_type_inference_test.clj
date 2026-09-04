@@ -108,6 +108,27 @@ if true then
 end
 print(t(10))")))))
 
+(deftest untyped-let-bound-lambda-used-as-an-if-test-lowers-to-boolean-test
+  (testing "a `let f := fn(...): Boolean do ... end` local (no Function(...) annotation
+            on the let itself) still lowers its call as a real :boolean when used
+            directly as an if-test — the lambda's own signature must survive
+            lower.clj's own (typechecker-independent) type inference for the let,
+            not just the typechecker's"
+    (is (= ["true"]
+           (both "function f(g: Real): Boolean
+do
+  let good_enough := fn(x: Real): Boolean
+  do
+    result := x < 0.001
+  end
+  if good_enough(g) then
+    result := true
+  else
+    result := false
+  end
+end
+print(f(0.0001))")))))
+
 (deftest fully-typed-fn-still-works-test
   (testing "a fully-annotated fn(...) literal is unaffected by inference support"
     (is (= ["true"]
