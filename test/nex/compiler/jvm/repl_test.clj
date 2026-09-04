@@ -2767,3 +2767,93 @@ end"))
         (is (not (str/includes? call-output "Type error")))
         (is (not (str/includes? call-output "Error:")))
         (is (str/includes? call-output "[0, 1, 2, 3]"))))))
+
+(deftest repl-mutually-recursive-closures-work-within-one-input-test
+  (testing "two `let`-bound closures that call each other, defined AND
+            called within the same REPL input, work correctly — the
+            in-REPL analog of the whole-file/single-compilation-unit case
+            (definition-of-nex &sect;4.5, rule 4.16$'$), which is fully
+            fixed and unaffected by the separate-input limitation covered
+            by the next test below"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx0 "let is_even := fn(n: Integer): Boolean do
+  if n = 0 then result := true else result := is_odd(n - 1) end
+end
+let is_odd := fn(n: Integer): Boolean do
+  if n = 0 then result := false else result := is_even(n - 1) end
+end
+print(is_even(10))
+print(is_odd(10))"))]
+        (is (not (str/includes? output "Type error")))
+        (is (not (str/includes? output "Error:")))
+        (is (str/includes? output "true"))
+        (is (str/includes? output "false"))))))
+
+(deftest repl-mutually-recursive-closures-across-separate-inputs-is-a-known-limitation-test
+  (testing "two `let`-bound closures defined together in ONE input, then
+            called from a LATER, SEPARATE input, is a documented, accepted
+            REPL implementation limitation (see nex.compiler.jvm.runtime/
+            rebuild-interpreter-ctx and definition-of-nex &sect;4.5's own
+            note on this) — not something this test expects fixed. It
+            exists to make a change in EITHER direction visible: if this
+            starts working, the note claiming otherwise in both docs and
+            in rebuild-interpreter-ctx's own comment needs updating; if the
+            failure mode changes, the explanation there may no longer be
+            accurate. Root cause: a call on a value that turns out to be
+            interpreter-native (which a REPL-defined closure always is) is
+            re-dispatched through a REBUILT interpreter context that merges
+            in the compiled session's own class registry — which holds
+            nex.lower/prepare-program-for-closures' REWRITTEN, box-aware
+            synthetic class-def for a mutually recursive closure, not the
+            one the interpreter originally built the value from. The
+            closure's own method then runs expecting a captured field to
+            be boxed when the real captured value never was."
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (repl/eval-code ctx0 "let is_even := fn(n: Integer): Boolean do
+  if n = 0 then result := true else result := is_odd(n - 1) end
+end
+let is_odd := fn(n: Integer): Boolean do
+  if n = 0 then result := false else result := is_even(n - 1) end
+end")
+            call-output (with-out-str
+                          (repl/eval-code ctx0 "print(is_even(10))"))]
+        (is (str/includes? call-output "Error:")
+            (str "expected the known 'Method not found' failure; got: " call-output))))))
+
+(deftest repl-declare-function-mutual-recursion-across-separate-inputs-works-test
+  (testing "the documented workaround for the limitation above: ordinary
+            `function` definitions (optionally with `declare function`
+            forward declarations) are never boxed by nex.lower's closure
+            machinery at all, so mutual recursion between them is
+            unaffected — defined together in one input, called correctly
+            from a later, separate one"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx0 (repl/init-repl-context)
+            _ (repl/eval-code ctx0 "declare function is_even(n: Integer): Boolean
+declare function is_odd(n: Integer): Boolean
+
+function is_even(n: Integer): Boolean do
+  if n = 0 then result := true else result := is_odd(n - 1) end
+end
+
+function is_odd(n: Integer): Boolean do
+  if n = 0 then result := false else result := is_even(n - 1) end
+end")
+            even-output (with-out-str (repl/eval-code ctx0 "print(is_even(10))"))
+            odd-output (with-out-str (repl/eval-code ctx0 "print(is_odd(10))"))]
+        (is (not (str/includes? even-output "Error:")))
+        (is (not (str/includes? odd-output "Error:")))
+        (is (str/includes? even-output "true"))
+        (is (str/includes? odd-output "false"))))))

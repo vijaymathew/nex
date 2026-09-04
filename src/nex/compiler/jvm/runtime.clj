@@ -820,6 +820,39 @@
   nil)
 
 (defn- rebuild-interpreter-ctx
+  "Build a fresh interpreter context from this compiled REPL session's own
+   state — used whenever a call has to be dispatched back through the
+   interpreter (see invoke-interpreter-object-method/invoke-function-object
+   below).
+
+   KNOWN LIMITATION (accepted, not planned to be fixed — see
+   docs/md/SYNTAX.md's mutual-recursion section and definition-of-nex
+   &sect;4.5): the `(:classes ctx)` merge below intentionally includes
+   `@(:classes state)` so an interpreted closure can reach a function/class
+   defined in a LATER REPL input (that IS this merge's whole point) — but
+   `@(:classes state)` also holds nex.lower/prepare-program-for-closures'
+   own REWRITTEN synthetic closure classes (its Closure_Mut_Box handling for
+   mutually recursive `let`-bound closures — see box-forward-referenced-
+   closures there), registered under the SAME synthetic name
+   (\"AnonymousFunction_N\") the ORIGINAL, correctly-working interpreter
+   object was itself built from when its OWN defining input ran. If that
+   object's value later has to be re-dispatched through THIS rebuilt ctx —
+   which happens for any interpreter-native value, exactly the case here —
+   it runs under the REWRITTEN class-def instead of the one it was actually
+   built with, expecting a captured field to be boxed when the real captured
+   value never was: \"Method not found: value\"/\"call1\", even though the
+   interpreter handles the very same mutual recursion correctly natively,
+   with no box involved at all, when it isn't relayed through this bridge.
+   A single self-recursive closure, or a whole mutually-recursive group
+   invoked from within the SAME input that defined it, never hits this path
+   this way and is unaffected — only a later, separate input calling into a
+   mutually-recursive PAIR defined earlier does. Fixing it for real means
+   keeping the rewritten, box-aware class-defs available for compiling NEW
+   code that references such a closure, while never substituting them in
+   when re-executing an EXISTING interpreter-native object's own method —
+   which is a change to this shared bridge, not to the closure code alone,
+   so it's deliberately left as documented behavior rather than patched
+   here."
   [state]
   (let [ctx (interp/make-context)]
     (reset! (:bindings (:globals ctx)) {})
