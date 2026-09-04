@@ -2225,6 +2225,41 @@
       (let [^java.lang.reflect.Field field (.getField klass method)]
         (.get field nil)))))
 
+(defn- read-back-method-fields
+  "Collect the object's fields back out of METHOD-ENV after the body ran. A
+   field shadowed by a same-named parameter is kept at its original value
+   unless the body explicitly wrote it via `this.field := ...` (tracked in
+   MODIFIED-FIELDS)."
+  [method-env fields all-fields param-names modified-fields]
+  (reduce (fn [m field]
+            (let [field-name (:name field)
+                  field-key (keyword field-name)]
+              (if (and (contains? param-names field-name)
+                       (not (contains? @modified-fields field-name)))
+                m
+                (let [val (try
+                            (env-lookup method-env field-name)
+                            (catch Exception _ ::not-found))]
+                  (if (not= val ::not-found)
+                    (assoc m field-key val)
+                    m)))))
+          fields
+          all-fields))
+
+(defn- method-result-value
+  "The routine's `result` value after the body ran — honouring an explicit
+   `result :=` flag, else the last value `result` holds, else nil."
+  [method-env]
+  (let [result-flag (try
+                      (env-lookup method-env "__result_assigned__")
+                      (catch Exception _ ::not-found))]
+    (if (= result-flag "result")
+      (env-lookup method-env "result")
+      (let [res (try
+                  (env-lookup method-env "result")
+                  (catch Exception _ ::not-found))]
+        (when (not= res ::not-found) res)))))
+
 (defn- invoke-found-nex-method
   "Invoke a method that resolved via `lookup-method-with-inheritance` on an
    interpreter object: validate the call shape, run the method body in its
@@ -2285,35 +2320,10 @@
                 (eval-body-with-rescue new-ctx (:body method-def) rescue)
                 (doseq [stmt (:body method-def)]
                   (eval-node new-ctx stmt)))
-            updated-fields (reduce (fn [m field]
-                                     (let [field-name (:name field)
-                                           field-key (keyword field-name)]
-                                      ;; Skip fields shadowed by params unless explicitly modified via this.field :=
-                                       (if (and (contains? param-names field-name)
-                                                (not (contains? @modified-fields field-name)))
-                                         m
-                                         (let [val (try
-                                                     (env-lookup method-env field-name)
-                                                     (catch Exception _ ::not-found))]
-                                           (if (not= val ::not-found)
-                                             (assoc m field-key val)
-                                             m)))))
-                                   (:fields obj)
-                                   all-fields)
+            updated-fields (read-back-method-fields method-env (:fields obj) all-fields
+                                                    param-names modified-fields)
             updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
-            result-flag (try
-                          (env-lookup method-env "__result_assigned__")
-                          (catch Exception _ ::not-found))
-            result (cond
-                     (= result-flag "result")
-                     (env-lookup method-env "result")
-                     :else
-                     (let [res (try
-                                 (env-lookup method-env "result")
-                                 (catch Exception _ ::not-found))]
-                       (if (not= res ::not-found)
-                         res
-                         nil)))]
+            result (method-result-value method-env)]
         (try
           (when-let [ensure-assertions effective-ensure]
             (check-assertions new-ctx ensure-assertions Postcondition))
@@ -3298,50 +3308,105 @@
    "Channel"          create-channel-builtin
    "Set"              create-set-builtin})
 
+(defn- resolve-effective-class-name
+  "The registry key `create ClassName[T, ...]` resolves to: the already-
+   specialized class if present, otherwise a freshly specialized class-def
+   registered under this reference's own spec-name (which may differ from the
+   template's when reached through an alias or qualified name)."
+  [ctx class-name generic-args]
+  (if (seq generic-args)
+    (let [spec-name (specialized-class-name class-name generic-args)]
+      (if (lookup-specialized-class ctx spec-name)
+        spec-name
+        (let [template (get @(:classes ctx) class-name)]
+          (when-not template
+            (throw (ex-info (str "Undefined template class: " class-name)
+                            {:class-name class-name})))
+          (when-not (:generic-params template)
+            (throw (ex-info (str "Class " class-name " is not generic")
+                            {:class-name class-name})))
+          (when (not= (count (:generic-params template)) (count generic-args))
+            (throw (ex-info (str "Type argument count mismatch for " class-name
+                                 ": expected " (count (:generic-params template))
+                                 ", got " (count generic-args))
+                            {:class-name class-name
+                             :expected (count (:generic-params template))
+                             :got (count generic-args)})))
+          ;; specialize-class computes its own internal spec-name from the
+          ;; TEMPLATE's own :name (:template-name, e.g. "Box") — unrelated to
+          ;; how THIS call reached it. Through an alias (`intern .../Box as
+          ;; BA`) that produces "Box[Integer]" while `spec-name` here is
+          ;; "BA[Integer]": a real class-def gets registered, but under a
+          ;; different key than the caller is about to look up, so object
+          ;; creation falls through to the Java-interop fallback and fails
+          ;; with "Undefined class". Re-stamping :name to `spec-name` makes
+          ;; the registry key match what callers through THIS reference ask
+          ;; for; :template-name is untouched.
+          (let [specialized (assoc (specialize-class template generic-args) :name spec-name)]
+            (register-specialized-class ctx specialized)
+            spec-name))))
+    class-name))
+
+(defn- run-user-constructor
+  "Execute CLASS-DEF's CONSTRUCTOR against ARGS in a fresh constructor env
+   (fields bound first, then params so they shadow), checking pre/post
+   conditions, and return the resulting field map."
+  [ctx class-def class-name effective-class-name constructor args initial-field-map all-fields]
+  (let [ctor-def (lookup-constructor-with-inheritance ctx class-def constructor)]
+    (when-not ctor-def
+      (throw (ex-info (str "Constructor not found: " class-name "." constructor)
+                      {:class-name class-name :constructor constructor})))
+    (let [ctor-env (make-env (:current-env ctx))
+          _ (doseq [[field-name field-val] initial-field-map]
+              (env-define ctor-env (name field-name) field-val))
+          _ (bind-class-constants! ctx ctor-env class-def)
+          ;; Params bound after fields so a param shadows a same-named field.
+          params (:params ctor-def)
+          arg-values (mapv #(eval-node ctx %) args)
+          _ (when params
+              (doseq [[param arg-val] (map vector params arg-values)]
+                (env-define ctor-env (:name param) arg-val)))
+          temp-obj (make-object effective-class-name initial-field-map)
+          source-class-name (:name (:source-class ctor-def))
+          new-ctx (-> ctx
+                      (assoc :current-env ctor-env)
+                      (assoc :current-object temp-obj)
+                      (assoc :current-class-name source-class-name)
+                      (assoc :current-method-name constructor)
+                      (assoc :in-constructor? true)
+                      (update :debug-stack (fnil conj [])
+                              {:class source-class-name
+                               :method (or constructor "make")
+                               :env ctor-env
+                               :arg-names (set (map :name (or params [])))
+                               :field-names (set (map name (keys initial-field-map)))
+                               :source (:debug-source ctx)})
+                      (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
+          _ (when-let [require-assertions (:require ctor-def)]
+              (check-assertions new-ctx require-assertions Precondition))
+          _ (if-let [rescue (:rescue ctor-def)]
+              (eval-body-with-rescue new-ctx (:body ctor-def) rescue)
+              (doseq [stmt (:body ctor-def)]
+                (eval-node new-ctx stmt)))
+          ;; Read the (possibly mutated) field values back out of the env.
+          updated-fields (reduce (fn [m field]
+                                   (let [field-name (:name field)
+                                         field-key (keyword field-name)
+                                         val (try
+                                               (env-lookup ctor-env field-name)
+                                               (catch Exception _ ::not-found))]
+                                     (if (not= val ::not-found)
+                                       (assoc m field-key val)
+                                       m)))
+                                 initial-field-map
+                                 all-fields)
+          _ (when-let [ensure-assertions (:ensure ctor-def)]
+              (check-assertions new-ctx ensure-assertions Postcondition))]
+      updated-fields)))
+
 (defn- create-user-object
   [ctx class-name generic-args constructor args]
-  ;; Resolve effective class name (handle generic specialization)
-  (let [effective-class-name
-        (if (seq generic-args)
-          (let [spec-name (specialized-class-name class-name generic-args)]
-            (if (lookup-specialized-class ctx spec-name)
-              spec-name
-              ;; Need to create the specialization
-              (let [template (get @(:classes ctx) class-name)]
-                (when-not template
-                  (throw (ex-info (str "Undefined template class: " class-name)
-                                  {:class-name class-name})))
-                (when-not (:generic-params template)
-                  (throw (ex-info (str "Class " class-name " is not generic")
-                                  {:class-name class-name})))
-                (when (not= (count (:generic-params template)) (count generic-args))
-                  (throw (ex-info (str "Type argument count mismatch for " class-name
-                                       ": expected " (count (:generic-params template))
-                                       ", got " (count generic-args))
-                                  {:class-name class-name
-                                   :expected (count (:generic-params template))
-                                   :got (count generic-args)})))
-                ;; specialize-class computes its own internal spec-name from
-                ;; the TEMPLATE's own :name (:template-name below, e.g. "Box")
-                ;; — the class-def's identity as far as its own body is
-                ;; concerned, unrelated to how THIS call reached it. When
-                ;; class-name is an alias (`intern .../Box as BA`) or a
-                ;; qualified reference, that produces "Box[Integer]" while
-                ;; `spec-name` here (computed from class-name, e.g. "BA") is
-                ;; "BA[Integer]" — a real class-def gets registered, but under
-                ;; a DIFFERENT key than the one register-specialized-class's
-                ;; caller (this same function, just below) is about to look
-                ;; it up by, so the immediately-following object-creation
-                ;; falls through to the Java-interop fallback and fails with
-                ;; "Undefined class". Re-stamping :name to `spec-name` here
-                ;; makes the registry key match what every caller through
-                ;; THIS reference actually asks for; :template-name (the
-                ;; template's own identity) is untouched, so anything that
-                ;; needs to know what this was specialized *from* still can.
-                (let [specialized (assoc (specialize-class template generic-args) :name spec-name)]
-                  (register-specialized-class ctx specialized)
-                  spec-name))))
-          class-name)
+  (let [effective-class-name (resolve-effective-class-name ctx class-name generic-args)
         class-def (lookup-class-if-exists ctx effective-class-name)
         _ (when (and class-def (:deferred? class-def))
             (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
@@ -3359,62 +3424,8 @@
         ;; If a constructor is specified, call it and update fields
         final-field-map (when class-def
                           (if constructor
-                            (let [ctor-def (lookup-constructor-with-inheritance ctx class-def constructor)]
-                              (when-not ctor-def
-                                (throw (ex-info (str "Constructor not found: " class-name "." constructor)
-                                                {:class-name class-name :constructor constructor})))
-                              ;; Create environment for constructor execution
-                              (let [ctor-env (make-env (:current-env ctx))
-                                    ;; Bind fields as local variables FIRST
-                                    _ (doseq [[field-name field-val] initial-field-map]
-                                        (env-define ctor-env (name field-name) field-val))
-                                    _ (bind-class-constants! ctx ctor-env class-def)
-                                    ;; Bind parameters SECOND (so they shadow fields with same name)
-                                    params (:params ctor-def)
-                                    arg-values (mapv #(eval-node ctx %) args)
-                                    _ (when params
-                                        (doseq [[param arg-val] (map vector params arg-values)]
-                                          (env-define ctor-env (:name param) arg-val)))
-                                    temp-obj (make-object effective-class-name initial-field-map)
-                                    source-class-name (:name (:source-class ctor-def))
-                                    new-ctx (-> ctx
-                                                (assoc :current-env ctor-env)
-                                                (assoc :current-object temp-obj)
-                                                (assoc :current-class-name source-class-name)
-                                                (assoc :current-method-name constructor)
-                                                (assoc :in-constructor? true)
-                                                (update :debug-stack (fnil conj [])
-                                                        {:class source-class-name
-                                                         :method (or constructor "make")
-                                                         :env ctor-env
-                                                         :arg-names (set (map :name (or params [])))
-                                                         :field-names (set (map name (keys initial-field-map)))
-                                                         :source (:debug-source ctx)})
-                                                (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
-                                    ;; Check pre-conditions
-                                    _ (when-let [require-assertions (:require ctor-def)]
-                                        (check-assertions new-ctx require-assertions Precondition))
-                                    ;; Execute constructor body
-                                    _ (if-let [rescue (:rescue ctor-def)]
-                                        (eval-body-with-rescue new-ctx (:body ctor-def) rescue)
-                                        (doseq [stmt (:body ctor-def)]
-                                          (eval-node new-ctx stmt)))
-                                    ;; Update object fields from modified environment
-                                    updated-fields (reduce (fn [m field]
-                                                             (let [field-name (:name field)
-                                                                   field-key (keyword field-name)
-                                                                   val (try
-                                                                         (env-lookup ctor-env field-name)
-                                                                         (catch Exception _ ::not-found))]
-                                                               (if (not= val ::not-found)
-                                                                 (assoc m field-key val)
-                                                                 m)))
-                                                           initial-field-map
-                                                           all-fields)
-                                    ;; Check post-conditions
-                                    _ (when-let [ensure-assertions (:ensure ctor-def)]
-                                        (check-assertions new-ctx ensure-assertions Postcondition))]
-                                updated-fields))
+                            (run-user-constructor ctx class-def class-name effective-class-name
+                                                  constructor args initial-field-map all-fields)
                             ;; No constructor: use default initialization
                             initial-field-map))
         ;; Create the final object

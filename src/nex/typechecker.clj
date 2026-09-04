@@ -1854,6 +1854,20 @@
     (let [type-map (build-generic-type-map env left-type)]
       (check-call-signature env name [right] sig type-map))))
 
+(defn- check-numeric-binary-op
+  "Shared checking for a purely numeric operator (`/`, `-`, `*`, `%`, `^`, and
+   the non-String case of `+`): both operands must be numeric, in which case
+   RESULT-TYPE-FN gives the result type; otherwise fall back to a user-defined
+   operator alias, and failing that raise a \"requires numeric operands\" error."
+  [env expr operator left-type right-type right result-type-fn]
+  (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
+    (result-type-fn left-type right-type)
+    (or (check-aliased-operator env expr operator left-type right)
+        (throw (ex-info (str "Operator " operator " requires numeric operands")
+                        {:error (type-error
+                                 (str "Operator " operator " requires numeric operands, got "
+                                      (display-type left-type) " and " (display-type right-type)))})))))
+
 (defn check-binary-op
   "Check the type of a binary operation"
   [env {:keys [operator left right] :as expr}]
@@ -1883,31 +1897,13 @@
                                           (display-type left-type) " and " (display-type right-type)))}))))
 
       ("/")
-      (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
-        (division-result-type left-type right-type)
-        (or (check-aliased-operator env expr operator left-type right)
-            (throw (ex-info (str "Operator " operator " requires numeric operands")
-                            {:error (type-error
-                                     (str "Operator " operator " requires numeric operands, got "
-                                          (display-type left-type) " and " (display-type right-type)))}))))
+      (check-numeric-binary-op env expr operator left-type right-type right division-result-type)
 
       ("-" "*" "%")
-      (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
-        (numeric-result-type left-type right-type)
-        (or (check-aliased-operator env expr operator left-type right)
-            (throw (ex-info (str "Operator " operator " requires numeric operands")
-                            {:error (type-error
-                                     (str "Operator " operator " requires numeric operands, got "
-                                          (display-type left-type) " and " (display-type right-type)))}))))
+      (check-numeric-binary-op env expr operator left-type right-type right numeric-result-type)
 
       ("^")
-      (if (and (is-numeric-type? left-type) (is-numeric-type? right-type))
-        (power-result-type left-type right-type)
-        (or (check-aliased-operator env expr operator left-type right)
-            (throw (ex-info (str "Operator " operator " requires numeric operands")
-                            {:error (type-error
-                                     (str "Operator " operator " requires numeric operands, got "
-                                          (display-type left-type) " and " (display-type right-type)))}))))
+      (check-numeric-binary-op env expr operator left-type right-type right power-result-type)
 
       ("=" "/=" "==" "!=")
       (if (or (= left-type "Nil")
@@ -3282,47 +3278,32 @@
                            (get @(:methods e) class-name))))
       (sort acc))))
 
-(defn check-call
-  "Check the type of a method call"
-  [env {:keys [target method args has-parens] :as expr}]
-  (if (and (map? target) (= :create (:type target)) (nil? method))
-    (if (nil? (:constructor target))
-      (throw (invalid-bare-create-call-error (:class-name target)))
-      (check-create env (assoc target :args args)))
-    (if target
-      (check-target-call env expr)
-      ;; A bare call to a name interned from more than one file — reject it
-      ;; here, before either the builtin-checker or env-lookup-var lookup
-      ;; below would silently resolve to whichever fn-def happened to
-      ;; register last (see check-program's function-variable registration
-      ;; loop). A builtin name is never in :ambiguous-functions (only
-      ;; interned user fn-defs populate it), so this can't misfire there.
-      (do
-        (when-let [qualified-names (get @(:ambiguous-functions (env-root env)) method)]
-          (throw (ambiguous-function-reference-error method qualified-names)))
-      ;; Function call (built-in like print/type_of/type_is) or function object call
-        (if-let [checker (get builtin-call-checkers method)]
-          (checker env args)
-          (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
-            (let [base-type (if (map? var-type) (:base-type var-type) var-type)
-                  call-name (str "call" (count args))
-                  method-sig (env-lookup-method env base-type call-name (count args))
-                  class-def (env-lookup-class env base-type)]
-              (when-not method-sig
-                (let [call-arities (env-call-method-arities env base-type)]
-                  (if (= 1 (count call-arities))
+(defn- check-function-object-call
+  "A bare `f(args)` where `f` is a variable holding a callable — a Function
+   value or a by-reference free function. Resolves the right `callN`, prefers
+   the variable's own declared signature over the generic Any-typed one,
+   infers and constraint-checks any generic bindings from the arguments, and
+   returns the (generic-resolved) return type."
+  [env method args var-type]
+  (let [base-type (if (map? var-type) (:base-type var-type) var-type)
+        call-name (str "call" (count args))
+        method-sig (env-lookup-method env base-type call-name (count args))
+        class-def (env-lookup-class env base-type)]
+    (when-not method-sig
+      (let [call-arities (env-call-method-arities env base-type)]
+        (if (= 1 (count call-arities))
               ;; A free function (or single-arity callable) invoked at the wrong
               ;; arity: report the function and the counts instead of `callN`.
-                    (let [expected (first call-arities)
-                          given (count args)
-                          msg (str "Function `" method "` takes " expected
-                                   (if (= 1 expected) " argument" " arguments")
-                                   ", " (when (< given expected) "only ") given " given")]
-                      (throw (ex-info msg {:error (type-error msg)})))
-                    (throw (ex-info (str "Method not found: " call-name)
-                                    {:error (type-error
-                                             (str "Method not found: " call-name))})))))
-              (let [generic-names (set (concat (map :name (:generic-params class-def))
+          (let [expected (first call-arities)
+                given (count args)
+                msg (str "Function `" method "` takes " expected
+                         (if (= 1 expected) " argument" " arguments")
+                         ", " (when (< given expected) "only ") given " given")]
+            (throw (ex-info msg {:error (type-error msg)})))
+          (throw (ex-info (str "Method not found: " call-name)
+                          {:error (type-error
+                                   (str "Method not found: " call-name))})))))
+    (let [generic-names (set (concat (map :name (:generic-params class-def))
                                          ;; A Function-typed variable holding an
                                          ;; anonymous function declared with its own
                                          ;; type params (`fn[T](x: T): T`) carries
@@ -3333,8 +3314,8 @@
                                          ;; must be unioned in here too, or T below
                                          ;; is never recognized as inferable and
                                          ;; every call reports it as unresolved.
-                                               (map :name (:generic-params var-type))))
-                    arg-types (mapv #(check-expression env %) args)
+                                     (map :name (:generic-params var-type))))
+          arg-types (mapv #(check-expression env %) args)
               ;; A Function-typed variable carries its own declared signature
               ;; (e.g. `Function(Dog): String`), which is more specific than
               ;; the generic call<N> method registered by
@@ -3342,51 +3323,51 @@
               ;; so *some* callN resolves for arbitrary arity). Prefer the
               ;; variable's own param types here so call-site arguments are
               ;; checked against the declared signature instead of Any.
-                    effective-params (if (and (map? var-type)
-                                              (= "Function" (:base-type var-type))
-                                              (:param-types var-type))
-                                       (:param-types var-type)
-                                       (:params method-sig))
-                    inferred-type-map (reduce (fn [acc [arg-type param]]
-                                                (merge-inferred-generic-bindings
-                                                 env
-                                                 acc
-                                                 (infer-generic-type-map-from-arg
-                                                  env generic-names (:type param) arg-type)))
-                                              {}
-                                              (map vector arg-types effective-params))
-                    type-map (merge (build-generic-type-map env var-type)
-                                    inferred-type-map)]
+          effective-params (if (and (map? var-type)
+                                    (= "Function" (:base-type var-type))
+                                    (:param-types var-type))
+                             (:param-types var-type)
+                             (:params method-sig))
+          inferred-type-map (reduce (fn [acc [arg-type param]]
+                                      (merge-inferred-generic-bindings
+                                       env
+                                       acc
+                                       (infer-generic-type-map-from-arg
+                                        env generic-names (:type param) arg-type)))
+                                    {}
+                                    (map vector arg-types effective-params))
+          type-map (merge (build-generic-type-map env var-type)
+                          inferred-type-map)]
           ;; An inferred binding must itself satisfy its generic parameter's
           ;; own declared constraint (`[G -> Animal]`) -- validate-generic-args
           ;; already does this for an EXPLICIT type argument (`Box[Dog]`), but
           ;; nothing did for a binding inferred from a call's own arguments
           ;; (`describe(42)` against `describe[G -> Animal](x: G)` type-checked
           ;; with G bound to Integer, which doesn't satisfy Animal).
-                (doseq [{:keys [name constraint]} (concat (:generic-params class-def) (:generic-params var-type))
-                        :when constraint
-                        :let [gname (type-name-string name)
-                              constraint (type-name-string constraint)
-                              bound (get type-map gname)]
-                        :when bound]
-                  (when-not (types-compatible? env bound constraint)
-                    (throw (ex-info (str "Argument type " (display-type bound)
-                                         " does not satisfy constraint " constraint
-                                         " for generic parameter " gname)
-                                    {:error (type-error
-                                             (str "Argument type " (display-type bound)
-                                                  " does not satisfy constraint " constraint
-                                                  " for generic parameter " gname))}))))
-                (when (not= (count args) (count effective-params))
-                  (throw (ex-info (str "Method " call-name " expects " (count effective-params)
-                                       " arguments, got " (count args))
-                                  {:error (type-error
-                                           (str "Method " call-name " expects " (count effective-params)
-                                                " arguments, got " (count args)))})))
-                (doseq [[arg-type param] (map vector arg-types effective-params)]
-                  (let [param-type (resolve-generic-type (:type param) type-map)]
-                    (when (and (is-generic-type-param? env param-type)
-                               (not (contains? type-map param-type))
+      (doseq [{:keys [name constraint]} (concat (:generic-params class-def) (:generic-params var-type))
+              :when constraint
+              :let [gname (type-name-string name)
+                    constraint (type-name-string constraint)
+                    bound (get type-map gname)]
+              :when bound]
+        (when-not (types-compatible? env bound constraint)
+          (throw (ex-info (str "Argument type " (display-type bound)
+                               " does not satisfy constraint " constraint
+                               " for generic parameter " gname)
+                          {:error (type-error
+                                   (str "Argument type " (display-type bound)
+                                        " does not satisfy constraint " constraint
+                                        " for generic parameter " gname))}))))
+      (when (not= (count args) (count effective-params))
+        (throw (ex-info (str "Method " call-name " expects " (count effective-params)
+                             " arguments, got " (count args))
+                        {:error (type-error
+                                 (str "Method " call-name " expects " (count effective-params)
+                                      " arguments, got " (count args)))})))
+      (doseq [[arg-type param] (map vector arg-types effective-params)]
+        (let [param-type (resolve-generic-type (:type param) type-map)]
+          (when (and (is-generic-type-param? env param-type)
+                     (not (contains? type-map param-type))
                        ;; Calling a Function(T)-typed *parameter* from inside
                        ;; the very generic scope that binds T (`each[T](a:
                        ;; Array[T], f: Function(T): T) do ... f(elem) ... end`,
@@ -3396,21 +3377,21 @@
                        ;; whose type actually differs from the declared
                        ;; (still-unresolved) param type represents a real,
                        ;; failed inference.
-                               (not= arg-type param-type))
-                      (throw (ex-info (str "Could not infer generic type parameter " param-type
-                                           " for function " method)
-                                      {:error (type-error
-                                               (str "Could not infer generic type parameter "
-                                                    param-type
-                                                    " for function "
-                                                    method))})))
-                    (when (any-into-concrete-without-convert? env param-type arg-type)
-                      (throw-any-narrowing-error! (str "parameter of " method) param-type))
-                    (when-not (types-compatible? env arg-type param-type)
-                      (throw (ex-info (str "Argument type mismatch for method " call-name)
-                                      {:error (type-error
-                                               (str "Expected " (display-type param-type)
-                                                    ", got " (display-type arg-type)))})))))
+                     (not= arg-type param-type))
+            (throw (ex-info (str "Could not infer generic type parameter " param-type
+                                 " for function " method)
+                            {:error (type-error
+                                     (str "Could not infer generic type parameter "
+                                          param-type
+                                          " for function "
+                                          method))})))
+          (when (any-into-concrete-without-convert? env param-type arg-type)
+            (throw-any-narrowing-error! (str "parameter of " method) param-type))
+          (when-not (types-compatible? env arg-type param-type)
+            (throw (ex-info (str "Argument type mismatch for method " call-name)
+                            {:error (type-error
+                                     (str "Expected " (display-type param-type)
+                                          ", got " (display-type arg-type)))})))))
           ;; A Function value carrying an explicit signature knows its own return
           ;; type; prefer it over the generic callN result (which is Any). Still
           ;; resolve it through type-map: when that signature is itself generic
@@ -3418,42 +3399,75 @@
           ;; the unbound "T", not this call's actual inferred type -- without
           ;; this, `let y: Integer := id(10)` reported the call's type as the
           ;; literal name "T" instead of the "Integer" this call resolved it to.
-                (if (and (map? var-type)
-                         (= "Function" (:base-type var-type))
-                         (:return-type var-type))
-                  (resolve-generic-type (:return-type var-type) type-map)
+      (if (and (map? var-type)
+               (= "Function" (:base-type var-type))
+               (:return-type var-type))
+        (resolve-generic-type (:return-type var-type) type-map)
             ;; Coalesce a missing :return-type to "Void" — see
             ;; check-call-signature's identical fix for why a bare nil here
             ;; would slip past check-expression's Void-as-value guard.
-                  (or (resolve-generic-type (:return-type method-sig) type-map) "Void"))))
-            (if-let [current-class (env-lookup-var env "__current_class__")]
-              (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
-                (do
-                  (when (not= (count args) (count (:params method-sig)))
-                    (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
-                                         " arguments, got " (count args))
-                                    {:error (type-error
-                                             (str "Method " method " expects " (count (:params method-sig))
-                                                  " arguments, got " (count args)))})))
-                  (doseq [[arg param] (map vector args (:params method-sig))]
-                    (let [arg-type (check-expression env arg)]
-                      (when (any-into-concrete-without-convert? env (:type param) arg-type)
-                        (throw-any-narrowing-error! (str "parameter '" (:name param) "' of " method) (:type param)))
-                      (when-not (types-compatible? env arg-type (:type param))
-                        (throw (ex-info (str "Argument type mismatch for method " method)
-                                        {:error (type-error
-                                                 (str "Expected " (:type param) ", got " arg-type))})))))
-                  (or (:return-type method-sig) "Void"))
-                (do
-                  (doseq [arg args] (check-expression env arg))
-                  (throw (ex-info (str "Undefined function or method: " method)
-                                  {:error (type-error
-                                           (str "Undefined function or method: " method))}))))
-              (do
-                (doseq [arg args] (check-expression env arg))
-                (throw (ex-info (str "Undefined function: " method)
-                                {:error (type-error
-                                         (str "Undefined function: " method))}))))))))))
+        (or (resolve-generic-type (:return-type method-sig) type-map) "Void")))))
+
+(defn- check-bare-name-call
+  "A bare `f(args)` that is neither a builtin nor a known callable variable:
+   an implicit-`this` method call inside a class body, else an error."
+  [env method args]
+  (if-let [current-class (env-lookup-var env "__current_class__")]
+    (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
+      (do
+        (when (not= (count args) (count (:params method-sig)))
+          (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
+                               " arguments, got " (count args))
+                          {:error (type-error
+                                   (str "Method " method " expects " (count (:params method-sig))
+                                        " arguments, got " (count args)))})))
+        (doseq [[arg param] (map vector args (:params method-sig))]
+          (let [arg-type (check-expression env arg)]
+            (when (any-into-concrete-without-convert? env (:type param) arg-type)
+              (throw-any-narrowing-error! (str "parameter '" (:name param) "' of " method) (:type param)))
+            (when-not (types-compatible? env arg-type (:type param))
+              (throw (ex-info (str "Argument type mismatch for method " method)
+                              {:error (type-error
+                                       (str "Expected " (:type param) ", got " arg-type))})))))
+        (or (:return-type method-sig) "Void"))
+      (do
+        (doseq [arg args] (check-expression env arg))
+        (throw (ex-info (str "Undefined function or method: " method)
+                        {:error (type-error
+                                 (str "Undefined function or method: " method))}))))
+    (do
+      (doseq [arg args] (check-expression env arg))
+      (throw (ex-info (str "Undefined function: " method)
+                      {:error (type-error
+                               (str "Undefined function: " method))})))))
+
+(defn check-call
+  "Check the type of a method call"
+  [env {:keys [target method args] :as expr}]
+  (cond
+    (and (map? target) (= :create (:type target)) (nil? method))
+    (if (nil? (:constructor target))
+      (throw (invalid-bare-create-call-error (:class-name target)))
+      (check-create env (assoc target :args args)))
+
+    target
+    (check-target-call env expr)
+
+    :else
+    ;; A bare call to a name interned from more than one file — reject it here,
+    ;; before either the builtin-checker or env-lookup-var lookup below would
+    ;; silently resolve to whichever fn-def happened to register last (see
+    ;; check-program's function-variable registration loop). A builtin name is
+    ;; never in :ambiguous-functions (only interned user fn-defs populate it),
+    ;; so this can't misfire there.
+    (do
+      (when-let [qualified-names (get @(:ambiguous-functions (env-root env)) method)]
+        (throw (ambiguous-function-reference-error method qualified-names)))
+      (if-let [checker (get builtin-call-checkers method)]
+        (checker env args)
+        (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
+          (check-function-object-call env method args var-type)
+          (check-bare-name-call env method args))))))
 
 (defn- check-create-array
   [env {:keys [generic-args constructor args]}]
@@ -4050,6 +4064,44 @@
 (declare check-statement)
 (declare check-expression-with-expected)
 
+(defn- check-collection-literal-elems-against
+  "Shared element-type check for an Array/Set literal against an annotated
+   `Array[T]` / `Set[T]` target: every element must be compatible with T
+   (with no implicit Any-narrowing). KIND is \"array\" or \"set\", used only
+   for the diagnostic wording."
+  [env expr elem-type kind]
+  (doseq [elem (:elements expr)]
+    (let [actual-elem-type (check-expression-with-expected env elem elem-type)]
+      (when (any-into-concrete-without-convert? env elem-type actual-elem-type)
+        (throw-any-narrowing-error! (str "a" (when (= kind "array") "n") " " kind " element") elem-type))
+      (when-not (types-compatible? env actual-elem-type elem-type)
+        (throw (ex-info (str (clojure.string/capitalize kind) " elements must have same type")
+                        {:error (type-error
+                                 (str (clojure.string/capitalize kind) " elements must have same type, got "
+                                      (display-type elem-type) " and " (display-type actual-elem-type)))}))))))
+
+(defn- check-map-literal-against
+  "Check a map literal's keys and values against an annotated `Map[K, V]`."
+  [env expr expected-type]
+  (let [[expected-key-type expected-val-type] (:type-params expected-type)]
+    (doseq [{:keys [key value]} (:entries expr)]
+      (let [actual-key-type (check-expression-with-expected env key expected-key-type)
+            actual-val-type (check-expression-with-expected env value expected-val-type)]
+        (when (any-into-concrete-without-convert? env expected-key-type actual-key-type)
+          (throw-any-narrowing-error! "a map key" expected-key-type))
+        (when-not (types-compatible? env actual-key-type expected-key-type)
+          (throw (ex-info "Map keys must have consistent types"
+                          {:error (type-error
+                                   (str "Cannot assign " (display-type actual-key-type)
+                                        " to map key type " (display-type expected-key-type)))})))
+        (when (any-into-concrete-without-convert? env expected-val-type actual-val-type)
+          (throw-any-narrowing-error! "a map value" expected-val-type))
+        (when-not (types-compatible? env actual-val-type expected-val-type)
+          (throw (ex-info "Map values must have consistent types"
+                          {:error (type-error
+                                   (str "Cannot assign " (display-type actual-val-type)
+                                        " to map value type " (display-type expected-val-type)))})))))))
+
 (defn check-expression-with-expected
   "Check an expression against an expected type when contextual typing matters,
    especially for collection literals with annotated target types."
@@ -4061,59 +4113,24 @@
            (map? expected-type)
            (= (:base-type expected-type) "Array")
            (= 1 (count (:type-params expected-type))))
-      (let [elem-type (first (:type-params expected-type))]
-        (doseq [elem (:elements expr)]
-          (let [actual-elem-type (check-expression-with-expected env elem elem-type)]
-            (when (any-into-concrete-without-convert? env elem-type actual-elem-type)
-              (throw-any-narrowing-error! "an array element" elem-type))
-            (when-not (types-compatible? env actual-elem-type elem-type)
-              (throw (ex-info "Array elements must have same type"
-                              {:error (type-error
-                                       (str "Array elements must have same type, got "
-                                            (display-type elem-type) " and " (display-type actual-elem-type)))})))))
-        expected-type)
+      (do (check-collection-literal-elems-against env expr (first (:type-params expected-type)) "array")
+          expected-type)
 
       (and (map? expr)
            (= :map-literal (:type expr))
            (map? expected-type)
            (= (:base-type expected-type) "Map")
            (= 2 (count (:type-params expected-type))))
-      (let [[expected-key-type expected-val-type] (:type-params expected-type)]
-        (doseq [{:keys [key value]} (:entries expr)]
-          (let [actual-key-type (check-expression-with-expected env key expected-key-type)
-                actual-val-type (check-expression-with-expected env value expected-val-type)]
-            (when (any-into-concrete-without-convert? env expected-key-type actual-key-type)
-              (throw-any-narrowing-error! "a map key" expected-key-type))
-            (when-not (types-compatible? env actual-key-type expected-key-type)
-              (throw (ex-info "Map keys must have consistent types"
-                              {:error (type-error
-                                       (str "Cannot assign " (display-type actual-key-type)
-                                            " to map key type " (display-type expected-key-type)))})))
-            (when (any-into-concrete-without-convert? env expected-val-type actual-val-type)
-              (throw-any-narrowing-error! "a map value" expected-val-type))
-            (when-not (types-compatible? env actual-val-type expected-val-type)
-              (throw (ex-info "Map values must have consistent types"
-                              {:error (type-error
-                                       (str "Cannot assign " (display-type actual-val-type)
-                                            " to map value type " (display-type expected-val-type)))})))))
-        expected-type)
+      (do (check-map-literal-against env expr expected-type)
+          expected-type)
 
       (and (map? expr)
            (= :set-literal (:type expr))
            (map? expected-type)
            (= (:base-type expected-type) "Set")
            (= 1 (count (:type-params expected-type))))
-      (let [elem-type (first (:type-params expected-type))]
-        (doseq [elem (:elements expr)]
-          (let [actual-elem-type (check-expression-with-expected env elem elem-type)]
-            (when (any-into-concrete-without-convert? env elem-type actual-elem-type)
-              (throw-any-narrowing-error! "a set element" elem-type))
-            (when-not (types-compatible? env actual-elem-type elem-type)
-              (throw (ex-info "Set elements must have same type"
-                              {:error (type-error
-                                       (str "Set elements must have same type, got "
-                                            (display-type elem-type) " and " (display-type actual-elem-type)))})))))
-        expected-type)
+      (do (check-collection-literal-elems-against env expr (first (:type-params expected-type)) "set")
+          expected-type)
 
       ;; `fn(item) do ... end` — an anonymous function with some or all of its
       ;; parameter types (and/or its return type) omitted, checked against a
@@ -4449,6 +4466,82 @@
   (when (and (map? expr) (= :call (:type expr)))
     expr))
 
+(defn- check-select-clause-body
+  "Check a select clause's body statements in a fresh scope, optionally binding
+   the `as <name>` alias to the channel/task element type."
+  [env alias alias-type body]
+  (let [body-env (make-type-env env)]
+    (when alias
+      (env-add-var body-env alias alias-type))
+    (doseq [stmt body]
+      (check-statement body-env stmt))))
+
+(defn- check-select-task-clause
+  [env method args alias body type-args]
+  (when-not (= method "await")
+    (throw (ex-info "select task clauses support only Task.await"
+                    {:error (type-error "select task clauses support only Task.await")})))
+  (when (seq args)
+    (throw (ex-info "Task.await in select takes no arguments"
+                    {:error (type-error "Task.await in select takes no arguments")})))
+  (check-select-clause-body env alias (or (first type-args) "Any") body))
+
+(defn- check-select-channel-receive-clause
+  [env method args alias body type-args]
+  (cond
+    (= method "try_receive")
+    (when (seq args)
+      (throw (ex-info "Channel.try_receive takes no arguments"
+                      {:error (type-error "Channel.try_receive takes no arguments")})))
+
+    (= method "receive")
+    (when (> (count args) 1)
+      (throw (ex-info "Channel.receive expects 0 or 1 arguments"
+                      {:error (type-error "Channel.receive expects 0 or 1 arguments")}))))
+  (when (= 1 (count args))
+    (let [timeout-type (check-expression env (first args))]
+      (when-not (= (attachable-type timeout-type) "Integer")
+        (throw (ex-info "Channel.receive timeout must be Integer"
+                        {:error (type-error
+                                 (str "Channel.receive timeout must be Integer, got "
+                                      (display-type timeout-type)))})))))
+  (check-select-clause-body env alias (or (first type-args) "Any") body))
+
+(defn- check-select-channel-send-clause
+  [env method args alias body type-args]
+  (cond
+    (= method "try_send")
+    (when-not (= 1 (count args))
+      (throw (ex-info "Channel.try_send expects 1 argument"
+                      {:error (type-error "Channel.try_send expects 1 argument")})))
+
+    (= method "send")
+    (when-not (<= 1 (count args) 2)
+      (throw (ex-info "Channel.send expects 1 or 2 arguments"
+                      {:error (type-error "Channel.send expects 1 or 2 arguments")}))))
+  (when alias
+    (throw (ex-info "send clauses cannot bind a value"
+                    {:error (type-error "send clauses cannot use 'as <name>'")})))
+  (let [arg-type (check-expression env (first args))
+        elem-type (or (first type-args) "Any")]
+    (when (any-into-concrete-without-convert? env elem-type arg-type)
+      (throw-any-narrowing-error! (str "the Channel." method " argument") elem-type))
+    (when-not (types-compatible? env arg-type elem-type)
+      (throw (ex-info (str "Channel." method " argument type mismatch")
+                      {:error (type-error
+                               (str "Expected " (display-type elem-type)
+                                    ", got " (display-type arg-type)))})))
+    (when (= 2 (count args))
+      (let [timeout-type (check-expression env (second args))]
+        (when-not (= (attachable-type timeout-type) "Integer")
+          (throw (ex-info "Channel.send timeout must be Integer"
+                          {:error (type-error
+                                   (str "Channel.send timeout must be Integer, got "
+                                        (display-type timeout-type)))})))))
+    (let [body-env (make-type-env env)]
+      (doseq [stmt body]
+        (check-statement body-env stmt)))))
+
 (defn- check-select-clause
   [env {:keys [expr alias body]}]
   (let [{:keys [target method args]} (or (select-clause-op expr)
@@ -4461,80 +4554,15 @@
                     (or (:type-params normalized-target) (:type-args normalized-target)))]
     (case base-type
       "Task"
-      (do
-        (when-not (= method "await")
-          (throw (ex-info "select task clauses support only Task.await"
-                          {:error (type-error "select task clauses support only Task.await")})))
-        (when (seq args)
-          (throw (ex-info "Task.await in select takes no arguments"
-                          {:error (type-error "Task.await in select takes no arguments")})))
-        (let [body-env (make-type-env env)]
-          (when alias
-            (env-add-var body-env alias (or (first type-args) "Any")))
-          (doseq [stmt body]
-            (check-statement body-env stmt))))
+      (check-select-task-clause env method args alias body type-args)
 
       "Channel"
       (case method
         ("receive" "try_receive")
-        (do
-          (cond
-            (= method "try_receive")
-            (when (seq args)
-              (throw (ex-info "Channel.try_receive takes no arguments"
-                              {:error (type-error "Channel.try_receive takes no arguments")})))
-
-            (= method "receive")
-            (when (> (count args) 1)
-              (throw (ex-info "Channel.receive expects 0 or 1 arguments"
-                              {:error (type-error "Channel.receive expects 0 or 1 arguments")}))))
-          (when (= 1 (count args))
-            (let [timeout-type (check-expression env (first args))]
-              (when-not (= (attachable-type timeout-type) "Integer")
-                (throw (ex-info "Channel.receive timeout must be Integer"
-                                {:error (type-error
-                                         (str "Channel.receive timeout must be Integer, got "
-                                              (display-type timeout-type)))})))))
-          (let [body-env (make-type-env env)]
-            (when alias
-              (env-add-var body-env alias (or (first type-args) "Any")))
-            (doseq [stmt body]
-              (check-statement body-env stmt))))
+        (check-select-channel-receive-clause env method args alias body type-args)
 
         ("send" "try_send")
-        (do
-          (cond
-            (= method "try_send")
-            (when-not (= 1 (count args))
-              (throw (ex-info "Channel.try_send expects 1 argument"
-                              {:error (type-error "Channel.try_send expects 1 argument")})))
-
-            (= method "send")
-            (when-not (<= 1 (count args) 2)
-              (throw (ex-info "Channel.send expects 1 or 2 arguments"
-                              {:error (type-error "Channel.send expects 1 or 2 arguments")}))))
-          (when alias
-            (throw (ex-info "send clauses cannot bind a value"
-                            {:error (type-error "send clauses cannot use 'as <name>'")})))
-          (let [arg-type (check-expression env (first args))
-                elem-type (or (first type-args) "Any")]
-            (when (any-into-concrete-without-convert? env elem-type arg-type)
-              (throw-any-narrowing-error! (str "the Channel." method " argument") elem-type))
-            (when-not (types-compatible? env arg-type elem-type)
-              (throw (ex-info (str "Channel." method " argument type mismatch")
-                              {:error (type-error
-                                       (str "Expected " (display-type elem-type)
-                                            ", got " (display-type arg-type)))})))
-            (when (= 2 (count args))
-              (let [timeout-type (check-expression env (second args))]
-                (when-not (= (attachable-type timeout-type) "Integer")
-                  (throw (ex-info "Channel.send timeout must be Integer"
-                                  {:error (type-error
-                                           (str "Channel.send timeout must be Integer, got "
-                                                (display-type timeout-type)))})))))
-            (let [body-env (make-type-env env)]
-              (doseq [stmt body]
-                (check-statement body-env stmt)))))
+        (check-select-channel-send-clause env method args alias body type-args)
 
         (throw (ex-info "select clauses support only Channel send/receive or Task.await operations"
                         {:error (type-error
@@ -4755,6 +4783,77 @@
                                         " does not cover all variants. Missing: "
                                         (str/join ", " (sort uncovered))))})))))))
 
+(defn- check-with-java-block
+  "A `with \"java\" ... end` block type-checks its body with `__with_java__`
+   bound, then lifts every non-marker var the body declared back into the
+   enclosing scope."
+  [env stmt]
+  (let [with-env (make-type-env env)]
+    (env-add-var with-env "__with_java__" true)
+    (doseq [s (:body stmt)]
+      (check-statement with-env s))
+    (doseq [[name type] @(:vars with-env)]
+      (when-not (= name "__with_java__")
+        (env-add-var env name type)))))
+
+(defn- check-member-assign
+  "Type-check `obj.field := v` / `this.field := v` / `super.field := v`:
+   resolve the field's owning class (the *parent* for `super`), reject writes
+   to a constant, to a `once` field outside a constructor, or to a field the
+   caller's class does not declare, and check the value against the field type."
+  [env stmt]
+  (let [field-name (:field stmt)
+        object-expr (:object stmt)
+        current-class (env-lookup-var env "__current_class__")
+        ;; `super.field := v` — `super` has its own node type, like `this`.
+        ;; Detected directly here (rather than going through the generic
+        ;; `check-expression env target-expr` call below, which would now
+        ;; happily type it as the parent class — see the `:super` case in
+        ;; `check-expression`) because the field-access checks below must run
+        ;; as the resolved *parent*, not the lexically current class — the
+        ;; point of `super.field := v` is writing a field only that ancestor
+        ;; could otherwise touch directly.
+        super-target? (and (map? object-expr) (= :super (:type object-expr)))
+        super-parent-name (when super-target?
+                            (resolve-super-parent-class-name env current-class))
+        target-expr (or object-expr {:type :this})
+        class-name (if super-target?
+                     super-parent-name
+                     (let [target-type (check-expression env target-expr)
+                           base-target-type (attachable-type target-type)]
+                       (if (map? base-target-type)
+                         (:base-type base-target-type)
+                         base-target-type)))
+        caller-class (if super-target? super-parent-name current-class)
+        _ (when-not class-name
+            (throw (ex-info "Field assignment target must be an object"
+                            {:error (type-error "Field assignment target must be an object")})))
+        _ (when (lookup-class-constant env class-name field-name)
+            (throw (ex-info (str "Cannot assign to constant: " field-name)
+                            {:error (type-error (str "Cannot assign to constant: " field-name))})))
+        field-member (lookup-class-field-member env class-name field-name caller-class)
+        _ (when (and (:once? field-member)
+                     (not (env-lookup-var env "__in_constructor__")))
+            (throw (ex-info (str "Cannot assign to once field outside constructor: " field-name)
+                            {:error (type-error (str "'" field-name "' is a once field and can only be assigned in a constructor"))})))
+        field-type (:field-type field-member)
+        val-type (check-expression env (:value stmt))]
+    (when-not field-type
+      (throw (ex-info (str "Undefined field: " field-name)
+                      {:error (type-error
+                               (undefined-field-message
+                                env class-name field-name caller-class nil))})))
+    (when-not (= caller-class (:declaring-class field-member))
+      (throw (ex-info (str "Cannot assign to field " field-name)
+                      {:error (field-write-error field-name (:declaring-class field-member))})))
+    (when (any-into-concrete-without-convert? env field-type val-type)
+      (throw-any-narrowing-error! (str "field '" field-name "'") field-type))
+    (when-not (types-compatible? env val-type field-type)
+      (throw (ex-info (str "Type mismatch in assignment to " field-name)
+                      {:error (type-error
+                               (str "Cannot assign " (display-type val-type)
+                                    " to field of type " (display-type field-type)))})))))
+
 (defn check-statement
   "Check a statement"
   [env stmt]
@@ -4783,13 +4882,7 @@
                               (env-add-var rescue-env "exception" "Any")
                               (doseq [s rescue] (check-statement rescue-env s)))))
           :with (if (= (:target stmt) "java")
-                  (let [with-env (make-type-env env)]
-                    (env-add-var with-env "__with_java__" true)
-                    (doseq [s (:body stmt)]
-                      (check-statement with-env s))
-                    (doseq [[name type] @(:vars with-env)]
-                      (when-not (= name "__with_java__")
-                        (env-add-var env name type))))
+                  (check-with-java-block env stmt)
                   (doseq [s (:body stmt)] (check-statement env s)))
           :case (do
                   (check-expression env (:expr stmt))
@@ -4810,58 +4903,7 @@
                                          (str "assert condition must be Boolean, got "
                                               cond-type))})))))
           :member-assign
-          (let [field-name (:field stmt)
-                object-expr (:object stmt)
-                current-class (env-lookup-var env "__current_class__")
-                ;; `super.field := v` — `super` has its own node type, like
-                ;; `this`. Detected directly here (rather than going through
-                ;; the generic `check-expression env target-expr` call below,
-                ;; which would now happily type it as the parent class — see
-                ;; the `:super` case in `check-expression`) because the
-                ;; field-access checks below must run as the resolved
-                ;; *parent*, not the lexically current class — the point of
-                ;; `super.field := v` is writing a field only that ancestor
-                ;; could otherwise touch directly.
-                super-target? (and (map? object-expr) (= :super (:type object-expr)))
-                super-parent-name (when super-target?
-                                    (resolve-super-parent-class-name env current-class))
-                target-expr (or object-expr {:type :this})
-                class-name (if super-target?
-                             super-parent-name
-                             (let [target-type (check-expression env target-expr)
-                                   base-target-type (attachable-type target-type)]
-                               (if (map? base-target-type)
-                                 (:base-type base-target-type)
-                                 base-target-type)))
-                caller-class (if super-target? super-parent-name current-class)
-                _ (when-not class-name
-                    (throw (ex-info "Field assignment target must be an object"
-                                    {:error (type-error "Field assignment target must be an object")})))
-                _ (when (lookup-class-constant env class-name field-name)
-                    (throw (ex-info (str "Cannot assign to constant: " field-name)
-                                    {:error (type-error (str "Cannot assign to constant: " field-name))})))
-                field-member (lookup-class-field-member env class-name field-name caller-class)
-                _ (when (and (:once? field-member)
-                             (not (env-lookup-var env "__in_constructor__")))
-                    (throw (ex-info (str "Cannot assign to once field outside constructor: " field-name)
-                                    {:error (type-error (str "'" field-name "' is a once field and can only be assigned in a constructor"))})))
-                field-type (:field-type field-member)
-                val-type (check-expression env (:value stmt))]
-            (when-not field-type
-              (throw (ex-info (str "Undefined field: " field-name)
-                              {:error (type-error
-                                       (undefined-field-message
-                                        env class-name field-name caller-class nil))})))
-            (when-not (= caller-class (:declaring-class field-member))
-              (throw (ex-info (str "Cannot assign to field " field-name)
-                              {:error (field-write-error field-name (:declaring-class field-member))})))
-            (when (any-into-concrete-without-convert? env field-type val-type)
-              (throw-any-narrowing-error! (str "field '" field-name "'") field-type))
-            (when-not (types-compatible? env val-type field-type)
-              (throw (ex-info (str "Type mismatch in assignment to " field-name)
-                              {:error (type-error
-                                       (str "Cannot assign " (display-type val-type)
-                                            " to field of type " (display-type field-type)))}))))
+          (check-member-assign env stmt)
 
           ;; Top-level REPL/program expression inputs are often parsed into
           ;; :statements, so fall back to expression checking for any remaining
@@ -5878,6 +5920,94 @@
             (some #(needs-constructor-init? env (:parent %) (conj seen class-name))
                   (:parents class-def))))))))
 
+(defn- check-class-invariants!
+  "Every `invariant` clause must be Boolean (or Void)."
+  [class-env name invariant]
+  (doseq [assertion invariant]
+    (when (and assertion (:expr assertion))
+      (let [inv-type (check-expression class-env (:expr assertion))]
+        (when-not (or (= inv-type "Boolean") (= inv-type "Void"))
+          (throw (ex-info (str "Invariant must be Boolean in class " name)
+                          {:error (type-error
+                                   (str "Invariant must be Boolean, got " inv-type))})))))))
+
+(defn- check-class-sections!
+  "Check each feature/constructor section: override conformance and bodies for
+   methods, type annotations for non-constant fields, and every constructor."
+  [env class-env name parents body]
+  (doseq [section body]
+    (cond
+      (= (:type section) :feature-section)
+      (doseq [member (:members section)]
+        (cond
+          (= (:type member) :method)
+          (do
+            (check-override-conformance env name parents member)
+            (when-not (:declaration-only? member)
+              (check-method class-env name member)))
+          (= (:type member) :field)
+          (when-not (:constant? member)
+            (validate-type-annotation class-env (:field-type member)))))
+
+      (= (:type section) :constructors)
+      (doseq [ctor (:constructors section)]
+        (check-constructor class-env name ctor)))))
+
+(defn- check-attachable-field-initialization!
+  "Void-safety: every attachable class-object field must be assigned by every
+   constructor, and a constructor of a class that inherits attachable fields
+   must call a parent constructor that initializes them."
+  [env name body parents]
+  (let [constructors (->> body
+                          (filter #(= :constructors (:type %)))
+                          (mapcat :constructors))
+        required-fields (attachable-init-field-names env body)
+        ;; Parents that hold attachable fields of their own. A subclass cannot
+        ;; assign an inherited field directly ("Cannot assign to field a outside
+        ;; of class B"), so the only way it can initialize one is by calling that
+        ;; parent's constructor — and the parent's own check guarantees every one
+        ;; of its constructors initializes its fields, which makes checking the
+        ;; direct parents enough to cover the whole chain.
+        parents-needing-init (->> parents
+                                  (map :parent)
+                                  (filter #(needs-constructor-init? env %))
+                                  set)]
+    (when (or (seq required-fields) (seq parents-needing-init))
+      (when (and (seq required-fields) (empty? constructors))
+        (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
+                        {:error (type-error
+                                 (str "Attachable fields must be initialized by constructors in class "
+                                      name ": " (str/join ", " (sort required-fields))))})))
+      ;; A class that declares no constructors of its own inherits its parent's,
+      ;; which already initialize the inherited fields — nothing to check.
+      (doseq [{ctor-name :name ctor-body :body} constructors]
+        (let [statements (mapcat constructor-statements ctor-body)
+              assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
+              missing (sort (seq (set/difference required-fields assigned)))
+              called-parents (->> statements
+                                  (keep (fn [stmt]
+                                          (when (= :call (:type stmt))
+                                            (:target stmt))))
+                                  set)
+              uninitialized-parents (sort (seq (set/difference parents-needing-init
+                                                               called-parents)))]
+          (when (seq missing)
+            (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
+                            {:error (type-error
+                                     (str "Constructor " ctor-name " must initialize attachable fields: "
+                                          (str/join ", " missing)))})))
+          (when (seq uninitialized-parents)
+            (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
+                            {:error (type-error
+                                     (str "Constructor " ctor-name " in class " name
+                                          " must call a constructor of "
+                                          (str/join ", " uninitialized-parents)
+                                          " to initialize inherited attachable field(s): "
+                                          (str/join ", "
+                                                    (sort (mapcat #(attachable-init-field-names
+                                                                    env (:body (env-lookup-class env %)))
+                                                                  uninitialized-parents)))))}))))))))
+
 (defn check-class
   "Check a class definition"
   [env {:keys [name body invariant parents generic-params] :as class-def}]
@@ -5910,85 +6040,9 @@
                                               (filter #(= :constructors (:type %)))
                                               (mapcat :constructors))))
     (check-deferred-methods-implemented! env name class-def)
-
-  ;; Check invariants
-    (doseq [assertion invariant]
-      (when (and assertion (:expr assertion))
-        (let [inv-type (check-expression class-env (:expr assertion))]
-          (when-not (or (= inv-type "Boolean") (= inv-type "Void"))
-            (throw (ex-info (str "Invariant must be Boolean in class " name)
-                            {:error (type-error
-                                     (str "Invariant must be Boolean, got " inv-type))}))))))
-
-  ;; Check each section
-    (doseq [section body]
-      (cond
-        (= (:type section) :feature-section)
-        (doseq [member (:members section)]
-          (cond
-            (= (:type member) :method)
-            (do
-              (check-override-conformance env name parents member)
-              (when-not (:declaration-only? member)
-                (check-method class-env name member)))
-            (= (:type member) :field)
-            (when-not (:constant? member)
-              (validate-type-annotation class-env (:field-type member)))))
-
-        (= (:type section) :constructors)
-        (doseq [ctor (:constructors section)]
-          (check-constructor class-env name ctor))))
-
-  ;; Void-safety: attachable class-object fields must be initialized by all ctors.
-    (let [constructors (->> body
-                            (filter #(= :constructors (:type %)))
-                            (mapcat :constructors))
-          required-fields (attachable-init-field-names env body)
-        ;; Parents that hold attachable fields of their own. A subclass cannot
-        ;; assign an inherited field directly ("Cannot assign to field a outside
-        ;; of class B"), so the only way it can initialize one is by calling that
-        ;; parent's constructor — and the parent's own check guarantees every one
-        ;; of its constructors initializes its fields, which makes checking the
-        ;; direct parents enough to cover the whole chain.
-          parents-needing-init (->> parents
-                                    (map :parent)
-                                    (filter #(needs-constructor-init? env %))
-                                    set)]
-      (when (or (seq required-fields) (seq parents-needing-init))
-        (when (and (seq required-fields) (empty? constructors))
-          (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
-                          {:error (type-error
-                                   (str "Attachable fields must be initialized by constructors in class "
-                                        name ": " (str/join ", " (sort required-fields))))})))
-      ;; A class that declares no constructors of its own inherits its parent's,
-      ;; which already initialize the inherited fields — nothing to check.
-        (doseq [{ctor-name :name ctor-body :body} constructors]
-          (let [statements (mapcat constructor-statements ctor-body)
-                assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
-                missing (sort (seq (set/difference required-fields assigned)))
-                called-parents (->> statements
-                                    (keep (fn [stmt]
-                                            (when (= :call (:type stmt))
-                                              (:target stmt))))
-                                    set)
-                uninitialized-parents (sort (seq (set/difference parents-needing-init
-                                                                 called-parents)))]
-            (when (seq missing)
-              (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
-                              {:error (type-error
-                                       (str "Constructor " ctor-name " must initialize attachable fields: "
-                                            (str/join ", " missing)))})))
-            (when (seq uninitialized-parents)
-              (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
-                              {:error (type-error
-                                       (str "Constructor " ctor-name " in class " name
-                                            " must call a constructor of "
-                                            (str/join ", " uninitialized-parents)
-                                            " to initialize inherited attachable field(s): "
-                                            (str/join ", "
-                                                      (sort (mapcat #(attachable-init-field-names
-                                                                      env (:body (env-lookup-class env %)))
-                                                                    uninitialized-parents)))))})))))))))
+    (check-class-invariants! class-env name invariant)
+    (check-class-sections! env class-env name parents body)
+    (check-attachable-field-initialization! env name body parents)))
 
 ;;
 ;; Program Type Checking
