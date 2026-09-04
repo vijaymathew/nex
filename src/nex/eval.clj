@@ -66,8 +66,6 @@
   (binding [*out* *err*]
     (println (str "Warning: falling back to the tree-walking interpreter: " reason))))
 
-(def ^:private issue-url "https://github.com/vijaymathew/nex/issues")
-
 (def ^:private diagnostic-detail-keys
   "ex-data keys worth naming in a compile diagnostic, in the order shown. The
    message alone says a construct is unsupported without saying *which* — these
@@ -121,12 +119,19 @@
       (:error (ex-data e))
       (ex-message e)
 
+      ;; Not marked :nex/unsupported or :error, so by convention (see
+      ;; nex.lower/unsupported's docstring) this is a compiler defect — the
+      ;; typechecker already accepted this program, so reaching here means
+      ;; some earlier pass admitted something it should have rejected.
+      ;; That's frequently a real gap in type-checking itself (as it was
+      ;; here: a loop's `until` clause went entirely unchecked, letting an
+      ;; undefined variable straight through to lowering) rather than a
+      ;; backend limitation — so this deliberately stays terse and doesn't
+      ;; presume to tell the user whose fault it is, direct them to
+      ;; --interpret (which hits the identical gap, just later and less
+      ;; clearly), or ask them to file a report themselves.
       :else
-      (str "internal error in the compiled backend: " detail
-           "\n  This is a defect in Nex, not in your program — please report it"
-           " at " issue-url
-           "\n  Meanwhile, --interpret runs the program on the tree-walking"
-           " interpreter."))))
+      (str "internal error in the compiled backend: " detail))))
 
 (defn- try-compile
   "Compile the whole program with the JVM backend. Returns {:compiled result} or,
