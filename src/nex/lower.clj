@@ -1145,6 +1145,34 @@
    left
    right))
 
+(defn- lower-ancestor-instantiation
+  "Like nex.typechecker's own (private) ancestor-instantiation, adapted to
+   this file's env shape (visible-class-map, not the typechecker's own
+   atom-backed env-lookup-class): walk SUB-NAME's inheritance chain looking
+   for SUPER-NAME, substituting generic arguments through each `inherit`
+   clause (handling arguments that are threaded, reordered, or nested), so
+   a subclass with a differently-parameterized ancestor can still be
+   matched against that ancestor's own type. Returns the type arguments
+   SUB-NAME's chain supplies to SUPER-NAME, or nil when SUPER-NAME is not
+   an ancestor."
+  ([env sub-name sub-args super-name]
+   (lower-ancestor-instantiation env sub-name sub-args super-name #{}))
+  ([env sub-name sub-args super-name seen]
+   (cond
+     (= sub-name super-name) (vec sub-args)
+     (contains? seen sub-name) nil
+     :else
+     (when-let [class-def (get (visible-class-map env) sub-name)]
+       (let [gparams (map :name (:generic-params class-def))
+             subst (zipmap gparams sub-args)
+             seen (conj seen sub-name)]
+         (some (fn [{:keys [parent generic-args]}]
+                 (lower-ancestor-instantiation
+                  env parent
+                  (mapv #(tc/resolve-generic-type % subst) generic-args)
+                  super-name seen))
+               (:parents class-def)))))))
+
 (defn- infer-generic-type-map-from-arg
   [env generic-names param-type arg-type]
   (let [param-type (tc/normalize-type param-type)
@@ -1206,6 +1234,46 @@
                      env acc (infer-generic-type-map-from-arg env generic-names param-arg arg-arg)))
                   {}
                   (map vector param-args arg-args))
+          {}))
+
+      ;; The argument's own class differs from the declared parameter's --
+      ;; `first_field[T](b: Base[T, Any])` called with a `Mid[String,
+      ;; Integer]` argument, where `Mid[P, Q] inherit Base[Q, P]` -- so T
+      ;; can still be inferred, but only by walking ARG-TYPE's ancestor
+      ;; chain up to PARAM-TYPE's class (ancestor-instantiation, already
+      ;; used for the identical reasoning in generic subtype conformance),
+      ;; substituting through however each `inherit` clause reorders or
+      ;; nests its own generic arguments along the way, and unifying
+      ;; PARAM-TYPE's own args against what that walk resolves to instead
+      ;; of ARG-TYPE's own (unrelated) ones. Without this, an unrelated
+      ;; base-type mismatch here fell straight to the final `:else {}` —
+      ;; no binding at all for T — which left the literal generic name "T"
+      ;; unsubstituted in infer-free-function-return-type's caller, and
+      ;; that leaked into codegen as if "T" were a real class name: the
+      ;; jar compiled but crashed with NoClassDefFoundError: T at run time.
+      (and (map? param-type)
+           (string? (:base-type param-type))
+           ;; ARG-TYPE is a bare string, not a map, whenever the argument's
+           ;; own class isn't itself generic (`Leaf`, with no `[...]` of
+           ;; its own, inheriting a concrete `Mid[String, Integer]`) --
+           ;; unlike PARAM-TYPE, which is a map here precisely because it
+           ;; IS parameterized (`Base[T, Any]`). Treated as that same class
+           ;; with zero type-args of its own, same as a map-shaped
+           ;; arg-type with a nil/empty :type-args would be.
+           (or (map? arg-type) (string? arg-type))
+           (string? (if (map? arg-type) (:base-type arg-type) arg-type))
+           (not (contains? generic-names (if (map? arg-type) (:base-type arg-type) arg-type))))
+      (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
+            arg-base (if (map? arg-type) (:base-type arg-type) arg-type)
+            arg-args (if (map? arg-type) (vec (or (:type-params arg-type) (:type-args arg-type))) [])
+            inherited-args (lower-ancestor-instantiation env arg-base arg-args
+                                                          (:base-type param-type) #{})]
+        (if (and inherited-args (= (count inherited-args) (count param-args)))
+          (reduce (fn [acc [param-arg inherited-arg]]
+                    (merge-inferred-generic-bindings
+                     env acc (infer-generic-type-map-from-arg env generic-names param-arg inherited-arg)))
+                  {}
+                  (map vector param-args inherited-args))
           {}))
 
       :else
@@ -3145,16 +3213,29 @@
      local-types]
 
     :loop
-    [(assoc stmt
-            :init (first (rewrite-statements-for-closures* ctx local-types captures (:init stmt)))
-            :until (rewrite-expression-for-closures ctx local-types captures (:until stmt))
-            :variant (when (:variant stmt)
-                       (rewrite-expression-for-closures ctx local-types captures (:variant stmt)))
-            :invariant (mapv (fn [inv]
-                               (assoc inv :condition (rewrite-expression-for-closures ctx local-types captures (:condition inv))))
-                             (:invariant stmt))
-            :body (first (rewrite-statements-for-closures* ctx local-types captures (:body stmt))))
-     local-types]
+    ;; `:init` (a `from let i := 0 ...` loop's own control-variable
+    ;; declaration) can itself introduce a name -- one just as visible to
+    ;; `:until`/`:invariant`/`:variant`/`:body`, and to any closure nested
+    ;; in the body, as an ordinary `:let` immediately before the loop
+    ;; would be. Threading its OWN returned local-types forward (not the
+    ;; original local-types unioned back in) is what makes that name
+    ;; resolvable there — without it, a spawn inside the loop body
+    ;; referencing the loop's own counter saw it as neither a known local
+    ;; nor a known outer variable, so capture-reference! silently captured
+    ;; nothing for it at all (closure-captures.clj's `:captures []`), and
+    ;; the closure's body went on to reference a name lowering could never
+    ;; resolve.
+    (let [[init' local-types'] (rewrite-statements-for-closures* ctx local-types captures (:init stmt))]
+      [(assoc stmt
+              :init init'
+              :until (rewrite-expression-for-closures ctx local-types' captures (:until stmt))
+              :variant (when (:variant stmt)
+                         (rewrite-expression-for-closures ctx local-types' captures (:variant stmt)))
+              :invariant (mapv (fn [inv]
+                                 (assoc inv :condition (rewrite-expression-for-closures ctx local-types' captures (:condition inv))))
+                               (:invariant stmt))
+              :body (first (rewrite-statements-for-closures* ctx local-types' captures (:body stmt))))
+       local-types])
 
     :select
     [(assoc stmt
@@ -3548,22 +3629,45 @@
        (keep (fn [[name n]] (when (> n 1) name)))
        set))
 
+(defn- direct-let-declarations
+  "Every `:let` this pass treats as \"directly\" in STMTS: a plain top-level
+   one, plus — the one deliberate, narrow exception to the \"not nested
+   inside an if/loop/etc.\" rule box-candidate-lets otherwise holds to — a
+   `from`-loop's own control variable, declared in a top-level `:loop`
+   node's `:init` rather than as an ordinary statement (`from let i := 0
+   until ... do ... end` parses `i`'s :let into the :loop node's :init, not
+   as a sibling statement; see nex.walker). That variable is exactly as
+   legitimate a boxing target as any other mutated-and-closed-over :let —
+   `from let i := 0 until i = n do spawn do result := i end ... end` needs
+   `i` boxed for the same reason a `let total := 0` does — but it lives one
+   field deeper, so box-candidate-lets' own plain `filter` over STMTS never
+   saw it without this. A loop nested inside another loop/if/etc. is still
+   out of scope, same as before: only a :loop directly in STMTS is looked
+   into."
+  [stmts]
+  (mapcat (fn [s]
+            (cond
+              (and (map? s) (= :let (:type s))) [s]
+              (and (map? s) (= :loop (:type s))) (filter #(and (map? %) (= :let (:type %))) (:init s))
+              :else nil))
+          stmts))
+
 (defn- box-candidate-lets
   "The {name -> let-stmt} map of every `:let` appearing directly (not
-   nested inside an if/loop/etc.) in STMTS whose name needs boxing per
-   box-target-names/names-touched-inside-closures, excluding any name
-   shadowed anywhere in STMTS (see shadowed-anywhere-names)."
+   nested inside an if/loop/etc. — see direct-let-declarations for the one
+   exception) in STMTS whose name needs boxing per box-target-names/names-
+   touched-inside-closures, excluding any name shadowed anywhere in STMTS
+   (see shadowed-anywhere-names)."
   [stmts]
   (let [reassigned (box-target-names stmts)
         touched-in-closure (names-touched-inside-closures stmts)
         shadowed (shadowed-anywhere-names stmts)]
     (into {}
-          (comp (filter #(= :let (:type %)))
-                (filter #(and (contains? reassigned (:name %))
+          (comp (filter #(and (contains? reassigned (:name %))
                               (contains? touched-in-closure (:name %))
                               (not (contains? shadowed (:name %)))))
                 (map (juxt :name identity)))
-          stmts)))
+          (direct-let-declarations stmts))))
 
 (defn anonymous-function-signature-type
   "A Function(...) type read directly off an :anonymous-function EXPR's
@@ -3815,35 +3919,62 @@
     (if (empty? candidates)
       stmts
       (let [boxed-names (set (keys candidates))
+            box-wrap (fn [s t]
+                       (assoc s
+                              :var-type {:base-type closure-mut-box-class-name :type-args [t]}
+                              :value {:type :create
+                                      :class-name closure-mut-box-class-name
+                                      :generic-args [t]
+                                      :constructor "make"
+                                      :args [(:value s)]}))
+            ;; One :let (top-level, or nested one level into a top-level
+            ;; :loop's own :init — see direct-let-declarations) threaded
+            ;; through the same lt/acc update either kind gets when it is
+            ;; a plain statement: box-typed and recorded when it is a
+            ;; boxing candidate, otherwise just folded into lt so a LATER
+            ;; boxed let's initializer can still resolve its type.
+            thread-let (fn [[lt acc] s]
+                         (if (contains? candidates (:name s))
+                           (let [t (box-let-type ctx lt s)]
+                             [(assoc lt (:name s) t) (assoc acc (:name s) t)])
+                           [(assoc lt (:name s) (or (:var-type s) (infer-prepass-type ctx lt (:value s)))) acc]))
             ;; Types are resolved against the ORIGINAL (pre-rewrite) lets,
             ;; threading local-types forward exactly like the ordinary
             ;; closure-rewrite :let case does, so a later boxed let's own
             ;; initializer can still refer to an earlier one's declared type.
-            box-types (loop [remaining stmts lt local-types acc {}]
-                        (if (empty? remaining)
-                          acc
-                          (let [s (first remaining)]
-                            (if (and (map? s) (= :let (:type s)) (contains? candidates (:name s)))
-                              (recur (rest remaining)
-                                     (assoc lt (:name s) (box-let-type ctx lt s))
-                                     (assoc acc (:name s) (box-let-type ctx lt s)))
-                              (recur (rest remaining)
-                                     (if (and (map? s) (= :let (:type s)) (:name s))
-                                       (assoc lt (:name s) (or (:var-type s) (infer-prepass-type ctx lt (:value s))))
-                                       lt)
-                                     acc)))))
+            box-types (second
+                       (reduce (fn [[lt acc] s]
+                                 (cond
+                                   (and (map? s) (= :let (:type s)) (:name s))
+                                   (thread-let [lt acc] s)
+
+                                   (and (map? s) (= :loop (:type s)))
+                                   (reduce (fn [state init-let]
+                                             (if (and (map? init-let) (= :let (:type init-let)) (:name init-let))
+                                               (thread-let state init-let)
+                                               state))
+                                           [lt acc]
+                                           (:init s))
+
+                                   :else [lt acc]))
+                               [local-types {}]
+                               stmts))
             rewritten (rewrite-boxed-references boxed-names stmts)]
         (mapv (fn [s]
-                (if (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
-                  (let [t (get box-types (:name s))]
-                    (assoc s
-                           :var-type {:base-type closure-mut-box-class-name :type-args [t]}
-                           :value {:type :create
-                                   :class-name closure-mut-box-class-name
-                                   :generic-args [t]
-                                   :constructor "make"
-                                   :args [(:value s)]}))
-                  s))
+                (cond
+                  (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
+                  (box-wrap s (get box-types (:name s)))
+
+                  (and (map? s) (= :loop (:type s)))
+                  (assoc s :init
+                         (mapv (fn [init-let]
+                                 (if (and (map? init-let) (= :let (:type init-let))
+                                          (contains? boxed-names (:name init-let)))
+                                   (box-wrap init-let (get box-types (:name init-let)))
+                                   init-let))
+                               (:init s)))
+
+                  :else s))
               rewritten)))))
 
 (defn prepare-program-for-closures

@@ -160,16 +160,31 @@
                :descriptor (str "L" repl-state-internal-name ";")
                :flags Opcodes/ACC_PUBLIC
                :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
+             ;; Package-private (no ACC_PRIVATE), not private: a composition
+             ;; field holds an ancestor object (_parent_Base, say), and a
+             ;; class more than one inheritance level down needs to reach
+             ;; through an INTERMEDIATE ancestor's own composition field to
+             ;; get at a further-back one -- Grandchild.__ctor forwarding to
+             ;; Parent.make(...) via Child's own `_parent_Base` field, not
+             ;; just Child's immediate one. JVM `private` is only visible
+             ;; within the exact declaring class, which an intermediate
+             ;; ancestor never is from a further subclass's perspective, so
+             ;; a 3-level (or deeper) generic inheritance chain crashed at
+             ;; class-load time with IllegalAccessError. Every class the
+             ;; compiler emits for one program shares one package (see
+             ;; class-jvm-meta), so package-private is exactly the right
+             ;; width: visible to every other class this program generates,
+             ;; not part of any public API a real Java caller could see.
              (map (fn [{:keys [name jvm-type]}]
                     {:name name
                      :descriptor (desc/jvm-type->descriptor jvm-type)
-                     :flags Opcodes/ACC_PRIVATE
+                     :flags 0
                      :jvm-type jvm-type})
                   (:composition-fields class-spec))
              (map (fn [{:keys [name jvm-type]}]
                     {:name name
                      :descriptor (desc/jvm-type->descriptor jvm-type)
-                     :flags Opcodes/ACC_PRIVATE
+                     :flags 0
                      :jvm-type jvm-type})
                   (:runtime-type-fields class-spec))
              (map (fn [{:keys [name jvm-type nex-type]}]
