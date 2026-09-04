@@ -156,7 +156,9 @@
 
 (defn start-http-server!
   [make-object-fn invoke-handler-fn ctx handle]
-  (let [server (com.sun.net.httpserver.HttpServer/create (java.net.InetSocketAddress. "127.0.0.1" (int @(:port handle))) 0)
+  (let [server (com.sun.net.httpserver.HttpServer/create
+                (java.net.InetSocketAddress. "127.0.0.1" (int @(:port handle)))
+                0)
         dispatch
         (proxy [com.sun.net.httpserver.HttpHandler] []
           (handle [exchange]
@@ -186,7 +188,8 @@
                 nil)
               (catch Exception ex
                 (let [message (.getMessage ex)
-                      bytes (.getBytes (str "Server error: " (or message "unknown")) java.nio.charset.StandardCharsets/UTF_8)]
+                      bytes (.getBytes (str "Server error: " (or message "unknown"))
+                                       java.nio.charset.StandardCharsets/UTF_8)]
                   (.sendResponseHeaders exchange 500 (long (alength bytes)))
                   (with-open [os (.getResponseBody exchange)]
                     (.write os bytes)))

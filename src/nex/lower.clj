@@ -4007,9 +4007,11 @@
         rewritten-functions (mapv #(rewrite-callable-for-closures ctx % (:var-types opts))
                                   boxed-functions)
         boxed-statements (box (:var-types opts) (:statements program))
-        [rewritten-statements _ _] (rewrite-statements-for-closures (assoc ctx :functions (vec (concat rewritten-functions (:functions opts))))
-                                                                    (:var-types opts)
-                                                                    boxed-statements)
+        [rewritten-statements _ _]
+        (rewrite-statements-for-closures
+         (assoc ctx :functions (vec (concat rewritten-functions (:functions opts))))
+         (:var-types opts)
+         boxed-statements)
         boxed-classes (mapv (fn [class-def]
                               (update class-def :body
                                       (fn [sections]
@@ -7051,7 +7053,8 @@
                                       (ir/object-jvm-type "java/lang/Object"))]))})))
 
 (defn- make-delegation-method-node
-  [env class-meta class-name compiled-classes {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]
+  [env class-meta class-name compiled-classes
+   {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]
   (let [;; method-def is declared by source-class, so its parameter/return types
         ;; may name the *parent's* generic params — resolve with both the
         ;; subclass's generics (env) and the declaring class's in scope, or a

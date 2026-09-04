@@ -662,20 +662,26 @@
 (defn text-file-open-read [path]
   {:nex-builtin-type :TextFileHandle
    :mode :read
-   :reader (java.io.BufferedReader. (java.io.InputStreamReader. (java.io.FileInputStream. path) java.nio.charset.StandardCharsets/UTF_8))
+   :reader (java.io.BufferedReader.
+            (java.io.InputStreamReader. (java.io.FileInputStream. path)
+                                        java.nio.charset.StandardCharsets/UTF_8))
    :writer nil})
 
 (defn text-file-open-write [path]
   {:nex-builtin-type :TextFileHandle
    :mode :write
    :reader nil
-   :writer (java.io.BufferedWriter. (java.io.OutputStreamWriter. (java.io.FileOutputStream. path false) java.nio.charset.StandardCharsets/UTF_8))})
+   :writer (java.io.BufferedWriter.
+            (java.io.OutputStreamWriter. (java.io.FileOutputStream. path false)
+                                         java.nio.charset.StandardCharsets/UTF_8))})
 
 (defn text-file-open-append [path]
   {:nex-builtin-type :TextFileHandle
    :mode :append
    :reader nil
-   :writer (java.io.BufferedWriter. (java.io.OutputStreamWriter. (java.io.FileOutputStream. path true) java.nio.charset.StandardCharsets/UTF_8))})
+   :writer (java.io.BufferedWriter.
+            (java.io.OutputStreamWriter. (java.io.FileOutputStream. path true)
+                                         java.nio.charset.StandardCharsets/UTF_8))})
 
 (defn text-file-read-line [handle]
   (.readLine ^java.io.BufferedReader (:reader handle)))

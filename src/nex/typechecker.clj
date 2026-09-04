@@ -3241,7 +3241,8 @@
    "binary_file_open_read"   (builtin-single-arg "binary_file_open_read" "String" "Any")
    "binary_file_open_write"  (builtin-single-arg "binary_file_open_write" "String" "Any")
    "binary_file_open_append" (builtin-single-arg "binary_file_open_append" "String" "Any")
-   "binary_file_read_all"    (builtin-checked-args "binary_file_read_all" 1 {:base-type "Array" :type-params ["Integer"]})
+   "binary_file_read_all"    (builtin-checked-args "binary_file_read_all" 1
+                                                   {:base-type "Array" :type-params ["Integer"]})
    "binary_file_read"        check-builtin-binary-file-read
    "binary_file_write"       check-builtin-binary-file-write
    "binary_file_position"    (builtin-checked-args "binary_file_position" 1 "Integer")
@@ -3408,7 +3409,8 @@
                     (when-not (types-compatible? env arg-type param-type)
                       (throw (ex-info (str "Argument type mismatch for method " call-name)
                                       {:error (type-error
-                                               (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
+                                               (str "Expected " (display-type param-type)
+                                                    ", got " (display-type arg-type)))})))))
           ;; A Function value carrying an explicit signature knows its own return
           ;; type; prefer it over the generic callN result (which is Any). Still
           ;; resolve it through type-map: when that signature is itself generic
@@ -3773,7 +3775,8 @@
                 (when-not (types-compatible? env arg-type param-type)
                   (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
                                   {:error (type-error
-                                           (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))))
+                                           (str "Expected " (display-type param-type)
+                                                ", got " (display-type arg-type)))})))))))
         target-type))))
 
 (defn check-create

@@ -15,7 +15,8 @@
   (:import [clj_antlr ParseError]
            [java.lang.reflect Field]
            [java.nio.charset StandardCharsets]
-           [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException]
+           [java.util.concurrent CompletableFuture ExecutionException Executors
+            TimeUnit TimeoutException CancellationException]
            [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
 (declare nex-format-value)

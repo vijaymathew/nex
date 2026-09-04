@@ -15,7 +15,8 @@
             [nex.types.http :as http]
             [nex.types.concurrency :as conc])
   (:import [java.nio.charset StandardCharsets]
-           [java.util.concurrent CompletableFuture ExecutionException TimeUnit TimeoutException CancellationException]
+           [java.util.concurrent CompletableFuture ExecutionException TimeUnit
+            TimeoutException CancellationException]
            [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
 (declare nex-format-value)
@@ -528,7 +529,8 @@
    ;; Default equality is structural (deep, field-by-field). A class may
    ;; override `equals` to change this; the `=`/`/=` operators then honour the
    ;; override. Identity comparison remains available through `==`/`!=`.
-   "equals"      ^{:returns "Boolean" :signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "equals"      ^{:returns "Boolean" :signatures [{:params [{:name "other" :type "Any"}]
+                                                    :return-type "Boolean"}]}
    (fn [v other & _] (nex-deep-equals? v other))
    ;; Default hash is structural and consistent with the structural `equals`
    ;; above. A class that overrides `equals` should override `hash` too.
@@ -544,7 +546,9 @@
    (fn [s ch & _]
      (let [idx (str/index-of s (str ch))]
        (->nex-integer (if idx idx -1))))
-   "substring"   ^{:signatures [{:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}] :return-type "String"}]}
+   "substring"   ^{:signatures [{:params [{:name "start" :type "Integer"}
+                                          {:name "end" :type "Integer"}]
+                                 :return-type "String"}]}
    (fn [s start end & _] (subs s (nex-int->number start) (nex-int->number end)))
    "to_upper"    ^{:signatures [{:params [] :return-type "String"}]}
    (fn [s & _] (str/upper-case s))
@@ -564,21 +568,30 @@
    (fn [s suffix & _] (str/ends-with? s suffix))
    "trim"        ^{:signatures [{:params [] :return-type "String"}]}
    (fn [s & _] (str/trim s))
-   "replace"     ^{:signatures [{:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}]}
+   "replace"     ^{:signatures [{:params [{:name "old" :type "String"} {:name "new" :type "String"}]
+                                 :return-type "String"}]}
    (fn [s old new & _] (str/replace s old new))
-   "pad_end"     ^{:signatures [{:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}]}
-   (fn [s pad len & _] (let [len (nex-int->number len)] (if (>= (count s) len) s (str s (apply str (repeat (- len (count s)) pad))))))
-   "pad_start"   ^{:signatures [{:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}]}
-   (fn [s pad len & _] (let [len (nex-int->number len)] (if (>= (count s) len) s (str (apply str (repeat (- len (count s)) pad)) s))))
+   "pad_end"     ^{:signatures [{:params [{:name "pad" :type "String"}
+                                          {:name "count" :type "Integer"}]
+                                 :return-type "String"}]}
+   (fn [s pad len & _]
+     (let [len (nex-int->number len)] (if (>= (count s) len) s (str s (apply str (repeat (- len (count s)) pad))))))
+   "pad_start"   ^{:signatures [{:params [{:name "pad" :type "String"}
+                                          {:name "count" :type "Integer"}]
+                                 :return-type "String"}]}
+   (fn [s pad len & _]
+     (let [len (nex-int->number len)] (if (>= (count s) len) s (str (apply str (repeat (- len (count s)) pad)) s))))
    "replicate"   ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "String"}]}
    (fn [s n & _] (apply str (repeat (nex-int->number n) s)))
    "char_at"     ^{:signatures [{:params [{:name "index" :type "Integer"}] :return-type "Char"}]}
    (fn [s idx & _] (get s (nex-int->number idx)))
-   "chars"       ^{:signatures [{:params [] :return-type {:base-type "Array" :type-params ["Char"]}}]}
+   "chars"       ^{:signatures [{:params []
+                                 :return-type {:base-type "Array" :type-params ["Char"]}}]}
    (fn [s & _]
      (nex-array-from
       (mapv #(get s %) (range (count s)))))
-   "to_bytes"    ^{:signatures [{:params [] :return-type {:base-type "Array" :type-params ["Integer"]}}]}
+   "to_bytes"    ^{:signatures [{:params []
+                                 :return-type {:base-type "Array" :type-params ["Integer"]}}]}
    (fn [s & _]
      (nex-array-from
       (mapv #(->nex-integer (bit-and (int %) 0xFF))
@@ -627,58 +640,81 @@
    (fn [n & _] (->nex-real n))
    "abs"               ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [n & _] (if (neg? n) (nex-int-neg n) n))
-   "min"               ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
+   "min"               ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n other & _] (if (pos? (nex-numeric-compare n other)) other n))
-   "max"               ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
+   "max"               ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
    "pick"              ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [n & _] (->nex-integer (rand-int (nex-int->number n))))
-   "bitwise_left_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_left_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}]
+                                        :return-type "Integer"}]}
    (fn [n shift & _] (nex-bitwise-left-shift n shift))
-   "bitwise_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}]
+                                         :return-type "Integer"}]}
    (fn [n shift & _] (nex-bitwise-right-shift n shift))
-   "bitwise_logical_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_logical_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}]
+                                                 :return-type "Integer"}]}
    (fn [n shift & _] (nex-bitwise-logical-right-shift n shift))
-   "bitwise_rotate_left" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_rotate_left" ^{:signatures [{:params [{:name "n" :type "Integer"}]
+                                         :return-type "Integer"}]}
    (fn [n shift & _] (nex-bitwise-rotate-left n shift))
-   "bitwise_rotate_right" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_rotate_right" ^{:signatures [{:params [{:name "n" :type "Integer"}]
+                                          :return-type "Integer"}]}
    (fn [n shift & _] (nex-bitwise-rotate-right n shift))
-   "bitwise_is_set"    ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Boolean"}]}
+   "bitwise_is_set"    ^{:signatures [{:params [{:name "n" :type "Integer"}]
+                                       :return-type "Boolean"}]}
    (fn [n idx & _] (nex-bitwise-is-set n idx))
-   "bitwise_set"       ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_set"       ^{:signatures [{:params [{:name "n" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n idx & _] (nex-bitwise-set n idx))
-   "bitwise_unset"     ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_unset"     ^{:signatures [{:params [{:name "n" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n idx & _] (nex-bitwise-unset n idx))
-   "bitwise_and"       ^{:signatures [{:params [{:name "x" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_and"       ^{:signatures [{:params [{:name "x" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n other & _] (nex-bitwise-and n other))
-   "bitwise_or"        ^{:signatures [{:params [{:name "x" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_or"        ^{:signatures [{:params [{:name "x" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n other & _] (nex-bitwise-or n other))
-   "bitwise_xor"       ^{:signatures [{:params [{:name "x" :type "Integer"}] :return-type "Integer"}]}
+   "bitwise_xor"       ^{:signatures [{:params [{:name "x" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n other & _] (nex-bitwise-xor n other))
    "bitwise_not"       ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [n & _] (nex-bitwise-not n))
    ;; Arithmetic operator methods (64-bit checked, matching the operators)
-   "plus"              ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
+   "plus"              ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n other & _] (nex-int-add n other))
-   "minus"             ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
+   "minus"             ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n other & _] (nex-int-sub n other))
-   "times"             ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
+   "times"             ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Integer"}]}
    (fn [n other & _] (nex-int-mul n other))
    ;; divided_by is typed to return Real, so it is real division on both hosts.
-   "divided_by"        ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Real"}]}
+   "divided_by"        ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Real"}]}
    (fn [n other & _] (/ (double n) (double other)))
    ;; Comparison operator methods
-   "equals"            ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "equals"            ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                       :return-type "Boolean"}]}
    (fn [n other & _] (nex-numeric-equals? n other))
-   "not_equals"        ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "not_equals"        ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                       :return-type "Boolean"}]}
    (fn [n other & _] (not (nex-numeric-equals? n other)))
-   "less_than"         ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "less_than"         ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                       :return-type "Boolean"}]}
    (fn [n other & _] (neg? (nex-numeric-compare n other)))
-   "less_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "less_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                        :return-type "Boolean"}]}
    (fn [n other & _] (not (pos? (nex-numeric-compare n other))))
-   "greater_than"      ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "greater_than"      ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                       :return-type "Boolean"}]}
    (fn [n other & _] (pos? (nex-numeric-compare n other)))
-   "greater_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "greater_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                           :return-type "Boolean"}]}
    (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
    "to_char"           ^{:signatures [{:params [] :return-type "Char"}]}
    (fn [n & _] (char (int n)))
@@ -696,7 +732,8 @@
    (fn [n other & _] (max (->nex-real n) (->nex-real other)))
    "round"             ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [n & _] (->nex-integer (nex-round n)))
-   "to_fixed"          ^{:signatures [{:params [{:name "places" :type "Integer"}] :return-type "Real"}]}
+   "to_fixed"          ^{:signatures [{:params [{:name "places" :type "Integer"}]
+                                       :return-type "Real"}]}
    (fn [n places & _]
      (let [places (nex-int->number places)]
        (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))))
@@ -720,17 +757,23 @@
    "divided_by"        ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
    (fn [n other & _] (/ (double n) (double other)))
    ;; Comparison operator methods
-   "equals"            ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "equals"            ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                       :return-type "Boolean"}]}
    (fn [n other & _] (= n other))
-   "not_equals"        ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "not_equals"        ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                       :return-type "Boolean"}]}
    (fn [n other & _] (not= n other))
-   "less_than"         ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "less_than"         ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                       :return-type "Boolean"}]}
    (fn [n other & _] (< n other))
-   "less_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "less_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                        :return-type "Boolean"}]}
    (fn [n other & _] (<= n other))
-   "greater_than"      ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "greater_than"      ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                       :return-type "Boolean"}]}
    (fn [n other & _] (> n other))
-   "greater_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   "greater_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}]
+                                           :return-type "Boolean"}]}
    (fn [n other & _] (>= n other))
    "compare"           (fn [n other & _] (nex-compare n other))
    "hash"              (fn [n & _] (hash n))})
@@ -759,14 +802,22 @@
    "hash"        (fn [b & _] (hash b))})
 
 (def array-type-methods
-  {"get"         ^{:returns :element :signatures [{:params [{:name "index" :type "Integer"}] :return-type "T"}]}
+  {"get"         ^{:returns :element :signatures [{:params [{:name "index" :type "Integer"}]
+                                                   :return-type "T"}]}
    (fn [arr index & _] (nex-array-get arr index))
-   "add"         ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
+   "add"         ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}]
+                                                 :return-type "Void"}]}
    (fn [arr value & _] (nex-array-add arr value))
-   "add_at"      ^{:returns "Void" :signatures [{:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}]}
+   "add_at"      ^{:returns "Void"
+                   :signatures [{:params [{:name "index" :type "Integer"}
+                                          {:name "value" :type "T"}]
+                                 :return-type "Void"}]}
    (fn [arr index value & _] (nex-array-add-at arr index value))
    "put"         ^{:returns "Void"} (fn [arr index value & _] (nex-array-set arr index value))
-   "set"         ^{:returns "Void" :signatures [{:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}]}
+   "set"         ^{:returns "Void"
+                   :signatures [{:params [{:name "index" :type "Integer"}
+                                          {:name "value" :type "T"}]
+                                 :return-type "Void"}]}
    (fn [arr index value & _] (nex-array-set arr index value))
    "length"      ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
    (fn [arr & _] (->nex-integer (nex-array-size arr)))
@@ -774,15 +825,19 @@
    (fn [arr & _] (nex-array-empty? arr))
    ;; A trailing ctx is supplied by call-builtin-method so element membership
    ;; can honour a user-defined `equals` override (see object-equals-override).
-   "contains"    ^{:returns "Boolean" :signatures [{:params [{:name "elem" :type "T"}] :return-type "Boolean"}]}
+   "contains"    ^{:returns "Boolean" :signatures [{:params [{:name "elem" :type "T"}]
+                                                    :return-type "Boolean"}]}
    (fn [arr elem & rest] (nex-array-contains-value? (first rest) arr elem))
-   "index_of"    ^{:returns "Integer" :signatures [{:params [{:name "elem" :type "T"}] :return-type "Integer"}]}
+   "index_of"    ^{:returns "Integer" :signatures [{:params [{:name "elem" :type "T"}]
+                                                    :return-type "Integer"}]}
    (fn [arr elem & rest]
      (let [idx (nex-array-index-of-value (first rest) arr elem)]
        (->nex-integer (if (>= idx 0) idx -1))))
-   "remove"      ^{:returns "Void" :signatures [{:params [{:name "index" :type "Integer"}] :return-type "Void"}]}
+   "remove"      ^{:returns "Void" :signatures [{:params [{:name "index" :type "Integer"}]
+                                                 :return-type "Void"}]}
    (fn [arr idx & _] (nex-array-remove arr idx))
-   "reverse"     ^{:returns :self :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}]}
+   "reverse"     ^{:returns :self :signatures [{:params []
+                                                :return-type {:base-type "Array" :type-params ["T"]}}]}
    (fn [arr & _] (nex-array-reverse arr))
    "sort"        ^{:returns :self
                    :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}
@@ -797,7 +852,8 @@
          (throw (ex-info "Method sort expects 0 or 1 arguments"
                          {:target arr :method "sort" :actual (count method-args)})))))
    "slice"       ^{:returns :self
-                   :signatures [{:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
+                   :signatures [{:params [{:name "start" :type "Integer"}
+                                          {:name "end" :type "Integer"}]
                                  :return-type {:base-type "Array" :type-params ["T"]}}]}
    (fn [arr start end & _] (nex-array-slice arr start end))
    "take"        ^{:returns :self
@@ -823,9 +879,11 @@
    "to_string"   ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
    (fn [arr & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx arr) (nex-array-str arr)))
    "equals"      ^{:returns "Boolean"
-                   :signatures [{:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}] :return-type "Boolean"}]}
+                   :signatures [{:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}]
+                                 :return-type "Boolean"}]}
    (fn [arr other & _] (nex-deep-equals? arr other))
-   "clone"       ^{:returns :self :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}]}
+   "clone"       ^{:returns :self :signatures [{:params []
+                                                :return-type {:base-type "Array" :type-params ["T"]}}]}
    (fn [arr & _] (nex-clone-value arr))
    "cursor"      ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
    (fn [arr & _]
@@ -834,7 +892,8 @@
       :index (atom 0)})})
 
 (def map-type-methods
-  {"get"         ^{:returns :value :signatures [{:params [{:name "key" :type "K"}] :return-type "V"}]}
+  {"get"         ^{:returns :value :signatures [{:params [{:name "key" :type "K"}]
+                                                 :return-type "V"}]}
                  ;; A stored value can legitimately be nil (e.g. a Map[String,
                  ;; Any] round-tripped from JSON, where a `null` becomes a
                  ;; present key with a nil value) — checking `(nil? v)` alone
@@ -846,20 +905,29 @@
        (nex-map-get m key)
        (report-contract-violation Precondition "key_must_exist" "has_key")))
    "try_get"      ^{:returns :value
-                    :signatures [{:params [{:name "key" :type "K"} {:name "default" :type "V"}] :return-type "V"}]}
+                    :signatures [{:params [{:name "key" :type "K"}
+                                           {:name "default" :type "V"}]
+                                  :return-type "V"}]}
    (fn [m key default & _]
      (if (nex-map-contains-key m key)
        (nex-map-get m key)
        default))
-   "put"          ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}]}
+   "put"          ^{:returns "Void"
+                    :signatures [{:params [{:name "key" :type "K"}
+                                           {:name "value" :type "V"}]
+                                  :return-type "Void"}]}
    (fn [m key val & _] (nex-map-put m key val))
-   "set"          ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}]}
+   "set"          ^{:returns "Void"
+                    :signatures [{:params [{:name "key" :type "K"}
+                                           {:name "value" :type "V"}]
+                                  :return-type "Void"}]}
    (fn [m key val & _] (nex-map-put m key val))
    "size"         ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
    (fn [m & _] (->nex-integer (nex-map-size m)))
    "is_empty"     ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
    (fn [m & _] (nex-map-empty? m))
-   "contains_key" ^{:returns "Boolean" :signatures [{:params [{:name "key" :type "K"}] :return-type "Boolean"}]}
+   "contains_key" ^{:returns "Boolean" :signatures [{:params [{:name "key" :type "K"}]
+                                                     :return-type "Boolean"}]}
    (fn [m key & _] (nex-map-contains-key-value? m key))
    "keys"         ^{:returns :array-of-element
                     :signatures [{:params [] :return-type {:base-type "Array" :type-params ["K"]}}]}
@@ -867,14 +935,17 @@
    "values"       ^{:returns :array-of-value
                     :signatures [{:params [] :return-type {:base-type "Array" :type-params ["V"]}}]}
    (fn [m & _] (nex-map-values m))
-   "remove"       ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"}] :return-type "Void"}]}
+   "remove"       ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"}]
+                                                  :return-type "Void"}]}
    (fn [m key & _] (nex-map-remove m key))
    "to_string"    ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
    (fn [m & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx m) (nex-map-str m)))
    "equals"       ^{:returns "Boolean"
-                    :signatures [{:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}] :return-type "Boolean"}]}
+                    :signatures [{:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}]
+                                  :return-type "Boolean"}]}
    (fn [m other & _] (nex-deep-equals? m other))
-   "clone"        ^{:returns :self :signatures [{:params [] :return-type {:base-type "Map" :type-params ["K" "V"]}}]}
+   "clone"        ^{:returns :self :signatures [{:params []
+                                                 :return-type {:base-type "Map" :type-params ["K" "V"]}}]}
    (fn [m & _] (nex-clone-value m))
    "cursor"       ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
    (fn [m & _]
@@ -884,11 +955,15 @@
       :index (atom 0)})})
 
 (def set-type-methods
-  {"contains"             ^{:returns "Boolean" :signatures [{:params [{:name "value" :type "T"}] :return-type "Boolean"}]}
+  {"contains"             ^{:returns "Boolean"
+                            :signatures [{:params [{:name "value" :type "T"}]
+                                          :return-type "Boolean"}]}
    (fn [s value & _] (nex-set-contains-value? s value))
-   "add"                  ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
+   "add"                  ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}]
+                                                          :return-type "Void"}]}
    (fn [s value & _] (nex-set-add! s value))
-   "remove"               ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
+   "remove"               ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}]
+                                                          :return-type "Void"}]}
    (fn [s value & _] (nex-set-remove! s value))
    "union"                ^{:returns :self
                             :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
@@ -911,14 +986,17 @@
    "is_empty"             ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
    (fn [s & _] (nex-set-empty? s))
    "to_array"             ^{:returns :array-of-element
-                            :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}]}
+                            :signatures [{:params []
+                                          :return-type {:base-type "Array" :type-params ["T"]}}]}
    (fn [s & _] (nex-set-to-array s))
    "to_string"            ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
    (fn [s & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx s) (nex-set-str s)))
    "equals"               ^{:returns "Boolean"
-                            :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}] :return-type "Boolean"}]}
+                            :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
+                                          :return-type "Boolean"}]}
    (fn [s other & _] (nex-deep-equals? s other))
-   "clone"                ^{:returns :self :signatures [{:params [] :return-type {:base-type "Set" :type-params ["T"]}}]}
+   "clone"                ^{:returns :self :signatures [{:params []
+                                                         :return-type {:base-type "Set" :type-params ["T"]}}]}
    (fn [s & _] (nex-clone-value s))
    "cursor"               ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
    (fn [s & _]
@@ -954,7 +1032,8 @@
 (def atomic-integer-type-methods
   {"load"            ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [atomic & _] (.get ^AtomicLong (:state atomic)))
-   "store"           ^{:signatures [{:params [{:name "value" :type "Integer"}] :return-type "Void"}]}
+   "store"           ^{:signatures [{:params [{:name "value" :type "Integer"}]
+                                     :return-type "Void"}]}
    (fn [atomic value & _]
      (.set ^AtomicLong (:state atomic) (long value))
      nil)
@@ -963,10 +1042,12 @@
                                      :return-type "Boolean"}]}
    (fn [atomic expected update & _]
      (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update)))
-   "get_and_add"     ^{:signatures [{:params [{:name "delta" :type "Integer"}] :return-type "Integer"}]}
+   "get_and_add"     ^{:signatures [{:params [{:name "delta" :type "Integer"}]
+                                     :return-type "Integer"}]}
    (fn [atomic delta & _]
      (.getAndAdd ^AtomicLong (:state atomic) (long delta)))
-   "add_and_get"     ^{:signatures [{:params [{:name "delta" :type "Integer"}] :return-type "Integer"}]}
+   "add_and_get"     ^{:signatures [{:params [{:name "delta" :type "Integer"}]
+                                     :return-type "Integer"}]}
    (fn [atomic delta & _]
      (.addAndGet ^AtomicLong (:state atomic) (long delta)))
    "increment"       ^{:signatures [{:params [] :return-type "Integer"}]}
@@ -979,7 +1060,8 @@
 (def atomic-integer64-type-methods
   {"load"            ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [atomic & _] (.get ^AtomicLong (:state atomic)))
-   "store"           ^{:signatures [{:params [{:name "value" :type "Integer"}] :return-type "Void"}]}
+   "store"           ^{:signatures [{:params [{:name "value" :type "Integer"}]
+                                     :return-type "Void"}]}
    (fn [atomic value & _]
      (.set ^AtomicLong (:state atomic) (long value))
      nil)
@@ -988,10 +1070,12 @@
                                      :return-type "Boolean"}]}
    (fn [atomic expected update & _]
      (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update)))
-   "get_and_add"     ^{:signatures [{:params [{:name "delta" :type "Integer"}] :return-type "Integer"}]}
+   "get_and_add"     ^{:signatures [{:params [{:name "delta" :type "Integer"}]
+                                     :return-type "Integer"}]}
    (fn [atomic delta & _]
      (.getAndAdd ^AtomicLong (:state atomic) (long delta)))
-   "add_and_get"     ^{:signatures [{:params [{:name "delta" :type "Integer"}] :return-type "Integer"}]}
+   "add_and_get"     ^{:signatures [{:params [{:name "delta" :type "Integer"}]
+                                     :return-type "Integer"}]}
    (fn [atomic delta & _]
      (.addAndGet ^AtomicLong (:state atomic) (long delta)))
    "increment"       ^{:signatures [{:params [] :return-type "Integer"}]}
@@ -1004,7 +1088,8 @@
 (def atomic-boolean-type-methods
   {"load"            ^{:signatures [{:params [] :return-type "Boolean"}]}
    (fn [atomic & _] (.get ^AtomicBoolean (:state atomic)))
-   "store"           ^{:signatures [{:params [{:name "value" :type "Boolean"}] :return-type "Void"}]}
+   "store"           ^{:signatures [{:params [{:name "value" :type "Boolean"}]
+                                     :return-type "Void"}]}
    (fn [atomic value & _]
      (.set ^AtomicBoolean (:state atomic) (boolean value))
      nil)
@@ -1019,7 +1104,8 @@
 (def atomic-reference-type-methods
   {"load"            ^{:signatures [{:params [] :return-type {:base-type "T" :detachable true}}]}
    (fn [atomic & _] (.get ^AtomicReference (:state atomic)))
-   "store"           ^{:signatures [{:params [{:name "value" :type {:base-type "T" :detachable true}}] :return-type "Void"}]}
+   "store"           ^{:signatures [{:params [{:name "value" :type {:base-type "T" :detachable true}}]
+                                     :return-type "Void"}]}
    (fn [atomic value & _]
      (.set ^AtomicReference (:state atomic) value)
      nil)
@@ -1069,15 +1155,19 @@
      (count (:buffer @(:state ch))))})
 
 (def console-type-methods
-  {"print"        ^{:returns "Void" :signatures [{:params [{:name "msg" :type "String"}] :return-type "Void"}]}
+  {"print"        ^{:returns "Void"
+                    :signatures [{:params [{:name "msg" :type "String"}]
+                                  :return-type "Void"}]}
    (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
-   "print_line"   ^{:returns "Void" :signatures [{:params [{:name "msg" :type "String"}] :return-type "Void"}]}
+   "print_line"   ^{:returns "Void" :signatures [{:params [{:name "msg" :type "String"}]
+                                                  :return-type "Void"}]}
    (fn [_ msg & _] (nex-console-println (nex-display-value msg)) nil)
    "read_line"    ^{:returns "String"
                     :signatures [{:params [] :return-type "String"}
                                  {:params [{:name "prompt" :type "String"}] :return-type "String"}]}
    (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
-   "error"        ^{:returns "Void" :signatures [{:params [{:name "msg" :type "String"}] :return-type "Void"}]}
+   "error"        ^{:returns "Void" :signatures [{:params [{:name "msg" :type "String"}]
+                                                  :return-type "Void"}]}
    (fn [_ msg & _] (nex-console-error (nex-display-value msg)) nil)
    "new_line"     ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
    (fn [_ & _] (nex-console-newline) nil)
@@ -1089,13 +1179,18 @@
    (fn [_ & _] (nex-parse-real (nex-console-read-line)))})
 
 (def process-type-methods
-  {"getenv"       ^{:returns "String" :signatures [{:params [{:name "name" :type "String"}] :return-type "String"}]}
+  {"getenv"       ^{:returns "String"
+                    :signatures [{:params [{:name "name" :type "String"}]
+                                  :return-type "String"}]}
    (fn [proc name & _] (or (nex-process-getenv proc (str name)) ""))
    "setenv"       ^{:returns "Void"
-                    :signatures [{:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}]}
+                    :signatures [{:params [{:name "name" :type "String"}
+                                           {:name "value" :type "String"}]
+                                  :return-type "Void"}]}
    (fn [proc name value & _] (nex-process-setenv proc (str name) (str value)) nil)
    "command_line" ^{:returns {:base-type "Array" :type-params ["String"]}
-                    :signatures [{:params [] :return-type {:base-type "Array" :type-params ["String"]}}]}
+                    :signatures [{:params []
+                                  :return-type {:base-type "Array" :type-params ["String"]}}]}
    (fn [proc & _] (nex-process-command-line proc))
 
    "is_self"      ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
@@ -1103,9 +1198,13 @@
    "is_child"     ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
    (fn [proc & _] (nex-process-is-child proc))
 
-   "set_working_directory"        ^{:returns "Void" :signatures [{:params [{:name "dir" :type "String"}] :return-type "Void"}]}
+   "set_working_directory"        ^{:returns "Void"
+                                    :signatures [{:params [{:name "dir" :type "String"}]
+                                                  :return-type "Void"}]}
    (fn [proc dir & _] (nex-process-set-working-directory proc (str dir)))
-   "set_redirect_error_to_output" ^{:returns "Void" :signatures [{:params [{:name "flag" :type "Boolean"}] :return-type "Void"}]}
+   "set_redirect_error_to_output" ^{:returns "Void"
+                                    :signatures [{:params [{:name "flag" :type "Boolean"}]
+                                                  :return-type "Void"}]}
    (fn [proc flag & _] (nex-process-set-redirect-error-to-output proc (boolean flag)))
 
    "start"        ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
@@ -1139,19 +1238,23 @@
    "kill"         ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
    (fn [proc & _] (nex-process-kill proc))
 
-   "write"            ^{:returns "Void" :signatures [{:params [{:name "text" :type "String"}] :return-type "Void"}]}
+   "write"            ^{:returns "Void" :signatures [{:params [{:name "text" :type "String"}]
+                                                      :return-type "Void"}]}
    (fn [proc text & _] (nex-process-write proc (str text)))
-   "write_line"       ^{:returns "Void" :signatures [{:params [{:name "text" :type "String"}] :return-type "Void"}]}
+   "write_line"       ^{:returns "Void" :signatures [{:params [{:name "text" :type "String"}]
+                                                      :return-type "Void"}]}
    (fn [proc text & _] (nex-process-write-line proc (str text)))
    "close_stdin"      ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
    (fn [proc & _] (nex-process-close-stdin proc))
    "read_line"        ^{:returns {:base-type "String" :detachable true}
-                        :signatures [{:params [] :return-type {:base-type "String" :detachable true}}]}
+                        :signatures [{:params []
+                                      :return-type {:base-type "String" :detachable true}}]}
    (fn [proc & _] (nex-process-read-line proc))
    "read_all"         ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
    (fn [proc & _] (nex-process-read-all proc))
    "read_error_line"  ^{:returns {:base-type "String" :detachable true}
-                        :signatures [{:params [] :return-type {:base-type "String" :detachable true}}]}
+                        :signatures [{:params []
+                                      :return-type {:base-type "String" :detachable true}}]}
    (fn [proc & _] (nex-process-read-error-line proc))
    "read_error_all"   ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
    (fn [proc & _] (nex-process-read-error-all proc))
@@ -1617,124 +1720,148 @@
   {"regex_validate"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "regex_validate expects exactly 2 arguments" {:function "regex_validate"})))
+       (throw (ex-info "regex_validate expects exactly 2 arguments"
+                       {:function "regex_validate"})))
      (regex-types/regex-validate (first args) (second args)))
    "regex_matches"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "regex_matches expects exactly 3 arguments" {:function "regex_matches"})))
+       (throw (ex-info "regex_matches expects exactly 3 arguments"
+                       {:function "regex_matches"})))
      (apply regex-types/regex-matches? args))
    "regex_find"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "regex_find expects exactly 3 arguments" {:function "regex_find"})))
+       (throw (ex-info "regex_find expects exactly 3 arguments"
+                       {:function "regex_find"})))
      (apply regex-types/regex-find args))
    "regex_find_all"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "regex_find_all expects exactly 3 arguments" {:function "regex_find_all"})))
+       (throw (ex-info "regex_find_all expects exactly 3 arguments"
+                       {:function "regex_find_all"})))
      (apply regex-types/regex-find-all args))
    "regex_replace"
    (fn [_ctx & args]
      (when (not= (count args) 4)
-       (throw (ex-info "regex_replace expects exactly 4 arguments" {:function "regex_replace"})))
+       (throw (ex-info "regex_replace expects exactly 4 arguments"
+                       {:function "regex_replace"})))
      (apply regex-types/regex-replace args))
    "regex_split"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "regex_split expects exactly 3 arguments" {:function "regex_split"})))
+       (throw (ex-info "regex_split expects exactly 3 arguments"
+                       {:function "regex_split"})))
      (apply regex-types/regex-split args))})
 
 (def datetime-builtins
   {"datetime_now"
    (fn [_ctx & args]
      (when (not= (count args) 0)
-       (throw (ex-info "datetime_now expects exactly 0 arguments" {:function "datetime_now"})))
+       (throw (ex-info "datetime_now expects exactly 0 arguments"
+                       {:function "datetime_now"})))
      (dt/datetime-now))
    "datetime_from_epoch_millis"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument" {:function "datetime_from_epoch_millis"})))
+       (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument"
+                       {:function "datetime_from_epoch_millis"})))
      (dt/datetime-from-epoch-millis (first args)))
    "datetime_parse_iso"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_parse_iso expects exactly 1 argument" {:function "datetime_parse_iso"})))
+       (throw (ex-info "datetime_parse_iso expects exactly 1 argument"
+                       {:function "datetime_parse_iso"})))
      (dt/datetime-parse-iso (first args)))
    "datetime_make"
    (fn [_ctx & args]
      (when (not= (count args) 6)
-       (throw (ex-info "datetime_make expects exactly 6 arguments" {:function "datetime_make"})))
+       (throw (ex-info "datetime_make expects exactly 6 arguments"
+                       {:function "datetime_make"})))
      (apply dt/datetime-make args))
    "datetime_year"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_year expects exactly 1 argument" {:function "datetime_year"})))
+       (throw (ex-info "datetime_year expects exactly 1 argument"
+                       {:function "datetime_year"})))
      (dt/datetime-year (first args)))
    "datetime_month"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_month expects exactly 1 argument" {:function "datetime_month"})))
+       (throw (ex-info "datetime_month expects exactly 1 argument"
+                       {:function "datetime_month"})))
      (dt/datetime-month (first args)))
    "datetime_day"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_day expects exactly 1 argument" {:function "datetime_day"})))
+       (throw (ex-info "datetime_day expects exactly 1 argument"
+                       {:function "datetime_day"})))
      (dt/datetime-day (first args)))
    "datetime_weekday"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_weekday expects exactly 1 argument" {:function "datetime_weekday"})))
+       (throw (ex-info "datetime_weekday expects exactly 1 argument"
+                       {:function "datetime_weekday"})))
      (dt/datetime-weekday (first args)))
    "datetime_day_of_year"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_day_of_year expects exactly 1 argument" {:function "datetime_day_of_year"})))
+       (throw (ex-info "datetime_day_of_year expects exactly 1 argument"
+                       {:function "datetime_day_of_year"})))
      (dt/datetime-day-of-year (first args)))
    "datetime_hour"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_hour expects exactly 1 argument" {:function "datetime_hour"})))
+       (throw (ex-info "datetime_hour expects exactly 1 argument"
+                       {:function "datetime_hour"})))
      (dt/datetime-hour (first args)))
    "datetime_minute"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_minute expects exactly 1 argument" {:function "datetime_minute"})))
+       (throw (ex-info "datetime_minute expects exactly 1 argument"
+                       {:function "datetime_minute"})))
      (dt/datetime-minute (first args)))
    "datetime_second"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_second expects exactly 1 argument" {:function "datetime_second"})))
+       (throw (ex-info "datetime_second expects exactly 1 argument"
+                       {:function "datetime_second"})))
      (dt/datetime-second (first args)))
    "datetime_epoch_millis"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_epoch_millis expects exactly 1 argument" {:function "datetime_epoch_millis"})))
+       (throw (ex-info "datetime_epoch_millis expects exactly 1 argument"
+                       {:function "datetime_epoch_millis"})))
      (dt/datetime-epoch-millis (first args)))
    "datetime_add_millis"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "datetime_add_millis expects exactly 2 arguments" {:function "datetime_add_millis"})))
+       (throw (ex-info "datetime_add_millis expects exactly 2 arguments"
+                       {:function "datetime_add_millis"})))
      (apply dt/datetime-add-millis args))
    "datetime_diff_millis"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "datetime_diff_millis expects exactly 2 arguments" {:function "datetime_diff_millis"})))
+       (throw (ex-info "datetime_diff_millis expects exactly 2 arguments"
+                       {:function "datetime_diff_millis"})))
      (apply dt/datetime-diff-millis args))
    "datetime_truncate_to_day"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_truncate_to_day expects exactly 1 argument" {:function "datetime_truncate_to_day"})))
+       (throw (ex-info "datetime_truncate_to_day expects exactly 1 argument"
+                       {:function "datetime_truncate_to_day"})))
      (dt/datetime-truncate-to-day (first args)))
    "datetime_truncate_to_hour"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_truncate_to_hour expects exactly 1 argument" {:function "datetime_truncate_to_hour"})))
+       (throw (ex-info "datetime_truncate_to_hour expects exactly 1 argument"
+                       {:function "datetime_truncate_to_hour"})))
      (dt/datetime-truncate-to-hour (first args)))
    "datetime_format_iso"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_format_iso expects exactly 1 argument" {:function "datetime_format_iso"})))
+       (throw (ex-info "datetime_format_iso expects exactly 1 argument"
+                       {:function "datetime_format_iso"})))
      (dt/datetime-format-iso (first args)))})
 
 (def path-query-builtins
@@ -1742,67 +1869,80 @@
   {"path_exists"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_exists expects exactly 1 argument" {:function "path_exists"})))
+       (throw (ex-info "path_exists expects exactly 1 argument"
+                       {:function "path_exists"})))
      (rt/path-exists? (str (first args))))
    "path_is_file"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_is_file expects exactly 1 argument" {:function "path_is_file"})))
+       (throw (ex-info "path_is_file expects exactly 1 argument"
+                       {:function "path_is_file"})))
      (rt/path-is-file? (str (first args))))
    "path_is_directory"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_is_directory expects exactly 1 argument" {:function "path_is_directory"})))
+       (throw (ex-info "path_is_directory expects exactly 1 argument"
+                       {:function "path_is_directory"})))
      (rt/path-is-directory? (str (first args))))
    "path_name"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_name expects exactly 1 argument" {:function "path_name"})))
+       (throw (ex-info "path_name expects exactly 1 argument"
+                       {:function "path_name"})))
      (rt/path-name (str (first args))))
    "path_extension"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_extension expects exactly 1 argument" {:function "path_extension"})))
+       (throw (ex-info "path_extension expects exactly 1 argument"
+                       {:function "path_extension"})))
      (rt/path-extension (str (first args))))
    "path_name_without_extension"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_name_without_extension expects exactly 1 argument" {:function "path_name_without_extension"})))
+       (throw (ex-info "path_name_without_extension expects exactly 1 argument"
+                       {:function "path_name_without_extension"})))
      (rt/path-name-without-extension (str (first args))))
    "path_absolute"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_absolute expects exactly 1 argument" {:function "path_absolute"})))
+       (throw (ex-info "path_absolute expects exactly 1 argument"
+                       {:function "path_absolute"})))
      (str (rt/path-absolute (str (first args)))))
    "path_normalize"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_normalize expects exactly 1 argument" {:function "path_normalize"})))
+       (throw (ex-info "path_normalize expects exactly 1 argument"
+                       {:function "path_normalize"})))
      (str (rt/path-normalize (str (first args)))))
    "path_size"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_size expects exactly 1 argument" {:function "path_size"})))
+       (throw (ex-info "path_size expects exactly 1 argument"
+                       {:function "path_size"})))
      (rt/path-size (str (first args))))
    "path_modified_time"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_modified_time expects exactly 1 argument" {:function "path_modified_time"})))
+       (throw (ex-info "path_modified_time expects exactly 1 argument"
+                       {:function "path_modified_time"})))
      (rt/path-modified-time (str (first args))))
    "path_parent"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_parent expects exactly 1 argument" {:function "path_parent"})))
+       (throw (ex-info "path_parent expects exactly 1 argument"
+                       {:function "path_parent"})))
      (rt/path-parent (str (first args))))
    "path_child"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_child expects exactly 2 arguments" {:function "path_child"})))
+       (throw (ex-info "path_child expects exactly 2 arguments"
+                       {:function "path_child"})))
      (rt/path-child (str (first args)) (str (second args))))
    "path_list"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_list expects exactly 1 argument" {:function "path_list"})))
+       (throw (ex-info "path_list expects exactly 1 argument"
+                       {:function "path_list"})))
      (rt/path-list (str (first args))))})
 
 (def path-mutation-builtins
@@ -1810,37 +1950,44 @@
   {"path_create_file"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_create_file expects exactly 1 argument" {:function "path_create_file"})))
+       (throw (ex-info "path_create_file expects exactly 1 argument"
+                       {:function "path_create_file"})))
      (rt/path-create-file (str (first args))))
    "path_create_directory"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_create_directory expects exactly 1 argument" {:function "path_create_directory"})))
+       (throw (ex-info "path_create_directory expects exactly 1 argument"
+                       {:function "path_create_directory"})))
      (rt/path-create-directory (str (first args))))
    "path_create_directories"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_create_directories expects exactly 1 argument" {:function "path_create_directories"})))
+       (throw (ex-info "path_create_directories expects exactly 1 argument"
+                       {:function "path_create_directories"})))
      (rt/path-create-directories (str (first args))))
    "path_delete"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_delete expects exactly 1 argument" {:function "path_delete"})))
+       (throw (ex-info "path_delete expects exactly 1 argument"
+                       {:function "path_delete"})))
      (rt/path-delete (str (first args))))
    "path_delete_tree"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_delete_tree expects exactly 1 argument" {:function "path_delete_tree"})))
+       (throw (ex-info "path_delete_tree expects exactly 1 argument"
+                       {:function "path_delete_tree"})))
      (rt/path-delete-tree (str (first args))))
    "path_copy"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_copy expects exactly 2 arguments" {:function "path_copy"})))
+       (throw (ex-info "path_copy expects exactly 2 arguments"
+                       {:function "path_copy"})))
      (rt/path-copy (str (first args)) (str (second args))))
    "path_move"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_move expects exactly 2 arguments" {:function "path_move"})))
+       (throw (ex-info "path_move expects exactly 2 arguments"
+                       {:function "path_move"})))
      (rt/path-move (str (first args)) (str (second args))))})
 
 (def path-io-builtins
@@ -1848,17 +1995,20 @@
   {"path_read_text"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_read_text expects exactly 1 argument" {:function "path_read_text"})))
+       (throw (ex-info "path_read_text expects exactly 1 argument"
+                       {:function "path_read_text"})))
      (rt/path-read-text (str (first args))))
    "path_write_text"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_write_text expects exactly 2 arguments" {:function "path_write_text"})))
+       (throw (ex-info "path_write_text expects exactly 2 arguments"
+                       {:function "path_write_text"})))
      (rt/path-write-text (str (first args)) (str (second args))))
    "path_append_text"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_append_text expects exactly 2 arguments" {:function "path_append_text"})))
+       (throw (ex-info "path_append_text expects exactly 2 arguments"
+                       {:function "path_append_text"})))
      (rt/path-append-text (str (first args)) (str (second args))))})
 
 (def path-builtins
@@ -1868,77 +2018,92 @@
   {"text_file_open_read"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_open_read expects exactly 1 argument" {:function "text_file_open_read"})))
+       (throw (ex-info "text_file_open_read expects exactly 1 argument"
+                       {:function "text_file_open_read"})))
      (rt/text-file-open-read (str (first args))))
    "text_file_open_write"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_open_write expects exactly 1 argument" {:function "text_file_open_write"})))
+       (throw (ex-info "text_file_open_write expects exactly 1 argument"
+                       {:function "text_file_open_write"})))
      (rt/text-file-open-write (str (first args))))
    "text_file_open_append"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_open_append expects exactly 1 argument" {:function "text_file_open_append"})))
+       (throw (ex-info "text_file_open_append expects exactly 1 argument"
+                       {:function "text_file_open_append"})))
      (rt/text-file-open-append (str (first args))))
    "text_file_read_line"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_read_line expects exactly 1 argument" {:function "text_file_read_line"})))
+       (throw (ex-info "text_file_read_line expects exactly 1 argument"
+                       {:function "text_file_read_line"})))
      (rt/text-file-read-line (first args)))
    "text_file_write"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "text_file_write expects exactly 2 arguments" {:function "text_file_write"})))
+       (throw (ex-info "text_file_write expects exactly 2 arguments"
+                       {:function "text_file_write"})))
      (rt/text-file-write (first args) (str (second args))))
    "text_file_close"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_close expects exactly 1 argument" {:function "text_file_close"})))
+       (throw (ex-info "text_file_close expects exactly 1 argument"
+                       {:function "text_file_close"})))
      (rt/text-file-close (first args)))
    "binary_file_open_read"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_open_read expects exactly 1 argument" {:function "binary_file_open_read"})))
+       (throw (ex-info "binary_file_open_read expects exactly 1 argument"
+                       {:function "binary_file_open_read"})))
      (rt/binary-file-open-read (str (first args))))
    "binary_file_open_write"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_open_write expects exactly 1 argument" {:function "binary_file_open_write"})))
+       (throw (ex-info "binary_file_open_write expects exactly 1 argument"
+                       {:function "binary_file_open_write"})))
      (rt/binary-file-open-write (str (first args))))
    "binary_file_open_append"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_open_append expects exactly 1 argument" {:function "binary_file_open_append"})))
+       (throw (ex-info "binary_file_open_append expects exactly 1 argument"
+                       {:function "binary_file_open_append"})))
      (rt/binary-file-open-append (str (first args))))
    "binary_file_read_all"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_read_all expects exactly 1 argument" {:function "binary_file_read_all"})))
+       (throw (ex-info "binary_file_read_all expects exactly 1 argument"
+                       {:function "binary_file_read_all"})))
      (rt/binary-file-read-all (first args)))
    "binary_file_read"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "binary_file_read expects exactly 2 arguments" {:function "binary_file_read"})))
+       (throw (ex-info "binary_file_read expects exactly 2 arguments"
+                       {:function "binary_file_read"})))
      (rt/binary-file-read (first args) (second args)))
    "binary_file_write"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "binary_file_write expects exactly 2 arguments" {:function "binary_file_write"})))
+       (throw (ex-info "binary_file_write expects exactly 2 arguments"
+                       {:function "binary_file_write"})))
      (rt/binary-file-write (first args) (second args)))
    "binary_file_position"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_position expects exactly 1 argument" {:function "binary_file_position"})))
+       (throw (ex-info "binary_file_position expects exactly 1 argument"
+                       {:function "binary_file_position"})))
      (rt/binary-file-position (first args)))
    "binary_file_seek"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "binary_file_seek expects exactly 2 arguments" {:function "binary_file_seek"})))
+       (throw (ex-info "binary_file_seek expects exactly 2 arguments"
+                       {:function "binary_file_seek"})))
      (rt/binary-file-seek (first args) (second args)))
    "binary_file_close"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_close expects exactly 1 argument" {:function "binary_file_close"})))
+       (throw (ex-info "binary_file_close expects exactly 1 argument"
+                       {:function "binary_file_close"})))
      (rt/binary-file-close (first args)))})
 
 (def http-server-builtins

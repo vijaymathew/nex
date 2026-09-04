@@ -1352,7 +1352,10 @@
                          (.getClass value)
                          (reify java.util.function.Function
                            (apply [_ _]
-                             (boolean (find-user-method value (lowered-instance-method-name synthetic-invariant-method-name 0))))))))
+                             (boolean
+                              (find-user-method
+                               value
+                               (lowered-instance-method-name synthetic-invariant-method-name 0))))))))
 
 (defn validate-object-state
   "Validate an object's class invariant after construction or a public call.
