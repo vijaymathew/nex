@@ -1465,7 +1465,7 @@ end"))
   (testing "compiled helper can execute a simple from/until/do loop that sums integers"
     (let [session (compiled-repl/make-session)
           result (compiled-repl/compile-and-eval! session
-                   (p/ast "let sum := 0
+                                                  (p/ast "let sum := 0
 from
   let i := 0
 until
@@ -1482,7 +1482,7 @@ sum"))]
   (testing "compiled helper can execute a repeat-style loop (desugared to from/until)"
     (let [session (compiled-repl/make-session)
           result (compiled-repl/compile-and-eval! session
-                   (p/ast "let count := 0
+                                                  (p/ast "let count := 0
 repeat 5 do
   count := count + 1
 end
@@ -1494,7 +1494,7 @@ count"))]
   (testing "compiled helper can execute a loop with print calls"
     (let [session (compiled-repl/make-session)
           result (compiled-repl/compile-and-eval! session
-                   (p/ast "from
+                                                  (p/ast "from
   let i := 0
 until
   i = 3
@@ -1509,9 +1509,9 @@ end"))]
   (testing "compiled loop can modify top-level variables across cells"
     (let [session (compiled-repl/make-session)
           _ (compiled-repl/compile-and-eval! session
-              (p/ast "let total := 0"))
+                                             (p/ast "let total := 0"))
           result (compiled-repl/compile-and-eval! session
-                   (p/ast "from
+                                                  (p/ast "from
   let i := 1
 until
   i > 5

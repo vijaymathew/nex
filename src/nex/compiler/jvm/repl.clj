@@ -224,8 +224,8 @@
                               :else inner)))
                         acc
                         generic-params)))
-          {}
-          classes)))
+            {}
+            classes)))
 
 (defn- augment-ctx-with-visible-generic-classes
   [ctx]
@@ -641,15 +641,15 @@
                 ctx
                 (:condition stmt))
                (supported-stmt-block? cond-ctx (:then stmt))
-             (if-let [clause (first (:elseif stmt))]
-               (supported-stmt-in-ctx?
-                ctx
-                {:type :if
-                 :condition (:condition clause)
-                 :then (:then clause)
-                 :elseif (vec (rest (:elseif stmt)))
-                 :else (:else stmt)})
-               (supported-stmt-block? ctx (or (:else stmt) [])))))
+               (if-let [clause (first (:elseif stmt))]
+                 (supported-stmt-in-ctx?
+                  ctx
+                  {:type :if
+                   :condition (:condition clause)
+                   :then (:then clause)
+                   :elseif (vec (rest (:elseif stmt)))
+                   :else (:else stmt)})
+                 (supported-stmt-block? ctx (or (:else stmt) [])))))
     :case (and (supported-expr-in-ctx? ctx (:expr stmt))
                (every? #(every? (partial supported-expr-in-ctx? ctx) (:values %))
                        (:clauses stmt))
@@ -813,44 +813,44 @@
     (when (seq actual-classes)
       (let [compiled-class-defs (vec (remove :closure-runtime-object? actual-classes))
             new-class-map (allocate-compiled-class-metadata session compiled-class-defs)
-          compiled-map (merge @(:compiled-classes session) new-class-map)
-          visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
+            compiled-map (merge @(:compiled-classes session) new-class-map)
+            visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
           ;; A class redeclared in this cell replaces its prior session
           ;; definition; drop the stale one from every name-based lookup below
           ;; so lowering (e.g. `ctx-class-def` in nex.lower, which returns the
           ;; *first* class matching a name) sees only the current shape rather
           ;; than whichever of the two entries happens to come first — mirrors
           ;; `compile-and-register-functions!`'s `other-functions` filtering.
-          replaced-names (set (map :name actual-classes))
-          other-classes (remove #(contains? replaced-names (:name %))
-                                (vals @(:class-asts session)))
-          visible-classes (vec (concat (builtin-class-defs)
-                                       (import-placeholder-classes (:imports ast))
-                                       other-classes
-                                       actual-classes
-                                       (keep :class-def visible-functions)))
-          visible-imports (:imports ast)
-          lowered-classes
-          (mapv (fn [class-def]
-                  (lower/lower-class-def class-def {:compiled-classes compiled-map
-                                                    :classes visible-classes
-                                                    :functions visible-functions
-                                                    :imports visible-imports
-                                                    :source-file source-id}))
-                compiled-class-defs)
+            replaced-names (set (map :name actual-classes))
+            other-classes (remove #(contains? replaced-names (:name %))
+                                  (vals @(:class-asts session)))
+            visible-classes (vec (concat (builtin-class-defs)
+                                         (import-placeholder-classes (:imports ast))
+                                         other-classes
+                                         actual-classes
+                                         (keep :class-def visible-functions)))
+            visible-imports (:imports ast)
+            lowered-classes
+            (mapv (fn [class-def]
+                    (lower/lower-class-def class-def {:compiled-classes compiled-map
+                                                      :classes visible-classes
+                                                      :functions visible-functions
+                                                      :imports visible-imports
+                                                      :source-file source-id}))
+                  compiled-class-defs)
           ;; A class with an object-/collection-valued constant bootstraps a
           ;; session state in its <clinit> to build it, so it needs the same
           ;; class/import metadata the launcher gets — here the union of the
           ;; session's known classes and the batch being defined.
-          bootstrap-edn {:classes-edn (pr-str (vec (concat other-classes
-                                                           actual-classes)))
-                         :imports-edn (pr-str visible-imports)}]
+            bootstrap-edn {:classes-edn (pr-str (vec (concat other-classes
+                                                             actual-classes)))
+                           :imports-edn (pr-str visible-imports)}]
         (doseq [class-def compiled-class-defs]
           (let [lowered (some #(when (= (:name %) (:name class-def)) %) lowered-classes)
                 bytecode (emit/compile-user-class->bytes lowered bootstrap-edn)]
             (loader/define-class! (:loader session)
-                                  (desc/binary-class-name (:jvm-name lowered))
-                                  bytecode)))
+              (desc/binary-class-name (:jvm-name lowered))
+              bytecode)))
         (swap! (:compiled-classes session)
                merge
                (into {}
@@ -921,8 +921,8 @@
                                   :var-types (session-var-types session)
                                   :type-aliases (inference-type-aliases-for-session session)})
                                 "Any")]
-             (when nex-type
-               (rt/state-set-type! (:state session) (:name stmt) nex-type))))
+               (when nex-type
+                 (rt/state-set-type! (:state session) (:name stmt) nex-type))))
       :assign (when-let [nex-type (or (get (session-var-types session) (:target stmt))
                                       (tc/infer-expression-type
                                        (:value stmt)
@@ -1021,8 +1021,8 @@
         :interns []
         :classes (vec (vals @(:class-asts session)))
         :functions all-functions
-       :statements []
-       :calls []}
+        :statements []
+        :calls []}
        source-id)))
   session)
 

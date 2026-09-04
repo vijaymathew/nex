@@ -1593,7 +1593,7 @@ end"))
               repl/*repl-var-types* (atom {})
               repl/*repl-backend* (atom :compiled)
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
-        (let [ctx0 (repl/init-repl-context)
+      (let [ctx0 (repl/init-repl-context)
             output (with-out-str
                      (repl/eval-code ctx0 (str "do\n"
                                                "  print(\"before\")\n"
@@ -2484,12 +2484,12 @@ end")
                                                        (p/ast "s.area()"))
           shape-meta (get @(:compiled-classes session) "Shape")
           square-meta (get @(:compiled-classes session) "Square")]
-        (is (true? (:deferred? shape-meta)))
-        (is (= "Shape" (get-in square-meta [:parents 0 :nex-name])))
-        (is (= "Shape" (runtime/state-get-type (:state session) "s")))
-        (is (:compiled? assign-result))
-        (is (:compiled? call-result))
-        (is (= 16.0 (:result call-result))))))
+      (is (true? (:deferred? shape-meta)))
+      (is (= "Shape" (get-in square-meta [:parents 0 :nex-name])))
+      (is (= "Shape" (runtime/state-get-type (:state session) "s")))
+      (is (:compiled? assign-result))
+      (is (:compiled? call-result))
+      (is (= 16.0 (:result call-result))))))
 
 (deftest compiled-repl-import-support-test
   (testing "compiled helper can keep Java imports on the compiled path"
@@ -2580,8 +2580,8 @@ end")
           (finally
             (when (.exists source-file)
               (.delete source-file))
-          (when (.exists tmp-dir)
-            (.delete tmp-dir))))))))
+            (when (.exists tmp-dir)
+              (.delete tmp-dir))))))))
 
 (deftest repl-compiled-backend-convert-guard-inside-across-test
   (testing "compiled backend handles convert-bound locals inside across loops without verifier errors"

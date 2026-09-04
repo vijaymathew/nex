@@ -339,10 +339,10 @@
 (defn nex-array-sort-with-ctx
   ([ctx arr]
    (let [out (java.util.ArrayList. arr)]
-             (.sort out (reify java.util.Comparator
-                          (compare [_ a b]
-                            (int (nex-value-compare ctx a b)))))
-             out))
+     (.sort out (reify java.util.Comparator
+                  (compare [_ a b]
+                    (int (nex-value-compare ctx a b)))))
+     out))
   ([ctx arr comparator]
    (let [compare-fn (fn [a b]
                       (let [result (if (fn? comparator)
@@ -353,10 +353,10 @@
                           (throw (ex-info "Array.sort comparator must return Integer"
                                           {:left a :right b :result result})))))]
      (let [out (java.util.ArrayList. arr)]
-               (.sort out (reify java.util.Comparator
-                            (compare [_ a b]
-                              (compare-fn a b))))
-               out))))
+       (.sort out (reify java.util.Comparator
+                    (compare [_ a b]
+                      (compare-fn a b))))
+       out))))
 
 (defn make-min-heap
   [comparator]
@@ -393,13 +393,13 @@
 (defn atomic-reference-cas!
   [atomic expected update]
   (loop []
-            (let [^AtomicReference state (:state atomic)
-                  current (.get state)]
-              (if (deep-equals-runtime? current expected)
-                (if (.compareAndSet state current update)
-                  true
-                  (recur))
-                false))))
+    (let [^AtomicReference state (:state atomic)
+          current (.get state)]
+      (if (deep-equals-runtime? current expected)
+        (if (.compareAndSet state current update)
+          true
+          (recur))
+        false))))
 
 (defn heap-compare
   [ctx heap left right]
@@ -524,71 +524,71 @@
 
 (def any-type-methods
   {"to_string"   ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                 (fn [v & _] (nex-format-value v))
+   (fn [v & _] (nex-format-value v))
    ;; Default equality is structural (deep, field-by-field). A class may
    ;; override `equals` to change this; the `=`/`/=` operators then honour the
    ;; override. Identity comparison remains available through `==`/`!=`.
    "equals"      ^{:returns "Boolean" :signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                 (fn [v other & _] (nex-deep-equals? v other))
+   (fn [v other & _] (nex-deep-equals? v other))
    ;; Default hash is structural and consistent with the structural `equals`
    ;; above. A class that overrides `equals` should override `hash` too.
    "hash"        ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
-                 (fn [v & _] (->nex-integer (nex-structural-hash v)))
+   (fn [v & _] (->nex-integer (nex-structural-hash v)))
    "clone"       ^{:returns "Any" :signatures [{:params [] :return-type "Any"}]}
-                 (fn [v & _] (nex-clone-value v))})
+   (fn [v & _] (nex-clone-value v))})
 
 (def string-type-methods
   {"length"      ^{:signatures [{:params [] :return-type "Integer"}]}
-                 (fn [s & _] (->nex-integer (count s)))
+   (fn [s & _] (->nex-integer (count s)))
    "index_of"    ^{:signatures [{:params [{:name "substr" :type "String"}] :return-type "Integer"}]}
-                 (fn [s ch & _]
-                   (let [idx (str/index-of s (str ch))]
-                     (->nex-integer (if idx idx -1))))
+   (fn [s ch & _]
+     (let [idx (str/index-of s (str ch))]
+       (->nex-integer (if idx idx -1))))
    "substring"   ^{:signatures [{:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}] :return-type "String"}]}
-                 (fn [s start end & _] (subs s (nex-int->number start) (nex-int->number end)))
+   (fn [s start end & _] (subs s (nex-int->number start) (nex-int->number end)))
    "to_upper"    ^{:signatures [{:params [] :return-type "String"}]}
-                 (fn [s & _] (str/upper-case s))
+   (fn [s & _] (str/upper-case s))
    "to_lower"    ^{:signatures [{:params [] :return-type "String"}]}
-                 (fn [s & _] (str/lower-case s))
+   (fn [s & _] (str/lower-case s))
    "to_integer"  ^{:signatures [{:params [] :return-type "Integer"}]}
-                 (fn [s & _] (nex-parse-integer s))
+   (fn [s & _] (nex-parse-integer s))
    "to_integer64" ^{:signatures [{:params [] :return-type "Integer"}]}
-                  (fn [s & _] (nex-parse-integer64-string s))
+   (fn [s & _] (nex-parse-integer64-string s))
    "to_real"     ^{:signatures [{:params [] :return-type "Real"}]}
-                 (fn [s & _] (Double/parseDouble (str/trim s)))
+   (fn [s & _] (Double/parseDouble (str/trim s)))
    "contains"    ^{:signatures [{:params [{:name "substr" :type "String"}] :return-type "Boolean"}]}
-                 (fn [s substr & _] (str/includes? s substr))
+   (fn [s substr & _] (str/includes? s substr))
    "starts_with" ^{:signatures [{:params [{:name "prefix" :type "String"}] :return-type "Boolean"}]}
-                 (fn [s prefix & _] (str/starts-with? s prefix))
+   (fn [s prefix & _] (str/starts-with? s prefix))
    "ends_with"   ^{:signatures [{:params [{:name "suffix" :type "String"}] :return-type "Boolean"}]}
-                 (fn [s suffix & _] (str/ends-with? s suffix))
+   (fn [s suffix & _] (str/ends-with? s suffix))
    "trim"        ^{:signatures [{:params [] :return-type "String"}]}
-                 (fn [s & _] (str/trim s))
+   (fn [s & _] (str/trim s))
    "replace"     ^{:signatures [{:params [{:name "old" :type "String"} {:name "new" :type "String"}] :return-type "String"}]}
-                 (fn [s old new & _] (str/replace s old new))
+   (fn [s old new & _] (str/replace s old new))
    "pad_end"     ^{:signatures [{:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}]}
-                 (fn [s pad len & _] (let [len (nex-int->number len)] (if (>= (count s) len) s (str s (apply str (repeat (- len (count s)) pad))))))
+   (fn [s pad len & _] (let [len (nex-int->number len)] (if (>= (count s) len) s (str s (apply str (repeat (- len (count s)) pad))))))
    "pad_start"   ^{:signatures [{:params [{:name "pad" :type "String"} {:name "count" :type "Integer"}] :return-type "String"}]}
-                 (fn [s pad len & _] (let [len (nex-int->number len)] (if (>= (count s) len) s (str (apply str (repeat (- len (count s)) pad)) s))))
+   (fn [s pad len & _] (let [len (nex-int->number len)] (if (>= (count s) len) s (str (apply str (repeat (- len (count s)) pad)) s))))
    "replicate"   ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "String"}]}
-                 (fn [s n & _] (apply str (repeat (nex-int->number n) s)))
+   (fn [s n & _] (apply str (repeat (nex-int->number n) s)))
    "char_at"     ^{:signatures [{:params [{:name "index" :type "Integer"}] :return-type "Char"}]}
-                 (fn [s idx & _] (get s (nex-int->number idx)))
+   (fn [s idx & _] (get s (nex-int->number idx)))
    "chars"       ^{:signatures [{:params [] :return-type {:base-type "Array" :type-params ["Char"]}}]}
-                 (fn [s & _]
-                   (nex-array-from
-                    (mapv #(get s %) (range (count s)))))
+   (fn [s & _]
+     (nex-array-from
+      (mapv #(get s %) (range (count s)))))
    "to_bytes"    ^{:signatures [{:params [] :return-type {:base-type "Array" :type-params ["Integer"]}}]}
-                 (fn [s & _]
-                   (nex-array-from
-                            (mapv #(->nex-integer (bit-and (int %) 0xFF))
-                                  (.getBytes ^String s StandardCharsets/UTF_8))))
+   (fn [s & _]
+     (nex-array-from
+      (mapv #(->nex-integer (bit-and (int %) 0xFF))
+            (.getBytes ^String s StandardCharsets/UTF_8))))
    "split"       ^{:signatures [{:params [{:name "delimiter" :type "String"}]
                                  :return-type {:base-type "Array" :type-params ["String"]}}]}
-                 (fn [s delim & _] (nex-array-from (str/split s (re-pattern delim))))
+   (fn [s delim & _] (nex-array-from (str/split s (re-pattern delim))))
    "join"        ^{:signatures [{:params [{:name "parts" :type {:base-type "Array" :type-params ["String"]}}]
                                  :return-type "String"}]}
-                 (fn [s arr & _] (str/join s arr))
+   (fn [s arr & _] (str/join s arr))
    ;; String operator methods
    "plus"        (fn [s other & [ctx]]
                    (str s (if ctx
@@ -606,144 +606,144 @@
    ;; their elements — see register-string-methods! for why this is declared
    ;; explicitly rather than through the universal "Any" fallback.
    "cursor"      ^{:signatures [{:params [] :return-type "Cursor"}]}
-                 (fn [s & _]
-                   {:nex-builtin-type :StringCursor
-                    :source s
-                    :index (atom 0)})})
+   (fn [s & _]
+     {:nex-builtin-type :StringCursor
+      :source s
+      :index (atom 0)})})
 
 (def integer-type-methods
   {"to_string"         ^{:signatures [{:params [] :return-type "String"}]}
-                       (fn [n & _] (str n))
+   (fn [n & _] (str n))
    ;; The typechecker has always accepted these three (they're registered
    ;; alongside every other Integer method), but the runtime table never
    ;; defined them — n.to_real() and kin failed with "Method not found",
    ;; not a type error. to_integer/to_integer64 are identity: an Integer is
    ;; already the language's one 64-bit integer type.
    "to_integer"        ^{:signatures [{:params [] :return-type "Integer"}]}
-                       (fn [n & _] n)
+   (fn [n & _] n)
    "to_integer64"      ^{:signatures [{:params [] :return-type "Integer"}]}
-                       (fn [n & _] n)
+   (fn [n & _] n)
    "to_real"           ^{:signatures [{:params [] :return-type "Real"}]}
-                       (fn [n & _] (->nex-real n))
+   (fn [n & _] (->nex-real n))
    "abs"               ^{:signatures [{:params [] :return-type "Integer"}]}
-                       (fn [n & _] (if (neg? n) (nex-int-neg n) n))
+   (fn [n & _] (if (neg? n) (nex-int-neg n) n))
    "min"               ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n other & _] (if (pos? (nex-numeric-compare n other)) other n))
+   (fn [n other & _] (if (pos? (nex-numeric-compare n other)) other n))
    "max"               ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
+   (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
    "pick"              ^{:signatures [{:params [] :return-type "Integer"}]}
-                       (fn [n & _] (->nex-integer (rand-int (nex-int->number n))))
+   (fn [n & _] (->nex-integer (rand-int (nex-int->number n))))
    "bitwise_left_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
-                        (fn [n shift & _] (nex-bitwise-left-shift n shift))
+   (fn [n shift & _] (nex-bitwise-left-shift n shift))
    "bitwise_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
-                         (fn [n shift & _] (nex-bitwise-right-shift n shift))
+   (fn [n shift & _] (nex-bitwise-right-shift n shift))
    "bitwise_logical_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
-                                 (fn [n shift & _] (nex-bitwise-logical-right-shift n shift))
+   (fn [n shift & _] (nex-bitwise-logical-right-shift n shift))
    "bitwise_rotate_left" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
-                         (fn [n shift & _] (nex-bitwise-rotate-left n shift))
+   (fn [n shift & _] (nex-bitwise-rotate-left n shift))
    "bitwise_rotate_right" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
-                          (fn [n shift & _] (nex-bitwise-rotate-right n shift))
+   (fn [n shift & _] (nex-bitwise-rotate-right n shift))
    "bitwise_is_set"    ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Boolean"}]}
-                       (fn [n idx & _] (nex-bitwise-is-set n idx))
+   (fn [n idx & _] (nex-bitwise-is-set n idx))
    "bitwise_set"       ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n idx & _] (nex-bitwise-set n idx))
+   (fn [n idx & _] (nex-bitwise-set n idx))
    "bitwise_unset"     ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n idx & _] (nex-bitwise-unset n idx))
+   (fn [n idx & _] (nex-bitwise-unset n idx))
    "bitwise_and"       ^{:signatures [{:params [{:name "x" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n other & _] (nex-bitwise-and n other))
+   (fn [n other & _] (nex-bitwise-and n other))
    "bitwise_or"        ^{:signatures [{:params [{:name "x" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n other & _] (nex-bitwise-or n other))
+   (fn [n other & _] (nex-bitwise-or n other))
    "bitwise_xor"       ^{:signatures [{:params [{:name "x" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n other & _] (nex-bitwise-xor n other))
+   (fn [n other & _] (nex-bitwise-xor n other))
    "bitwise_not"       ^{:signatures [{:params [] :return-type "Integer"}]}
-                       (fn [n & _] (nex-bitwise-not n))
+   (fn [n & _] (nex-bitwise-not n))
    ;; Arithmetic operator methods (64-bit checked, matching the operators)
    "plus"              ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n other & _] (nex-int-add n other))
+   (fn [n other & _] (nex-int-add n other))
    "minus"             ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n other & _] (nex-int-sub n other))
+   (fn [n other & _] (nex-int-sub n other))
    "times"             ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Integer"}]}
-                       (fn [n other & _] (nex-int-mul n other))
+   (fn [n other & _] (nex-int-mul n other))
    ;; divided_by is typed to return Real, so it is real division on both hosts.
    "divided_by"        ^{:signatures [{:params [{:name "other" :type "Integer"}] :return-type "Real"}]}
-                       (fn [n other & _] (/ (double n) (double other)))
+   (fn [n other & _] (/ (double n) (double other)))
    ;; Comparison operator methods
    "equals"            ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                       (fn [n other & _] (nex-numeric-equals? n other))
+   (fn [n other & _] (nex-numeric-equals? n other))
    "not_equals"        ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                       (fn [n other & _] (not (nex-numeric-equals? n other)))
+   (fn [n other & _] (not (nex-numeric-equals? n other)))
    "less_than"         ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                       (fn [n other & _] (neg? (nex-numeric-compare n other)))
+   (fn [n other & _] (neg? (nex-numeric-compare n other)))
    "less_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                        (fn [n other & _] (not (pos? (nex-numeric-compare n other))))
+   (fn [n other & _] (not (pos? (nex-numeric-compare n other))))
    "greater_than"      ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                       (fn [n other & _] (pos? (nex-numeric-compare n other)))
+   (fn [n other & _] (pos? (nex-numeric-compare n other)))
    "greater_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                           (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
+   (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
    "to_char"           ^{:signatures [{:params [] :return-type "Char"}]}
-                       (fn [n & _] (char (int n)))
+   (fn [n & _] (char (int n)))
    "compare"           (fn [n other & _] (nex-compare n other))
    "hash"              (fn [n & _] (hash n))})
 
 (def real-type-methods
   {"to_string"         ^{:signatures [{:params [] :return-type "String"}]}
-                       (fn [n & _] (str n))
+   (fn [n & _] (str n))
    "abs"               ^{:signatures [{:params [] :return-type "Real"}]}
-                       (fn [n & _] (nex-abs n))
+   (fn [n & _] (nex-abs n))
    "min"               ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
-                       (fn [n other & _] (min (->nex-real n) (->nex-real other)))
+   (fn [n other & _] (min (->nex-real n) (->nex-real other)))
    "max"               ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
-                       (fn [n other & _] (max (->nex-real n) (->nex-real other)))
+   (fn [n other & _] (max (->nex-real n) (->nex-real other)))
    "round"             ^{:signatures [{:params [] :return-type "Integer"}]}
-                       (fn [n & _] (->nex-integer (nex-round n)))
+   (fn [n & _] (->nex-integer (nex-round n)))
    "to_fixed"          ^{:signatures [{:params [{:name "places" :type "Integer"}] :return-type "Real"}]}
-                       (fn [n places & _]
-                         (let [places (nex-int->number places)]
-                           (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))))
+   (fn [n places & _]
+     (let [places (nex-int->number places)]
+       (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))))
    ;; IEEE-754 inspection: with Real division now honestly IEEE, these let
    ;; callers detect the special values it can produce (see NUMERIC_TOWER.md).
    "is_nan"            ^{:signatures [{:params [] :return-type "Boolean"}]}
-                       (fn [n & _] (Double/isNaN (double n)))
+   (fn [n & _] (Double/isNaN (double n)))
    "is_infinite"       ^{:signatures [{:params [] :return-type "Boolean"}]}
-                       (fn [n & _] (Double/isInfinite (double n)))
+   (fn [n & _] (Double/isInfinite (double n)))
    "is_finite"         ^{:signatures [{:params [] :return-type "Boolean"}]}
-                       (fn [n & _] (and (not (Double/isNaN (double n)))
-                                                (not (Double/isInfinite (double n)))))
+   (fn [n & _] (and (not (Double/isNaN (double n)))
+                    (not (Double/isInfinite (double n)))))
    ;; Arithmetic operator methods
    "plus"              ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
-                       (fn [n other & _] (+ n other))
+   (fn [n other & _] (+ n other))
    "minus"             ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
-                       (fn [n other & _] (- n other))
+   (fn [n other & _] (- n other))
    "times"             ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
-                       (fn [n other & _] (* n other))
+   (fn [n other & _] (* n other))
    ;; IEEE division (see the boxed-double note on the "/" operator).
    "divided_by"        ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
-                       (fn [n other & _] (/ (double n) (double other)))
+   (fn [n other & _] (/ (double n) (double other)))
    ;; Comparison operator methods
    "equals"            ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                       (fn [n other & _] (= n other))
+   (fn [n other & _] (= n other))
    "not_equals"        ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                       (fn [n other & _] (not= n other))
+   (fn [n other & _] (not= n other))
    "less_than"         ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                       (fn [n other & _] (< n other))
+   (fn [n other & _] (< n other))
    "less_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                        (fn [n other & _] (<= n other))
+   (fn [n other & _] (<= n other))
    "greater_than"      ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                       (fn [n other & _] (> n other))
+   (fn [n other & _] (> n other))
    "greater_than_or_equal" ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
-                           (fn [n other & _] (>= n other))
+   (fn [n other & _] (>= n other))
    "compare"           (fn [n other & _] (nex-compare n other))
    "hash"              (fn [n & _] (hash n))})
 
 (def char-type-methods
   {"to_string"   ^{:signatures [{:params [] :return-type "String"}]}
-                 (fn [c & _] (str c))
+   (fn [c & _] (str c))
    "to_upper"    ^{:signatures [{:params [] :return-type "String"}]}
-                 (fn [c & _] (str/upper-case (str c)))
+   (fn [c & _] (str/upper-case (str c)))
    "to_lower"    ^{:signatures [{:params [] :return-type "String"}]}
-                 (fn [c & _] (str/lower-case (str c)))
+   (fn [c & _] (str/lower-case (str c)))
    "to_integer"  ^{:signatures [{:params [] :return-type "Integer"}]}
-                 (fn [c & _] (->nex-integer (int c)))
+   (fn [c & _] (->nex-integer (int c)))
    "compare"     (fn [c other & _] (nex-compare c other))
    "hash"        (fn [c & _] (hash c))})
 
@@ -760,78 +760,78 @@
 
 (def array-type-methods
   {"get"         ^{:returns :element :signatures [{:params [{:name "index" :type "Integer"}] :return-type "T"}]}
-                 (fn [arr index & _] (nex-array-get arr index))
+   (fn [arr index & _] (nex-array-get arr index))
    "add"         ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
-                 (fn [arr value & _] (nex-array-add arr value))
+   (fn [arr value & _] (nex-array-add arr value))
    "add_at"      ^{:returns "Void" :signatures [{:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}]}
-                 (fn [arr index value & _] (nex-array-add-at arr index value))
+   (fn [arr index value & _] (nex-array-add-at arr index value))
    "put"         ^{:returns "Void"} (fn [arr index value & _] (nex-array-set arr index value))
    "set"         ^{:returns "Void" :signatures [{:params [{:name "index" :type "Integer"} {:name "value" :type "T"}] :return-type "Void"}]}
-                 (fn [arr index value & _] (nex-array-set arr index value))
+   (fn [arr index value & _] (nex-array-set arr index value))
    "length"      ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
-                 (fn [arr & _] (->nex-integer (nex-array-size arr)))
+   (fn [arr & _] (->nex-integer (nex-array-size arr)))
    "is_empty"    ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
-                 (fn [arr & _] (nex-array-empty? arr))
+   (fn [arr & _] (nex-array-empty? arr))
    ;; A trailing ctx is supplied by call-builtin-method so element membership
    ;; can honour a user-defined `equals` override (see object-equals-override).
    "contains"    ^{:returns "Boolean" :signatures [{:params [{:name "elem" :type "T"}] :return-type "Boolean"}]}
-                 (fn [arr elem & rest] (nex-array-contains-value? (first rest) arr elem))
+   (fn [arr elem & rest] (nex-array-contains-value? (first rest) arr elem))
    "index_of"    ^{:returns "Integer" :signatures [{:params [{:name "elem" :type "T"}] :return-type "Integer"}]}
-                 (fn [arr elem & rest]
-                   (let [idx (nex-array-index-of-value (first rest) arr elem)]
-                     (->nex-integer (if (>= idx 0) idx -1))))
+   (fn [arr elem & rest]
+     (let [idx (nex-array-index-of-value (first rest) arr elem)]
+       (->nex-integer (if (>= idx 0) idx -1))))
    "remove"      ^{:returns "Void" :signatures [{:params [{:name "index" :type "Integer"}] :return-type "Void"}]}
-                 (fn [arr idx & _] (nex-array-remove arr idx))
+   (fn [arr idx & _] (nex-array-remove arr idx))
    "reverse"     ^{:returns :self :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr & _] (nex-array-reverse arr))
+   (fn [arr & _] (nex-array-reverse arr))
    "sort"        ^{:returns :self
                    :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}
                                 {:params [{:name "compareFn" :type "Function"}]
                                  :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr & args]
-                   (let [ctx (last args)
-                         method-args (butlast args)]
-                     (case (count method-args)
-                       0 (nex-array-sort-with-ctx ctx arr)
-                       1 (nex-array-sort-with-ctx ctx arr (first method-args))
-                       (throw (ex-info "Method sort expects 0 or 1 arguments"
-                                       {:target arr :method "sort" :actual (count method-args)})))))
+   (fn [arr & args]
+     (let [ctx (last args)
+           method-args (butlast args)]
+       (case (count method-args)
+         0 (nex-array-sort-with-ctx ctx arr)
+         1 (nex-array-sort-with-ctx ctx arr (first method-args))
+         (throw (ex-info "Method sort expects 0 or 1 arguments"
+                         {:target arr :method "sort" :actual (count method-args)})))))
    "slice"       ^{:returns :self
                    :signatures [{:params [{:name "start" :type "Integer"} {:name "end" :type "Integer"}]
                                  :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr start end & _] (nex-array-slice arr start end))
+   (fn [arr start end & _] (nex-array-slice arr start end))
    "take"        ^{:returns :self
                    :signatures [{:params [{:name "n" :type "Integer"}]
                                  :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr n & _] (nex-array-take arr n))
+   (fn [arr n & _] (nex-array-take arr n))
    "drop"        ^{:returns :self
                    :signatures [{:params [{:name "n" :type "Integer"}]
                                  :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr n & _] (nex-array-drop arr n))
+   (fn [arr n & _] (nex-array-drop arr n))
    "take_last"   ^{:returns :self
                    :signatures [{:params [{:name "n" :type "Integer"}]
                                  :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr n & _] (nex-array-take-last arr n))
+   (fn [arr n & _] (nex-array-take-last arr n))
    "drop_last"   ^{:returns :self
                    :signatures [{:params [{:name "n" :type "Integer"}]
                                  :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr n & _] (nex-array-drop-last arr n))
+   (fn [arr n & _] (nex-array-drop-last arr n))
    "concat"      ^{:returns :self
                    :signatures [{:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}]
                                  :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr other & _] (nex-array-concat arr other))
+   (fn [arr other & _] (nex-array-concat arr other))
    "to_string"   ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                 (fn [arr & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx arr) (nex-array-str arr)))
+   (fn [arr & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx arr) (nex-array-str arr)))
    "equals"      ^{:returns "Boolean"
                    :signatures [{:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}] :return-type "Boolean"}]}
-                 (fn [arr other & _] (nex-deep-equals? arr other))
+   (fn [arr other & _] (nex-deep-equals? arr other))
    "clone"       ^{:returns :self :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}]}
-                 (fn [arr & _] (nex-clone-value arr))
+   (fn [arr & _] (nex-clone-value arr))
    "cursor"      ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
-                 (fn [arr & _]
-                   {:nex-builtin-type :ArrayCursor
-                    :source arr
-                    :index (atom 0)})})
+   (fn [arr & _]
+     {:nex-builtin-type :ArrayCursor
+      :source arr
+      :index (atom 0)})})
 
 (def map-type-methods
   {"get"         ^{:returns :value :signatures [{:params [{:name "key" :type "K"}] :return-type "V"}]}
@@ -841,111 +841,111 @@
                  ;; can't tell that apart from an absent key, so it's the
                  ;; presence check itself (`nex-map-contains-key`) that
                  ;; decides, not the retrieved value.
-                 (fn [m key & _]
-                   (if (nex-map-contains-key m key)
-                     (nex-map-get m key)
-                     (report-contract-violation Precondition "key_must_exist" "has_key")))
+   (fn [m key & _]
+     (if (nex-map-contains-key m key)
+       (nex-map-get m key)
+       (report-contract-violation Precondition "key_must_exist" "has_key")))
    "try_get"      ^{:returns :value
                     :signatures [{:params [{:name "key" :type "K"} {:name "default" :type "V"}] :return-type "V"}]}
-                  (fn [m key default & _]
-                   (if (nex-map-contains-key m key)
-                     (nex-map-get m key)
-                     default))
+   (fn [m key default & _]
+     (if (nex-map-contains-key m key)
+       (nex-map-get m key)
+       default))
    "put"          ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}]}
-                  (fn [m key val & _] (nex-map-put m key val))
+   (fn [m key val & _] (nex-map-put m key val))
    "set"          ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"} {:name "value" :type "V"}] :return-type "Void"}]}
-                  (fn [m key val & _] (nex-map-put m key val))
+   (fn [m key val & _] (nex-map-put m key val))
    "size"         ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
-                  (fn [m & _] (->nex-integer (nex-map-size m)))
+   (fn [m & _] (->nex-integer (nex-map-size m)))
    "is_empty"     ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
-                  (fn [m & _] (nex-map-empty? m))
+   (fn [m & _] (nex-map-empty? m))
    "contains_key" ^{:returns "Boolean" :signatures [{:params [{:name "key" :type "K"}] :return-type "Boolean"}]}
-                  (fn [m key & _] (nex-map-contains-key-value? m key))
+   (fn [m key & _] (nex-map-contains-key-value? m key))
    "keys"         ^{:returns :array-of-element
                     :signatures [{:params [] :return-type {:base-type "Array" :type-params ["K"]}}]}
-                  (fn [m & _] (nex-map-keys m))
+   (fn [m & _] (nex-map-keys m))
    "values"       ^{:returns :array-of-value
                     :signatures [{:params [] :return-type {:base-type "Array" :type-params ["V"]}}]}
-                  (fn [m & _] (nex-map-values m))
+   (fn [m & _] (nex-map-values m))
    "remove"       ^{:returns "Void" :signatures [{:params [{:name "key" :type "K"}] :return-type "Void"}]}
-                  (fn [m key & _] (nex-map-remove m key))
+   (fn [m key & _] (nex-map-remove m key))
    "to_string"    ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                  (fn [m & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx m) (nex-map-str m)))
+   (fn [m & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx m) (nex-map-str m)))
    "equals"       ^{:returns "Boolean"
                     :signatures [{:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}] :return-type "Boolean"}]}
-                  (fn [m other & _] (nex-deep-equals? m other))
+   (fn [m other & _] (nex-deep-equals? m other))
    "clone"        ^{:returns :self :signatures [{:params [] :return-type {:base-type "Map" :type-params ["K" "V"]}}]}
-                  (fn [m & _] (nex-clone-value m))
+   (fn [m & _] (nex-clone-value m))
    "cursor"       ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
-                  (fn [m & _]
-                    {:nex-builtin-type :MapCursor
-                    :source m
-                    :keys (atom (nex-map-keys m))
-                    :index (atom 0)})})
+   (fn [m & _]
+     {:nex-builtin-type :MapCursor
+      :source m
+      :keys (atom (nex-map-keys m))
+      :index (atom 0)})})
 
 (def set-type-methods
   {"contains"             ^{:returns "Boolean" :signatures [{:params [{:name "value" :type "T"}] :return-type "Boolean"}]}
-                          (fn [s value & _] (nex-set-contains-value? s value))
+   (fn [s value & _] (nex-set-contains-value? s value))
    "add"                  ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
-                          (fn [s value & _] (nex-set-add! s value))
+   (fn [s value & _] (nex-set-add! s value))
    "remove"               ^{:returns "Void" :signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
-                          (fn [s value & _] (nex-set-remove! s value))
+   (fn [s value & _] (nex-set-remove! s value))
    "union"                ^{:returns :self
                             :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
                                           :return-type {:base-type "Set" :type-params ["T"]}}]}
-                          (fn [s other & _] (nex-set-union s other))
+   (fn [s other & _] (nex-set-union s other))
    "difference"           ^{:returns :self
                             :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
                                           :return-type {:base-type "Set" :type-params ["T"]}}]}
-                          (fn [s other & _] (nex-set-difference s other))
+   (fn [s other & _] (nex-set-difference s other))
    "intersection"         ^{:returns :self
                             :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
                                           :return-type {:base-type "Set" :type-params ["T"]}}]}
-                          (fn [s other & _] (nex-set-intersection s other))
+   (fn [s other & _] (nex-set-intersection s other))
    "symmetric_difference" ^{:returns :self
                             :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
                                           :return-type {:base-type "Set" :type-params ["T"]}}]}
-                          (fn [s other & _] (nex-set-symmetric-difference s other))
+   (fn [s other & _] (nex-set-symmetric-difference s other))
    "size"                 ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
-                          (fn [s & _] (->nex-integer (nex-set-size s)))
+   (fn [s & _] (->nex-integer (nex-set-size s)))
    "is_empty"             ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
-                          (fn [s & _] (nex-set-empty? s))
+   (fn [s & _] (nex-set-empty? s))
    "to_array"             ^{:returns :array-of-element
                             :signatures [{:params [] :return-type {:base-type "Array" :type-params ["T"]}}]}
-                          (fn [s & _] (nex-set-to-array s))
+   (fn [s & _] (nex-set-to-array s))
    "to_string"            ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                          (fn [s & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx s) (nex-set-str s)))
+   (fn [s & rest] (if-let [ctx (first rest)] (format-value-with-ctx ctx s) (nex-set-str s)))
    "equals"               ^{:returns "Boolean"
                             :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}] :return-type "Boolean"}]}
-                          (fn [s other & _] (nex-deep-equals? s other))
+   (fn [s other & _] (nex-deep-equals? s other))
    "clone"                ^{:returns :self :signatures [{:params [] :return-type {:base-type "Set" :type-params ["T"]}}]}
-                          (fn [s & _] (nex-clone-value s))
+   (fn [s & _] (nex-clone-value s))
    "cursor"               ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
-                          (fn [s & _]
-                            {:nex-builtin-type :SetCursor
-                             :source s
-                             :values (atom (vec (nex-set-seq s)))
-                             :index (atom 0)})})
+   (fn [s & _]
+     {:nex-builtin-type :SetCursor
+      :source s
+      :values (atom (vec (nex-set-seq s)))
+      :index (atom 0)})})
 
 (def min-heap-type-methods
   {"insert"          ^{:signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
-                     (fn [heap value & [ctx]] (heap-insert! ctx heap value))
+   (fn [heap value & [ctx]] (heap-insert! ctx heap value))
    "extract_min"     ^{:signatures [{:params [] :return-type "T"}]}
-                     (fn [heap & [ctx]]
-                       (or (heap-extract-min! ctx heap)
-                           (throw (ex-info "Min_Heap is empty" {:heap heap}))))
+   (fn [heap & [ctx]]
+     (or (heap-extract-min! ctx heap)
+         (throw (ex-info "Min_Heap is empty" {:heap heap}))))
    "try_extract_min" ^{:signatures [{:params [] :return-type {:base-type "T" :detachable true}}]}
-                     (fn [heap & [ctx]] (heap-extract-min! ctx heap))
+   (fn [heap & [ctx]] (heap-extract-min! ctx heap))
    "peek"            ^{:signatures [{:params [] :return-type "T"}]}
-                     (fn [heap & _]
-                       (or (heap-peek heap)
-                           (throw (ex-info "Min_Heap is empty" {:heap heap}))))
+   (fn [heap & _]
+     (or (heap-peek heap)
+         (throw (ex-info "Min_Heap is empty" {:heap heap}))))
    "try_peek"        ^{:signatures [{:params [] :return-type {:base-type "T" :detachable true}}]}
-                     (fn [heap & _] (heap-peek heap))
+   (fn [heap & _] (heap-peek heap))
    "size"            ^{:signatures [{:params [] :return-type "Integer"}]}
-                     (fn [heap & _] (->nex-integer (count @(:data heap))))
+   (fn [heap & _] (->nex-integer (count @(:data heap))))
    "is_empty"        ^{:signatures [{:params [] :return-type "Boolean"}]}
-                     (fn [heap & _] (empty? @(:data heap)))})
+   (fn [heap & _] (empty? @(:data heap)))})
 
 ;; Atomic_Integer and Atomic_Integer64 are both 64-bit (AtomicLong on the JVM,
 ;; a BigInt-holding atom on JS). On JS, Integer is a BigInt, so increment/add
@@ -953,169 +953,169 @@
 ;; and throw.
 (def atomic-integer-type-methods
   {"load"            ^{:signatures [{:params [] :return-type "Integer"}]}
-                     (fn [atomic & _] (.get ^AtomicLong (:state atomic)))
+   (fn [atomic & _] (.get ^AtomicLong (:state atomic)))
    "store"           ^{:signatures [{:params [{:name "value" :type "Integer"}] :return-type "Void"}]}
-                     (fn [atomic value & _]
-                       (.set ^AtomicLong (:state atomic) (long value))
-                       nil)
+   (fn [atomic value & _]
+     (.set ^AtomicLong (:state atomic) (long value))
+     nil)
    "compare_and_set" ^{:signatures [{:params [{:name "expected" :type "Integer"}
-                                               {:name "update" :type "Integer"}]
-                                      :return-type "Boolean"}]}
-                     (fn [atomic expected update & _]
-                       (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update)))
+                                              {:name "update" :type "Integer"}]
+                                     :return-type "Boolean"}]}
+   (fn [atomic expected update & _]
+     (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update)))
    "get_and_add"     ^{:signatures [{:params [{:name "delta" :type "Integer"}] :return-type "Integer"}]}
-                     (fn [atomic delta & _]
-                       (.getAndAdd ^AtomicLong (:state atomic) (long delta)))
+   (fn [atomic delta & _]
+     (.getAndAdd ^AtomicLong (:state atomic) (long delta)))
    "add_and_get"     ^{:signatures [{:params [{:name "delta" :type "Integer"}] :return-type "Integer"}]}
-                     (fn [atomic delta & _]
-                       (.addAndGet ^AtomicLong (:state atomic) (long delta)))
+   (fn [atomic delta & _]
+     (.addAndGet ^AtomicLong (:state atomic) (long delta)))
    "increment"       ^{:signatures [{:params [] :return-type "Integer"}]}
-                     (fn [atomic & _]
-                       (.incrementAndGet ^AtomicLong (:state atomic)))
+   (fn [atomic & _]
+     (.incrementAndGet ^AtomicLong (:state atomic)))
    "decrement"       ^{:signatures [{:params [] :return-type "Integer"}]}
-                     (fn [atomic & _]
-                       (.decrementAndGet ^AtomicLong (:state atomic)))})
+   (fn [atomic & _]
+     (.decrementAndGet ^AtomicLong (:state atomic)))})
 
 (def atomic-integer64-type-methods
   {"load"            ^{:signatures [{:params [] :return-type "Integer"}]}
-                     (fn [atomic & _] (.get ^AtomicLong (:state atomic)))
+   (fn [atomic & _] (.get ^AtomicLong (:state atomic)))
    "store"           ^{:signatures [{:params [{:name "value" :type "Integer"}] :return-type "Void"}]}
-                     (fn [atomic value & _]
-                       (.set ^AtomicLong (:state atomic) (long value))
-                       nil)
+   (fn [atomic value & _]
+     (.set ^AtomicLong (:state atomic) (long value))
+     nil)
    "compare_and_set" ^{:signatures [{:params [{:name "expected" :type "Integer"}
-                                               {:name "update" :type "Integer"}]
-                                      :return-type "Boolean"}]}
-                     (fn [atomic expected update & _]
-                       (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update)))
+                                              {:name "update" :type "Integer"}]
+                                     :return-type "Boolean"}]}
+   (fn [atomic expected update & _]
+     (.compareAndSet ^AtomicLong (:state atomic) (long expected) (long update)))
    "get_and_add"     ^{:signatures [{:params [{:name "delta" :type "Integer"}] :return-type "Integer"}]}
-                     (fn [atomic delta & _]
-                       (.getAndAdd ^AtomicLong (:state atomic) (long delta)))
+   (fn [atomic delta & _]
+     (.getAndAdd ^AtomicLong (:state atomic) (long delta)))
    "add_and_get"     ^{:signatures [{:params [{:name "delta" :type "Integer"}] :return-type "Integer"}]}
-                     (fn [atomic delta & _]
-                       (.addAndGet ^AtomicLong (:state atomic) (long delta)))
+   (fn [atomic delta & _]
+     (.addAndGet ^AtomicLong (:state atomic) (long delta)))
    "increment"       ^{:signatures [{:params [] :return-type "Integer"}]}
-                     (fn [atomic & _]
-                       (.incrementAndGet ^AtomicLong (:state atomic)))
+   (fn [atomic & _]
+     (.incrementAndGet ^AtomicLong (:state atomic)))
    "decrement"       ^{:signatures [{:params [] :return-type "Integer"}]}
-                     (fn [atomic & _]
-                       (.decrementAndGet ^AtomicLong (:state atomic)))})
+   (fn [atomic & _]
+     (.decrementAndGet ^AtomicLong (:state atomic)))})
 
 (def atomic-boolean-type-methods
   {"load"            ^{:signatures [{:params [] :return-type "Boolean"}]}
-                     (fn [atomic & _] (.get ^AtomicBoolean (:state atomic)))
+   (fn [atomic & _] (.get ^AtomicBoolean (:state atomic)))
    "store"           ^{:signatures [{:params [{:name "value" :type "Boolean"}] :return-type "Void"}]}
-                     (fn [atomic value & _]
-                       (.set ^AtomicBoolean (:state atomic) (boolean value))
-                       nil)
+   (fn [atomic value & _]
+     (.set ^AtomicBoolean (:state atomic) (boolean value))
+     nil)
    "compare_and_set" ^{:signatures [{:params [{:name "expected" :type "Boolean"}
-                                               {:name "update" :type "Boolean"}]
-                                      :return-type "Boolean"}]}
-                     (fn [atomic expected update & _]
-                       (.compareAndSet ^AtomicBoolean (:state atomic)
-                                               (boolean expected)
-                                               (boolean update)))})
+                                              {:name "update" :type "Boolean"}]
+                                     :return-type "Boolean"}]}
+   (fn [atomic expected update & _]
+     (.compareAndSet ^AtomicBoolean (:state atomic)
+                     (boolean expected)
+                     (boolean update)))})
 
 (def atomic-reference-type-methods
   {"load"            ^{:signatures [{:params [] :return-type {:base-type "T" :detachable true}}]}
-                     (fn [atomic & _] (.get ^AtomicReference (:state atomic)))
+   (fn [atomic & _] (.get ^AtomicReference (:state atomic)))
    "store"           ^{:signatures [{:params [{:name "value" :type {:base-type "T" :detachable true}}] :return-type "Void"}]}
-                     (fn [atomic value & _]
-                       (.set ^AtomicReference (:state atomic) value)
-                       nil)
+   (fn [atomic value & _]
+     (.set ^AtomicReference (:state atomic) value)
+     nil)
    "compare_and_set" ^{:signatures [{:params [{:name "expected" :type {:base-type "T" :detachable true}}
-                                               {:name "update" :type {:base-type "T" :detachable true}}]
-                                      :return-type "Boolean"}]}
-                     (fn [atomic expected update & _]
-                       (atomic-reference-cas! atomic expected update))})
+                                              {:name "update" :type {:base-type "T" :detachable true}}]
+                                     :return-type "Boolean"}]}
+   (fn [atomic expected update & _]
+     (atomic-reference-cas! atomic expected update))})
 
 (def task-type-methods
   {"await"    ^{:signatures [{:params [] :return-type "T"}]}
-             (fn [t & [timeout]]
-                 (let [result (if (some? timeout)
-                                (task-await t timeout)
-                                (task-await t))]
-                   (if (= result task-timeout-signal) nil result)))
+   (fn [t & [timeout]]
+     (let [result (if (some? timeout)
+                    (task-await t timeout)
+                    (task-await t))]
+       (if (= result task-timeout-signal) nil result)))
    "cancel"   ^{:signatures [{:params [] :return-type "Boolean"}]}
-             (fn [t & _] (task-cancel t))
+   (fn [t & _] (task-cancel t))
    "is_done"  ^{:signatures [{:params [] :return-type "Boolean"}]}
-             (fn [t & _] (.isDone ^CompletableFuture (:future t)))
+   (fn [t & _] (.isDone ^CompletableFuture (:future t)))
    "is_cancelled" ^{:signatures [{:params [] :return-type "Boolean"}]}
-                  (fn [t & _] (task-cancelled? t))})
+   (fn [t & _] (task-cancelled? t))})
 
 (def channel-type-methods
   {"send"      ^{:signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
-              (fn [ch value & [timeout]]
-                 (if (some? timeout)
-                   (channel-send ch value timeout)
-                   (channel-send ch value)))
+   (fn [ch value & [timeout]]
+     (if (some? timeout)
+       (channel-send ch value timeout)
+       (channel-send ch value)))
    "try_send"  ^{:signatures [{:params [{:name "value" :type "T"}] :return-type "Boolean"}]}
-              (fn [ch value & _] (channel-try-send ch value))
+   (fn [ch value & _] (channel-try-send ch value))
    "receive"   ^{:signatures [{:params [] :return-type "T"}]}
-              (fn [ch & [timeout]]
-                 (if (some? timeout)
-                   (channel-receive ch timeout)
-                   (channel-receive ch)))
+   (fn [ch & [timeout]]
+     (if (some? timeout)
+       (channel-receive ch timeout)
+       (channel-receive ch)))
    "try_receive" ^{:signatures [{:params [] :return-type {:base-type "T" :detachable true}}]}
-                 (fn [ch & _] (channel-try-receive ch))
+   (fn [ch & _] (channel-try-receive ch))
    "close"     ^{:signatures [{:params [] :return-type "Void"}]}
-              (fn [ch & _] (channel-close ch))
+   (fn [ch & _] (channel-close ch))
    "is_closed" ^{:signatures [{:params [] :return-type "Boolean"}]}
-              (fn [ch & _] (:closed? @(:state ch)))
+   (fn [ch & _] (:closed? @(:state ch)))
    "capacity"  ^{:signatures [{:params [] :return-type "Integer"}]}
-              (fn [ch & _] (:capacity @(:state ch)))
+   (fn [ch & _] (:capacity @(:state ch)))
    "size"      ^{:signatures [{:params [] :return-type "Integer"}]}
-              (fn [ch & _]
-                 (count (:buffer @(:state ch))))})
+   (fn [ch & _]
+     (count (:buffer @(:state ch))))})
 
 (def console-type-methods
   {"print"        ^{:returns "Void" :signatures [{:params [{:name "msg" :type "String"}] :return-type "Void"}]}
-                  (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
+   (fn [_ msg & _] (nex-console-print (nex-display-value msg)) nil)
    "print_line"   ^{:returns "Void" :signatures [{:params [{:name "msg" :type "String"}] :return-type "Void"}]}
-                  (fn [_ msg & _] (nex-console-println (nex-display-value msg)) nil)
+   (fn [_ msg & _] (nex-console-println (nex-display-value msg)) nil)
    "read_line"    ^{:returns "String"
                     :signatures [{:params [] :return-type "String"}
                                  {:params [{:name "prompt" :type "String"}] :return-type "String"}]}
-                  (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
+   (fn [_ & args] (when (seq args) (nex-console-print (str (first args)))) (nex-console-read-line))
    "error"        ^{:returns "Void" :signatures [{:params [{:name "msg" :type "String"}] :return-type "Void"}]}
-                  (fn [_ msg & _] (nex-console-error (nex-display-value msg)) nil)
+   (fn [_ msg & _] (nex-console-error (nex-display-value msg)) nil)
    "new_line"     ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
-                  (fn [_ & _] (nex-console-newline) nil)
+   (fn [_ & _] (nex-console-newline) nil)
    "flush"        ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
-                  (fn [_ & _] (nex-console-flush) nil)
+   (fn [_ & _] (nex-console-flush) nil)
    "read_integer" ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
-                  (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
+   (fn [_ & _] (nex-parse-integer (nex-console-read-line)))
    "read_real"    ^{:returns "Real" :signatures [{:params [] :return-type "Real"}]}
-                  (fn [_ & _] (nex-parse-real (nex-console-read-line)))})
+   (fn [_ & _] (nex-parse-real (nex-console-read-line)))})
 
 (def process-type-methods
   {"getenv"       ^{:returns "String" :signatures [{:params [{:name "name" :type "String"}] :return-type "String"}]}
-                  (fn [proc name & _] (or (nex-process-getenv proc (str name)) ""))
+   (fn [proc name & _] (or (nex-process-getenv proc (str name)) ""))
    "setenv"       ^{:returns "Void"
                     :signatures [{:params [{:name "name" :type "String"} {:name "value" :type "String"}] :return-type "Void"}]}
-                  (fn [proc name value & _] (nex-process-setenv proc (str name) (str value)) nil)
+   (fn [proc name value & _] (nex-process-setenv proc (str name) (str value)) nil)
    "command_line" ^{:returns {:base-type "Array" :type-params ["String"]}
                     :signatures [{:params [] :return-type {:base-type "Array" :type-params ["String"]}}]}
-                  (fn [proc & _] (nex-process-command-line proc))
+   (fn [proc & _] (nex-process-command-line proc))
 
    "is_self"      ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
-                  (fn [proc & _] (nex-process-is-self proc))
+   (fn [proc & _] (nex-process-is-self proc))
    "is_child"     ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
-                  (fn [proc & _] (nex-process-is-child proc))
+   (fn [proc & _] (nex-process-is-child proc))
 
    "set_working_directory"        ^{:returns "Void" :signatures [{:params [{:name "dir" :type "String"}] :return-type "Void"}]}
-                                   (fn [proc dir & _] (nex-process-set-working-directory proc (str dir)))
+   (fn [proc dir & _] (nex-process-set-working-directory proc (str dir)))
    "set_redirect_error_to_output" ^{:returns "Void" :signatures [{:params [{:name "flag" :type "Boolean"}] :return-type "Void"}]}
-                                   (fn [proc flag & _] (nex-process-set-redirect-error-to-output proc (boolean flag)))
+   (fn [proc flag & _] (nex-process-set-redirect-error-to-output proc (boolean flag)))
 
    "start"        ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
-                  (fn [proc & _] (nex-process-start proc))
+   (fn [proc & _] (nex-process-start proc))
    "is_started"   ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
-                  (fn [proc & _] (nex-process-is-started proc))
+   (fn [proc & _] (nex-process-is-started proc))
    "is_alive"     ^{:returns "Boolean" :signatures [{:params [] :return-type "Boolean"}]}
-                  (fn [proc & _] (nex-process-is-alive proc))
+   (fn [proc & _] (nex-process-is-alive proc))
    "pid"          ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
-                  (fn [proc & _] (nex-process-pid proc))
+   (fn [proc & _] (nex-process-pid proc))
 
    ;; wait() never actually returns nil (it blocks until exit), but the JVM
    ;; lowering's static return type is keyed by method name only, not arity
@@ -1126,38 +1126,38 @@
                     :signatures [{:params [] :return-type "Integer"}
                                  {:params [{:name "timeout_ms" :type "Integer"}]
                                   :return-type {:base-type "Integer" :detachable true}}]}
-                  (fn [proc & [timeout]]
-                    (if (some? timeout)
-                      (nex-process-wait-timeout proc timeout)
-                      (nex-process-wait proc)))
+   (fn [proc & [timeout]]
+     (if (some? timeout)
+       (nex-process-wait-timeout proc timeout)
+       (nex-process-wait proc)))
    "exit_code"    ^{:returns {:base-type "Integer" :detachable true}
                     :signatures [{:params [] :return-type {:base-type "Integer" :detachable true}}]}
-                  (fn [proc & _] (nex-process-exit-code proc))
+   (fn [proc & _] (nex-process-exit-code proc))
 
    "terminate"    ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
-                  (fn [proc & _] (nex-process-terminate proc))
+   (fn [proc & _] (nex-process-terminate proc))
    "kill"         ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
-                  (fn [proc & _] (nex-process-kill proc))
+   (fn [proc & _] (nex-process-kill proc))
 
    "write"            ^{:returns "Void" :signatures [{:params [{:name "text" :type "String"}] :return-type "Void"}]}
-                      (fn [proc text & _] (nex-process-write proc (str text)))
+   (fn [proc text & _] (nex-process-write proc (str text)))
    "write_line"       ^{:returns "Void" :signatures [{:params [{:name "text" :type "String"}] :return-type "Void"}]}
-                      (fn [proc text & _] (nex-process-write-line proc (str text)))
+   (fn [proc text & _] (nex-process-write-line proc (str text)))
    "close_stdin"      ^{:returns "Void" :signatures [{:params [] :return-type "Void"}]}
-                      (fn [proc & _] (nex-process-close-stdin proc))
+   (fn [proc & _] (nex-process-close-stdin proc))
    "read_line"        ^{:returns {:base-type "String" :detachable true}
                         :signatures [{:params [] :return-type {:base-type "String" :detachable true}}]}
-                      (fn [proc & _] (nex-process-read-line proc))
+   (fn [proc & _] (nex-process-read-line proc))
    "read_all"         ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                      (fn [proc & _] (nex-process-read-all proc))
+   (fn [proc & _] (nex-process-read-all proc))
    "read_error_line"  ^{:returns {:base-type "String" :detachable true}
                         :signatures [{:params [] :return-type {:base-type "String" :detachable true}}]}
-                      (fn [proc & _] (nex-process-read-error-line proc))
+   (fn [proc & _] (nex-process-read-error-line proc))
    "read_error_all"   ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                      (fn [proc & _] (nex-process-read-error-all proc))
+   (fn [proc & _] (nex-process-read-error-all proc))
 
    "to_string"    ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
-                  (fn [proc & _] (nex-process-to-string proc))})
+   (fn [proc & _] (nex-process-to-string proc))})
 
 (def arraycursor-type-methods
   {"start"   (fn [c & _] (reset! (:index c) 0) nil)
@@ -1345,36 +1345,36 @@
   (typeinfo/runtime-type-is? runtime-type-name is-parent? ctx target-type value))
 
 (defn java-http-request
-     [method url body timeout-ms]
-     (http/java-http-request make-object method url body timeout-ms))
+  [method url body timeout-ms]
+  (http/java-http-request make-object method url body timeout-ms))
 
 (defn make-http-server-handle
-     [port]
-     (http/make-http-server-handle port))
+  [port]
+  (http/make-http-server-handle port))
 
 (defn start-http-server!
-     [ctx handle]
-     (http/start-http-server!
-      make-object
-      (fn [inner-ctx handler request-obj]
-        (eval-call inner-ctx handler "call1" [request-obj]))
-      ctx
-      handle))
+  [ctx handle]
+  (http/start-http-server!
+   make-object
+   (fn [inner-ctx handler request-obj]
+     (eval-call inner-ctx handler "call1" [request-obj]))
+   ctx
+   handle))
 
 (defn resolve-imported-java-class
-     "Resolve a Java class name using imports in the context."
-     [ctx class-name]
-     (let [imports @(:imports ctx)
-           match (some (fn [{:keys [qualified-name source]}]
-                         (when (and (nil? source)
-                                    qualified-name
-                                    (= class-name (last (str/split qualified-name #"\."))))
-                           qualified-name))
-                       imports)
-           qualified (or match class-name)]
-       (try
-         (Class/forName qualified)
-         (catch Exception _ nil))))
+  "Resolve a Java class name using imports in the context."
+  [ctx class-name]
+  (let [imports @(:imports ctx)
+        match (some (fn [{:keys [qualified-name source]}]
+                      (when (and (nil? source)
+                                 qualified-name
+                                 (= class-name (last (str/split qualified-name #"\."))))
+                        qualified-name))
+                    imports)
+        qualified (or match class-name)]
+    (try
+      (Class/forName qualified)
+      (catch Exception _ nil))))
 
 (defn- class-def-if-exists
   "Nex class-def lookup mirroring nex.interpreter/lookup-class-if-exists,
@@ -1490,18 +1490,18 @@
   (mapv #(java-arg ctx %) arg-values))
 
 (defn java-create-object
-     "Create a Java object via reflection."
-     [ctx class-name arg-values]
-     (let [klass (resolve-imported-java-class ctx class-name)]
-       (when-not klass
-         (throw (ex-info (str "Undefined class: " class-name)
-                         {:class-name class-name})))
-       (clojure.lang.Reflector/invokeConstructor klass (to-array (java-args ctx arg-values)))))
+  "Create a Java object via reflection."
+  [ctx class-name arg-values]
+  (let [klass (resolve-imported-java-class ctx class-name)]
+    (when-not klass
+      (throw (ex-info (str "Undefined class: " class-name)
+                      {:class-name class-name})))
+    (clojure.lang.Reflector/invokeConstructor klass (to-array (java-args ctx arg-values)))))
 
 (defn java-call-method
-     "Call a Java method via reflection."
-     [ctx target method-name arg-values]
-     (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array (java-args ctx arg-values))))
+  "Call a Java method via reflection."
+  [ctx target method-name arg-values]
+  (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array (java-args ctx arg-values))))
 
 (def core-builtins
   {"print"
@@ -1561,8 +1561,8 @@
        (throw (ex-info "sleep expects exactly 1 argument"
                        {:function "sleep" :expected 1 :actual (count args)})))
      (do
-               (Thread/sleep (long (first args)))
-               nil))
+       (Thread/sleep (long (first args)))
+       nil))
    "hint_spin"
    (fn [_ctx & args]
      (when (not= (count args) 0)
@@ -1955,9 +1955,9 @@
                        {:function "http_server_get" :expected 3 :actual (count args)})))
      (let [[handle path handler] args]
        (do
-                 (swap! (get-in handle [:routes "GET"]) conj {:path-pattern (str path)
-                                                              :handler handler})
-                 nil)))
+         (swap! (get-in handle [:routes "GET"]) conj {:path-pattern (str path)
+                                                      :handler handler})
+         nil)))
    "http_server_post"
    (fn [_ctx & args]
      (when (not= (count args) 3)
@@ -1965,9 +1965,9 @@
                        {:function "http_server_post" :expected 3 :actual (count args)})))
      (let [[handle path handler] args]
        (do
-                 (swap! (get-in handle [:routes "POST"]) conj {:path-pattern (str path)
-                                                               :handler handler})
-                 nil)))
+         (swap! (get-in handle [:routes "POST"]) conj {:path-pattern (str path)
+                                                       :handler handler})
+         nil)))
    "http_server_put"
    (fn [_ctx & args]
      (when (not= (count args) 3)
@@ -1975,9 +1975,9 @@
                        {:function "http_server_put" :expected 3 :actual (count args)})))
      (let [[handle path handler] args]
        (do
-                 (swap! (get-in handle [:routes "PUT"]) conj {:path-pattern (str path)
-                                                              :handler handler})
-                 nil)))
+         (swap! (get-in handle [:routes "PUT"]) conj {:path-pattern (str path)
+                                                      :handler handler})
+         nil)))
    "http_server_delete"
    (fn [_ctx & args]
      (when (not= (count args) 3)
@@ -1985,9 +1985,9 @@
                        {:function "http_server_delete" :expected 3 :actual (count args)})))
      (let [[handle path handler] args]
        (do
-                 (swap! (get-in handle [:routes "DELETE"]) conj {:path-pattern (str path)
-                                                                 :handler handler})
-                 nil)))
+         (swap! (get-in handle [:routes "DELETE"]) conj {:path-pattern (str path)
+                                                         :handler handler})
+         nil)))
    "http_server_start"
    (fn [ctx & args]
      (when (not= (count args) 1)
@@ -2000,11 +2000,11 @@
        (throw (ex-info "http_server_stop expects exactly 1 argument"
                        {:function "http_server_stop" :expected 1 :actual (count args)})))
      (let [handle (first args)
-                   server @(:server handle)]
-               (when server
-                 (.stop ^com.sun.net.httpserver.HttpServer server 0)
-                 (reset! (:server handle) nil))
-               nil))
+           server @(:server handle)]
+       (when server
+         (.stop ^com.sun.net.httpserver.HttpServer server 0)
+         (reset! (:server handle) nil))
+       nil))
    "http_server_is_running"
    (fn [_ctx & args]
      (when (not= (count args) 1)

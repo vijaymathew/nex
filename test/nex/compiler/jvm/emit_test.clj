@@ -225,11 +225,11 @@
                                              :var-types {"score" "Integer"}})
                      :unit)
           class-a (loader/define-class! state-loader
-                                        "nex.repl.Cell_0050"
-                                        (emit/compile-unit->bytes unit-a))
+                    "nex.repl.Cell_0050"
+                    (emit/compile-unit->bytes unit-a))
           class-b (loader/define-class! state-loader
-                                        "nex.repl.Cell_0051"
-                                        (emit/compile-unit->bytes unit-b))
+                    "nex.repl.Cell_0051"
+                    (emit/compile-unit->bytes unit-b))
           eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
           eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
       (.invoke eval-a nil (object-array [state]))
@@ -249,11 +249,11 @@
                                              :var-types {"x" "Integer"}})
                      :unit)
           class-a (loader/define-class! state-loader
-                                        "nex.repl.Cell_0052"
-                                        (emit/compile-unit->bytes unit-a))
+                    "nex.repl.Cell_0052"
+                    (emit/compile-unit->bytes unit-a))
           class-b (loader/define-class! state-loader
-                                        "nex.repl.Cell_0053"
-                                        (emit/compile-unit->bytes unit-b))
+                    "nex.repl.Cell_0053"
+                    (emit/compile-unit->bytes unit-b))
           eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
           eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
       (.invoke eval-a nil (object-array [state]))
@@ -273,11 +273,11 @@
                                              :var-types {"x" "Integer"}})
                      :unit)
           class-a (loader/define-class! state-loader
-                                        "nex.repl.Cell_0054"
-                                        (emit/compile-unit->bytes unit-a))
+                    "nex.repl.Cell_0054"
+                    (emit/compile-unit->bytes unit-a))
           class-b (loader/define-class! state-loader
-                                        "nex.repl.Cell_0055"
-                                        (emit/compile-unit->bytes unit-b))
+                    "nex.repl.Cell_0055"
+                    (emit/compile-unit->bytes unit-b))
           eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
           eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
       (.invoke eval-a nil (object-array [state]))
@@ -296,11 +296,11 @@
                                              :functions (:functions def-ast)})
                      :unit)
           class-a (loader/define-class! state-loader
-                                        "nex.repl.Cell_0061"
-                                        (emit/compile-unit->bytes unit-a))
+                    "nex.repl.Cell_0061"
+                    (emit/compile-unit->bytes unit-a))
           class-b (loader/define-class! state-loader
-                                        "nex.repl.Cell_0062"
-                                        (emit/compile-unit->bytes unit-b))
+                    "nex.repl.Cell_0062"
+                    (emit/compile-unit->bytes unit-b))
           eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
           eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
       (.invoke eval-a nil (object-array [state]))
@@ -324,14 +324,14 @@
                                              :functions (:functions def-ast-b)})
                      :unit)
           class-a (loader/define-class! state-loader
-                                        "nex.repl.Cell_0063"
-                                        (emit/compile-unit->bytes unit-a))
+                    "nex.repl.Cell_0063"
+                    (emit/compile-unit->bytes unit-a))
           class-b (loader/define-class! state-loader
-                                        "nex.repl.Cell_0064"
-                                        (emit/compile-unit->bytes unit-b))
+                    "nex.repl.Cell_0064"
+                    (emit/compile-unit->bytes unit-b))
           class-c (loader/define-class! state-loader
-                                        "nex.repl.Cell_0065"
-                                        (emit/compile-unit->bytes unit-c))
+                    "nex.repl.Cell_0065"
+                    (emit/compile-unit->bytes unit-c))
           eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
           eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))
           eval-c (.getMethod class-c "eval" (into-array Class [(class state)]))]
@@ -353,11 +353,11 @@
                                              :functions (:functions def-ast)})
                      :unit)
           class-a (loader/define-class! state-loader
-                                        "nex.repl.Cell_0066"
-                                        (emit/compile-unit->bytes unit-a))
+                    "nex.repl.Cell_0066"
+                    (emit/compile-unit->bytes unit-a))
           class-b (loader/define-class! state-loader
-                                        "nex.repl.Cell_0067"
-                                        (emit/compile-unit->bytes unit-b))
+                    "nex.repl.Cell_0067"
+                    (emit/compile-unit->bytes unit-b))
           eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
           eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))]
       (.invoke eval-a nil (object-array [state]))
@@ -383,14 +383,14 @@
                                              :functions visible-fns})
                      :unit)
           class-a (loader/define-class! state-loader
-                                        "nex.repl.Cell_0068"
-                                        (emit/compile-unit->bytes unit-a))
+                    "nex.repl.Cell_0068"
+                    (emit/compile-unit->bytes unit-a))
           class-b (loader/define-class! state-loader
-                                        "nex.repl.Cell_0069"
-                                        (emit/compile-unit->bytes unit-b))
+                    "nex.repl.Cell_0069"
+                    (emit/compile-unit->bytes unit-b))
           class-c (loader/define-class! state-loader
-                                        "nex.repl.Cell_0070"
-                                        (emit/compile-unit->bytes unit-c))
+                    "nex.repl.Cell_0070"
+                    (emit/compile-unit->bytes unit-c))
           eval-a (.getMethod class-a "eval" (into-array Class [(class state)]))
           eval-b (.getMethod class-b "eval" (into-array Class [(class state)]))
           eval-c (.getMethod class-c "eval" (into-array Class [(class state)]))]
@@ -406,9 +406,9 @@ feature
 end")
           shape (first (:classes program))
           lowered (lower/lower-class-def shape {:compiled-classes {"Shape" {:name "Shape"
-                                                                           :internal-name "nex/repl/Shape_0001"
-                                                                           :jvm-name "nex/repl/Shape_0001"
-                                                                           :binary-name "nex.repl.Shape_0001"}}
+                                                                            :internal-name "nex/repl/Shape_0001"
+                                                                            :jvm-name "nex/repl/Shape_0001"
+                                                                            :binary-name "nex.repl.Shape_0001"}}
                                                 :classes (:classes program)
                                                 :functions []
                                                 :imports []})
@@ -457,9 +457,9 @@ end")
                                                         :imports []})
           l (loader/make-loader)
           shape-cls (loader/define-class! l "nex.repl.Shape_0001"
-                                          (emit/compile-user-class->bytes shape-lowered))
+                      (emit/compile-user-class->bytes shape-lowered))
           square-cls (loader/define-class! l "nex.repl.Square_0002"
-                                           (emit/compile-user-class->bytes square-lowered))
+                       (emit/compile-user-class->bytes square-lowered))
           parent-field (.getDeclaredField square-cls "_parent_Shape")]
       (is (= "java.lang.Object" (.getName (.getSuperclass square-cls))))
       (is (= shape-cls (.getType parent-field)))

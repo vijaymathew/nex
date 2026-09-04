@@ -64,7 +64,7 @@
           call-node {:type :call :target "counter" :method "badIncrement" :args []}]
       ;; Should throw postcondition violation
       (is (thrown-with-msg? Exception #"Postcondition violation"
-                           (eval-node ctx call-node))))))
+                            (eval-node ctx call-node))))))
 
 (deftest old-keyword-rollback-test
   (testing "Fields are rolled back when postcondition fails"
@@ -153,4 +153,4 @@
           call-node {:type :call :target "a" :method "bad" :args []}]
       ;; Should throw error about 'old' only being valid in postconditions
       (is (thrown-with-msg? Exception #"'old' can only be used in postconditions"
-                           (eval-node ctx call-node))))))
+                            (eval-node ctx call-node))))))

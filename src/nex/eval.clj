@@ -31,7 +31,7 @@
              :imports (vec (concat (interp/resolve-interned-imports source-id ast)
                                    (:imports ast)))
              :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
-                                       (:type-aliases ast))))
+                                        (:type-aliases ast))))
       walker/resolve-qualified-function-calls))
 
 (defn- type-check-ast!
@@ -54,8 +54,8 @@
   ;; not threaded through ctx — set once, here, before the program runs.
   (rt/set-program-args! program-args)
   (let [ctx (assoc (interp/make-context)
-                    :debug-source source-id
-                    :skip-contracts? skip-contracts?)]
+                   :debug-source source-id
+                   :skip-contracts? skip-contracts?)]
     ;; The program writes its own output as it runs, interleaved with `Console`
     ;; in the order the program produced it; nothing is echoed afterwards.
     (interp/eval-node ctx ast)
@@ -137,7 +137,7 @@
   [source-id ast skip-contracts?]
   (try
     {:compiled (jvm-file/compile-ast source-id ast {:skip-type-check true
-                                                     :skip-contracts? skip-contracts?})}
+                                                    :skip-contracts? skip-contracts?})}
     (catch Throwable e {:compile-error e})))
 
 (defn- run-compiled

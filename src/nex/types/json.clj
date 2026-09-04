@@ -38,9 +38,9 @@
                           {:value value}))))
 
 (defn nex-json-parse
-     [text]
-     (json-value->nex (json/read-str (str text))))
+  [text]
+  (json-value->nex (json/read-str (str text))))
 
 (defn nex-json-stringify
-     [value]
-     (json/write-str (nex-value->json value)))
+  [value]
+  (json/write-str (nex-value->json value)))

@@ -189,9 +189,9 @@ end"
             _ (interp/env-define env "c1" c1-obj)
             test-ctx (assoc ctx :current-env env)
             result (interp/eval-node test-ctx {:type :call
-                                                :target "c1"
-                                                :method "b"
-                                                :args [{:type :integer :value 10}]})]
+                                               :target "c1"
+                                               :method "b"
+                                               :args [{:type :integer :value 10}]})]
         (is (= 20 result))))))
 
 (deftest interpreter-function-field-no-parens-test
@@ -215,10 +215,10 @@ end"
             _ (interp/env-define env "c1" c1-obj)
             test-ctx (assoc ctx :current-env env)
             result (interp/eval-node test-ctx {:type :call
-                                                :target "c1"
-                                                :method "f"
-                                                :args []
-                                                :has-parens false})]
+                                               :target "c1"
+                                               :method "f"
+                                               :args []
+                                               :has-parens false})]
         (is (interp/nex-object? result))
         (is (= "MyFunc" (:class-name result)))))))
 
@@ -243,10 +243,10 @@ end"
             _ (interp/env-define env "c1" c1-obj)
             test-ctx (assoc ctx :current-env env)
             result (interp/eval-node test-ctx {:type :call
-                                                :target "c1"
-                                                :method "f"
-                                                :args []
-                                                :has-parens true})]
+                                               :target "c1"
+                                               :method "f"
+                                               :args []
+                                               :has-parens true})]
         (is (= 42 result))))))
 
 (deftest interpreter-zero-arg-method-invoke-test
@@ -264,9 +264,9 @@ end"
             _ (interp/env-define env "c1" c1-obj)
             test-ctx (assoc ctx :current-env env)
             result (interp/eval-node test-ctx {:type :call
-                                                :target "c1"
-                                                :method "a"
-                                                :args []})]
+                                               :target "c1"
+                                               :method "a"
+                                               :args []})]
         (is (= 10 result))))))
 
 ;; `a - 100` must parse as one subtraction, not as a parameterless call `a`

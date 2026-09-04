@@ -331,7 +331,7 @@
         (when decl
           (swap! seen-declarations conj decl))
         (if (and (not (transcript-block? block))
-          (declaration-block? block))
+                 (declaration-block? block))
           (doseq [[cell-pos {:keys [code expected-output]}] (map-indexed vector (block-cell-records block))]
             (eval-with-fresh-state! code
                                     (str (.getPath f) "#block-" index ":cell-" (inc cell-pos))

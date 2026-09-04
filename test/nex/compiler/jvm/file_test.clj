@@ -23,7 +23,7 @@
                        java.io.File/pathSeparator
                        (System/getProperty "java.class.path"))
         pb (ProcessBuilder. ^java.util.List
-                            ["java" "-cp" classpath main-class])]
+            ["java" "-cp" classpath main-class])]
     (.redirectErrorStream pb true)
     (let [proc (.start pb)
           output (slurp (.getInputStream proc))]

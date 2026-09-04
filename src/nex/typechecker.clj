@@ -109,20 +109,20 @@
   ([env class-name method-name]
    (env-lookup-method env class-name method-name nil))
   ([env class-name method-name arity]
-  (if-let [class-methods (get @(:methods env) class-name)]
-    (let [method-entry (get class-methods method-name)]
-      (cond
-        (nil? method-entry) nil
-        (nil? arity) (if (map? method-entry)
-                       (or (get method-entry 0) (val (first method-entry)))
-                       method-entry)
-        (map? method-entry) (get method-entry arity)
-        :else method-entry))
-    (if (:parent env)
-      (env-lookup-method (:parent env) class-name method-name arity)
-      (when-let [aliased (env-lookup-type-alias env class-name)]
-        (when (and (string? aliased) (not= aliased class-name))
-          (env-lookup-method env aliased method-name arity)))))))
+   (if-let [class-methods (get @(:methods env) class-name)]
+     (let [method-entry (get class-methods method-name)]
+       (cond
+         (nil? method-entry) nil
+         (nil? arity) (if (map? method-entry)
+                        (or (get method-entry 0) (val (first method-entry)))
+                        method-entry)
+         (map? method-entry) (get method-entry arity)
+         :else method-entry))
+     (if (:parent env)
+       (env-lookup-method (:parent env) class-name method-name arity)
+       (when-let [aliased (env-lookup-type-alias env class-name)]
+         (when (and (string? aliased) (not= aliased class-name))
+           (env-lookup-method env aliased method-name arity)))))))
 
 (defn env-add-method
   "Add a method signature to the environment"
@@ -578,11 +578,11 @@
           core (cond
                  param-types
                  (let [params-str (clojure.string/join ", "
-                                    (map (fn [p]
-                                           (if (:name p)
-                                             (str (:name p) ": " (display-type (:type p)))
-                                             (display-type (:type p))))
-                                         param-types))
+                                                       (map (fn [p]
+                                                              (if (:name p)
+                                                                (str (:name p) ": " (display-type (:type p)))
+                                                                (display-type (:type p))))
+                                                            param-types))
                        sig (str "Function(" params-str ")")]
                    (if return-type
                      (str sig ": " (display-type return-type))
@@ -897,14 +897,14 @@
             ;; inherit Rule, just spelled "flex/Rule" at the inherit site.
             super-identity (class-name-identity env super)]
         (letfn [(sub? [current seen]
-                (if (contains? seen current)
-                  false
-                  (if-let [class-def (env-lookup-class env current)]
-                    (let [parents (map :parent (:parents class-def))
-                          seen (conj seen current)]
-                      (or (some #(= (class-name-identity env %) super-identity) parents)
-                          (some #(sub? % seen) parents)))
-                    false)))]
+                  (if (contains? seen current)
+                    false
+                    (if-let [class-def (env-lookup-class env current)]
+                      (let [parents (map :parent (:parents class-def))
+                            seen (conj seen current)]
+                        (or (some #(= (class-name-identity env %) super-identity) parents)
+                            (some #(sub? % seen) parents)))
+                      false)))]
           (sub? sub #{}))))))
 
 (declare types-compatible?)
@@ -1023,7 +1023,7 @@
           (and (string? a1) (map? a2) (= (:base-type a2) "Function") (:param-types a2)
                (class-subtype? env a1 "Function")
                (when-let [method-sig (lookup-class-method env a1 (str "call" (count (:param-types a2)))
-                                                           (count (:param-types a2)))]
+                                                          (count (:param-types a2)))]
                  (types-compatible? env
                                     {:base-type "Function"
                                      :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
@@ -1183,8 +1183,8 @@
     (let [name (type-name-string name)
           constraint (type-name-string constraint)]
       (when (and name
-               (not (builtin-type? name))
-               (not (env-lookup-class env name)))
+                 (not (builtin-type? name))
+                 (not (env-lookup-class env name)))
         (env-add-class env name
                        (cond-> {:name name
                                 :deferred? true
@@ -1288,32 +1288,32 @@
                           (generic-param-constraint env class-name))
                         class-name)]
      (letfn [(lookup-method [cn visited]
-             (when (and cn (not (contains? visited cn)))
-               (let [class-def (env-lookup-class env cn)
-                     visited' (conj visited cn)
-                     method-sig (env-lookup-method env cn method-name arity)
-                     feature-member (when class-def
-                                      (some (fn [member]
-                                              (when (and (= (:type member) :method)
-                                                         (= (:name member) method-name)
-                                                         (or (nil? arity)
-                                                             (= (count (or (:params member) [])) arity)))
-                                                member))
-                                            (feature-members class-def)))
-                     own-method (when (and method-sig
-                                           (or (nil? feature-member)
-                                               (= caller-class-name cn)
-                                               (public-member? feature-member)))
+               (when (and cn (not (contains? visited cn)))
+                 (let [class-def (env-lookup-class env cn)
+                       visited' (conj visited cn)
+                       method-sig (env-lookup-method env cn method-name arity)
+                       feature-member (when class-def
+                                        (some (fn [member]
+                                                (when (and (= (:type member) :method)
+                                                           (= (:name member) method-name)
+                                                           (or (nil? arity)
+                                                               (= (count (or (:params member) [])) arity)))
+                                                  member))
+                                              (feature-members class-def)))
+                       own-method (when (and method-sig
+                                             (or (nil? feature-member)
+                                                 (= caller-class-name cn)
+                                                 (public-member? feature-member)))
                                   ;; Record where the routine was declared: an
                                   ;; inherited routine's signature is written in
                                   ;; its declaring class's generic parameters, so
                                   ;; callers need that class to resolve them.
-                                  (assoc method-sig :declaring-class cn))]
-                 (or own-method
-                     (when class-def
-                       (some (fn [{:keys [parent]}]
-                               (lookup-method parent visited'))
-                             (:parents class-def)))))))]
+                                    (assoc method-sig :declaring-class cn))]
+                   (or own-method
+                       (when class-def
+                         (some (fn [{:keys [parent]}]
+                                 (lookup-method parent visited'))
+                               (:parents class-def)))))))]
        (lookup-method class-name #{})))))
 
 (defn lookup-class-method-any-arity
@@ -1323,40 +1323,40 @@
                          (generic-param-constraint env class-name))
                        class-name)]
     (letfn [(lookup-method [cn visited]
-            (when (and cn (not (contains? visited cn)))
-              (let [class-def (env-lookup-class env cn)
-                    visited' (conj visited cn)
-                    method-sig (env-lookup-method env cn method-name)
-                    feature-member (when class-def
-                                     (some (fn [member]
-                                             (when (and (= (:type member) :method)
-                                                        (= (:name member) method-name))
-                                               member))
-                                           (feature-members class-def)))
-                    own-method (when (and method-sig
-                                          (or (nil? feature-member)
-                                              (= caller-class-name cn)
-                                              (public-member? feature-member)))
-                                 method-sig)]
-                (or own-method
-                    (when class-def
-                      (some (fn [{:keys [parent]}]
-                              (lookup-method parent visited'))
-                            (:parents class-def)))))))]
+              (when (and cn (not (contains? visited cn)))
+                (let [class-def (env-lookup-class env cn)
+                      visited' (conj visited cn)
+                      method-sig (env-lookup-method env cn method-name)
+                      feature-member (when class-def
+                                       (some (fn [member]
+                                               (when (and (= (:type member) :method)
+                                                          (= (:name member) method-name))
+                                                 member))
+                                             (feature-members class-def)))
+                      own-method (when (and method-sig
+                                            (or (nil? feature-member)
+                                                (= caller-class-name cn)
+                                                (public-member? feature-member)))
+                                   method-sig)]
+                  (or own-method
+                      (when class-def
+                        (some (fn [{:keys [parent]}]
+                                (lookup-method parent visited'))
+                              (:parents class-def)))))))]
       (lookup-method class-name #{}))))
 
 (defn- resolve-imported-java-class
-     [env class-name]
-     (when (string? class-name)
-       (let [class-def (env-lookup-class env class-name)
-             qualified-name (or (:import class-def)
-                                (when (str/includes? class-name ".")
-                                  class-name))]
-         (when qualified-name
-           (try
-             (Class/forName qualified-name)
-             (catch Exception _
-               nil))))))
+  [env class-name]
+  (when (string? class-name)
+    (let [class-def (env-lookup-class env class-name)
+          qualified-name (or (:import class-def)
+                             (when (str/includes? class-name ".")
+                               class-name))]
+      (when qualified-name
+        (try
+          (Class/forName qualified-name)
+          (catch Exception _
+            nil))))))
 
 (defn- known-reference-type
   [env ^Class klass]
@@ -1367,63 +1367,63 @@
       :else "Any")))
 
 (defn- java-class->nex-type
-     [env ^Class klass]
-     (cond
-       (nil? klass) "Any"
-       (= klass Void/TYPE) "Void"
-       (= klass java.lang.Void) "Void"
-       (.isArray klass)
-       {:base-type "Array"
-        :type-params [(java-class->nex-type env (.getComponentType klass))]}
+  [env ^Class klass]
+  (cond
+    (nil? klass) "Any"
+    (= klass Void/TYPE) "Void"
+    (= klass java.lang.Void) "Void"
+    (.isArray klass)
+    {:base-type "Array"
+     :type-params [(java-class->nex-type env (.getComponentType klass))]}
 
-       (= klass java.lang.String) "String"
+    (= klass java.lang.String) "String"
 
-       (or (= klass Byte/TYPE)
-           (= klass java.lang.Byte)
-           (= klass Short/TYPE)
-           (= klass java.lang.Short)
-           (= klass Integer/TYPE)
-           (= klass java.lang.Integer))
-       "Integer"
+    (or (= klass Byte/TYPE)
+        (= klass java.lang.Byte)
+        (= klass Short/TYPE)
+        (= klass java.lang.Short)
+        (= klass Integer/TYPE)
+        (= klass java.lang.Integer))
+    "Integer"
 
-       (or (= klass Long/TYPE)
-           (= klass java.lang.Long))
-       "Integer"
+    (or (= klass Long/TYPE)
+        (= klass java.lang.Long))
+    "Integer"
 
-       (or (= klass Float/TYPE)
-           (= klass java.lang.Float)
-           (= klass Double/TYPE)
-           (= klass java.lang.Double))
-       "Real"
+    (or (= klass Float/TYPE)
+        (= klass java.lang.Float)
+        (= klass Double/TYPE)
+        (= klass java.lang.Double))
+    "Real"
 
-       (or (= klass Boolean/TYPE)
-           (= klass java.lang.Boolean))
-       "Boolean"
+    (or (= klass Boolean/TYPE)
+        (= klass java.lang.Boolean))
+    "Boolean"
 
-       (or (= klass Character/TYPE)
-           (= klass java.lang.Character))
-       "Char"
+    (or (= klass Character/TYPE)
+        (= klass java.lang.Character))
+    "Char"
 
-       (= klass java.lang.Object) "Any"
+    (= klass java.lang.Object) "Any"
 
-       :else
-       (known-reference-type env klass)))
+    :else
+    (known-reference-type env klass)))
 
 (defn- reflected-java-method-signatures
-     [env class-name method-name argc static?]
-     (when-let [klass (resolve-imported-java-class env class-name)]
-       (->> (.getMethods ^Class klass)
-            (filter (fn [^java.lang.reflect.Method method]
-                      (and (= (.getName method) method-name)
-                           (= (java.lang.reflect.Modifier/isStatic (.getModifiers method)) static?)
-                           (= (alength (.getParameterTypes method)) argc))))
-            (mapv (fn [^java.lang.reflect.Method method]
-                    {:params (mapv (fn [index ^Class param-type]
-                                     {:name (str "arg" index)
-                                      :type (java-class->nex-type env param-type)})
-                                   (range argc)
-                                   (.getParameterTypes method))
-                     :return-type (java-class->nex-type env (.getReturnType method))})))))
+  [env class-name method-name argc static?]
+  (when-let [klass (resolve-imported-java-class env class-name)]
+    (->> (.getMethods ^Class klass)
+         (filter (fn [^java.lang.reflect.Method method]
+                   (and (= (.getName method) method-name)
+                        (= (java.lang.reflect.Modifier/isStatic (.getModifiers method)) static?)
+                        (= (alength (.getParameterTypes method)) argc))))
+         (mapv (fn [^java.lang.reflect.Method method]
+                 {:params (mapv (fn [index ^Class param-type]
+                                  {:name (str "arg" index)
+                                   :type (java-class->nex-type env param-type)})
+                                (range argc)
+                                (.getParameterTypes method))
+                  :return-type (java-class->nex-type env (.getReturnType method))})))))
 
 (defn- reflected-java-method-signature
   [env class-name method-name arg-types static?]
@@ -1546,24 +1546,24 @@
    (lookup-class-field-member env class-name field-name class-name))
   ([env class-name field-name caller-class-name]
    (letfn [(lookup-field [cn visited]
-            (when (and cn (not (contains? visited cn)))
-              (let [class-def (env-lookup-class env cn)
-                    visited' (conj visited cn)
-                    own-field
-                    (when class-def
-                      (some (fn [member]
-                              (when (and (= (:type member) :field)
-                                         (not (:constant? member))
-                                         (= (:name member) field-name)
-                                         (or (= caller-class-name cn)
-                                             (public-member? member)))
-                                (assoc member :declaring-class cn)))
-                            (feature-members class-def)))]
-                (or own-field
-                    (when class-def
-                      (some (fn [{:keys [parent]}]
-                              (lookup-field parent visited'))
-                            (:parents class-def)))))))]
+             (when (and cn (not (contains? visited cn)))
+               (let [class-def (env-lookup-class env cn)
+                     visited' (conj visited cn)
+                     own-field
+                     (when class-def
+                       (some (fn [member]
+                               (when (and (= (:type member) :field)
+                                          (not (:constant? member))
+                                          (= (:name member) field-name)
+                                          (or (= caller-class-name cn)
+                                              (public-member? member)))
+                                 (assoc member :declaring-class cn)))
+                             (feature-members class-def)))]
+                 (or own-field
+                     (when class-def
+                       (some (fn [{:keys [parent]}]
+                               (lookup-field parent visited'))
+                             (:parents class-def)))))))]
      (lookup-field class-name #{}))))
 
 (defn feature-members
@@ -1704,8 +1704,8 @@
                     own (when class-def
                           (some (fn [m]
                                   (when (and (= (:type m) :method)
-                                            (= (:name m) method-name)
-                                            (= (count (or (:params m) [])) arity))
+                                             (= (:name m) method-name)
+                                             (= (count (or (:params m) [])) arity))
                                     m))
                                 (feature-members class-def)))]
                 (or own
@@ -2565,7 +2565,6 @@
   (when-let [handler (get builtin-method-signature-dispatch base-type)]
     (handler method argc type-map)))
 
-
 (defn- across-target-message
   "The diagnostic for an `across` whose target cannot be iterated. `cursor` is
    invented by the desugaring, so naming it would point at code the programmer
@@ -3301,28 +3300,28 @@
         (when-let [qualified-names (get @(:ambiguous-functions (env-root env)) method)]
           (throw (ambiguous-function-reference-error method qualified-names)))
       ;; Function call (built-in like print/type_of/type_is) or function object call
-      (if-let [checker (get builtin-call-checkers method)]
-        (checker env args)
-      (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
-      (let [base-type (if (map? var-type) (:base-type var-type) var-type)
-            call-name (str "call" (count args))
-            method-sig (env-lookup-method env base-type call-name (count args))
-            class-def (env-lookup-class env base-type)]
-        (when-not method-sig
-          (let [call-arities (env-call-method-arities env base-type)]
-            (if (= 1 (count call-arities))
+        (if-let [checker (get builtin-call-checkers method)]
+          (checker env args)
+          (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
+            (let [base-type (if (map? var-type) (:base-type var-type) var-type)
+                  call-name (str "call" (count args))
+                  method-sig (env-lookup-method env base-type call-name (count args))
+                  class-def (env-lookup-class env base-type)]
+              (when-not method-sig
+                (let [call-arities (env-call-method-arities env base-type)]
+                  (if (= 1 (count call-arities))
               ;; A free function (or single-arity callable) invoked at the wrong
               ;; arity: report the function and the counts instead of `callN`.
-              (let [expected (first call-arities)
-                    given (count args)
-                    msg (str "Function `" method "` takes " expected
-                             (if (= 1 expected) " argument" " arguments")
-                             ", " (when (< given expected) "only ") given " given")]
-                (throw (ex-info msg {:error (type-error msg)})))
-              (throw (ex-info (str "Method not found: " call-name)
-                              {:error (type-error
-                                       (str "Method not found: " call-name))})))))
-        (let [generic-names (set (concat (map :name (:generic-params class-def))
+                    (let [expected (first call-arities)
+                          given (count args)
+                          msg (str "Function `" method "` takes " expected
+                                   (if (= 1 expected) " argument" " arguments")
+                                   ", " (when (< given expected) "only ") given " given")]
+                      (throw (ex-info msg {:error (type-error msg)})))
+                    (throw (ex-info (str "Method not found: " call-name)
+                                    {:error (type-error
+                                             (str "Method not found: " call-name))})))))
+              (let [generic-names (set (concat (map :name (:generic-params class-def))
                                          ;; A Function-typed variable holding an
                                          ;; anonymous function declared with its own
                                          ;; type params (`fn[T](x: T): T`) carries
@@ -3333,8 +3332,8 @@
                                          ;; must be unioned in here too, or T below
                                          ;; is never recognized as inferable and
                                          ;; every call reports it as unresolved.
-                                         (map :name (:generic-params var-type))))
-              arg-types (mapv #(check-expression env %) args)
+                                               (map :name (:generic-params var-type))))
+                    arg-types (mapv #(check-expression env %) args)
               ;; A Function-typed variable carries its own declared signature
               ;; (e.g. `Function(Dog): String`), which is more specific than
               ;; the generic call<N> method registered by
@@ -3342,51 +3341,51 @@
               ;; so *some* callN resolves for arbitrary arity). Prefer the
               ;; variable's own param types here so call-site arguments are
               ;; checked against the declared signature instead of Any.
-              effective-params (if (and (map? var-type)
-                                        (= "Function" (:base-type var-type))
-                                        (:param-types var-type))
-                                 (:param-types var-type)
-                                 (:params method-sig))
-              inferred-type-map (reduce (fn [acc [arg-type param]]
-                                          (merge-inferred-generic-bindings
-                                           env
-                                           acc
-                                           (infer-generic-type-map-from-arg
-                                            env generic-names (:type param) arg-type)))
-                                        {}
-                                        (map vector arg-types effective-params))
-              type-map (merge (build-generic-type-map env var-type)
-                              inferred-type-map)]
+                    effective-params (if (and (map? var-type)
+                                              (= "Function" (:base-type var-type))
+                                              (:param-types var-type))
+                                       (:param-types var-type)
+                                       (:params method-sig))
+                    inferred-type-map (reduce (fn [acc [arg-type param]]
+                                                (merge-inferred-generic-bindings
+                                                 env
+                                                 acc
+                                                 (infer-generic-type-map-from-arg
+                                                  env generic-names (:type param) arg-type)))
+                                              {}
+                                              (map vector arg-types effective-params))
+                    type-map (merge (build-generic-type-map env var-type)
+                                    inferred-type-map)]
           ;; An inferred binding must itself satisfy its generic parameter's
           ;; own declared constraint (`[G -> Animal]`) -- validate-generic-args
           ;; already does this for an EXPLICIT type argument (`Box[Dog]`), but
           ;; nothing did for a binding inferred from a call's own arguments
           ;; (`describe(42)` against `describe[G -> Animal](x: G)` type-checked
           ;; with G bound to Integer, which doesn't satisfy Animal).
-          (doseq [{:keys [name constraint]} (concat (:generic-params class-def) (:generic-params var-type))
-                  :when constraint
-                  :let [gname (type-name-string name)
-                        constraint (type-name-string constraint)
-                        bound (get type-map gname)]
-                  :when bound]
-            (when-not (types-compatible? env bound constraint)
-              (throw (ex-info (str "Argument type " (display-type bound)
-                                   " does not satisfy constraint " constraint
-                                   " for generic parameter " gname)
-                              {:error (type-error
-                                       (str "Argument type " (display-type bound)
-                                            " does not satisfy constraint " constraint
-                                            " for generic parameter " gname))}))))
-          (when (not= (count args) (count effective-params))
-            (throw (ex-info (str "Method " call-name " expects " (count effective-params)
-                                 " arguments, got " (count args))
-                            {:error (type-error
-                                     (str "Method " call-name " expects " (count effective-params)
-                                          " arguments, got " (count args)))})))
-          (doseq [[arg-type param] (map vector arg-types effective-params)]
-            (let [param-type (resolve-generic-type (:type param) type-map)]
-            (when (and (is-generic-type-param? env param-type)
-                       (not (contains? type-map param-type))
+                (doseq [{:keys [name constraint]} (concat (:generic-params class-def) (:generic-params var-type))
+                        :when constraint
+                        :let [gname (type-name-string name)
+                              constraint (type-name-string constraint)
+                              bound (get type-map gname)]
+                        :when bound]
+                  (when-not (types-compatible? env bound constraint)
+                    (throw (ex-info (str "Argument type " (display-type bound)
+                                         " does not satisfy constraint " constraint
+                                         " for generic parameter " gname)
+                                    {:error (type-error
+                                             (str "Argument type " (display-type bound)
+                                                  " does not satisfy constraint " constraint
+                                                  " for generic parameter " gname))}))))
+                (when (not= (count args) (count effective-params))
+                  (throw (ex-info (str "Method " call-name " expects " (count effective-params)
+                                       " arguments, got " (count args))
+                                  {:error (type-error
+                                           (str "Method " call-name " expects " (count effective-params)
+                                                " arguments, got " (count args)))})))
+                (doseq [[arg-type param] (map vector arg-types effective-params)]
+                  (let [param-type (resolve-generic-type (:type param) type-map)]
+                    (when (and (is-generic-type-param? env param-type)
+                               (not (contains? type-map param-type))
                        ;; Calling a Function(T)-typed *parameter* from inside
                        ;; the very generic scope that binds T (`each[T](a:
                        ;; Array[T], f: Function(T): T) do ... f(elem) ... end`,
@@ -3396,20 +3395,20 @@
                        ;; whose type actually differs from the declared
                        ;; (still-unresolved) param type represents a real,
                        ;; failed inference.
-                       (not= arg-type param-type))
-              (throw (ex-info (str "Could not infer generic type parameter " param-type
-                                   " for function " method)
-                              {:error (type-error
-                                       (str "Could not infer generic type parameter "
-                                            param-type
-                                            " for function "
-                                            method))})))
-              (when (any-into-concrete-without-convert? env param-type arg-type)
-                (throw-any-narrowing-error! (str "parameter of " method) param-type))
-              (when-not (types-compatible? env arg-type param-type)
-                (throw (ex-info (str "Argument type mismatch for method " call-name)
-                                {:error (type-error
-                                         (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
+                               (not= arg-type param-type))
+                      (throw (ex-info (str "Could not infer generic type parameter " param-type
+                                           " for function " method)
+                                      {:error (type-error
+                                               (str "Could not infer generic type parameter "
+                                                    param-type
+                                                    " for function "
+                                                    method))})))
+                    (when (any-into-concrete-without-convert? env param-type arg-type)
+                      (throw-any-narrowing-error! (str "parameter of " method) param-type))
+                    (when-not (types-compatible? env arg-type param-type)
+                      (throw (ex-info (str "Argument type mismatch for method " call-name)
+                                      {:error (type-error
+                                               (str "Expected " (display-type param-type) ", got " (display-type arg-type)))})))))
           ;; A Function value carrying an explicit signature knows its own return
           ;; type; prefer it over the generic callN result (which is Any). Still
           ;; resolve it through type-map: when that signature is itself generic
@@ -3417,42 +3416,42 @@
           ;; the unbound "T", not this call's actual inferred type -- without
           ;; this, `let y: Integer := id(10)` reported the call's type as the
           ;; literal name "T" instead of the "Integer" this call resolved it to.
-          (if (and (map? var-type)
-                   (= "Function" (:base-type var-type))
-                   (:return-type var-type))
-            (resolve-generic-type (:return-type var-type) type-map)
+                (if (and (map? var-type)
+                         (= "Function" (:base-type var-type))
+                         (:return-type var-type))
+                  (resolve-generic-type (:return-type var-type) type-map)
             ;; Coalesce a missing :return-type to "Void" — see
             ;; check-call-signature's identical fix for why a bare nil here
             ;; would slip past check-expression's Void-as-value guard.
-            (or (resolve-generic-type (:return-type method-sig) type-map) "Void"))))
-        (if-let [current-class (env-lookup-var env "__current_class__")]
-          (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
-            (do
-              (when (not= (count args) (count (:params method-sig)))
-                (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
-                                     " arguments, got " (count args))
-                                {:error (type-error
-                                         (str "Method " method " expects " (count (:params method-sig))
-                                              " arguments, got " (count args)))})))
-              (doseq [[arg param] (map vector args (:params method-sig))]
-                (let [arg-type (check-expression env arg)]
-                  (when (any-into-concrete-without-convert? env (:type param) arg-type)
-                    (throw-any-narrowing-error! (str "parameter '" (:name param) "' of " method) (:type param)))
-                  (when-not (types-compatible? env arg-type (:type param))
-                    (throw (ex-info (str "Argument type mismatch for method " method)
+                  (or (resolve-generic-type (:return-type method-sig) type-map) "Void"))))
+            (if-let [current-class (env-lookup-var env "__current_class__")]
+              (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
+                (do
+                  (when (not= (count args) (count (:params method-sig)))
+                    (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
+                                         " arguments, got " (count args))
                                     {:error (type-error
-                                             (str "Expected " (:type param) ", got " arg-type))})))))
-              (or (:return-type method-sig) "Void"))
-            (do
-              (doseq [arg args] (check-expression env arg))
-              (throw (ex-info (str "Undefined function or method: " method)
-                              {:error (type-error
-                                       (str "Undefined function or method: " method))}))))
-          (do
-            (doseq [arg args] (check-expression env arg))
-            (throw (ex-info (str "Undefined function: " method)
-                            {:error (type-error
-                                     (str "Undefined function: " method))}))))))))))
+                                             (str "Method " method " expects " (count (:params method-sig))
+                                                  " arguments, got " (count args)))})))
+                  (doseq [[arg param] (map vector args (:params method-sig))]
+                    (let [arg-type (check-expression env arg)]
+                      (when (any-into-concrete-without-convert? env (:type param) arg-type)
+                        (throw-any-narrowing-error! (str "parameter '" (:name param) "' of " method) (:type param)))
+                      (when-not (types-compatible? env arg-type (:type param))
+                        (throw (ex-info (str "Argument type mismatch for method " method)
+                                        {:error (type-error
+                                                 (str "Expected " (:type param) ", got " arg-type))})))))
+                  (or (:return-type method-sig) "Void"))
+                (do
+                  (doseq [arg args] (check-expression env arg))
+                  (throw (ex-info (str "Undefined function or method: " method)
+                                  {:error (type-error
+                                           (str "Undefined function or method: " method))}))))
+              (do
+                (doseq [arg args] (check-expression env arg))
+                (throw (ex-info (str "Undefined function: " method)
+                                {:error (type-error
+                                         (str "Undefined function: " method))}))))))))))
 
 (defn- check-create-array
   [env {:keys [generic-args constructor args]}]
@@ -3769,7 +3768,7 @@
               (let [param-type (resolve-generic-type (:type param) type-map)]
                 (when (any-into-concrete-without-convert? env param-type arg-type)
                   (throw-any-narrowing-error! (str "parameter '" (:name param) "' of constructor "
-                                                    class-name "." ctor-name)
+                                                   class-name "." ctor-name)
                                               param-type))
                 (when-not (types-compatible? env arg-type param-type)
                   (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
@@ -3783,7 +3782,6 @@
   (if-let [handler (get check-create-builtin-dispatch class-name)]
     (handler env expr)
     (check-create-user-class env expr)))
-
 
 (defn check-array-literal
   "Check the type of an array literal"
@@ -4002,8 +4000,8 @@
       (cond
         (nil? expr) "Void"
         (string? expr) (or (env-lookup-var env expr)
-                          (throw (ex-info (str "Undefined variable: " expr)
-                                          {:error (type-error (str "Undefined variable: " expr))})))
+                           (throw (ex-info (str "Undefined variable: " expr)
+                                           {:error (type-error (str "Undefined variable: " expr))})))
         (number? expr) "Integer"
         (boolean? expr) "Boolean"
         (map? expr)
@@ -4041,7 +4039,6 @@
       (throw (ex-info "Cannot use a Void expression as a value"
                       {:error (type-error "Cannot use a Void expression as a value")})))
     t))
-
 
 ;;
 ;; Statement Type Checking
@@ -4144,8 +4141,8 @@
                                         " parameter" (if (= 1 (count expected-params)) "" "s")
                                         ", got one with " (count own-params) "."))})))
         (let [patched (patch-anonymous-function-types expr
-                                                       (mapv :type expected-params)
-                                                       (:return-type expected-type))
+                                                      (mapv :type expected-params)
+                                                      (:return-type expected-type))
               ;; A param/return already declared on the literal itself is left
               ;; untouched by patch-anonymous-function-types (only nil slots
               ;; are filled from EXPECTED-TYPE) — so a fully- or partially-
@@ -4155,9 +4152,9 @@
               ;; patched signature back against EXPECTED-TYPE here catches
               ;; that instead of silently trusting the arity check above.
               actual-type {:base-type "Function"
-                          :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
-                                             (:params patched))
-                          :return-type (:return-type patched)}]
+                           :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
+                                              (:params patched))
+                           :return-type (:return-type patched)}]
           (when-not (types-compatible? env actual-type expected-type)
             (throw (ex-info "Anonymous function type does not match expected Function type"
                             {:error (type-error
@@ -4427,9 +4424,9 @@
              (apply-condition-branch-refinement! (:condition clause) :else)))
          else-chain-env
          elseif)]
-  (when else
-    (doseq [stmt else]
-      (check-statement final-else-env stmt)))))
+    (when else
+      (doseq [stmt else]
+        (check-statement final-else-env stmt)))))
 
 (defn check-loop
   "Check a loop statement"
@@ -4476,69 +4473,69 @@
 
       "Channel"
       (case method
-      ("receive" "try_receive")
-      (do
-        (cond
-          (= method "try_receive")
-          (when (seq args)
-            (throw (ex-info "Channel.try_receive takes no arguments"
-                            {:error (type-error "Channel.try_receive takes no arguments")})))
+        ("receive" "try_receive")
+        (do
+          (cond
+            (= method "try_receive")
+            (when (seq args)
+              (throw (ex-info "Channel.try_receive takes no arguments"
+                              {:error (type-error "Channel.try_receive takes no arguments")})))
 
-          (= method "receive")
-          (when (> (count args) 1)
-            (throw (ex-info "Channel.receive expects 0 or 1 arguments"
-                            {:error (type-error "Channel.receive expects 0 or 1 arguments")}))))
-        (when (= 1 (count args))
-          (let [timeout-type (check-expression env (first args))]
-            (when-not (= (attachable-type timeout-type) "Integer")
-              (throw (ex-info "Channel.receive timeout must be Integer"
-                              {:error (type-error
-                                       (str "Channel.receive timeout must be Integer, got "
-                                            (display-type timeout-type)))})))))
-        (let [body-env (make-type-env env)]
-          (when alias
-            (env-add-var body-env alias (or (first type-args) "Any")))
-          (doseq [stmt body]
-            (check-statement body-env stmt))))
-
-      ("send" "try_send")
-      (do
-        (cond
-          (= method "try_send")
-          (when-not (= 1 (count args))
-            (throw (ex-info "Channel.try_send expects 1 argument"
-                            {:error (type-error "Channel.try_send expects 1 argument")})))
-
-          (= method "send")
-          (when-not (<= 1 (count args) 2)
-            (throw (ex-info "Channel.send expects 1 or 2 arguments"
-                            {:error (type-error "Channel.send expects 1 or 2 arguments")}))))
-        (when alias
-          (throw (ex-info "send clauses cannot bind a value"
-                          {:error (type-error "send clauses cannot use 'as <name>'")})))
-        (let [arg-type (check-expression env (first args))
-              elem-type (or (first type-args) "Any")]
-          (when (any-into-concrete-without-convert? env elem-type arg-type)
-            (throw-any-narrowing-error! (str "the Channel." method " argument") elem-type))
-          (when-not (types-compatible? env arg-type elem-type)
-            (throw (ex-info (str "Channel." method " argument type mismatch")
-                            {:error (type-error
-                                     (str "Expected " (display-type elem-type)
-                                          ", got " (display-type arg-type)))})))
-          (when (= 2 (count args))
-            (let [timeout-type (check-expression env (second args))]
+            (= method "receive")
+            (when (> (count args) 1)
+              (throw (ex-info "Channel.receive expects 0 or 1 arguments"
+                              {:error (type-error "Channel.receive expects 0 or 1 arguments")}))))
+          (when (= 1 (count args))
+            (let [timeout-type (check-expression env (first args))]
               (when-not (= (attachable-type timeout-type) "Integer")
-                (throw (ex-info "Channel.send timeout must be Integer"
+                (throw (ex-info "Channel.receive timeout must be Integer"
                                 {:error (type-error
-                                         (str "Channel.send timeout must be Integer, got "
+                                         (str "Channel.receive timeout must be Integer, got "
                                               (display-type timeout-type)))})))))
           (let [body-env (make-type-env env)]
+            (when alias
+              (env-add-var body-env alias (or (first type-args) "Any")))
             (doseq [stmt body]
-              (check-statement body-env stmt)))))
+              (check-statement body-env stmt))))
 
-      (throw (ex-info "select clauses support only Channel send/receive or Task.await operations"
-                      {:error (type-error
-                               "select clauses support only send, try_send, receive, try_receive, and Task.await")})))
+        ("send" "try_send")
+        (do
+          (cond
+            (= method "try_send")
+            (when-not (= 1 (count args))
+              (throw (ex-info "Channel.try_send expects 1 argument"
+                              {:error (type-error "Channel.try_send expects 1 argument")})))
+
+            (= method "send")
+            (when-not (<= 1 (count args) 2)
+              (throw (ex-info "Channel.send expects 1 or 2 arguments"
+                              {:error (type-error "Channel.send expects 1 or 2 arguments")}))))
+          (when alias
+            (throw (ex-info "send clauses cannot bind a value"
+                            {:error (type-error "send clauses cannot use 'as <name>'")})))
+          (let [arg-type (check-expression env (first args))
+                elem-type (or (first type-args) "Any")]
+            (when (any-into-concrete-without-convert? env elem-type arg-type)
+              (throw-any-narrowing-error! (str "the Channel." method " argument") elem-type))
+            (when-not (types-compatible? env arg-type elem-type)
+              (throw (ex-info (str "Channel." method " argument type mismatch")
+                              {:error (type-error
+                                       (str "Expected " (display-type elem-type)
+                                            ", got " (display-type arg-type)))})))
+            (when (= 2 (count args))
+              (let [timeout-type (check-expression env (second args))]
+                (when-not (= (attachable-type timeout-type) "Integer")
+                  (throw (ex-info "Channel.send timeout must be Integer"
+                                  {:error (type-error
+                                           (str "Channel.send timeout must be Integer, got "
+                                                (display-type timeout-type)))})))))
+            (let [body-env (make-type-env env)]
+              (doseq [stmt body]
+                (check-statement body-env stmt)))))
+
+        (throw (ex-info "select clauses support only Channel send/receive or Task.await operations"
+                        {:error (type-error
+                                 "select clauses support only send, try_send, receive, try_receive, and Task.await")})))
 
       (throw (ex-info "select clause target must be a Channel or Task"
                       {:error (type-error
@@ -5222,19 +5219,18 @@
           rescue-path-returns? (when rescue (body-may-complete-normally? rescue))
           normal-path-inits? (result-definitely-assigned-in-body? body false)
           rescue-path-inits? (when rescue (result-definitely-assigned-in-body? rescue false))]
-    (when (and return-type
-               (attached-non-scalar-type? return-type)
-               (or (and normal-path-returns? (not normal-path-inits?))
-                   (and rescue-path-returns? (not rescue-path-inits?))))
-      (throw (ex-info (str "Method " name " does not initialize result")
-                      {:error (type-error
-                               (str "Method '" name "' declares return type "
-                                    (display-type return-type)
-                                    " but does not definitely assign result on all returning paths. "
-                                    "Use 'result :=' or declare the return type detachable."))})))
-    )
+      (when (and return-type
+                 (attached-non-scalar-type? return-type)
+                 (or (and normal-path-returns? (not normal-path-inits?))
+                     (and rescue-path-returns? (not rescue-path-inits?))))
+        (throw (ex-info (str "Method " name " does not initialize result")
+                        {:error (type-error
+                                 (str "Method '" name "' declares return type "
+                                      (display-type return-type)
+                                      " but does not definitely assign result on all returning paths. "
+                                      "Use 'result :=' or declare the return type detachable."))}))))
 
-    ;; Check postconditions
+;; Check postconditions
     (doseq [assertion ensure]
       (let [cond-type (check-expression method-env (:condition assertion))]
         (when-not (= cond-type "Boolean")
@@ -5382,21 +5378,21 @@
   ;; reference-time design Phase 2 was built around; reading the local
   ;; binding restores it — collect-class-info has this class-def already, it
   ;; doesn't need to ask the (possibly ambiguous) registry for it back.
-  (doseq [section (:body updated-class-def)]
-    (cond
-      (= (:type section) :feature-section)
-      (doseq [member (:members section)]
-        (when (= (:type member) :method)
-          (env-add-method env name (:name member)
-                         {:params (:params member)
-                          :return-type (:return-type member)
-                          :alias (:alias member)})))
+    (doseq [section (:body updated-class-def)]
+      (cond
+        (= (:type section) :feature-section)
+        (doseq [member (:members section)]
+          (when (= (:type member) :method)
+            (env-add-method env name (:name member)
+                            {:params (:params member)
+                             :return-type (:return-type member)
+                             :alias (:alias member)})))
 
-      (= (:type section) :constructors)
-      (doseq [ctor (:constructors section)]
-        (env-add-method env name (:name ctor)
-                       {:params (:params ctor)
-                        :return-type name}))))))
+        (= (:type section) :constructors)
+        (doseq [ctor (:constructors section)]
+          (env-add-method env name (:name ctor)
+                          {:params (:params ctor)
+                           :return-type name}))))))
 
 (defn- java-type-parent
   "The reflected Class for parent-name, when it names an imported Java type
@@ -5515,42 +5511,42 @@
                               (some #(visit (:parent %) path' seen')
                                     (:parents class-def))))))]
                 (visit start-parent [class-name] #{class-name})))]
-  (doseq [{:keys [parent]} parents]
+      (doseq [{:keys [parent]} parents]
     ;; Check that parent class exists: a Nex class, a builtin, or an imported
     ;; Java interface or class (docs/proposals/java-interop.md). The
     ;; at-most-one-concrete-Java-class constraint (JVM single inheritance) is
     ;; checked once below, across the whole parents list, not per entry here.
-    (let [parent-def (env-lookup-class env parent)
-          real-nex-class? (and parent-def (not (:import parent-def)))
-          java-class (when-not real-nex-class? (resolve-imported-java-class env parent))]
-      (when-not (or real-nex-class? (builtin-type? parent) java-class)
-        (throw (ex-info (str "Parent class " parent " not found for class " class-name)
-                        {:error (type-error
-                                 (str "Undefined parent class: " parent))}))))
-    (when (= (class-name-identity env parent) class-identity)
-      (throw (ex-info (str "Class " class-name " cannot inherit from itself")
-                      {:error (type-error
-                               (str "Class " class-name " cannot inherit from itself"))})))
-    (when-let [path (cycle-path parent)]
-      (throw (ex-info (str "Cyclic inheritance detected: " (str/join " -> " path))
-                      {:error (type-error
-                               (str "Cyclic inheritance detected: "
-                                    (str/join " -> " path)))}))))
-  (let [concrete-java-parents (->> parents
-                                   (map :parent)
-                                   (filter (fn [parent]
-                                             (let [parent-def (env-lookup-class env parent)
-                                                   real-nex-class? (and parent-def (not (:import parent-def)))]
-                                               (when-let [^Class klass (and (not real-nex-class?)
-                                                                            (resolve-imported-java-class env parent))]
-                                                 (not (.isInterface klass)))))))]
-    (when (< 1 (count concrete-java-parents))
-      (throw (ex-info (str "Class " class-name " cannot extend more than one Java class")
-                      {:error (type-error
-                               (str "Class " class-name " inherits more than one concrete Java class ("
-                                    (str/join ", " concrete-java-parents)
-                                    ") — the JVM allows extending only one."))}))))
-  (check-java-interface-conformance env class-name parents))))
+        (let [parent-def (env-lookup-class env parent)
+              real-nex-class? (and parent-def (not (:import parent-def)))
+              java-class (when-not real-nex-class? (resolve-imported-java-class env parent))]
+          (when-not (or real-nex-class? (builtin-type? parent) java-class)
+            (throw (ex-info (str "Parent class " parent " not found for class " class-name)
+                            {:error (type-error
+                                     (str "Undefined parent class: " parent))}))))
+        (when (= (class-name-identity env parent) class-identity)
+          (throw (ex-info (str "Class " class-name " cannot inherit from itself")
+                          {:error (type-error
+                                   (str "Class " class-name " cannot inherit from itself"))})))
+        (when-let [path (cycle-path parent)]
+          (throw (ex-info (str "Cyclic inheritance detected: " (str/join " -> " path))
+                          {:error (type-error
+                                   (str "Cyclic inheritance detected: "
+                                        (str/join " -> " path)))}))))
+      (let [concrete-java-parents (->> parents
+                                       (map :parent)
+                                       (filter (fn [parent]
+                                                 (let [parent-def (env-lookup-class env parent)
+                                                       real-nex-class? (and parent-def (not (:import parent-def)))]
+                                                   (when-let [^Class klass (and (not real-nex-class?)
+                                                                                (resolve-imported-java-class env parent))]
+                                                     (not (.isInterface klass)))))))]
+        (when (< 1 (count concrete-java-parents))
+          (throw (ex-info (str "Class " class-name " cannot extend more than one Java class")
+                          {:error (type-error
+                                   (str "Class " class-name " inherits more than one concrete Java class ("
+                                        (str/join ", " concrete-java-parents)
+                                        ") — the JVM allows extending only one."))}))))
+      (check-java-interface-conformance env class-name parents))))
 
 (defn- substitute-method-types
   "Apply a generic substitution map to a method member's parameter and return
@@ -5859,7 +5855,7 @@
       (reduce (fn [acc [delegated-name arg-count]]
                 (if-let [delegated-ctor (some #(when (and (= (:name %) delegated-name)
                                                           (= (count (or (:params %) [])) arg-count))
-                                                %)
+                                                 %)
                                               all-ctors)]
                   (into acc (constructor-initialized-fields delegated-name (:body delegated-ctor)
                                                             all-ctors visited'))
@@ -5887,109 +5883,109 @@
         invariant (:invariant class-def)
         parents (:parents class-def)
         class-env (make-type-env env)]
-  (check-distinct-fields! name (:body class-def))
-  (check-distinct-methods! name (:body class-def))
-  (check-equals-hash-consistency env name class-def)
-  (env-add-var class-env "__current_class__" name)
-  (register-generic-param-classes! class-env generic-params)
-  (bind-visible-class-fields! class-env env name)
+    (check-distinct-fields! name (:body class-def))
+    (check-distinct-methods! name (:body class-def))
+    (check-equals-hash-consistency env name class-def)
+    (env-add-var class-env "__current_class__" name)
+    (register-generic-param-classes! class-env generic-params)
+    (bind-visible-class-fields! class-env env name)
   ;; A sealed class must be deferred. If it could be instantiated, a value of
   ;; the bare parent type would slip past an exhaustive `match` over its
   ;; subclasses (the very guarantee `sealed` exists to provide), failing at
   ;; runtime with no compile-time warning.
-  (when (and (:sealed? class-def) (not (:deferred? class-def)))
-    (throw (ex-info (str "Sealed class " name " must be deferred")
-                    {:error (type-error
-                             (str "Sealed class '" name "' must be declared 'sealed deferred'. "
-                                  "A sealed class cannot be instantiated; otherwise an exhaustive "
-                                  "match over its subclasses would not cover a bare " name " value."))})))
+    (when (and (:sealed? class-def) (not (:deferred? class-def)))
+      (throw (ex-info (str "Sealed class " name " must be deferred")
+                      {:error (type-error
+                               (str "Sealed class '" name "' must be declared 'sealed deferred'. "
+                                    "A sealed class cannot be instantiated; otherwise an exhaustive "
+                                    "match over its subclasses would not cover a bare " name " value."))})))
   ;; Check inheritance
-  (when parents
-    (check-inheritance env name parents)
-    (check-java-super-constructor-call env name
-                                       (->> body
-                                            (filter #(= :constructors (:type %)))
-                                            (mapcat :constructors))))
-  (check-deferred-methods-implemented! env name class-def)
+    (when parents
+      (check-inheritance env name parents)
+      (check-java-super-constructor-call env name
+                                         (->> body
+                                              (filter #(= :constructors (:type %)))
+                                              (mapcat :constructors))))
+    (check-deferred-methods-implemented! env name class-def)
 
   ;; Check invariants
-  (doseq [assertion invariant]
-    (when (and assertion (:expr assertion))
-      (let [inv-type (check-expression class-env (:expr assertion))]
-        (when-not (or (= inv-type "Boolean") (= inv-type "Void"))
-          (throw (ex-info (str "Invariant must be Boolean in class " name)
-                          {:error (type-error
-                                   (str "Invariant must be Boolean, got " inv-type))}))))))
+    (doseq [assertion invariant]
+      (when (and assertion (:expr assertion))
+        (let [inv-type (check-expression class-env (:expr assertion))]
+          (when-not (or (= inv-type "Boolean") (= inv-type "Void"))
+            (throw (ex-info (str "Invariant must be Boolean in class " name)
+                            {:error (type-error
+                                     (str "Invariant must be Boolean, got " inv-type))}))))))
 
   ;; Check each section
-  (doseq [section body]
-    (cond
-      (= (:type section) :feature-section)
-      (doseq [member (:members section)]
-        (cond
-          (= (:type member) :method)
-          (do
-            (check-override-conformance env name parents member)
-            (when-not (:declaration-only? member)
-              (check-method class-env name member)))
-          (= (:type member) :field)
-          (when-not (:constant? member)
-            (validate-type-annotation class-env (:field-type member)))))
+    (doseq [section body]
+      (cond
+        (= (:type section) :feature-section)
+        (doseq [member (:members section)]
+          (cond
+            (= (:type member) :method)
+            (do
+              (check-override-conformance env name parents member)
+              (when-not (:declaration-only? member)
+                (check-method class-env name member)))
+            (= (:type member) :field)
+            (when-not (:constant? member)
+              (validate-type-annotation class-env (:field-type member)))))
 
-      (= (:type section) :constructors)
-      (doseq [ctor (:constructors section)]
-        (check-constructor class-env name ctor))))
+        (= (:type section) :constructors)
+        (doseq [ctor (:constructors section)]
+          (check-constructor class-env name ctor))))
 
   ;; Void-safety: attachable class-object fields must be initialized by all ctors.
-  (let [constructors (->> body
-                          (filter #(= :constructors (:type %)))
-                          (mapcat :constructors))
-        required-fields (attachable-init-field-names env body)
+    (let [constructors (->> body
+                            (filter #(= :constructors (:type %)))
+                            (mapcat :constructors))
+          required-fields (attachable-init-field-names env body)
         ;; Parents that hold attachable fields of their own. A subclass cannot
         ;; assign an inherited field directly ("Cannot assign to field a outside
         ;; of class B"), so the only way it can initialize one is by calling that
         ;; parent's constructor — and the parent's own check guarantees every one
         ;; of its constructors initializes its fields, which makes checking the
         ;; direct parents enough to cover the whole chain.
-        parents-needing-init (->> parents
-                                  (map :parent)
-                                  (filter #(needs-constructor-init? env %))
-                                  set)]
-    (when (or (seq required-fields) (seq parents-needing-init))
-      (when (and (seq required-fields) (empty? constructors))
-        (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
-                        {:error (type-error
-                                 (str "Attachable fields must be initialized by constructors in class "
-                                      name ": " (str/join ", " (sort required-fields))))})))
+          parents-needing-init (->> parents
+                                    (map :parent)
+                                    (filter #(needs-constructor-init? env %))
+                                    set)]
+      (when (or (seq required-fields) (seq parents-needing-init))
+        (when (and (seq required-fields) (empty? constructors))
+          (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
+                          {:error (type-error
+                                   (str "Attachable fields must be initialized by constructors in class "
+                                        name ": " (str/join ", " (sort required-fields))))})))
       ;; A class that declares no constructors of its own inherits its parent's,
       ;; which already initialize the inherited fields — nothing to check.
-      (doseq [{ctor-name :name ctor-body :body} constructors]
-        (let [statements (mapcat constructor-statements ctor-body)
-              assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
-              missing (sort (seq (set/difference required-fields assigned)))
-              called-parents (->> statements
-                                  (keep (fn [stmt]
-                                          (when (= :call (:type stmt))
-                                            (:target stmt))))
-                                  set)
-              uninitialized-parents (sort (seq (set/difference parents-needing-init
-                                                               called-parents)))]
-          (when (seq missing)
-            (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
-                            {:error (type-error
-                                     (str "Constructor " ctor-name " must initialize attachable fields: "
-                                          (str/join ", " missing)))})))
-          (when (seq uninitialized-parents)
-            (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
-                            {:error (type-error
-                                     (str "Constructor " ctor-name " in class " name
-                                          " must call a constructor of "
-                                          (str/join ", " uninitialized-parents)
-                                          " to initialize inherited attachable field(s): "
-                                          (str/join ", "
-                                                    (sort (mapcat #(attachable-init-field-names
-                                                                    env (:body (env-lookup-class env %)))
-                                                                  uninitialized-parents)))))})))))))))
+        (doseq [{ctor-name :name ctor-body :body} constructors]
+          (let [statements (mapcat constructor-statements ctor-body)
+                assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
+                missing (sort (seq (set/difference required-fields assigned)))
+                called-parents (->> statements
+                                    (keep (fn [stmt]
+                                            (when (= :call (:type stmt))
+                                              (:target stmt))))
+                                    set)
+                uninitialized-parents (sort (seq (set/difference parents-needing-init
+                                                                 called-parents)))]
+            (when (seq missing)
+              (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
+                              {:error (type-error
+                                       (str "Constructor " ctor-name " must initialize attachable fields: "
+                                            (str/join ", " missing)))})))
+            (when (seq uninitialized-parents)
+              (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
+                              {:error (type-error
+                                       (str "Constructor " ctor-name " in class " name
+                                            " must call a constructor of "
+                                            (str/join ", " uninitialized-parents)
+                                            " to initialize inherited attachable field(s): "
+                                            (str/join ", "
+                                                      (sort (mapcat #(attachable-init-field-names
+                                                                      env (:body (env-lookup-class env %)))
+                                                                    uninitialized-parents)))))})))))))))
 
 ;;
 ;; Program Type Checking
@@ -6092,7 +6088,7 @@
 (defn- register-array-methods!
   [env]
   (env-add-class env "Array" {:name "Array"
-                               :generic-params [{:name "T"}]})
+                              :generic-params [{:name "T"}]})
   (env-add-method env "Array" "filled"
                   {:params [{:name "size" :type "Integer"}
                             {:name "value" :type "T"}]
@@ -6102,7 +6098,7 @@
 (defn- register-map-methods!
   [env]
   (env-add-class env "Map" {:name "Map"
-                             :generic-params [{:name "K"} {:name "V"}]})
+                            :generic-params [{:name "K"} {:name "V"}]})
   (register-builtin-type-signatures! env "Map"))
 
 (defn- register-set-methods!
@@ -6195,7 +6191,6 @@
   (register-atomic-reference-methods! env)
   (register-channel-methods! env)
   (register-function-call-methods! env))
-
 
 ;;
 ;; Undefined-type validation
@@ -6306,10 +6301,10 @@
         generic-param-names (fn [gparams]
                               (into #{} (keep (comp type-name-string :name)) gparams))
         known-here? (fn [nm local-generics]
-                     (or (builtin-type? nm)
-                         (some? (env-lookup-class env nm))
-                         (some? (env-lookup-type-alias env nm))
-                         (contains? local-generics nm)))
+                      (or (builtin-type? nm)
+                          (some? (env-lookup-class env nm))
+                          (some? (env-lookup-type-alias env nm))
+                          (contains? local-generics nm)))
         check! (fn [label line type-expr local-generics]
                  (when (and type-expr (not (full?)))
                    (doseq [nm (distinct (type-base-name-refs type-expr))
@@ -6546,10 +6541,10 @@
   ([{:keys [classes calls statements imports functions type-aliases duplicate-functions
             function-signature-conflicts] :as program} opts]
    (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))]
-   (let [env (make-type-env)
-         normalized-functions (normalize-function-defs classes functions)
-         all-class-defs (vec (concat classes (function-class-defs normalized-functions)))
-         visible-classes (class-defs-by-name-last-wins all-class-defs)
+     (let [env (make-type-env)
+           normalized-functions (normalize-function-defs classes functions)
+           all-class-defs (vec (concat classes (function-class-defs normalized-functions)))
+           visible-classes (class-defs-by-name-last-wins all-class-defs)
          ;; Every interned class-def, under its qualified identity (Phase 3,
          ;; docs/proposals/namespaces.md) — not just whichever one won the
          ;; bare-name collapse above. `:name` is swapped to the qualified
@@ -6568,53 +6563,53 @@
          ;; ordinary bare-name registration, and enumerating it as a second,
          ;; differently-named entry would count it as an extra sealed variant
          ;; that does not exist.
-         qualified-class-defs (->> all-class-defs
-                                   (filter :qualified-name)
-                                   (map (fn [cd] (assoc cd :name (:qualified-name cd) :true-name (:name cd))))
-                                   (into [] (distinct)))
-         ambiguous-classes (ambiguous-class-names all-class-defs)
+           qualified-class-defs (->> all-class-defs
+                                     (filter :qualified-name)
+                                     (map (fn [cd] (assoc cd :name (:qualified-name cd) :true-name (:name cd))))
+                                     (into [] (distinct)))
+           ambiguous-classes (ambiguous-class-names all-class-defs)
          ;; The free-function analog — normalized-functions, not
          ;; all-class-defs: a function's OWN bare :name, not its
          ;; synthesized, always-unique :class-name (which ambiguous-classes
          ;; already covers and could never find ambiguous).
-         ambiguous-functions (ambiguous-function-names normalized-functions)
+           ambiguous-functions (ambiguous-function-names normalized-functions)
          ;; Names whose bodies should be collected for resolution but not re-checked
          ;; (used by the REPL to avoid re-validating previously defined code).
-         skip-body-names (or (:skip-class-body-names opts) #{})]
+           skip-body-names (or (:skip-class-body-names opts) #{})]
      ;; Populate ambiguity info before any lookup can happen — env-lookup-class
      ;; consults it on every resolved bare name (see ambiguous-class-names).
-     (reset! (:ambiguous-classes env) ambiguous-classes)
-     (reset! (:ambiguous-functions env) ambiguous-functions)
-     (try
+       (reset! (:ambiguous-classes env) ambiguous-classes)
+       (reset! (:ambiguous-functions env) ambiguous-functions)
+       (try
        ;; Reject duplicate free-function definitions before they are collapsed
        ;; last-wins (which would otherwise make the earlier definition silently
        ;; vanish and surface later as an obscure "Method not found: callN").
-       (when-let [dup (first duplicate-functions)]
-         (throw (ex-info (str "Duplicate function definition: " dup)
-                         {:error (type-error
-                                  (str "Function '" dup "' is defined more than once. "
-                                       "Free-function names must be unique within a program; "
-                                       "a later definition would silently replace the earlier one. "
-                                       "Rename or remove the duplicate."))})))
+         (when-let [dup (first duplicate-functions)]
+           (throw (ex-info (str "Duplicate function definition: " dup)
+                           {:error (type-error
+                                    (str "Function '" dup "' is defined more than once. "
+                                         "Free-function names must be unique within a program; "
+                                         "a later definition would silently replace the earlier one. "
+                                         "Rename or remove the duplicate."))})))
 
        ;; A `declare function` signature must be matched exactly by its later
        ;; definition (the declaration is collapsed away, so an unchecked
        ;; mismatch would silently take the definition's signature).
-       (when-let [conflict (first function-signature-conflicts)]
-         (throw (ex-info (:message conflict)
-                         {:error (type-error (:message conflict))})))
+         (when-let [conflict (first function-signature-conflicts)]
+           (throw (ex-info (:message conflict)
+                           {:error (type-error (:message conflict))})))
 
        ;; Register imported Java classes (as placeholders)
-       (doseq [{:keys [qualified-name source]} imports]
-         (when (nil? source)
-           (let [simple-name (last (str/split qualified-name #"\."))]
-             (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
+         (doseq [{:keys [qualified-name source]} imports]
+           (when (nil? source)
+             (let [simple-name (last (str/split qualified-name #"\."))]
+               (env-add-class env simple-name {:name simple-name :body [] :import qualified-name}))))
 
-       (register-builtin-methods env)
+         (register-builtin-methods env)
 
        ;; Register type aliases first so they are available throughout the program.
-       (doseq [{:keys [name type-expr]} (or type-aliases [])]
-         (env-add-type-alias env name type-expr))
+         (doseq [{:keys [name type-expr]} (or type-aliases [])]
+           (env-add-type-alias env name type-expr))
 
        ;; First pass: collect every interned class under its qualified
        ;; identity (see qualified-class-defs) — including one that will go on
@@ -6628,9 +6623,9 @@
        ;; create finance/Account.make(...)`) needs that qualified registration
        ;; to already exist at the point its OWN constant is checked, not
        ;; merely by the time the whole program finishes elaborating.
-       (doseq [class-def qualified-class-defs]
-         (with-source-file (:source-file class-def)
-           (fn [] (collect-class-info env class-def))))
+         (doseq [class-def qualified-class-defs]
+           (with-source-file (:source-file class-def)
+             (fn [] (collect-class-info env class-def))))
 
        ;; Second pass: collect the rest of the program's class definitions —
        ;; the entry file's own classes, allowing them to override builtin
@@ -6648,33 +6643,33 @@
        ;; misleading "Undefined class" — this raw registration is that, and
        ;; nothing more; the class's real processing already happened above,
        ;; under its qualified key, where no such collision exists.
-       (doseq [class-def visible-classes]
-         (if (contains? ambiguous-classes (:name class-def))
-           (env-add-class env (:name class-def) class-def)
-           (with-source-file (:source-file class-def)
-             (fn [] (collect-class-info env class-def)))))
+         (doseq [class-def visible-classes]
+           (if (contains? ambiguous-classes (:name class-def))
+             (env-add-class env (:name class-def) class-def)
+             (with-source-file (:source-file class-def)
+               (fn [] (collect-class-info env class-def)))))
 
        ;; Undefined-type validation. Runs now that every class, alias and import
        ;; is collected, so forward references resolve. Collects up to a bound of
        ;; errors (not just the first) and reports them together; short-circuits
        ;; before body checking so an undefined type does not also spray unrelated
        ;; downstream noise. REPL-skipped classes were validated when first defined.
-       (let [undefined-type-errors
-             (collect-undefined-type-errors
-              env
-              (remove #(contains? skip-body-names (:name %)) classes)
-              functions
-              statements
-              (or (:max-undefined-type-errors opts) default-max-undefined-type-errors))]
-         (when (seq undefined-type-errors)
-           (throw (ex-info "Undefined type(s) referenced"
-                           {:errors undefined-type-errors}))))
+         (let [undefined-type-errors
+               (collect-undefined-type-errors
+                env
+                (remove #(contains? skip-body-names (:name %)) classes)
+                functions
+                statements
+                (or (:max-undefined-type-errors opts) default-max-undefined-type-errors))]
+           (when (seq undefined-type-errors)
+             (throw (ex-info "Undefined type(s) referenced"
+                             {:errors undefined-type-errors}))))
 
        ;; Inject pre-existing variable types (e.g., from REPL). Expand any type
        ;; aliases so a variable declared with an alias type (e.g. a REPL `let m:
        ;; Matrix := ...`) resolves its methods on later inputs.
-       (doseq [[var-name var-type] (:var-types opts)]
-         (env-add-var env var-name (expand-type-aliases env var-type)))
+         (doseq [[var-name var-type] (:var-types opts)]
+           (env-add-var env var-name (expand-type-aliases env var-type)))
 
        ;; Register function variables (name -> generated class): the bare
        ;; name, always (an ambiguous one just gets whichever fn-def visits
@@ -6688,30 +6683,30 @@
        ;; rewrote it to an ordinary bare call naming "trade.ship" by the
        ;; time this program reaches check-program, so it needs a real var
        ;; registered under that exact key like any other free function.
-       (doseq [fn-def normalized-functions]
-         (let [arity (count (:params fn-def))]
-           (when (> arity 32)
-             (throw (ex-info (str "Function " (:name fn-def)
-                                  " must have at most 32 parameters")
-                             {:error (type-error
-                                      (str "Function " (:name fn-def)
-                                           " must have at most 32 parameters"))}))))
-         (env-add-var env (:name fn-def) (:class-name fn-def))
-         (when (:qualified-name fn-def)
-           (env-add-var env (:qualified-name fn-def) (:class-name fn-def))))
+         (doseq [fn-def normalized-functions]
+           (let [arity (count (:params fn-def))]
+             (when (> arity 32)
+               (throw (ex-info (str "Function " (:name fn-def)
+                                    " must have at most 32 parameters")
+                               {:error (type-error
+                                        (str "Function " (:name fn-def)
+                                             " must have at most 32 parameters"))}))))
+           (env-add-var env (:name fn-def) (:class-name fn-def))
+           (when (:qualified-name fn-def)
+             (env-add-var env (:qualified-name fn-def) (:class-name fn-def))))
 
        ;; Register top-level `let` globals so class and function bodies can read
        ;; them (§7), and enforce the def-before-use watermark before those bodies
        ;; are checked (so an undefined global surfaces as an init-order error,
        ;; not a downstream "Undefined variable").
-       (when (seq statements)
-         (collect-top-level-globals! env statements)
-         (let [watermark-errors (check-global-watermark
-                                 statements normalized-functions classes
-                                 @(:globals env))]
-           (when (seq watermark-errors)
-             (throw (ex-info "Global initialized after first use"
-                             {:errors watermark-errors})))))
+         (when (seq statements)
+           (collect-top-level-globals! env statements)
+           (let [watermark-errors (check-global-watermark
+                                   statements normalized-functions classes
+                                   @(:globals env))]
+             (when (seq watermark-errors)
+               (throw (ex-info "Global initialized after first use"
+                               {:errors watermark-errors})))))
 
        ;; Second pass: check every interned class's body under its qualified
        ;; identity, mirroring the collect-class-info ordering above (qualified
@@ -6722,49 +6717,49 @@
        ;; regardless. skip-body-names is bare-name-shaped (a REPL concern; see
        ;; :skip-class-body-names), so it does not apply here — a small,
        ;; accepted extra REPL re-check cost, not a correctness issue.
-       (doseq [class-def qualified-class-defs]
-         (with-source-file (:source-file class-def)
-           (fn [] (check-class env class-def))))
+         (doseq [class-def qualified-class-defs]
+           (with-source-file (:source-file class-def)
+             (fn [] (check-class env class-def))))
 
        ;; Third pass: check the rest of the program's class bodies. Skipped
        ;; for an ambiguous bare name for the same reason as the first pass
        ;; above — its body was already fully checked under its qualified key.
-       (doseq [class-def visible-classes]
-         (when-not (or (contains? skip-body-names (:name class-def))
-                       (contains? ambiguous-classes (:name class-def)))
-           (with-source-file (:source-file class-def)
-             (fn [] (check-class env class-def)))))
+         (doseq [class-def visible-classes]
+           (when-not (or (contains? skip-body-names (:name class-def))
+                         (contains? ambiguous-classes (:name class-def)))
+             (with-source-file (:source-file class-def)
+               (fn [] (check-class env class-def)))))
 
        ;; Check top-level statements in source order when available.
        ;; Fall back to legacy :calls-only programs.
-       (if (seq statements)
-         (check-statements env statements)
-         (doseq [call calls]
-           (check-expression env call)))
+         (if (seq statements)
+           (check-statements env statements)
+           (doseq [call calls]
+             (check-expression env call)))
 
-       {:success true
-        :errors []
-        :warnings (vec @(:warnings env))}
+         {:success true
+          :errors []
+          :warnings (vec @(:warnings env))}
 
-       (catch clojure.lang.ExceptionInfo e
-         (let [error-data (ex-data e)]
-           {:success false
+         (catch clojure.lang.ExceptionInfo e
+           (let [error-data (ex-data e)]
+             {:success false
             ;; A pass may report several errors at once (e.g. undefined-type
             ;; validation) via :errors; otherwise fall back to the single :error.
-            :errors (or (:errors error-data)
-                        [(or (:error error-data)
-                             (type-error (ex-message e)))])
-            :warnings (vec @(:warnings env))}))
+              :errors (or (:errors error-data)
+                          [(or (:error error-data)
+                               (type-error (ex-message e)))])
+              :warnings (vec @(:warnings env))}))
 
        ;; Any other exception is an internal type-checker fault (e.g. a shape
        ;; assumption broken by an unexpected AST). Surface it as a type error
        ;; instead of letting a raw JVM exception escape this entry point; callers
        ;; rely on type-check always returning a result map. (In cljs the `:default`
        ;; clause above already covers this, so this JVM-only clause is elided there.)
-       (catch Exception e
-            {:success false
-             :errors [(type-error (str "Internal type checker error: " (ex-message e)))]
-             :warnings (vec @(:warnings env))}))))))
+         (catch Exception e
+           {:success false
+            :errors [(type-error (str "Internal type checker error: " (ex-message e)))]
+            :warnings (vec @(:warnings env))}))))))
 
 (defn type-check
   "Type check Nex code (entry point).

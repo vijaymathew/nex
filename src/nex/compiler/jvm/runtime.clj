@@ -483,7 +483,7 @@
         fixed-count (count fixed-classes)
         ^java.lang.reflect.Method m (.getMethod owner ^String method-name
                                                 (into-array Class (resolve-declared-varargs-method
-                                                                    fixed-classes component-class)))
+                                                                   fixed-classes component-class)))
         coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
         varargs-array (build-varargs-array component-class (drop fixed-count args))]
     (.invoke m target (to-array (conj (vec coerced-fixed) varargs-array)))))
@@ -496,7 +496,7 @@
         fixed-count (count fixed-classes)
         ^java.lang.reflect.Method m (.getMethod owner ^String method-name
                                                 (into-array Class (resolve-declared-varargs-method
-                                                                    fixed-classes component-class)))
+                                                                   fixed-classes component-class)))
         coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
         varargs-array (build-varargs-array component-class (drop fixed-count args))]
     (.invoke m nil (to-array (conj (vec coerced-fixed) varargs-array)))))
@@ -509,7 +509,7 @@
         fixed-count (count fixed-classes)
         ^java.lang.reflect.Constructor c (.getConstructor klass
                                                           (into-array Class (resolve-declared-varargs-method
-                                                                              fixed-classes component-class)))
+                                                                             fixed-classes component-class)))
         coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
         varargs-array (build-varargs-array component-class (drop fixed-count args))]
     (.newInstance c (to-array (conj (vec coerced-fixed) varargs-array)))))
@@ -1126,27 +1126,27 @@
     ;; compiled runtime cannot reflect user methods off an interpreter object, so
     ;; dispatch it back through the interpreter — mirroring invoke-function-object.
     (invoke-interpreter-object-method state target method-name args)
-  (let [^Class cls (.getClass target)
-        lowered-name (lowered-instance-method-name method-name (count args))]
-    (if-let [[effective-target ^Method method] (find-user-method target lowered-name)]
-      (invoke-reflective! method effective-target (object-array [state (object-array args)]))
-      (let [runtime-name (runtime-type-name state target)]
-        (if (and (= method-name "cursor")
-                 (empty? args)
-                 (string? runtime-name)
-                 (runtime-compatible-with? state runtime-name "Cursor"))
-          target
-          (let [builtin-result (try
-                                 (if (typeinfo/get-type-name target)
-                                   (bi/call-builtin-method nil target target method-name args)
-                                   ::not-found)
-                                 (catch Exception _ ::not-found))]
-            (if (not= builtin-result ::not-found)
-              builtin-result
-              (throw (ex-info (str "Method not found: " method-name)
-                              {:method method-name
-                               :arity (count args)
-                               :class (.getName cls)}))))))))))
+    (let [^Class cls (.getClass target)
+          lowered-name (lowered-instance-method-name method-name (count args))]
+      (if-let [[effective-target ^Method method] (find-user-method target lowered-name)]
+        (invoke-reflective! method effective-target (object-array [state (object-array args)]))
+        (let [runtime-name (runtime-type-name state target)]
+          (if (and (= method-name "cursor")
+                   (empty? args)
+                   (string? runtime-name)
+                   (runtime-compatible-with? state runtime-name "Cursor"))
+            target
+            (let [builtin-result (try
+                                   (if (typeinfo/get-type-name target)
+                                     (bi/call-builtin-method nil target target method-name args)
+                                     ::not-found)
+                                   (catch Exception _ ::not-found))]
+              (if (not= builtin-result ::not-found)
+                builtin-result
+                (throw (ex-info (str "Method not found: " method-name)
+                                {:method method-name
+                                 :arity (count args)
+                                 :class (.getName cls)}))))))))))
 
 (defn- get-user-field
   [target field-name]
@@ -2557,27 +2557,27 @@
 
    "java-call-method-resolved"
    (fn [state args] (java-call-method-resolved state (nth args 0) (nth args 1) (nth args 2)
-                                                (nth args 3) (vec (drop 4 args))))
+                                               (nth args 3) (vec (drop 4 args))))
 
    "java-call-static-resolved"
    (fn [state args] (java-call-static-resolved state (nth args 0) (nth args 1) (nth args 2)
-                                                (vec (drop 3 args))))
+                                               (vec (drop 3 args))))
 
    "java-create-object-resolved"
    (fn [state args] (java-create-object-resolved state (nth args 0) (nth args 1)
-                                                  (vec (drop 2 args))))
+                                                 (vec (drop 2 args))))
 
    "java-call-method-resolved-varargs"
    (fn [state args] (java-call-method-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
-                                                        (nth args 3) (nth args 4) (vec (drop 5 args))))
+                                                       (nth args 3) (nth args 4) (vec (drop 5 args))))
 
    "java-call-static-resolved-varargs"
    (fn [state args] (java-call-static-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
-                                                        (nth args 3) (vec (drop 4 args))))
+                                                       (nth args 3) (vec (drop 4 args))))
 
    "java-create-object-resolved-varargs"
    (fn [state args] (java-create-object-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
-                                                          (vec (drop 3 args))))
+                                                         (vec (drop 3 args))))
 
    "spawn-function-object"
    (fn [state args] (spawn-function-object state (first args)))

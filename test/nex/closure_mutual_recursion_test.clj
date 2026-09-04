@@ -191,7 +191,7 @@ print(is_even(10))
 check_is_odd(99)")
         (doseq [opts [{} {:interpret? true}]]
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Undefined function or method: is_odd"
-                                 (e/eval-file (.getPath f) opts))))
+                                (e/eval-file (.getPath f) opts))))
         (finally (.delete f))))))
 
 (deftest untyped-mutually-recursive-closure-lets-called-from-top-level-test

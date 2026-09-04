@@ -173,7 +173,7 @@ end")))
             defeats the point of naming it"
     (let [{:keys [compiled interpreted]}
           (both-backends (str color-enum
-                               "print(Color.Red)
+                              "print(Color.Red)
 print(Color.Red.to_string())
 print(\"val: \" + Color.Green.to_string())"))]
       (is (= ["Red" "\"Red\"" "\"val: Green\""] compiled))

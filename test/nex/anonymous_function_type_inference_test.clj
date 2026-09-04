@@ -11,7 +11,7 @@
     (try
       (spit f code)
       (let [compiled (clojure.string/split-lines
-                       (clojure.string/trim-newline (with-out-str (e/eval-file (.getPath f) {}))))
+                      (clojure.string/trim-newline (with-out-str (e/eval-file (.getPath f) {}))))
             interpreted (clojure.string/split-lines
                          (clojure.string/trim-newline (with-out-str (e/eval-file (.getPath f) {:interpret? true}))))]
         (is (= interpreted compiled) "compiled and interpreted output must agree")

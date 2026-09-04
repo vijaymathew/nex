@@ -53,6 +53,6 @@ end"]
       end
 end"]
       (is (thrown-with-msg?
-            Exception
-            #"Postcondition violation: sum_correct"
-            (invoke-first-method code "buggy_sum" [5 10]))))))
+           Exception
+           #"Postcondition violation: sum_correct"
+           (invoke-first-method code "buggy_sum" [5 10]))))))

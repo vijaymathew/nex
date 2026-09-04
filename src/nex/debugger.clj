@@ -108,23 +108,23 @@
   [raw]
   (let [s (str/trim (or raw ""))]
     (or
-      (when-let [n (parse-positive-int s)]
-        {:kind :hit :n n})
-      (when-let [[_ cls f] (re-matches #"^([A-Za-z_][A-Za-z0-9_]*)#([A-Za-z_][A-Za-z0-9_]*)$" s)]
-        {:kind :class-field-write :class cls :field f})
-      (when-let [[_ f] (re-matches #"^field:([A-Za-z_][A-Za-z0-9_]*)$" s)]
-        {:kind :field-write :field f})
-      (when-let [[_ lhs line-str] (re-matches #"^(.+):(\d+)$" s)]
-        (let [line (parse-positive-int line-str)]
-          (when line
-            (if (or (str/includes? lhs "/")
-                    (str/includes? lhs "\\")
-                    (str/ends-with? lhs ".nex"))
-              {:kind :file-line :source lhs :line line}
-              (when-let [[_ cls m] (re-matches #"^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$" lhs)]
-                {:kind :cm-line :class cls :method m :line line})))))
-      (when-let [[_ cls m] (re-matches #"^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$" s)]
-        {:kind :cm :class cls :method m}))))
+     (when-let [n (parse-positive-int s)]
+       {:kind :hit :n n})
+     (when-let [[_ cls f] (re-matches #"^([A-Za-z_][A-Za-z0-9_]*)#([A-Za-z_][A-Za-z0-9_]*)$" s)]
+       {:kind :class-field-write :class cls :field f})
+     (when-let [[_ f] (re-matches #"^field:([A-Za-z_][A-Za-z0-9_]*)$" s)]
+       {:kind :field-write :field f})
+     (when-let [[_ lhs line-str] (re-matches #"^(.+):(\d+)$" s)]
+       (let [line (parse-positive-int line-str)]
+         (when line
+           (if (or (str/includes? lhs "/")
+                   (str/includes? lhs "\\")
+                   (str/ends-with? lhs ".nex"))
+             {:kind :file-line :source lhs :line line}
+             (when-let [[_ cls m] (re-matches #"^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$" lhs)]
+               {:kind :cm-line :class cls :method m :line line})))))
+     (when-let [[_ cls m] (re-matches #"^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$" s)]
+       {:kind :cm :class cls :method m}))))
 
 (defn parse-break-command
   "Parse :break argument into {:spec <breakpoint-spec> :condition <expr-or-nil>}."
@@ -316,26 +316,26 @@
   [ctx cond-expr]
   (let [eval-ctx (assoc ctx :debug-hook nil)]
     (try
-    (let [ast (p/ast cond-expr)
-          top-node (when (= (:type ast) :program)
-                     (last-program-top-node ast))
-          v (if top-node
-              (interp/eval-node eval-ctx top-node)
-              false)]
-      (boolean v))
-    (catch Exception _
-      (try
-        (let [wrapped (p/ast (str "class __DbgCond__\n"
-                                  "  feature\n"
-                                  "    __eval__() do\n"
-                                  "      print(" cond-expr ")\n"
-                                  "    end\n"
-                                  "end"))
-              expr-node (-> wrapped :classes first :body first :members first :body first :args first)
-              v (interp/eval-node eval-ctx expr-node)]
-          (boolean v))
-        (catch Exception _
-          false))))))
+      (let [ast (p/ast cond-expr)
+            top-node (when (= (:type ast) :program)
+                       (last-program-top-node ast))
+            v (if top-node
+                (interp/eval-node eval-ctx top-node)
+                false)]
+        (boolean v))
+      (catch Exception _
+        (try
+          (let [wrapped (p/ast (str "class __DbgCond__\n"
+                                    "  feature\n"
+                                    "    __eval__() do\n"
+                                    "      print(" cond-expr ")\n"
+                                    "    end\n"
+                                    "end"))
+                expr-node (-> wrapped :classes first :body first :members first :body first :args first)
+                v (interp/eval-node eval-ctx expr-node)]
+            (boolean v))
+          (catch Exception _
+            false))))))
 
 (defn breakpoint-hit?
   [bp hit ctx node]
@@ -386,17 +386,17 @@
   [ctx expr wrap-expression-fn]
   (let [eval-ctx (assoc ctx :debug-hook nil)]
     (try
-    (let [ast (p/ast expr)]
-      (if (and (= (:type ast) :program) (last-program-top-node ast))
-        (interp/eval-node eval-ctx (last-program-top-node ast))
-        ::invalid))
-    (catch Exception _
-      (try
-        (let [wrapped (p/ast (wrap-expression-fn expr))
-              expr-node (-> wrapped :classes first :body first :members first :body first :args first)]
-          (interp/eval-node eval-ctx expr-node))
-        (catch Exception _
-          ::invalid))))))
+      (let [ast (p/ast expr)]
+        (if (and (= (:type ast) :program) (last-program-top-node ast))
+          (interp/eval-node eval-ctx (last-program-top-node ast))
+          ::invalid))
+      (catch Exception _
+        (try
+          (let [wrapped (p/ast (wrap-expression-fn expr))
+                expr-node (-> wrapped :classes first :body first :members first :body first :args first)]
+            (interp/eval-node eval-ctx expr-node))
+          (catch Exception _
+            ::invalid))))))
 
 (defn watchpoint-hits!
   [ctx {:keys [wrap-expression-fn]}]

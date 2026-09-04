@@ -168,8 +168,8 @@ end"
           ctx (interp/interpret ast)
           ;; Create Main instance and call demo
           _ (interp/eval-node ctx {:type :let :name "main_obj"
-                                    :value {:type :create :class-name "Main"
-                                            :generic-args nil :constructor nil :args []}})
+                                   :value {:type :create :class-name "Main"
+                                           :generic-args nil :constructor nil :args []}})
           _ (interp/eval-node ctx {:type :call :target "main_obj" :method "demo" :args []})
           output @(:output ctx)]
       (is (= ["42"] output)))))

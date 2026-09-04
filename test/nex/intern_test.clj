@@ -345,7 +345,7 @@ end")
       (is (not (.contains output "Cannot find intern file for io/Directory")))
       (is (not (.contains output "Cannot find intern file for io/Text_File")))
       (is (not (.contains output "Cannot find intern file for io/Binary_File")))
-      (is (.contains output "\"Directory(.") ))))
+      (is (.contains output "\"Directory(.")))))
 
 (deftest repl-intern-loads-checked-in-json-library
   (testing "REPL can load the checked-in Json library and create a Json object"
@@ -1863,9 +1863,9 @@ let a := create Account.make(create Money.make(100.0))
 print(a.balance.amount)")
       (try
         (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
-                                  (into-array String
-                                              ["java" "-cp" (System/getProperty "java.class.path")
-                                               "clojure.main" "-m" "nex.eval" (.getPath main-file)]))]
+                  (into-array String
+                              ["java" "-cp" (System/getProperty "java.class.path")
+                               "clojure.main" "-m" "nex.eval" (.getPath main-file)]))]
           (.put (.environment pb) "NEX_USER_DIR" (.getPath tmp-dir))
           (.redirectErrorStream pb true)
           (let [proc (.start pb)

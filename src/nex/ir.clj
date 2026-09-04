@@ -51,22 +51,22 @@
 (defn unit
   [{:keys [name kind functions body result-jvm-type] :as m}]
   (assoc m :op :unit
-           :functions (vec (or functions []))
-           :body (vec (or body []))
-           :result-jvm-type result-jvm-type
-           :name name
-           :kind kind))
+         :functions (vec (or functions []))
+         :body (vec (or body []))
+         :result-jvm-type result-jvm-type
+         :name name
+         :kind kind))
 
 (defn fn-node
   [{:keys [name owner params return-type return-jvm-type locals body] :as m}]
   (assoc m :op :fn
-           :name name
-           :owner owner
-           :params (vec (or params []))
-           :return-type return-type
-           :return-jvm-type return-jvm-type
-           :locals (vec (or locals []))
-           :body (vec (or body []))))
+         :name name
+         :owner owner
+         :params (vec (or params []))
+         :return-type return-type
+         :return-jvm-type return-jvm-type
+         :locals (vec (or locals []))
+         :body (vec (or body []))))
 
 (defn const-node [value nex-type jvm-type]
   {:op :const

@@ -189,7 +189,6 @@ end")
       (is (true? (:closure-runtime-object? (:class-def anon-expr))))
       (is (true? (:closure-runtime-object? anon-class))))))
 
-
 (deftest lower-collection-literals-test
   (testing "collection literals lower to explicit IR nodes"
     (let [array-unit (:unit (lower/lower-repl-cell (p/ast "[1, 2, 3]") {:name "nex/repl/ArrayLit_0001"}))
@@ -230,8 +229,8 @@ end")
 end")
           {:keys [unit env]} (lower/lower-repl-cell program {:name "nex/repl/ConvertGuard_0001"
                                                              :var-types {"books" {:base-type "Array"
-                                                                                   :type-params [{:base-type "Map"
-                                                                                                  :type-params ["String" "Any"]}]}}})
+                                                                                  :type-params [{:base-type "Map"
+                                                                                                 :type-params ["String" "Any"]}]}}})
           block (first (:body unit))
           if-stmt (second (:body block))
           binding (get-in if-stmt [:test :binding])]

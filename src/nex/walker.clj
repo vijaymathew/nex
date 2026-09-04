@@ -411,80 +411,80 @@
   ([variant-node parent-name generic-params]
    (union-variant->class variant-node parent-name generic-params nil))
   ([variant-node parent-name generic-params enum-ordinal]
-  (let [var-name (token-text (second variant-node))
-        param-list-node (first (filter #(and (sequential? %)
-                                             (= :paramList (first %)))
-                                       (drop 2 variant-node)))
-        payload (if param-list-node (transform-node param-list-node) [])
+   (let [var-name (token-text (second variant-node))
+         param-list-node (first (filter #(and (sequential? %)
+                                              (= :paramList (first %)))
+                                        (drop 2 variant-node)))
+         payload (if param-list-node (transform-node param-list-node) [])
         ;; inherit P[G…] — parent generic args are the bare param names.
-        gargs (mapv :name generic-params)
-        parent-entry (cond-> {:parent parent-name}
-                       (seq gargs) (assoc :generic-args gargs))
-        fields (mapv (fn [{:keys [name type]}]
-                       {:type :field
-                        :name name
-                        :field-type type
-                        :once? false
-                        :constant? false
-                        :value nil
-                        :note nil})
-                     payload)
+         gargs (mapv :name generic-params)
+         parent-entry (cond-> {:parent parent-name}
+                        (seq gargs) (assoc :generic-args gargs))
+         fields (mapv (fn [{:keys [name type]}]
+                        {:type :field
+                         :name name
+                         :field-type type
+                         :once? false
+                         :constant? false
+                         :value nil
+                         :note nil})
+                      payload)
         ;; Constructor params are given internal names distinct from the field
         ;; names (payload construction is positional), so the field-init
         ;; `field := arg__i` is never ambiguous with the param in scope.
-        ctor-params (vec (map-indexed
-                          (fn [i {:keys [type]}]
-                            {:name (str "arg__" (inc i))
-                             :type type})
-                          payload))
-        ctor-body (if enum-ordinal
-                    [{:type :assign
-                      :target "ordinal"
-                      :value {:type :integer :value enum-ordinal}}]
-                    (vec (map-indexed
-                          (fn [i {:keys [name]}]
-                            {:type :assign
-                             :target name
-                             :value {:type :identifier :name (str "arg__" (inc i))}})
-                          payload)))
+         ctor-params (vec (map-indexed
+                           (fn [i {:keys [type]}]
+                             {:name (str "arg__" (inc i))
+                              :type type})
+                           payload))
+         ctor-body (if enum-ordinal
+                     [{:type :assign
+                       :target "ordinal"
+                       :value {:type :integer :value enum-ordinal}}]
+                     (vec (map-indexed
+                           (fn [i {:keys [name]}]
+                             {:type :assign
+                              :target name
+                              :value {:type :identifier :name (str "arg__" (inc i))}})
+                           payload)))
         ;; Enum members are canonical named constants (per the enum-union
         ;; doc), so each gets a `to_string` returning its own declared name —
         ;; otherwise `print(Color.Red)` falls through to the default
         ;; `#<Red object>` object rendering, which defeats the point of a
         ;; named enumeration. Plain (non-enum) union variants are untouched:
         ;; enrichment stays opt-in, so they keep the default rendering.
-        to-string-method (when enum-ordinal
+         to-string-method (when enum-ordinal
                             {:type :method :name "to_string"
                              :params nil :return-type "String" :alias nil
                              :note nil :require nil
                              :body [{:type :assign :target "result"
                                      :value {:type :string :value var-name}}]
                              :declaration-only? false :ensure nil :rescue nil})
-        feature-section (when (or (seq fields) to-string-method)
-                          {:type :feature-section
-                           :visibility {:type :public}
-                           :members (vec (concat fields
+         feature-section (when (or (seq fields) to-string-method)
+                           {:type :feature-section
+                            :visibility {:type :public}
+                            :members (vec (concat fields
                                                   (when to-string-method [to-string-method])))})
-        constructor {:type :constructor
-                     :name "make"
-                     :params (when (seq ctor-params) ctor-params)
-                     :require nil
-                     :body ctor-body
-                     :ensure nil
-                     :rescue nil}
-        constructors {:type :constructors
-                      :constructors [constructor]}]
-    {:type :class
-     :name var-name
-     :deferred? false
-     :sealed? false
-     :generic-params (when (seq generic-params) generic-params)
-     :note nil
-     :parents [parent-entry]
-     :body (if feature-section
-             [feature-section constructors]
-             [constructors])
-     :invariant nil})))
+         constructor {:type :constructor
+                      :name "make"
+                      :params (when (seq ctor-params) ctor-params)
+                      :require nil
+                      :body ctor-body
+                      :ensure nil
+                      :rescue nil}
+         constructors {:type :constructors
+                       :constructors [constructor]}]
+     {:type :class
+      :name var-name
+      :deferred? false
+      :sealed? false
+      :generic-params (when (seq generic-params) generic-params)
+      :note nil
+      :parents [parent-entry]
+      :body (if feature-section
+              [feature-section constructors]
+              [constructors])
+      :invariant nil})))
 
 (defn- payload-free-variant?
   "A variant with no `(payload)` — an enum-style tag."
@@ -942,11 +942,11 @@
     (if (empty? field-refinements)
       class-node
       (let [check-body (fn [routine]
-                          (if (sequential? (:body routine))
-                            (update routine :body
-                                    #(inject-field-checks-in-body
-                                      % field-refinements (body-let-names %)))
-                            routine))]
+                         (if (sequential? (:body routine))
+                           (update routine :body
+                                   #(inject-field-checks-in-body
+                                     % field-refinements (body-let-names %)))
+                           routine))]
         (update class-node :body
                 (fn [sections]
                   (mapv (fn [section]
@@ -995,7 +995,7 @@
                n))
            program)
           (update :classes (fn [classes]
-                              (mapv #(inject-class-field-refinement-checks % refinements) classes)))))))
+                             (mapv #(inject-class-field-refinement-checks % refinements) classes)))))))
 
 (defn- process-field-patterns
   "Desugar a variant's field patterns against a bound variable `var-name`.
@@ -1133,16 +1133,16 @@
         has-alias? (some #(= "as" %) parts)
         ;; Split into path/class-name and optional alias
         main-parts (if has-alias?
-                    (take-while #(not= "as" %) parts)
-                    parts)
+                     (take-while #(not= "as" %) parts)
+                     parts)
         alias (when has-alias?
-               (last parts))
+                (last parts))
         ;; Last part of main-parts is the class name
         class-name (last main-parts)
         ;; Everything before class name is the path
         path-parts (butlast main-parts)
         path (when (seq path-parts)
-              (clojure.string/join "/" path-parts))]
+               (clojure.string/join "/" path-parts))]
     {:type :intern
      :path path
      :class-name class-name
@@ -1155,16 +1155,16 @@
         has-from? (some #(= "from" %) tokens)
         ;; Split into qualified name and optional source path
         main-parts (if has-from?
-                    (take-while #(not= "from" %) tokens)
-                    tokens)
+                     (take-while #(not= "from" %) tokens)
+                     tokens)
         source (when has-from? (last tokens))
         ;; Remove dot separators from main parts
         name-parts (remove #(= "." %) main-parts)
         ;; For JS imports: first part is the identifier, rest is ignored
         ;; For Java imports: join all parts with dots
         qualified-name (if has-from?
-                        (first name-parts)  ; JS: just the identifier
-                        (clojure.string/join "." name-parts))] ; Java: full qualified name
+                         (first name-parts)  ; JS: just the identifier
+                         (clojure.string/join "." name-parts))] ; Java: full qualified name
     {:type :import
      :qualified-name qualified-name
      :source source}))
@@ -1186,20 +1186,20 @@
         cleaned (remove #(= "end" %) rest)
         ;; Find different clauses
         generic-params (first (filter #(and (sequential? %)
-                                           (= :genericParams (first %)))
-                                     cleaned))
+                                            (= :genericParams (first %)))
+                                      cleaned))
         note-clause (first (filter #(and (sequential? %)
                                          (= :noteClause (first %)))
-                                  cleaned))
+                                   cleaned))
         inherit-clause (first (filter #(and (sequential? %)
                                             (= :inheritClause (first %)))
-                                     cleaned))
+                                      cleaned))
         class-body (first (filter #(and (sequential? %)
-                                       (= :classBody (first %)))
-                                 cleaned))
+                                        (= :classBody (first %)))
+                                  cleaned))
         invariant-clause (first (filter #(and (sequential? %)
-                                               (= :invariantClause (first %)))
-                                       cleaned))]
+                                              (= :invariantClause (first %)))
+                                        cleaned))]
     {:type :class
      :name (token-text name)
      :deferred? deferred?
@@ -1372,15 +1372,15 @@
   (let [has-visibility? (and (sequential? first-elem)
                              (= :visibilityModifier (first first-elem)))
         visibility (when has-visibility?
-                    (let [modifier first-elem]
-                      (when (= "private" (token-text (second modifier)))
-                        {:type :private})))
+                     (let [modifier first-elem]
+                       (when (= "private" (token-text (second modifier)))
+                         {:type :private})))
         ;; If has visibility: remaining = ("feature" member1 member2...)
         ;; If no visibility: remaining = (member1 member2...), first-elem = "feature"
         ;; In either case, we need to skip the "feature" keyword
         members-list (if has-visibility?
-                      (drop 1 remaining)  ; Skip "feature" keyword
-                      remaining)]          ; Already past "feature"
+                       (drop 1 remaining)  ; Skip "feature" keyword
+                       remaining)]          ; Already past "feature"
     {:type :feature-section
      :visibility (or visibility {:type :public})
      :members (mapv transform-node members-list)}))
@@ -1403,7 +1403,7 @@
         eq-idx (first (keep-indexed (fn [i v] (when (= "=" v) i)) tokens))
         note-clause (first (filter #(and (sequential? %)
                                          (= :noteClause (first %)))
-                                  tokens))]
+                                   tokens))]
     (if has-colon?
       (let [type-node (nth tokens 2)
             value-node (when eq-idx (nth tokens (inc eq-idx)))]
@@ -1430,19 +1430,19 @@
         ;; Separate params, require, ensure, rescue, and block
         params (first (filter #(and (sequential? %)
                                     (= :paramList (first %)))
-                             cleaned))
+                              cleaned))
         require-clause (first (filter #(and (sequential? %)
                                             (= :requireClause (first %)))
-                                     cleaned))
+                                      cleaned))
         ensure-clause (first (filter #(and (sequential? %)
                                            (= :ensureClause (first %)))
-                                    cleaned))
+                                     cleaned))
         rescue-clause (first (filter #(and (sequential? %)
                                            (= :rescueClause (first %)))
-                                    cleaned))
+                                     cleaned))
         block (first (filter #(and (sequential? %)
                                    (= :block (first %)))
-                            cleaned))]
+                             cleaned))]
     {:type :constructor
      :name (token-text name)
      :params (when params (transform-node params))
@@ -1458,28 +1458,28 @@
         ;; Separate params, return type, note, require, ensure, rescue, and block
         params (first (filter #(and (sequential? %)
                                     (= :paramList (first %)))
-                             cleaned))
+                              cleaned))
         return-type (first (filter #(and (sequential? %)
-                                        (= :type (first %)))
-                                  cleaned))
+                                         (= :type (first %)))
+                                   cleaned))
         note-clause (first (filter #(and (sequential? %)
                                          (= :noteClause (first %)))
-                                  cleaned))
+                                   cleaned))
         require-clause (first (filter #(and (sequential? %)
                                             (= :requireClause (first %)))
-                                     cleaned))
+                                      cleaned))
         ensure-clause (first (filter #(and (sequential? %)
                                            (= :ensureClause (first %)))
-                                    cleaned))
+                                     cleaned))
         rescue-clause (first (filter #(and (sequential? %)
                                            (= :rescueClause (first %)))
-                                    cleaned))
+                                     cleaned))
         block (first (filter #(and (sequential? %)
                                    (= :block (first %)))
-                            cleaned))
+                             cleaned))
         alias-clause (first (filter #(and (sequential? %)
                                           (= :aliasClause (first %)))
-                                   cleaned))
+                                    cleaned))
         ;; A method is deferred when no body is present (body-less syntax)
         ;; or when the explicit 'deferred' keyword was used
         deferred? (or (nil? block) (some #(= "deferred" %) rest))]
@@ -1520,9 +1520,9 @@
         type-node (first (filter sequential? parts))
         ;; Everything before the colon is identifiers (filter out commas)
         identifiers (->> parts
-                        (take-while #(not= ":" %))
-                        (filter string?)
-                        (remove #(= "," %)))
+                         (take-while #(not= ":" %))
+                         (filter string?)
+                         (remove #(= "," %)))
         param-type (when type-node (transform-node type-node))]
     ;; Return a vector of parameter maps, one for each identifier
     (mapv (fn [name]
@@ -1534,8 +1534,8 @@
   [[_ _open-bracket & params]]
   ;; Filter out brackets and commas
   (let [param-nodes (filter #(and (sequential? %)
-                                 (= :genericParam (first %)))
-                           params)]
+                                  (= :genericParam (first %)))
+                            params)]
     (mapv transform-node param-nodes)))
 
 (defn- handle-generic-param
@@ -1587,7 +1587,7 @@
     (let [type-name first-node
           type-args-node (first (filter #(and (sequential? %)
                                               (= :typeArgs (first %)))
-                                       rest))]
+                                        rest))]
       (if type-args-node
         {:base-type (qualified-name-text type-name)
          :type-args (transform-node type-args-node)}
@@ -1653,8 +1653,8 @@
   [[_ _open-bracket & args]]
   ;; Filter out brackets and commas, get type nodes
   (let [type-nodes (filter #(and (sequential? %)
-                                (= :type (first %)))
-                          args)]
+                                 (= :type (first %)))
+                           args)]
     (mapv transform-node type-nodes)))
 
 (defn- handle-block
@@ -1692,8 +1692,8 @@
                         (transform-node after-else))))]
     {:type :case
      :expr (transform-node expr)
-    :clauses (mapv transform-node clauses)
-    :else else-stmt}))
+     :clauses (mapv transform-node clauses)
+     :else else-stmt}))
 
 (defn- handle-match-statement
   [[_ _match-kw expr _of-kw & rest]]
@@ -1896,18 +1896,18 @@
         cleaned (remove #(#{"until" "do" "end"} %) rest)
         ;; Find optional clauses
         invariant-clause (first (filter #(and (sequential? %)
-                                               (= :invariantClause (first %)))
-                                       cleaned))
+                                              (= :invariantClause (first %)))
+                                        cleaned))
         variant-clause (first (filter #(and (sequential? %)
                                             (= :variantClause (first %)))
-                                     cleaned))
+                                      cleaned))
         ;; Find until condition and body
         until-expr (first (filter #(and (sequential? %)
-                                       (= :expression (first %)))
-                                 cleaned))
+                                        (= :expression (first %)))
+                                  cleaned))
         body-block (first (filter #(and (sequential? %)
-                                       (= :block (first %)))
-                                 cleaned))]
+                                        (= :block (first %)))
+                                  cleaned))]
     {:type :loop
      :init (transform-node init-block)
      :invariant (when invariant-clause (transform-node invariant-clause))
@@ -2083,11 +2083,11 @@
                        (= ":" (first rest)))
         ;; Extract and transform type node if present
         var-type (when has-type?
-                  (let [type-node (second rest)]
-                    (if (sequential? type-node)
+                   (let [type-node (second rest)]
+                     (if (sequential? type-node)
                       ;; Transform the type node (handles both simple and parameterized types)
-                      (transform-node type-node)
-                      type-node)))
+                       (transform-node type-node)
+                       type-node)))
         assign-idx (if has-type? 2 0)
         expr (nth rest (inc assign-idx))]
     {:type :let
@@ -2291,7 +2291,7 @@
         rest (drop-while #(not= name %) children)
         has-parens (boolean (some #(= "(" %) rest))
         args-node (first (filter #(and (sequential? %)
-                                      (= :argumentList (first %)))
+                                       (= :argumentList (first %)))
                                  rest))]
     (cond-> {:type :member-access
              :name (token-text name)
@@ -2304,12 +2304,12 @@
 (defn- handle-call-suffix
   [[_ & rest]]
   (let [args-node (first (filter #(and (sequential? %)
-                                      (= :argumentList (first %)))
+                                       (= :argumentList (first %)))
                                  rest))]
     {:type :call-suffix
      :args (if args-node
-            (transform-node args-node)
-            [])}))
+             (transform-node args-node)
+             [])}))
 
 (defn- handle-primary-expr
   [[_ primary]]
@@ -2353,8 +2353,8 @@
   [[_ _open-bracket & elements]]
   ;; Filter out brackets and commas, get expression nodes
   (let [expr-nodes (filter #(and (sequential? %)
-                                (= :expression (first %)))
-                          elements)]
+                                 (= :expression (first %)))
+                           elements)]
     {:type :array-literal
      :elements (mapv transform-node expr-nodes)}))
 
@@ -2370,8 +2370,8 @@
   [[_ _open-brace & entries]]
   ;; Filter out braces and commas, get mapEntry nodes
   (let [entry-nodes (filter #(and (sequential? %)
-                                 (= :mapEntry (first %)))
-                           entries)]
+                                  (= :mapEntry (first %)))
+                            entries)]
     {:type :map-literal
      :entries (mapv transform-node entry-nodes)}))
 
@@ -2379,10 +2379,10 @@
   [[_ key _colon value]]
   {:key (if (string? key)
          ;; String literal key (double- or single-quoted) or identifier key
-         (if (string-literal-token? key)
-           {:type :string :value (string-literal-value key)}
-           {:type :string :value key})
-         (transform-node key))
+          (if (string-literal-token? key)
+            {:type :string :value (string-literal-value key)}
+            {:type :string :value key})
+          (transform-node key))
    :value (transform-node value)})
 
 (defn- handle-literal
@@ -2419,21 +2419,21 @@
         generic-args (when generic-args-node (transform-node generic-args-node))
         ;; Remove punctuation and genericArgs node
         cleaned (remove #(or (#{"." "(" ")"} %)
-                            (and (sequential? %) (= :genericArgs (first %)))) rest)
+                             (and (sequential? %) (= :genericArgs (first %)))) rest)
         ;; Check if there's a constructor call
         has-constructor? (seq cleaned)
         constructor-name (when has-constructor? (first cleaned))
         ;; Find argument list if present
         args-node (first (filter #(and (sequential? %)
                                        (= :argumentList (first %)))
-                                rest))]
+                                 rest))]
     {:type :create
      :class-name (qualified-name-text class-name)
      :generic-args generic-args
      :constructor (when has-constructor? constructor-name)
-    :args (if args-node
-            (transform-node args-node)
-            [])}))
+     :args (if args-node
+             (transform-node args-node)
+             [])}))
 
 (defn- handle-convert-expression
   [[_ _convert-kw value-expr _to-kw var-name _colon type-expr]]
@@ -2565,7 +2565,6 @@
    :spawnExpression handle-spawn-expression
    :oldExpression handle-old-expression
    :whenExpression handle-when-expression})
-
 
 ;;
 ;; Core transformation function (forward-declared above; the handler fns

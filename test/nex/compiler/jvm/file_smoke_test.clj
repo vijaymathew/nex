@@ -352,9 +352,9 @@ print(fallback.typed_or(99))")
               output-lines (remove str/blank? (str/split-lines out))]
           (is (= 0 exit) err)
           (is (= ["7" "99"] output-lines)))
-      (finally
-        (when (.exists tmp-dir)
-          (delete-tree! tmp-dir)))))))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
 
 (deftest compile-jar-convert-in-and-condition-smoke-test
   (testing "compile-jar supports convert bindings nested under and conditions"
