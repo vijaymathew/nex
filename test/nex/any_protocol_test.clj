@@ -107,13 +107,27 @@ print(b.to_string)
 print(b)")))))
 
 (deftest enum-member-has-any-to-string
-  (testing "an enum union member, which declares no `to_string`, still renders"
-    (is (= ["\"#<INR object>\""]
+  ;; An enum union member now gets an auto-generated `to_string` returning
+  ;; its own declared name (a member is a canonical named constant — see
+  ;; nex.walker's union-variant->class), so this no longer exercises the
+  ;; Any-protocol fallback the way it used to; `plain-union-member-...` below
+  ;; covers that with a variant that genuinely declares none.
+  (testing "an enum union member's own to_string renders its declared name, not the Any-protocol default object rendering"
+    (is (= ["\"INR\""]
            (both "enum union Currency
   INR
   USD
 end
 print(Currency.INR.to_string)")))))
+
+(deftest plain-union-member-has-any-to-string
+  (testing "a plain (non-enum) union variant, which declares no `to_string`, still renders via the Any protocol fallback"
+    (is (= ["\"#<INR object>\""]
+           (both "union Currency
+  INR
+  USD
+end
+print(create INR.make().to_string)")))))
 
 (deftest object-to-string-in-concatenation
   (testing "an object without `to_string` concatenates in its Nex form"

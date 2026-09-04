@@ -81,9 +81,9 @@
       :array-literal (str "[" (str/join ", " (map format-expression (:elements expr))) "]")
       :set-literal (str "#{" (str/join ", " (map format-expression (:elements expr))) "}")
       :map-literal (str "{" (str/join ", " (map (fn [{:keys [key value]}]
-                                                   (str (format-expression key) " : "
-                                                        (format-expression value)))
-                                                 (:entries expr))) "}")
+                                                  (str (format-expression key) " : "
+                                                       (format-expression value)))
+                                                (:entries expr))) "}")
       ;; Default: just return the expression as-is
       (str expr))
     :else (str expr)))
@@ -128,8 +128,8 @@
                          (when (:invariant stmt)
                            (str (indent (inc level)) "invariant\n"
                                 (str/join "\n" (map #(str (indent (+ level 2))
-                                                         (:label %) ": " (format-expression (:expr %)))
-                                                   (:invariant stmt)))))
+                                                          (:label %) ": " (format-expression (:expr %)))
+                                                    (:invariant stmt)))))
                          (when (:variant stmt)
                            (str (indent (inc level)) "variant\n"
                                 (str (indent (+ level 2)) (format-expression (:variant stmt)))))

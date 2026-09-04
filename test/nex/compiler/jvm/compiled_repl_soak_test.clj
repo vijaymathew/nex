@@ -45,7 +45,7 @@
             repl/*repl-backend* (atom backend)
             repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
     (let [ctx (repl/init-repl-context)
-                          outputs (reduce (fn [acc step]
+          outputs (reduce (fn [acc step]
                             (conj acc {:label (:label step)
                                        :parity-ignore-output? (:parity-ignore-output? step)
                                        :output (eval-step-output ctx step)}))

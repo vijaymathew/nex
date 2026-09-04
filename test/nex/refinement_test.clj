@@ -450,28 +450,28 @@ print(u.where = \"vijay\")")))))
   (testing "a let narrowing into a refinement declared in an interned file raises,
             same as if the refinement were declared in the entry file itself"
     (let [main-file (write-lib-and-main!
-                      "declare type Currency_Code = String where s: s.length() = 3"
-                      "let code: Currency_Code := \"USDX\"\nprint(code)")]
+                     "declare type Currency_Code = String where s: s.length() = 3"
+                     "let code: Currency_Code := \"USDX\"\nprint(code)")]
       (is (= "Refinement Currency_Code violated" (:error (run-cross-file main-file)))))))
 
 (deftest cross-file-refinement-narrowing-passes-for-valid-value-test
   (testing "the same interned refinement accepts a value satisfying its predicate"
     (let [main-file (write-lib-and-main!
-                      "declare type Currency_Code = String where s: s.length() = 3"
-                      "let code: Currency_Code := \"USD\"\nprint(code)")]
+                     "declare type Currency_Code = String where s: s.length() = 3"
+                     "let code: Currency_Code := \"USD\"\nprint(code)")]
       (is (= "\"USD\"\n" (:output (run-cross-file main-file)))))))
 
 (deftest cross-file-refinement-parameter-is-enforced-test
   (testing "a refinement declared in an interned file is checked at a
             parameter boundary, not just a bare let"
     (let [main-file (write-lib-and-main!
-                      "declare type Quantity = Integer where n: n > 0"
-                      "function use(x: Quantity): Integer do result := x end
+                     "declare type Quantity = Integer where n: n > 0"
+                     "function use(x: Quantity): Integer do result := x end
 print(use(5))")]
       (is (= "5\n" (:output (run-cross-file main-file)))))
     (let [main-file (write-lib-and-main!
-                      "declare type Quantity = Integer where n: n > 0"
-                      "function use(x: Quantity): Integer do result := x end
+                     "declare type Quantity = Integer where n: n > 0"
+                     "function use(x: Quantity): Integer do result := x end
 print(use(-1))")]
       (is (= "Refinement Quantity violated" (:error (run-cross-file main-file)))))))
 
@@ -479,16 +479,16 @@ print(use(-1))")]
   (testing "a refinement declared in an interned file is checked at a field
             assignment (`this.field := v`) in a class declared in the entry file"
     (let [main-file (write-lib-and-main!
-                      "declare type Quantity = Integer where n: n > 0"
-                      "class Box
+                     "declare type Quantity = Integer where n: n > 0"
+                     "class Box
   create make(v: Integer) do this.q := v end
   feature q: Quantity
 end
 print(create Box.make(7).q)")]
       (is (= "7\n" (:output (run-cross-file main-file)))))
     (let [main-file (write-lib-and-main!
-                      "declare type Quantity = Integer where n: n > 0"
-                      "class Box
+                     "declare type Quantity = Integer where n: n > 0"
+                     "class Box
   create make(v: Integer) do this.q := v end
   feature q: Quantity
 end
@@ -504,8 +504,8 @@ print(create Box.make(-5).q)")]
   (testing "`convert x to y: R` is rejected the same way whether R is declared
             in the entry file or reached via intern — not silently accepted"
     (let [main-file (write-lib-and-main!
-                      "declare type Quantity = Integer where n: n > 0"
-                      "let x: Any := 5
+                     "declare type Quantity = Integer where n: n > 0"
+                     "let x: Any := 5
 if convert x to y: Quantity then print(y) end")
           {:keys [error]} (run-cross-file main-file)]
       (is (some? error) "convert to an interned refinement must be rejected")
@@ -517,7 +517,7 @@ if convert x to y: Quantity then print(y) end")
   (testing "a non-refinement alias reached via intern still resolves in a
             convert target, same as a same-file one already does"
     (let [main-file (write-lib-and-main!
-                      "declare type Count = Integer"
-                      "let x: Any := 5
+                     "declare type Count = Integer"
+                     "let x: Any := 5
 if convert x to y: Count then print(\"matched \" + y.to_string) else print(\"no match\") end")]
       (is (= "\"matched 5\"\n" (:output (run-cross-file main-file)))))))

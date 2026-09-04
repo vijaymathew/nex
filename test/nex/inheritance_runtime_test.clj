@@ -52,9 +52,9 @@ end"
             _ (interp/env-define env "mydog" dog-obj)
             ctx-with-dog (assoc ctx :current-env env)]
         (interp/eval-node ctx-with-dog {:type :call
-                                         :target "mydog"
-                                         :method "speak"
-                                         :args []})
+                                        :target "mydog"
+                                        :method "speak"
+                                        :args []})
         (is (= ["\"Animal speaks\""] @(:output ctx-with-dog)))))))
 
 (deftest calling-own-method-test
@@ -83,9 +83,9 @@ end"
             _ (interp/env-define env "mydog" dog-obj)
             ctx-with-dog (assoc ctx :current-env env)]
         (interp/eval-node ctx-with-dog {:type :call
-                                         :target "mydog"
-                                         :method "bark"
-                                         :args []})
+                                        :target "mydog"
+                                        :method "bark"
+                                        :args []})
         (is (= ["\"Woof!\""] @(:output ctx-with-dog)))))))
 
 (deftest method-overriding-test
@@ -114,9 +114,9 @@ end"
             _ (interp/env-define env "mycircle" circle-obj)
             ctx-with-circle (assoc ctx :current-env env)]
         (interp/eval-node ctx-with-circle {:type :call
-                                            :target "mycircle"
-                                            :method "draw"
-                                            :args []})
+                                           :target "mycircle"
+                                           :method "draw"
+                                           :args []})
         (is (= ["\"Drawing circle\""] @(:output ctx-with-circle)))))))
 
 (deftest multiple-inheritance-methods-test
@@ -153,23 +153,23 @@ end"
             ctx-with-duck (assoc ctx :current-env env)]
         ;; Test fly from Flyable
         (interp/eval-node ctx-with-duck {:type :call
-                                          :target "myduck"
-                                          :method "fly"
-                                          :args []})
+                                         :target "myduck"
+                                         :method "fly"
+                                         :args []})
         (is (= ["\"Flying...\""] @(:output ctx-with-duck)))
         ;; Test swim from Swimmable
         (reset! (:output ctx-with-duck) [])
         (interp/eval-node ctx-with-duck {:type :call
-                                          :target "myduck"
-                                          :method "swim"
-                                          :args []})
+                                         :target "myduck"
+                                         :method "swim"
+                                         :args []})
         (is (= ["\"Swimming...\""] @(:output ctx-with-duck)))
         ;; Test quack from Duck
         (reset! (:output ctx-with-duck) [])
         (interp/eval-node ctx-with-duck {:type :call
-                                          :target "myduck"
-                                          :method "quack"
-                                          :args []})
+                                         :target "myduck"
+                                         :method "quack"
+                                         :args []})
         (is (= ["\"Quack!\""] @(:output ctx-with-duck)))))))
 
 (deftest inheritance-chain-test
@@ -206,23 +206,23 @@ end"
             ctx-with-dog (assoc ctx :current-env env)]
         ;; Test breathe from Animal (grandparent)
         (interp/eval-node ctx-with-dog {:type :call
-                                         :target "mydog"
-                                         :method "breathe"
-                                         :args []})
+                                        :target "mydog"
+                                        :method "breathe"
+                                        :args []})
         (is (= ["\"Breathing...\""] @(:output ctx-with-dog)))
         ;; Test nurture from Mammal (parent)
         (reset! (:output ctx-with-dog) [])
         (interp/eval-node ctx-with-dog {:type :call
-                                         :target "mydog"
-                                         :method "nurture"
-                                         :args []})
+                                        :target "mydog"
+                                        :method "nurture"
+                                        :args []})
         (is (= ["\"Nurturing young\""] @(:output ctx-with-dog)))
         ;; Test bark from Dog (own)
         (reset! (:output ctx-with-dog) [])
         (interp/eval-node ctx-with-dog {:type :call
-                                         :target "mydog"
-                                         :method "bark"
-                                         :args []})
+                                        :target "mydog"
+                                        :method "bark"
+                                        :args []})
         (is (= ["\"Woof!\""] @(:output ctx-with-dog)))))))
 
 (deftest parent-method-call-test
@@ -256,9 +256,9 @@ end"
             _ (interp/env-define env "b" b-obj)
             ctx-with-b (assoc ctx :current-env env)]
         (interp/eval-node ctx-with-b {:type :call
-                                       :target "b"
-                                       :method "show"
-                                       :args []})
+                                      :target "b"
+                                      :method "show"
+                                      :args []})
         ;; A.show prints x (10), then show prints y (20)
         (is (= ["10" "20"] @(:output ctx-with-b)))))))
 
@@ -289,11 +289,11 @@ end"
         (interp/register-class ctx class-node))
       ;; Create B using constructor
       (let [b-obj (interp/eval-node ctx {:type :create
-                                          :class-name "B"
-                                          :generic-args nil
-                                          :constructor "make_B"
-                                          :args [{:type :integer :value 10}
-                                                 {:type :integer :value 20}]})]
+                                         :class-name "B"
+                                         :generic-args nil
+                                         :constructor "make_B"
+                                         :args [{:type :integer :value 10}
+                                                {:type :integer :value 20}]})]
         (is (= 10 (get (:fields b-obj) :x)))
         (is (= 20 (get (:fields b-obj) :y)))))))
 
@@ -324,9 +324,9 @@ end"
             _ (interp/env-define env "mycar" car-obj)
             ctx-with-car (assoc ctx :current-env env)]
         (interp/eval-node ctx-with-car {:type :call
-                                         :target "mycar"
-                                         :method "info"
-                                         :args []})
+                                        :target "mycar"
+                                        :method "info"
+                                        :args []})
         (is (= ["100" "\"Tesla\""] @(:output ctx-with-car)))))))
 
 (deftest inherited-invariants-checked-on-create-test
@@ -348,13 +348,13 @@ end"
       (doseq [class-node (:classes ast)]
         (interp/register-class ctx class-node))
       (is (thrown-with-msg?
-            Exception
-            #"Class invariant violation: parent_positive"
-            (interp/eval-node ctx {:type :create
-                                   :class-name "C"
-                                   :generic-args nil
-                                   :constructor nil
-                                   :args []}))))))
+           Exception
+           #"Class invariant violation: parent_positive"
+           (interp/eval-node ctx {:type :create
+                                  :class-name "C"
+                                  :generic-args nil
+                                  :constructor nil
+                                  :args []}))))))
 
 (deftest inherited-and-local-invariants-conjoined-test
   (testing "Class invariants are inherited as base-invariants and conjoined with local invariants"
@@ -389,19 +389,19 @@ end"
             _ (interp/env-define env "b" obj)
             ctx-with-b (assoc ctx :current-env env)]
         (is (thrown-with-msg?
-              Exception
-              #"Class invariant violation: parent_positive"
-              (interp/eval-node ctx-with-b {:type :call
-                                            :target "b"
-                                            :method "set_x"
-                                            :args [{:type :integer :value 0}]})))
+             Exception
+             #"Class invariant violation: parent_positive"
+             (interp/eval-node ctx-with-b {:type :call
+                                           :target "b"
+                                           :method "set_x"
+                                           :args [{:type :integer :value 0}]})))
         (is (thrown-with-msg?
-              Exception
-              #"Class invariant violation: local_lt_ten"
-              (interp/eval-node ctx-with-b {:type :call
-                                            :target "b"
-                                            :method "set_x"
-                                            :args [{:type :integer :value 11}]})))))))
+             Exception
+             #"Class invariant violation: local_lt_ten"
+             (interp/eval-node ctx-with-b {:type :call
+                                           :target "b"
+                                           :method "set_x"
+                                           :args [{:type :integer :value 11}]})))))))
 
 (deftest diamond-inheritance-invariants-deduplicated-test
   (testing "Diamond inheritance deduplicates shared ancestor class invariants"
@@ -477,12 +477,12 @@ end"
                                                 :args [{:type :integer :value -1}]})))
         ;; both false -> precondition violation
         (is (thrown-with-msg?
-              Exception
-              #"Precondition violation"
-              (interp/eval-node ctx-with-b {:type :call
-                                            :target "b"
-                                            :method "f"
-                                            :args [{:type :integer :value 0}]})))))))
+             Exception
+             #"Precondition violation"
+             (interp/eval-node ctx-with-b {:type :call
+                                           :target "b"
+                                           :method "f"
+                                           :args [{:type :integer :value 0}]})))))))
 
 (deftest inherited-method-postconditions-use-and-test
   (testing "Overridden feature postconditions are base AND local"
@@ -514,12 +514,12 @@ end"
             _ (interp/env-define env "b" obj)
             ctx-with-b (assoc ctx :current-env env)]
         (is (thrown-with-msg?
-              Exception
-              #"Postcondition violation: local_lt_ten"
-              (interp/eval-node ctx-with-b {:type :call
-                                            :target "b"
-                                            :method "g"
-                                            :args []})))))))
+             Exception
+             #"Postcondition violation: local_lt_ten"
+             (interp/eval-node ctx-with-b {:type :call
+                                           :target "b"
+                                           :method "g"
+                                           :args []})))))))
 
 (deftest multiple-inherited-method-preconditions-use-or-test
   (testing "Overridden feature preconditions are OR-ed across all inherited parents"
@@ -573,12 +573,12 @@ end"
                                                :method "f"
                                                :args [{:type :integer :value 0}]})))
         (is (thrown-with-msg?
-              Exception
-              #"Precondition violation: inherited_or_local_require"
-              (interp/eval-node ctx-with-d {:type :call
-                                            :target "d"
-                                            :method "f"
-                                            :args [{:type :integer :value 5}]})))))))
+             Exception
+             #"Precondition violation: inherited_or_local_require"
+             (interp/eval-node ctx-with-d {:type :call
+                                           :target "d"
+                                           :method "f"
+                                           :args [{:type :integer :value 5}]})))))))
 
 (deftest multiple-inherited-method-postconditions-use-and-test
   (testing "Overridden feature postconditions are AND-ed across all inherited parents"
@@ -618,12 +618,12 @@ end"
             _ (interp/env-define env "d" obj)
             ctx-with-d (assoc ctx :current-env env)]
         (is (thrown-with-msg?
-              Exception
-              #"Postcondition violation: c_ok"
-              (interp/eval-node ctx-with-d {:type :call
-                                            :target "d"
-                                            :method "g"
-                                            :args []})))))))
+             Exception
+             #"Postcondition violation: c_ok"
+             (interp/eval-node ctx-with-d {:type :call
+                                           :target "d"
+                                           :method "g"
+                                           :args []})))))))
 
 (deftest inherited-constructor-create-test
   (testing "Child class can use constructor inherited from parent"
@@ -841,7 +841,7 @@ end")
         (repl/eval-code ctx "class Box [G] create make(v: G) do value := v end feature value: G end"))
       (let [redef-out (with-out-str
                         (let [err (with-err-str
-                                   (repl/eval-code ctx generic-class-calling-hash-on-unconstrained-param))]
+                                    (repl/eval-code ctx generic-class-calling-hash-on-unconstrained-param))]
                           (is (str/includes? err "Warning") err)
                           (is (str/includes? err "interpreter") err)))]
         (is (not (str/includes? redef-out "Error:")) redef-out))))

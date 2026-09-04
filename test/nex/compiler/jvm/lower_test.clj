@@ -166,7 +166,7 @@ end")
           anon-expr (-> prepared :functions first :body second :value)]
       (is (= [{:name "x" :type "Integer"}] (:captures anon-expr)))
       (is (true? (:closure-runtime-object? (:class-def anon-expr))))
-      (is (true? (:closure-runtime-object? anon-class)))))) 
+      (is (true? (:closure-runtime-object? anon-class))))))
 
 (deftest prepare-program-for-captured-call-target-closures-test
   (testing "closure preparation captures outer variables used as raw call targets"
@@ -188,7 +188,6 @@ end")
              (:captures anon-expr)))
       (is (true? (:closure-runtime-object? (:class-def anon-expr))))
       (is (true? (:closure-runtime-object? anon-class))))))
-
 
 (deftest lower-collection-literals-test
   (testing "collection literals lower to explicit IR nodes"
@@ -230,8 +229,8 @@ end")
 end")
           {:keys [unit env]} (lower/lower-repl-cell program {:name "nex/repl/ConvertGuard_0001"
                                                              :var-types {"books" {:base-type "Array"
-                                                                                   :type-params [{:base-type "Map"
-                                                                                                  :type-params ["String" "Any"]}]}}})
+                                                                                  :type-params [{:base-type "Map"
+                                                                                                 :type-params ["String" "Any"]}]}}})
           block (first (:body unit))
           if-stmt (second (:body block))
           binding (get-in if-stmt [:test :binding])]

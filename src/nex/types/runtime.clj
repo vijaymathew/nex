@@ -11,18 +11,18 @@
 (defn nex-array-get [arr idx] (let [idx (nex-int->number idx)] (.get arr idx)))
 (defn nex-array-add [arr val]
   (do
-            (.add arr val)
-            nil))
+    (.add arr val)
+    nil))
 (defn nex-array-add-at [arr idx val]
   (let [idx (nex-int->number idx)]
     (do
-              (.add arr idx val)
-              nil)))
+      (.add arr idx val)
+      nil)))
 (defn nex-array-set [arr idx val]
   (let [idx (nex-int->number idx)]
     (do
-              (.set arr idx val)
-              nil)))
+      (.set arr idx val)
+      nil)))
 (defn nex-array-size [arr] (.size arr))
 (defn nex-array-empty? [arr] (.isEmpty arr))
 (defn nex-array-contains [arr elem] (.contains arr elem))
@@ -30,8 +30,8 @@
 (defn nex-array-remove [arr idx]
   (let [idx (nex-int->number idx)]
     (do
-              (.remove ^java.util.ArrayList arr ^int (int idx))
-              nil)))
+      (.remove ^java.util.ArrayList arr ^int (int idx))
+      nil)))
 (defn nex-array-reverse [arr] (java.util.ArrayList. (.reversed arr)))
 (defn nex-array-sort [arr] (.sort arr nil))
 (defn nex-array-slice [arr start end]
@@ -68,7 +68,7 @@
     (java.util.ArrayList. (.subList arr 0 end))))
 (defn nex-array-concat [arr other]
   (doto (java.util.ArrayList. arr)
-            (.addAll other)))
+    (.addAll other)))
 (defn nex-array-str [formatter arr]
   (str "[" (str/join ", " (map formatter arr)) "]"))
 
@@ -123,7 +123,7 @@
   (if (portable-map? m)
     (let [s @(:state m)] (map #(map-find-pair s %) (:keys s)))
     (map (fn [^java.util.Map$Entry e] [(.getKey e) (.getValue e)])
-                 (.entrySet ^java.util.Map m))))
+         (.entrySet ^java.util.Map m))))
 
 (defn nex-map-get [m k]
   (if (portable-map? m)
@@ -176,9 +176,12 @@
     (doseq [[k v] pairs] (nex-map-put m k v))
     m))
 (defn nex-host-map-from
-  "Build a host-backed map (the representation the compiled backend uses)."
+  "Build a host-backed map (the representation the compiled backend uses).
+   LinkedHashMap, not HashMap: `pairs` arrives in the source map's own
+   insertion order (see nex-clone-value), and a plain HashMap would scramble
+   it to hash-bucket order."
   [pairs]
-  (let [m (java.util.HashMap.)] (doseq [[k v] pairs] (.put m k v)) m))
+  (let [m (java.util.LinkedHashMap.)] (doseq [[k v] pairs] (.put m k v)) m))
 (defn nex-map-str [formatter m]
   (str "{"
        (str/join ", " (map (fn [[k v]] (str (formatter k) ": " (formatter v)))
@@ -326,16 +329,16 @@
 
 (defn nex-bitwise-logical-right-shift [n shift]
   (i32->int
-    (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
-                                   (bit-index shift)))))
+   (long (bit-shift-right (bit-and 0xFFFFFFFF (long (int32 n)))
+                          (bit-index shift)))))
 
 (defn nex-bitwise-rotate-left [n shift]
   (i32->int
-    (Integer/rotateLeft (int32 n) (bit-index shift))))
+   (Integer/rotateLeft (int32 n) (bit-index shift))))
 
 (defn nex-bitwise-rotate-right [n shift]
   (i32->int
-    (Integer/rotateRight (int32 n) (bit-index shift))))
+   (Integer/rotateRight (int32 n) (bit-index shift))))
 
 (defn nex-bitwise-and [n other]
   (i32->int (int32 (bit-and (int32 n) (int32 other)))))
@@ -432,8 +435,8 @@
   (when (nex-int-zero? b)
     (throw (ex-info "Division by zero" {:left a :right b})))
   (if (and (= a Long/MIN_VALUE) (= b -1))
-            (throw (ArithmeticException. "long overflow"))
-            (quot a b)))
+    (throw (ArithmeticException. "long overflow"))
+    (quot a b)))
 
 ;; Truncated remainder (sign of the dividend), like Java % / BigInt %.
 ;; Nex `%` is truncated in every backend — the JVM's LREM/DREM and JS's `%`
@@ -450,7 +453,7 @@
    JVM's DREM and JS's `%`; x % 0.0 is NaN."
   [a b]
   (let [d (double b)]
-            (if (zero? d) Double/NaN (rem (double a) d))))
+    (if (zero? d) Double/NaN (rem (double a) d))))
 (defn nex-int-odd? [a]
   (odd? a))
 
@@ -518,8 +521,8 @@
 (defn nex-console-flush [] (flush))
 (defn nex-console-read-line []
   (do
-            (flush)
-            (read-line)))
+    (flush)
+    (read-line)))
 
 (defn nex-parse-integer64-string [s]
   (let [trimmed (str/trim s)
@@ -601,30 +604,30 @@
 
 (defn path-delete [path]
   (let [f (java.io.File. path)]
-            (when (.exists f)
-              (if (.isDirectory f)
-                (throw (ex-info "path_delete does not remove directories" {:path path}))
-                (.delete f))))
+    (when (.exists f)
+      (if (.isDirectory f)
+        (throw (ex-info "path_delete does not remove directories" {:path path}))
+        (.delete f))))
   nil)
 
 (defn- delete-tree-clj! [^java.io.File f]
-     (when (.exists f)
-       (doseq [child (reverse (clojure.core/file-seq f))]
-         (.delete ^java.io.File child))))
+  (when (.exists f)
+    (doseq [child (reverse (clojure.core/file-seq f))]
+      (.delete ^java.io.File child))))
 
 (defn- copy-tree-clj! [^java.io.File source ^java.io.File target]
-     (if (.isDirectory source)
-       (do
-         (.mkdirs target)
-         (doseq [child (or (.listFiles source) (make-array java.io.File 0))]
-           (copy-tree-clj! child (java.io.File. target (.getName ^java.io.File child)))))
-       (do
-         (when-let [parent (.getParentFile target)]
-           (.mkdirs parent))
-         (java.nio.file.Files/copy (.toPath source)
-                                   (.toPath target)
-                                   (into-array java.nio.file.CopyOption
-                                               [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
+  (if (.isDirectory source)
+    (do
+      (.mkdirs target)
+      (doseq [child (or (.listFiles source) (make-array java.io.File 0))]
+        (copy-tree-clj! child (java.io.File. target (.getName ^java.io.File child)))))
+    (do
+      (when-let [parent (.getParentFile target)]
+        (.mkdirs parent))
+      (java.nio.file.Files/copy (.toPath source)
+                                (.toPath target)
+                                (into-array java.nio.file.CopyOption
+                                            [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
 
 (defn path-delete-tree [path]
   (delete-tree-clj! (java.io.File. path))
@@ -636,8 +639,8 @@
 
 (defn path-move [source-path target-path]
   (do
-            (path-copy source-path target-path)
-            (path-delete-tree source-path))
+    (path-copy source-path target-path)
+    (path-delete-tree source-path))
   nil)
 
 (defn path-read-text [path]
@@ -653,103 +656,109 @@
 
 (defn path-list [path]
   (let [dir (java.io.File. path)
-                files (.listFiles dir)]
-            (nex-array-from (mapv #(.getPath ^java.io.File %) (or files [])))))
+        files (.listFiles dir)]
+    (nex-array-from (mapv #(.getPath ^java.io.File %) (or files [])))))
 
 (defn text-file-open-read [path]
-     {:nex-builtin-type :TextFileHandle
-      :mode :read
-      :reader (java.io.BufferedReader. (java.io.InputStreamReader. (java.io.FileInputStream. path) java.nio.charset.StandardCharsets/UTF_8))
-      :writer nil})
+  {:nex-builtin-type :TextFileHandle
+   :mode :read
+   :reader (java.io.BufferedReader.
+            (java.io.InputStreamReader. (java.io.FileInputStream. path)
+                                        java.nio.charset.StandardCharsets/UTF_8))
+   :writer nil})
 
 (defn text-file-open-write [path]
-     {:nex-builtin-type :TextFileHandle
-      :mode :write
-      :reader nil
-      :writer (java.io.BufferedWriter. (java.io.OutputStreamWriter. (java.io.FileOutputStream. path false) java.nio.charset.StandardCharsets/UTF_8))})
+  {:nex-builtin-type :TextFileHandle
+   :mode :write
+   :reader nil
+   :writer (java.io.BufferedWriter.
+            (java.io.OutputStreamWriter. (java.io.FileOutputStream. path false)
+                                         java.nio.charset.StandardCharsets/UTF_8))})
 
 (defn text-file-open-append [path]
-     {:nex-builtin-type :TextFileHandle
-      :mode :append
-      :reader nil
-      :writer (java.io.BufferedWriter. (java.io.OutputStreamWriter. (java.io.FileOutputStream. path true) java.nio.charset.StandardCharsets/UTF_8))})
+  {:nex-builtin-type :TextFileHandle
+   :mode :append
+   :reader nil
+   :writer (java.io.BufferedWriter.
+            (java.io.OutputStreamWriter. (java.io.FileOutputStream. path true)
+                                         java.nio.charset.StandardCharsets/UTF_8))})
 
 (defn text-file-read-line [handle]
   (.readLine ^java.io.BufferedReader (:reader handle)))
 
 (defn text-file-write [handle text]
   (do (.write ^java.io.BufferedWriter (:writer handle) (str text))
-              (.flush ^java.io.BufferedWriter (:writer handle)))
+      (.flush ^java.io.BufferedWriter (:writer handle)))
   nil)
 
 (defn text-file-close [handle]
   (do
-            (when-let [r (:reader handle)] (.close ^java.io.BufferedReader r))
-            (when-let [w (:writer handle)] (.close ^java.io.BufferedWriter w)))
+    (when-let [r (:reader handle)] (.close ^java.io.BufferedReader r))
+    (when-let [w (:writer handle)] (.close ^java.io.BufferedWriter w)))
   nil)
 
 (defn- bytes->int-array [^bytes bs]
-     (nex-array-from (mapv #(bit-and (int %) 0xFF) bs)))
+  (nex-array-from (mapv #(bit-and (int %) 0xFF) bs)))
 
 (defn- int-array->bytes [values]
-     (byte-array (map (fn [v]
-                        (when (or (neg? v) (> v 255))
-                          (throw (ex-info "Binary byte values must be in range 0..255" {:value v})))
-                        (byte v))
-                      values)))
+  (byte-array (map (fn [v]
+                     (when (or (neg? v) (> v 255))
+                       (throw (ex-info "Binary byte values must be in range 0..255" {:value v})))
+                     (byte v))
+                   values)))
 
 (defn- make-binary-file-handle
-     [mode ^java.io.RandomAccessFile raf]
-     {:nex-builtin-type :BinaryFileHandle
-      :mode mode
-      :index (atom (.getFilePointer raf))
-      :raf raf})
+  [mode ^java.io.RandomAccessFile raf]
+  {:nex-builtin-type :BinaryFileHandle
+   :mode mode
+   :index (atom (.getFilePointer raf))
+   :raf raf})
 
 (defn binary-file-open-read [path]
-     (make-binary-file-handle :read
-                              (java.io.RandomAccessFile. path "r")))
+  (make-binary-file-handle :read
+                           (java.io.RandomAccessFile. path "r")))
 
 (defn binary-file-open-write [path]
-     (let [raf (java.io.RandomAccessFile. path "rw")]
-       (.setLength raf 0)
-       (.seek raf 0)
-        (make-binary-file-handle :write raf)))
+  (let [raf (java.io.RandomAccessFile. path "rw")]
+    (.setLength raf 0)
+    (.seek raf 0)
+    (make-binary-file-handle :write raf)))
 
 (defn binary-file-open-append [path]
-     (let [raf (java.io.RandomAccessFile. path "rw")
-           size (.length raf)]
-       (.seek raf size)
-       (make-binary-file-handle :append raf)))
+  (let [raf (java.io.RandomAccessFile. path "rw")
+        size (.length raf)]
+    (.seek raf size)
+    (make-binary-file-handle :append raf)))
 
 (defn binary-file-read-all [handle]
   (let [^java.io.RandomAccessFile raf (:raf handle)
-                pos (.getFilePointer raf)
-                size (int (.length raf))
-                data (byte-array size)]
-            (.seek raf 0)
-            (.readFully raf data)
-            (.seek raf pos)
-            (bytes->int-array data)))
+        pos (.getFilePointer raf)
+        size (int (.length raf))
+        data (byte-array size)]
+    (.seek raf 0)
+    (.readFully raf data)
+    (.seek raf pos)
+    (bytes->int-array data)))
 
 (defn binary-file-read [handle count]
   (let [^java.io.RandomAccessFile raf (:raf handle)
-                idx @(:index handle)
-                size (.length raf)
-                bytes-to-read (int (max 0 (min count (- size idx))))
-                out (byte-array bytes-to-read)]
-            (.seek raf idx)
-            (when (pos? bytes-to-read)
-              (.readFully raf out))
-            (reset! (:index handle) (+ idx bytes-to-read))
-            (bytes->int-array out)))
+        idx @(:index handle)
+        size (.length raf)
+        bytes-to-read (int (max 0 (min count (- size idx))))
+        out (byte-array bytes-to-read)]
+    (.seek raf idx)
+    (when (pos? bytes-to-read)
+      (.readFully raf out))
+    (reset! (:index handle) (+ idx bytes-to-read))
+    (bytes->int-array out)))
 
 (defn binary-file-write [handle values]
   (let [^java.io.RandomAccessFile raf (:raf handle)
-                idx @(:index handle)
-                data ^bytes (int-array->bytes values)]
-            (.seek raf idx)
-            (.write raf data)
-            (reset! (:index handle) (+ idx (alength data))))
+        idx @(:index handle)
+        data ^bytes (int-array->bytes values)]
+    (.seek raf idx)
+    (.write raf data)
+    (reset! (:index handle) (+ idx (alength data))))
   nil)
 
 (defn binary-file-position [handle]
@@ -760,12 +769,12 @@
     (throw (ex-info "binary file position must be non-negative" {:offset offset})))
   (reset! (:index handle) offset)
   (when-let [^java.io.RandomAccessFile raf (:raf handle)]
-            (.seek raf offset))
+    (.seek raf offset))
   nil)
 
 (defn binary-file-close [handle]
   (when-let [^java.io.RandomAccessFile raf (:raf handle)]
-            (.close raf))
+    (.close raf))
   nil)
 
 ;; ---------------------------------------------------------------------------
@@ -873,11 +882,11 @@
       (let [^java.lang.ProcessBuilder pb (:process-builder proc)
             merged-error? (.redirectErrorStream pb)
             ^java.lang.Process p (try
-                                    (.start pb)
-                                    (catch java.io.IOException e
-                                      (throw (ex-info (str "Process: failed to start '" (:command proc)
-                                                            "': " (.getMessage e))
-                                                      {}))))
+                                   (.start pb)
+                                   (catch java.io.IOException e
+                                     (throw (ex-info (str "Process: failed to start '" (:command proc)
+                                                          "': " (.getMessage e))
+                                                     {}))))
             stdin (java.io.BufferedWriter. (java.io.OutputStreamWriter. (.getOutputStream p)))
             stdout (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p)))
             stderr (when-not merged-error?
@@ -978,8 +987,8 @@
   (if (process-self? proc)
     "Process(self)"
     (str "Process(" (:command proc)
-        (when (seq (:arguments proc)) (str " " (str/join " " (:arguments proc))))
-        ")")))
+         (when (seq (:arguments proc)) (str " " (str/join " " (:arguments proc))))
+         ")")))
 
 (defn nex-process-getenv [proc name]
   (if (process-self? proc)

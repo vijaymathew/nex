@@ -38,9 +38,9 @@
 end"]
       (is (= ["15"] (invoke-first-method code "set_day" [15])))
       (is (thrown-with-msg?
-            Exception
-            #"Precondition violation: valid_day"
-            (invoke-first-method code "set_day" [50]))))))
+           Exception
+           #"Precondition violation: valid_day"
+           (invoke-first-method code "set_day" [50]))))))
 
 (deftest postcondition-pass-and-fail-test
   (testing "Postconditions are enforced at runtime"
@@ -69,6 +69,6 @@ end"]
       ;; No output expected, only successful execution.
       (is (= [] (invoke-first-method ok-code "set_hour" [15])))
       (is (thrown-with-msg?
-            Exception
-            #"Postcondition violation: hour_set"
-            (invoke-first-method bad-code "buggy_set" [15]))))))
+           Exception
+           #"Postcondition violation: hour_set"
+           (invoke-first-method bad-code "buggy_set" [15]))))))

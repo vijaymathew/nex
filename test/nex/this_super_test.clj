@@ -194,7 +194,7 @@ end"
 
 (deftest typecheck-this-super-usage
   (testing "this and super usage passes type checking"
-      (let [code "class A
+    (let [code "class A
   create
     make(x: Integer) do
       this.x := x
@@ -259,7 +259,7 @@ end"
     (try
       (spit f code)
       (let [compiled (clojure.string/split-lines
-                       (clojure.string/trim-newline (with-out-str (e/eval-file (.getPath f) {}))))
+                      (clojure.string/trim-newline (with-out-str (e/eval-file (.getPath f) {}))))
             interpreted (clojure.string/split-lines
                          (clojure.string/trim-newline (with-out-str (e/eval-file (.getPath f) {:interpret? true}))))]
         (is (= interpreted compiled) "compiled and interpreted output must agree")

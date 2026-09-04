@@ -1,8 +1,11 @@
 (ns nex.pattern-destructure-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [nex.parser :as p]
             [nex.typechecker :as tc]
-            [nex.interpreter :as interp]))
+            [nex.interpreter :as interp]
+            [nex.compiler.jvm.file :as file]
+            [nex.compiler.jvm.classloader :as loader]))
 
 ;; Phase 1 of richer patterns: field destructuring and `_` wildcard in `match`.
 ;; Both desugar in the walker to the plain type-dispatch form (a synthetic `as`
@@ -14,6 +17,17 @@
         ctx (interp/make-context)]
     (interp/eval-node ctx ast)
     @(:output ctx)))
+
+(defn- run-compiled [code]
+  (let [{:keys [main-class classes]} (file/compile-ast "pattern_destructure_test.nex" (p/ast code) {})
+        ldr (loader/make-loader)]
+    (doseq [[binary-name ^bytes bytecode] classes]
+      (loader/define-class! ldr binary-name bytecode))
+    (let [cls (loader/resolve-class ldr main-class)
+          m (.getMethod cls "main" (into-array Class [(Class/forName "[Ljava.lang.String;")]))
+          out (with-out-str
+                (.invoke m nil (object-array [(into-array String [])])))]
+      (->> (str/split-lines out) (remove str/blank?) vec))))
 
 (defn- type-error? [code]
   (let [result (tc/type-check (p/ast code))]
@@ -289,6 +303,97 @@ print(f(create Bad[Integer].make()))"))))))
 end
 print(f(create Bad[Integer].make()))")))))
 
+(deftest trivially-true-field-type-pattern-counts-toward-exhaustiveness
+  ;; A bare `field: T` pattern desugars to a narrowing `convert` folded into
+  ;; the clause's :guard, and previously ANY guard -- explicit `if` or this
+  ;; synthetic one -- unconditionally excluded the clause from
+  ;; exhaustiveness, even when T is exactly the field's own already-declared
+  ;; type (so the convert can never actually fail). `Placed(id: String)`
+  ;; here, `id` already being declared String on Placed, used to make this
+  ;; match wrongly rejected as non-exhaustive; the plain, unannotated form
+  ;; (Placed(id, total)) was the only accepted spelling. See
+  ;; nex.walker/top-level-field-type-checks and nex.typechecker/clause-may-
+  ;; not-fire? for the fix.
+  (testing "Placed(id: String) — a field-type pattern the field's own declared type already satisfies — makes the match exhaustive without an else"
+    (is (= ["\"draft\"" "\"placed:A1\""]
+           (run (str order-decl
+                     "function d(o: Order): String do
+  match o of
+    Draft              then result := \"draft\"
+    Placed(id: String) then result := \"placed:\" + id
+    Shipped(tracking)  then result := \"shipped:\" + tracking
+  end
+end
+print(d(create Draft.make()))
+print(d(create Placed.make(\"A1\", 5.0)))"))))))
+
+(def ^:private result2-decl
+  "union Result2[T, E]
+  Ok2(value: T)
+  Err2(error: E)
+end
+")
+
+(def ^:private trivially-true-field-type-pattern-program
+  (str order-decl
+       "function d(o: Order): String do
+  match o of
+    Draft              then result := \"draft\"
+    Placed(id: String) then result := \"placed:\" + id
+    Shipped(tracking)  then result := \"shipped:\" + tracking
+  end
+end
+print(d(create Draft.make()))
+print(d(create Placed.make(\"A1\", 5.0)))"))
+
+(deftest trivially-true-field-type-pattern-runs-correctly-on-the-compiled-backend
+  (testing "the same match — accepted as exhaustive — also executes correctly through JVM lowering, not just the interpreter"
+    (is (= ["\"draft\"" "\"placed:A1\""] (run-compiled trivially-true-field-type-pattern-program)))))
+
+(deftest trivially-true-field-type-pattern-with-generic-substitution
+  (testing "Ok2(value: Integer) against a Result2[Integer, String] subject — the field's declared type is the class's own generic T, resolved to Integer via the subject's type-args before the trivial check runs"
+    (is (= ["\"ok:5\"" "\"err:oops\""]
+           (run (str result2-decl
+                     "function show(r: Result2[Integer, String]): String do
+  match r of
+    Ok2(value: Integer) then result := \"ok:\" + value.to_string()
+    Err2(error)          then result := \"err:\" + error
+  end
+end
+print(show(create Ok2[Integer, String].make(5)))
+print(show(create Err2[Integer, String].make(\"oops\")))"))))))
+
+(deftest genuinely-narrowing-field-type-pattern-still-excluded-from-exhaustiveness
+  ;; Unlike the above, `v: String` here narrows a field declared `Any` --
+  ;; a real, possibly-failing check (types-compatible? treats Any as
+  ;; compatible with everything AS A SOURCE, precisely because it defers to
+  ;; a runtime check like this one, so this predicate must not call it
+  ;; guaranteed just because types-compatible? would allow the assignment).
+  (testing "Full(v: String) against Full(v: Any) is still a real narrowing and is still rejected as non-exhaustive on its own"
+    (is (type-error?
+         "union Box
+  Full(v: Any)
+end
+function unwrap(b: Box): String do
+  match b of
+    Full(v: String) then result := v
+  end
+end
+print(unwrap(create Full.make(\"hi\")))"))))
+
+(deftest field-type-pattern-alongside-explicit-guard-still-excluded
+  (testing "a field-type pattern that would otherwise be trivial, combined with an explicit `if` guard, is still excluded — the explicit guard, not the pattern, decides"
+    (is (type-error?
+         (str order-decl
+              "function d(o: Order): String do
+  match o of
+    Draft                                    then result := \"draft\"
+    Placed(id: String, total) if total > 0.0 then result := \"placed:\" + id
+    Shipped(tracking)                        then result := \"shipped:\" + tracking
+  end
+end
+print(d(create Draft.make()))")))))
+
 (deftest plain-type-clause-without-as-is-allowed
   (testing "a clause may bind neither fields nor the whole value"
     (is (= ["\"yes\""]
@@ -346,7 +451,7 @@ end
   end
 end
 print(d(create Box.make(create Circle.make(7))))
-print(d(create Box.make(\"hello\")))")))))) 
+print(d(create Box.make(\"hello\")))"))))))
 
 (deftest type-pattern-accepts-a-builtin-type-name
   (testing "a builtin type keyword is spellable in a pattern"

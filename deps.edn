@@ -13,4 +13,8 @@
               :extra-paths ["test"]}
   :repl {:main-opts ["-m" "nex.repl"]}
   :fmt {:main-opts ["-m" "nex.fmt"]}
-  :docgen {:main-opts ["-m" "nex.docgen"]}}}
+  :docgen {:main-opts ["-m" "nex.docgen"]}
+  ;; Clojure source formatting (indentation/whitespace only; does not reflow lines).
+  ;; `clojure -M:cljfmt check` / `clojure -M:cljfmt fix`
+  :cljfmt {:extra-deps {dev.weavejester/cljfmt {:mvn/version "0.13.0"}}
+           :main-opts ["-m" "cljfmt.main"]}}}

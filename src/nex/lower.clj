@@ -66,6 +66,10 @@
 (declare java-super-constructor-call?)
 (declare ctor-forwards-java-super-args?)
 (declare resolve-imported-java-type)
+(declare resolve-java-class-by-name)
+(declare resolve-java-call-target)
+(declare resolved-param-classes-joined)
+(declare resolved-varargs-descriptor)
 
 (defn- invalid-bare-create-call-ex
   [class-name]
@@ -574,9 +578,9 @@
                 (:body expr))
         result-env (update env :var-types merge local-var-types)]
     (if-let [result-assign (some #(when (and (= :assign (:type %))
-                                              (= "result" (:target %)))
+                                             (= "result" (:target %)))
                                     %)
-                                  (:body expr))]
+                                 (:body expr))]
       {:base-type "Task" :type-params [(infer-type result-env (:value result-assign))]}
       "Task")))
 
@@ -676,8 +680,8 @@
 (defn- infer-type-when
   [env expr]
   (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
-                                               (:condition expr)
-                                               :then)
+                                              (:condition expr)
+                                              :then)
         else-env (refine-condition-branch-env env (:condition expr) :else)
         cons-type (infer-type-or-any then-env (:consequent expr))
         alt-type (infer-type-or-any else-env (:alternative expr))]
@@ -702,7 +706,24 @@
    :identifier         infer-type-identifier
    :create             infer-type-create
    :this               infer-type-this
-   :anonymous-function (constantly "Function")
+   ;; A bare "Function" string here (the pre-fix shape) discards the
+   ;; lambda's own signature — so a `let good_enough := fn(g: Real):
+   ;; Boolean do ... end` local's inferred nex-type carried no
+   ;; :return-type, and a later `good_enough(guess)` call
+   ;; (infer-call-type -> function-object-binding-type) fell into the "no
+   ;; map, so Any" branch, lowering the call's :jvm-type as Object instead
+   ;; of :boolean. Used directly as an `if`/`when` test, that Object value
+   ;; reached emit-stmt-if!'s boolean check unconverted and crashed with
+   ;; "If statement test did not lower to boolean" — a real bug only in
+   ;; the compiled backend (the interpreter has no such static jvm-type
+   ;; step). Mirrors the richer shape
+   ;; nex.typechecker/anonymous-function-provisional-signature already
+   ;; uses for the identical reason on the typechecking side.
+   :anonymous-function (fn [_ expr]
+                         {:base-type "Function"
+                          :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")})
+                                             (:params expr))
+                          :return-type (or (:return-type expr) "Any")})
    :spawn              infer-type-spawn
    :binary             infer-type-binary
    :unary              infer-type-unary
@@ -771,103 +792,110 @@
           (throw (ex-info "Unable to infer expression type during lowering"
                           {:expr expr}))))))
 
+(defn- infer-super-call-type
+  [env expr]
+  (let [parent-name (single-super-parent-name env)
+        parent-def (get (visible-class-map env) parent-name)]
+    (if (false? (:has-parens expr))
+      (or (some-> (class-field-def parent-def (:method expr))
+                  :field-type)
+          (some-> (class-method-def parent-def (:method expr) 0)
+                  function-return-type)
+          (some-> (inherited-method-def env parent-def (:method expr) 0)
+                  function-return-type))
+      (or (some-> (class-method-def parent-def (:method expr) (count (:args expr)))
+                  function-return-type)
+          (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
+                  function-return-type)))))
 
-(defn- infer-target-call-type
+(defn- infer-instance-call-type
   [env expr class-target-name across-item-type target-expr]
-  (if (= :super (:type target-expr))
-    (let [parent-name (single-super-parent-name env)
-          parent-def (get (visible-class-map env) parent-name)]
-      (if (false? (:has-parens expr))
-        (or (some-> (class-field-def parent-def (:method expr))
-                    :field-type)
-            (some-> (class-method-def parent-def (:method expr) 0)
-                    function-return-type)
-            (some-> (inherited-method-def env parent-def (:method expr) 0)
-                    function-return-type))
-        (or (some-> (class-method-def parent-def (:method expr) (count (:args expr)))
-                    function-return-type)
-            (some-> (inherited-method-def env parent-def (:method expr) (count (:args expr)))
-                    function-return-type))))
-    (let [java-static-owner (java-host-class-root-name env target-expr)
+  (let [java-static-owner (java-host-class-root-name env target-expr)
           ;; Through the alias: a receiver declared with an alias or a
           ;; refinement (`declare type Tracking_Id = String where ...`) carries
           ;; the *alias* name here, which names no class and no builtin. The
           ;; underlying type is what owns the method, and what the value
           ;; actually is at runtime — refinements are erased by lowering time,
           ;; their checks already inserted at the narrowing sites.
-          target-type (when (and (not class-target-name)
-                                 (not java-static-owner))
-                        (resolve-type-alias (infer-type env target-expr)))
-          base-type (base-type-name target-type)
-          class-def (or (when class-target-name
-                          (get (visible-class-map env) class-target-name))
-                        (get (visible-class-map env) base-type))
-          field-def (when (and class-def (false? (:has-parens expr)))
-                      (if (= (:type target-expr) :this)
-                        (class-field-def class-def (:method expr))
-                        (accessible-field-def env class-def (:method expr))))
-          method-def (when class-def
-                       (if (= (:type target-expr) :this)
-                         (or (class-method-def class-def (:method expr) (count (:args expr)))
-                             (inherited-method-def env class-def (:method expr) (count (:args expr))))
-                         (accessible-method-def env class-def (:method expr) (count (:args expr)))))
+        target-type (when (and (not class-target-name)
+                               (not java-static-owner))
+                      (resolve-type-alias (infer-type env target-expr)))
+        base-type (base-type-name target-type)
+        class-def (or (when class-target-name
+                        (get (visible-class-map env) class-target-name))
+                      (get (visible-class-map env) base-type))
+        field-def (when (and class-def (false? (:has-parens expr)))
+                    (if (= (:type target-expr) :this)
+                      (class-field-def class-def (:method expr))
+                      (accessible-field-def env class-def (:method expr))))
+        method-def (when class-def
+                     (if (= (:type target-expr) :this)
+                       (or (class-method-def class-def (:method expr) (count (:args expr)))
+                           (inherited-method-def env class-def (:method expr) (count (:args expr))))
+                       (accessible-method-def env class-def (:method expr) (count (:args expr)))))
           ;; Built once the member is known: an inherited member's types are stated
           ;; in its declaring class's generic params, not the receiver's.
-          type-map (generic-type-map env target-type
-                                     (:declaring-class (or method-def field-def)))]
-      (or
-       (when across-item-type
-         (case (:method expr)
-           "item" across-item-type
-           "start" "Void"
-           "next" "Void"
-           "at_end" "Boolean"
-           "cursor" "Cursor"
-           nil))
-       (when (or java-static-owner (:with-java? env))
-         "Any")
-       (when class-def
-         (if (and class-target-name (false? (:has-parens expr)))
-           (some-> (lookup-class-constant env class-target-name (:method expr))
-                   (#(constant-nex-type env %)))
-             (if (:import class-def)
-               "Any"
-               (if (false? (:has-parens expr))
-                 (or (some-> field-def
-                             :field-type
-                             (#(tc/resolve-generic-type % type-map)))
-                     (some-> method-def
-                             function-return-type
-                             (#(tc/resolve-generic-type % type-map))))
+        type-map (generic-type-map env target-type
+                                   (:declaring-class (or method-def field-def)))]
+    (or
+     (when across-item-type
+       (case (:method expr)
+         "item" across-item-type
+         "start" "Void"
+         "next" "Void"
+         "at_end" "Boolean"
+         "cursor" "Cursor"
+         nil))
+     (when (or java-static-owner (:with-java? env))
+       "Any")
+     (when class-def
+       (if (and class-target-name (false? (:has-parens expr)))
+         (some-> (lookup-class-constant env class-target-name (:method expr))
+                 (#(constant-nex-type env %)))
+         (if (:import class-def)
+           "Any"
+           (if (false? (:has-parens expr))
+             (or (some-> field-def
+                         :field-type
+                         (#(tc/resolve-generic-type % type-map)))
                  (some-> method-def
                          function-return-type
-                         (#(tc/resolve-generic-type % type-map)))))))
-       (when (direct-collection-method? target-type (:method expr))
-         (collection-method-return-type target-type (:method expr)))
-       (when (contains? #{"Console" "Process"} base-type)
-         (bi/builtin-type-method-return-type (keyword base-type) (:method expr)))
+                         (#(tc/resolve-generic-type % type-map))))
+             (some-> method-def
+                     function-return-type
+                     (#(tc/resolve-generic-type % type-map)))))))
+     (when (direct-collection-method? target-type (:method expr))
+       (collection-method-return-type target-type (:method expr)))
+     (when (contains? #{"Console" "Process"} base-type)
+       (bi/builtin-type-method-return-type (keyword base-type) (:method expr)))
        ;; Generic type parameter with constraint - look up method on constraint type
-       (when-let [constraint (get (:generic-param-constraints env) base-type)]
-         (case constraint
-           "Comparable"
-           (case (:method expr)
-             "compare" "Integer"
-             nil)
-           "Hashable"
-           (case (:method expr)
-             "hash" "Integer"
-             nil)
-           nil))
+     (when-let [constraint (get (:generic-param-constraints env) base-type)]
+       (case constraint
+         "Comparable"
+         (case (:method expr)
+           "compare" "Integer"
+           nil)
+         "Hashable"
+         (case (:method expr)
+           "hash" "Integer"
+           nil)
+         nil))
        ;; The Any/Comparable/Hashable protocols (spec B.1): every value renders
        ;; with to_string and compares with equals, so their types are known even
        ;; when the receiver is a builtin scalar with no per-method type table.
-       (case (:method expr)
-         "to_string" "String"
-         "equals" "Boolean"
-         "not_equals" "Boolean"
-         "hash" "Integer"
-         "compare" "Integer"
-         nil)))))
+     (case (:method expr)
+       "to_string" "String"
+       "equals" "Boolean"
+       "not_equals" "Boolean"
+       "hash" "Integer"
+       "compare" "Integer"
+       nil))))
+
+(defn- infer-target-call-type
+  [env expr class-target-name across-item-type target-expr]
+  (if (= :super (:type target-expr))
+    (infer-super-call-type env expr)
+    (infer-instance-call-type env expr class-target-name across-item-type target-expr)))
 
 (def ^:private builtin-free-function-return-types
   "Return types of the builtin free functions. Mirrors the typechecker's
@@ -1141,68 +1169,156 @@
    left
    right))
 
+(defn- lower-ancestor-instantiation
+  "Like nex.typechecker's own (private) ancestor-instantiation, adapted to
+   this file's env shape (visible-class-map, not the typechecker's own
+   atom-backed env-lookup-class): walk SUB-NAME's inheritance chain looking
+   for SUPER-NAME, substituting generic arguments through each `inherit`
+   clause (handling arguments that are threaded, reordered, or nested), so
+   a subclass with a differently-parameterized ancestor can still be
+   matched against that ancestor's own type. Returns the type arguments
+   SUB-NAME's chain supplies to SUPER-NAME, or nil when SUPER-NAME is not
+   an ancestor."
+  ([env sub-name sub-args super-name]
+   (lower-ancestor-instantiation env sub-name sub-args super-name #{}))
+  ([env sub-name sub-args super-name seen]
+   (cond
+     (= sub-name super-name) (vec sub-args)
+     (contains? seen sub-name) nil
+     :else
+     (when-let [class-def (get (visible-class-map env) sub-name)]
+       (let [gparams (map :name (:generic-params class-def))
+             subst (zipmap gparams sub-args)
+             seen (conj seen sub-name)]
+         (some (fn [{:keys [parent generic-args]}]
+                 (lower-ancestor-instantiation
+                  env parent
+                  (mapv #(tc/resolve-generic-type % subst) generic-args)
+                  super-name seen))
+               (:parents class-def)))))))
+
+(declare infer-generic-type-map-from-arg)
+
+;; The argument is a bare class name -- a free function passed by
+;; reference, or an anonymous lambda's generated wrapper class (see the
+;; analogous branch in nex.typechecker/types-compatible?) -- rather than
+;; an already-structural Function type. Resolve its callN method to an
+;; equivalent structural shape before unifying against param-type.
+(defn- infer-generic-map-from-function-ref-arg
+  [env generic-names param-type arg-type]
+  (if-let [method-sig (class-method-def (get (visible-class-map env) arg-type)
+                                        (str "call" (count (:param-types param-type)))
+                                        (count (:param-types param-type)))]
+    (infer-generic-type-map-from-arg
+     env generic-names param-type
+     {:base-type "Function"
+      :param-types (mapv (fn [p] {:name (:name p) :type (:type p)}) (:params method-sig))
+      :return-type (:return-type method-sig)})
+    {}))
+
+;; A Function-typed param/arg carries its generic-relevant substructure
+;; under :param-types/:return-type, not :type-params/:type-args (those
+;; are how Array[T]/Map[K,V]/user generic classes are shaped) -- so a
+;; generic parameter appearing only in a Function value's parameter or
+;; return position (e.g. `f: Function(v: G): T` matched against an
+;; argument lambda `fn(v: Integer): String`) must be unified here
+;; explicitly, or its binding is silently missed. A missed return-type
+;; binding leaves T unsubstituted in infer-free-function-return-type,
+;; which then leaks the literal generic name "T" into codegen as if it
+;; were a real class -- the jar compiles but crashes with
+;; NoClassDefFoundError: T at run time.
+(defn- infer-generic-map-from-function-arg
+  [env generic-names param-type arg-type]
+  (let [param-params (or (:param-types param-type) [])
+        arg-params (or (:param-types arg-type) [])]
+    (if (= (count param-params) (count arg-params))
+      (reduce (fn [acc [pt at]]
+                (merge-inferred-generic-bindings
+                 env acc (infer-generic-type-map-from-arg env generic-names pt at)))
+              {}
+              (cond-> (mapv (fn [pp ap] [(:type pp) (:type ap)]) param-params arg-params)
+                (and (:return-type param-type) (:return-type arg-type))
+                (conj [(:return-type param-type) (:return-type arg-type)])))
+      {})))
+
+(defn- infer-generic-map-from-parameterized-arg
+  [env generic-names param-type arg-type]
+  (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
+        arg-args (vec (or (:type-params arg-type) (:type-args arg-type)))]
+    (if (= (count param-args) (count arg-args))
+      (reduce (fn [acc [param-arg arg-arg]]
+                (merge-inferred-generic-bindings
+                 env acc (infer-generic-type-map-from-arg env generic-names param-arg arg-arg)))
+              {}
+              (map vector param-args arg-args))
+      {})))
+
+;; The argument's own class differs from the declared parameter's --
+;; `first_field[T](b: Base[T, Any])` called with a `Mid[String,
+;; Integer]` argument, where `Mid[P, Q] inherit Base[Q, P]` -- so T
+;; can still be inferred, but only by walking ARG-TYPE's ancestor
+;; chain up to PARAM-TYPE's class (ancestor-instantiation, already
+;; used for the identical reasoning in generic subtype conformance),
+;; substituting through however each `inherit` clause reorders or
+;; nests its own generic arguments along the way, and unifying
+;; PARAM-TYPE's own args against what that walk resolves to instead
+;; of ARG-TYPE's own (unrelated) ones. Without this, an unrelated
+;; base-type mismatch here fell straight to the final `:else {}` —
+;; no binding at all for T — which left the literal generic name "T"
+;; unsubstituted in infer-free-function-return-type's caller, and
+;; that leaked into codegen as if "T" were a real class name: the
+;; jar compiled but crashed with NoClassDefFoundError: T at run time.
+(defn- infer-generic-map-from-inherited-arg
+  [env generic-names param-type arg-type]
+  (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
+        arg-base (if (map? arg-type) (:base-type arg-type) arg-type)
+        arg-args (if (map? arg-type) (vec (or (:type-params arg-type) (:type-args arg-type))) [])
+        inherited-args (lower-ancestor-instantiation env arg-base arg-args
+                                                     (:base-type param-type) #{})]
+    (if (and inherited-args (= (count inherited-args) (count param-args)))
+      (reduce (fn [acc [param-arg inherited-arg]]
+                (merge-inferred-generic-bindings
+                 env acc (infer-generic-type-map-from-arg env generic-names param-arg inherited-arg)))
+              {}
+              (map vector param-args inherited-args))
+      {})))
+
 (defn- infer-generic-type-map-from-arg
   [env generic-names param-type arg-type]
+
   (let [param-type (tc/normalize-type param-type)
         arg-type (tc/normalize-type arg-type)]
     (cond
+
       (and (string? param-type) (contains? generic-names param-type))
       {param-type arg-type}
 
-      ;; The argument is a bare class name -- a free function passed by
-      ;; reference, or an anonymous lambda's generated wrapper class (see the
-      ;; analogous branch in nex.typechecker/types-compatible?) -- rather than
-      ;; an already-structural Function type. Resolve its callN method to an
-      ;; equivalent structural shape before unifying against param-type.
       (and (map? param-type) (= (:base-type param-type) "Function") (:param-types param-type)
            (string? arg-type))
-      (if-let [method-sig (class-method-def (get (visible-class-map env) arg-type)
-                                            (str "call" (count (:param-types param-type)))
-                                            (count (:param-types param-type)))]
-        (infer-generic-type-map-from-arg
-         env generic-names param-type
-         {:base-type "Function"
-          :param-types (mapv (fn [p] {:name (:name p) :type (:type p)}) (:params method-sig))
-          :return-type (:return-type method-sig)})
-        {})
+      (infer-generic-map-from-function-ref-arg env generic-names param-type arg-type)
 
-      ;; A Function-typed param/arg carries its generic-relevant substructure
-      ;; under :param-types/:return-type, not :type-params/:type-args (those
-      ;; are how Array[T]/Map[K,V]/user generic classes are shaped) -- so a
-      ;; generic parameter appearing only in a Function value's parameter or
-      ;; return position (e.g. `f: Function(v: G): T` matched against an
-      ;; argument lambda `fn(v: Integer): String`) must be unified here
-      ;; explicitly, or its binding is silently missed. A missed return-type
-      ;; binding leaves T unsubstituted in infer-free-function-return-type,
-      ;; which then leaks the literal generic name "T" into codegen as if it
-      ;; were a real class -- the jar compiles but crashes with
-      ;; NoClassDefFoundError: T at run time.
       (and (map? param-type) (map? arg-type)
            (= (:base-type param-type) (:base-type arg-type))
            (= (:base-type param-type) "Function"))
-      (let [param-params (or (:param-types param-type) [])
-            arg-params (or (:param-types arg-type) [])]
-        (if (= (count param-params) (count arg-params))
-          (reduce (fn [acc [pt at]]
-                    (merge-inferred-generic-bindings
-                     env acc (infer-generic-type-map-from-arg env generic-names pt at)))
-                  {}
-                  (cond-> (mapv (fn [pp ap] [(:type pp) (:type ap)]) param-params arg-params)
-                    (and (:return-type param-type) (:return-type arg-type))
-                    (conj [(:return-type param-type) (:return-type arg-type)])))
-          {}))
+      (infer-generic-map-from-function-arg env generic-names param-type arg-type)
 
       (and (map? param-type) (map? arg-type)
            (= (:base-type param-type) (:base-type arg-type)))
-      (let [param-args (vec (or (:type-params param-type) (:type-args param-type)))
-            arg-args (vec (or (:type-params arg-type) (:type-args arg-type)))]
-        (if (= (count param-args) (count arg-args))
-          (reduce (fn [acc [param-arg arg-arg]]
-                    (merge-inferred-generic-bindings
-                     env acc (infer-generic-type-map-from-arg env generic-names param-arg arg-arg)))
-                  {}
-                  (map vector param-args arg-args))
-          {}))
+      (infer-generic-map-from-parameterized-arg env generic-names param-type arg-type)
+
+      (and (map? param-type)
+           (string? (:base-type param-type))
+           ;; ARG-TYPE is a bare string, not a map, whenever the argument's
+           ;; own class isn't itself generic (`Leaf`, with no `[...]` of
+           ;; its own, inheriting a concrete `Mid[String, Integer]`) --
+           ;; unlike PARAM-TYPE, which is a map here precisely because it
+           ;; IS parameterized (`Base[T, Any]`). Treated as that same class
+           ;; with zero type-args of its own, same as a map-shaped
+           ;; arg-type with a nil/empty :type-args would be.
+           (or (map? arg-type) (string? arg-type))
+           (string? (if (map? arg-type) (:base-type arg-type) arg-type))
+           (not (contains? generic-names (if (map? arg-type) (:base-type arg-type) arg-type))))
+      (infer-generic-map-from-inherited-arg env generic-names param-type arg-type)
 
       :else
       {})))
@@ -1482,7 +1598,7 @@
     (let [else-body (or else-branch [])]
       (when-not (= 1 (count else-body))
         (throw (unsupported "Only expression-shaped or result-assignment if branches are supported in lowering"
-                        {:branch else-body})))
+                            {:branch else-body})))
       (if-branch-expression env else-body))))
 
 (defn- case-clause-test-expr
@@ -1596,126 +1712,126 @@
                   nil)
       nil)))
 
+(defn- select-done-set-stmt
+  "The `__select_done := true` marker appended to a fired select clause's body."
+  [done-local]
+  (ir/set-local-node (:slot done-local)
+                     (ir/const-node true "Boolean" :boolean)
+                     "Boolean"
+                     :boolean))
+
+(defn- lower-select-task-clause
+  [env done-local not-done clause target-expr]
+  (let [{:keys [alias body]} clause
+        ready-expr {:type :call :target target-expr :method "is_done"
+                    :args [] :has-parens false}
+        value-expr {:type :call :target target-expr :method "await"
+                    :args [] :has-parens true}
+        [env1 alias-local] (if alias
+                             (env-add-local env alias (select-clause-value-type env clause))
+                             [env nil])
+        [env2 lowered-body] (lower-scoped-statements env1 body)
+        then-body (vec (concat
+                        (when alias-local
+                          [(ir/set-local-node (:slot alias-local)
+                                              (lower-expression env2 value-expr)
+                                              (:nex-type alias-local)
+                                              (:jvm-type alias-local))])
+                        lowered-body
+                        [(select-done-set-stmt done-local)]))]
+    [env2
+     (ir/if-stmt-node (ir/binary-node :and
+                                      not-done
+                                      (lower-expression env ready-expr)
+                                      "Boolean"
+                                      :boolean)
+                      then-body
+                      [])]))
+
+(defn- lower-select-channel-receive-clause
+  [env done-local not-done clause target-expr]
+  (let [{:keys [alias body]} clause
+        value-type (select-clause-value-type env clause)
+        temp-type (tc/detachable-version value-type)
+        [env1 temp-local] (env-add-local env (str "__select_value_" (:next-slot env)) temp-type)
+        [env2 alias-local] (if alias
+                             (env-add-local env1 alias value-type)
+                             [env1 nil])
+        [env3 lowered-body] (lower-scoped-statements env2 body)
+        receive-expr {:type :call :target target-expr :method "try_receive"
+                      :args [] :has-parens true}
+        temp-node (ir/local-node "__select_value"
+                                 (:slot temp-local)
+                                 (:nex-type temp-local)
+                                 (:jvm-type temp-local))
+        then-body (vec (concat
+                        (when alias-local
+                          [(ir/set-local-node (:slot alias-local)
+                                              temp-node
+                                              (:nex-type alias-local)
+                                              (:jvm-type alias-local))])
+                        lowered-body
+                        [(select-done-set-stmt done-local)]))]
+    [env3
+     (ir/block-node
+      [(ir/set-local-node (:slot temp-local)
+                          (lower-expression env3 receive-expr)
+                          (:nex-type temp-local)
+                          (:jvm-type temp-local))
+       (ir/if-stmt-node (ir/binary-node :and
+                                        not-done
+                                        (ir/compare-node :neq
+                                                         temp-node
+                                                         (ir/const-node nil "Any" (ir/object-jvm-type "java/lang/Object"))
+                                                         "Boolean"
+                                                         :boolean)
+                                        "Boolean"
+                                        :boolean)
+                        then-body
+                        [])])]))
+
+(defn- lower-select-channel-send-clause
+  [env done-local not-done clause target-expr]
+  (let [{:keys [expr body]} clause
+        send-expr {:type :call :target target-expr :method "try_send"
+                   :args [(first (:args expr))] :has-parens true}
+        [env1 lowered-body] (lower-scoped-statements env body)
+        then-body (vec (concat lowered-body [(select-done-set-stmt done-local)]))]
+    [env1
+     (ir/if-stmt-node (ir/binary-node :and
+                                      not-done
+                                      (lower-expression env1 send-expr)
+                                      "Boolean"
+                                      :boolean)
+                      then-body
+                      [])]))
+
 (defn- lower-select-clause
   [env done-local clause]
-  (let [{:keys [expr alias body]} clause
-        done-node (ir/local-node "__select_done"
+  (let [done-node (ir/local-node "__select_done"
                                  (:slot done-local)
                                  (:nex-type done-local)
                                  (:jvm-type done-local))
         not-done (ir/unary-node :not done-node "Boolean" :boolean)
-        {:keys [target method args]} expr
+        {:keys [target method]} (:expr clause)
         target-expr (normalize-call-target target)]
     (case (base-type-name (infer-type env target-expr))
       "Task"
-      (let [ready-expr {:type :call
-                        :target target-expr
-                        :method "is_done"
-                        :args []
-                        :has-parens false}
-            value-expr {:type :call
-                        :target target-expr
-                        :method "await"
-                        :args []
-                        :has-parens true}
-            [env1 alias-local] (if alias
-                                 (env-add-local env alias (select-clause-value-type env clause))
-                                 [env nil])
-            [env2 lowered-body] (lower-scoped-statements env1 body)
-            then-body (vec (concat
-                            (when alias-local
-                              [(ir/set-local-node (:slot alias-local)
-                                                  (lower-expression env2 value-expr)
-                                                  (:nex-type alias-local)
-                                                  (:jvm-type alias-local))])
-                            lowered-body
-                            [(ir/set-local-node (:slot done-local)
-                                                (ir/const-node true "Boolean" :boolean)
-                                                "Boolean"
-                                                :boolean)]))]
-        [env2
-         (ir/if-stmt-node (ir/binary-node :and
-                                          not-done
-                                          (lower-expression env ready-expr)
-                                          "Boolean"
-                                          :boolean)
-                          then-body
-                          [])])
+      (lower-select-task-clause env done-local not-done clause target-expr)
 
       "Channel"
       (case method
         ("receive" "try_receive")
-        (let [value-type (select-clause-value-type env clause)
-              temp-type (tc/detachable-version value-type)
-              [env1 temp-local] (env-add-local env (str "__select_value_" (:next-slot env)) temp-type)
-              [env2 alias-local] (if alias
-                                   (env-add-local env1 alias value-type)
-                                   [env1 nil])
-              [env3 lowered-body] (lower-scoped-statements env2 body)
-              receive-expr {:type :call
-                            :target target-expr
-                            :method "try_receive"
-                            :args []
-                            :has-parens true}
-              temp-node (ir/local-node "__select_value"
-                                       (:slot temp-local)
-                                       (:nex-type temp-local)
-                                       (:jvm-type temp-local))
-              then-body (vec (concat
-                              (when alias-local
-                                [(ir/set-local-node (:slot alias-local)
-                                                    temp-node
-                                                    (:nex-type alias-local)
-                                                    (:jvm-type alias-local))])
-                              lowered-body
-                              [(ir/set-local-node (:slot done-local)
-                                                  (ir/const-node true "Boolean" :boolean)
-                                                  "Boolean"
-                                                  :boolean)]))]
-          [env3
-           (ir/block-node
-            [(ir/set-local-node (:slot temp-local)
-                                (lower-expression env3 receive-expr)
-                                (:nex-type temp-local)
-                                (:jvm-type temp-local))
-             (ir/if-stmt-node (ir/binary-node :and
-                                              not-done
-                                              (ir/compare-node :neq
-                                                               temp-node
-                                                               (ir/const-node nil "Any" (ir/object-jvm-type "java/lang/Object"))
-                                                               "Boolean"
-                                                               :boolean)
-                                              "Boolean"
-                                              :boolean)
-                             then-body
-                             [])])])
+        (lower-select-channel-receive-clause env done-local not-done clause target-expr)
 
         ("send" "try_send")
-        (let [send-expr {:type :call
-                         :target target-expr
-                         :method "try_send"
-                         :args [(first args)]
-                         :has-parens true}
-              [env1 lowered-body] (lower-scoped-statements env body)
-              then-body (vec (concat lowered-body
-                                     [(ir/set-local-node (:slot done-local)
-                                                         (ir/const-node true "Boolean" :boolean)
-                                                         "Boolean"
-                                                         :boolean)]))]
-          [env1
-           (ir/if-stmt-node (ir/binary-node :and
-                                            not-done
-                                            (lower-expression env1 send-expr)
-                                            "Boolean"
-                                            :boolean)
-                            then-body
-                            [])])
+        (lower-select-channel-send-clause env done-local not-done clause target-expr)
 
         (throw (unsupported "Unsupported select channel clause during lowering"
-                        {:clause clause})))
+                            {:clause clause})))
 
       (throw (unsupported "Unsupported select clause target during lowering"
-                      {:clause clause})))))
+                          {:clause clause})))))
 
 (defn lower-select
   [env stmt]
@@ -1737,10 +1853,10 @@
                                                "Integer"
                                                :long)])))
         [env3 clause-stmts] (reduce (fn [[e acc] clause]
-                                     (let [[e' stmt'] (lower-select-clause e done-local clause)]
-                                       [e' (conj acc stmt')]))
-                                   [env2 []]
-                                   (:clauses stmt))
+                                      (let [[e' stmt'] (lower-select-clause e done-local clause)]
+                                        [e' (conj acc stmt')]))
+                                    [env2 []]
+                                    (:clauses stmt))
         [env4 else-body] (if-let [else-stmts (:else stmt)]
                            (let [[e body] (lower-scoped-statements env3 else-stmts)]
                              [e body])
@@ -1762,22 +1878,22 @@
                                             [])])
                         (when-let [_timeout (:timeout stmt)]
                           [(ir/if-stmt-node (ir/binary-node :and
-                                                           (ir/unary-node :not done-node "Boolean" :boolean)
-                                                           (ir/call-runtime-node "deadline-expired?"
-                                                                                 [(ir/local-node "__select_deadline"
-                                                                                                 (:slot deadline-local)
-                                                                                                 "Integer"
-                                                                                                 :long)]
-                                                                                 "Boolean"
-                                                                                 :boolean)
-                                                           "Boolean"
-                                                           :boolean)
-                                           (vec (concat timeout-body
-                                                        [(ir/set-local-node (:slot done-local)
-                                                                            (ir/const-node true "Boolean" :boolean)
-                                                                            "Boolean"
-                                                                            :boolean)]))
-                                           [])])
+                                                            (ir/unary-node :not done-node "Boolean" :boolean)
+                                                            (ir/call-runtime-node "deadline-expired?"
+                                                                                  [(ir/local-node "__select_deadline"
+                                                                                                  (:slot deadline-local)
+                                                                                                  "Integer"
+                                                                                                  :long)]
+                                                                                  "Boolean"
+                                                                                  :boolean)
+                                                            "Boolean"
+                                                            :boolean)
+                                            (vec (concat timeout-body
+                                                         [(ir/set-local-node (:slot done-local)
+                                                                             (ir/const-node true "Boolean" :boolean)
+                                                                             "Boolean"
+                                                                             :boolean)]))
+                                            [])])
                         [(ir/pop-node (ir/call-runtime-node "select-sleep-step" [] "Void" :void))]))]
     [env5
      (ir/block-node
@@ -1816,7 +1932,7 @@
         by-qualified-name-from-compiled (into {}
                                               (keep (fn [[qn meta]]
                                                       (when (and (:class-def meta)
-                                                                (not (contains? by-qualified-name qn)))
+                                                                 (not (contains? by-qualified-name qn)))
                                                         [qn (:class-def meta)])))
                                               (:compiled-classes env))
         base (merge by-bare-name by-qualified-name by-qualified-name-from-compiled)]
@@ -2413,20 +2529,20 @@
     (let [bound-type (if (map? bound-type)
                        (assoc bound-type :detachable true)
                        {:base-type bound-type :detachable true})]
-    (if-let [binding (lookup-convert-binding env var-name)]
-    [env binding]
-      (if (and (:top-level? env) (not (:scoped-locals? env)))
-        (let [env' (update env :var-types assoc var-name bound-type)]
-          [env' {:kind :top
-                 :name var-name
-                 :nex-type bound-type
-                 :jvm-type (resolve-jvm-type env' bound-type)}])
-        (let [[env' local] (env-add-local env var-name bound-type)]
-          [env' {:kind :local
-                 :name var-name
-                 :slot (:slot local)
-                 :nex-type (:nex-type local)
-                 :jvm-type (:jvm-type local)}]))))))
+      (if-let [binding (lookup-convert-binding env var-name)]
+        [env binding]
+        (if (and (:top-level? env) (not (:scoped-locals? env)))
+          (let [env' (update env :var-types assoc var-name bound-type)]
+            [env' {:kind :top
+                   :name var-name
+                   :nex-type bound-type
+                   :jvm-type (resolve-jvm-type env' bound-type)}])
+          (let [[env' local] (env-add-local env var-name bound-type)]
+            [env' {:kind :local
+                   :name var-name
+                   :slot (:slot local)
+                   :nex-type (:nex-type local)
+                   :jvm-type (:jvm-type local)}]))))))
 
 (defn- lower-convert-expression
   [env {:keys [value var-name target-type] :as expr}]
@@ -2481,9 +2597,9 @@
   [env condition]
   (reduce (fn [[env' bindings] {:keys [name value]}]
             (let [[env'' lowered-binding] (ensure-convert-binding
-                                            env'
-                                            {:var-name name
-                                             :type (tc/attachable-type (infer-type-or-any env' value))})]
+                                           env'
+                                           {:var-name name
+                                            :type (tc/attachable-type (infer-type-or-any env' value))})]
               [env'' (conj bindings lowered-binding)]))
           [env []]
           (tc/attached-test-guards condition)))
@@ -2727,6 +2843,7 @@
 (declare rewrite-expression-for-closures)
 (declare rewrite-statement-for-closures)
 (declare rewrite-statements-for-closures)
+(declare anonymous-function-signature-type)
 (declare rewrite-statements-for-closures*)
 (declare sync-callable-into-class-def)
 
@@ -2783,10 +2900,156 @@
                 (:inside-closure? ctx)
                 (accessible-method-def ctx (ctx-class-def ctx (:this-type ctx)) name arity))))
 
+;; A bare field read of one of the enclosing method's own fields (`count`,
+;; meaning `this.count`): a spawn/anonymous-function body is dispatched to
+;; the tree-walking interpreter at runtime (nex.compiler.jvm.runtime/make-
+;; captured-function-object), with `this` captured like any other outer
+;; variable under closure-this-capture-name. Rewriting the bare read into
+;; an explicit field-get on that captured identifier — the same shape an
+;; ordinary captured *other* object's field read already uses — means the
+;; interpreter needs no special "this" handling for it at all.
+(defn- rewrite-identifier-for-closures
+  [ctx local-types captures expr]
+  (if (and (not (contains? local-types (:name expr)))
+           (not (contains? (:var-types ctx) (:name expr)))
+           (this-type-field? ctx (:name expr)))
+    (do (capture-closure-this! captures ctx)
+        {:type :call
+         :target {:type :identifier :name closure-this-capture-name}
+         :method (:name expr)
+         :args []
+         :has-parens false})
+    (do
+      (capture-reference! captures local-types (:var-types ctx) (:name expr))
+      expr)))
+
+(defn- rewrite-anonymous-function-for-closures
+  [ctx local-types captures expr]
+  (let [params (or (:params expr) [])
+        fn-locals (into {"result" (or (:return-type expr) "Any")}
+                        (map (fn [{:keys [name type]}] [name type]))
+                        params)
+        nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
+        [rewritten-body _ nested-captures]
+        (rewrite-statements-for-closures nested-ctx fn-locals (:body expr))
+        capture-vec (->> nested-captures
+                         (map (fn [[name type]] {:name name :type type}))
+                         (sort-by :name)
+                         vec)
+      ;; A name this nested closure captures is free from *this* scope's
+      ;; point of view too, unless `local-types` (this level's own
+      ;; params/lets) already supplies it. When it isn't, the enclosing
+      ;; closure must also capture it — it has to hold the value in a
+      ;; field of its own so it can hand it to the nested closure's
+      ;; constructor at the point it builds it. Without this, only
+      ;; directly-referenced names ever reach `captures` here, so a
+      ;; capture two (or more) closures deep never propagates outward:
+      ;; the enclosing closure compiles as if it captured nothing, and
+      ;; lowering the nested closure's construction inside it then can't
+      ;; resolve the name at all.
+        _ (doseq [{:keys [name]} capture-vec]
+            (capture-reference! captures local-types (:var-types ctx) name))
+        runtime-object? (seq capture-vec)
+      ;; (:class-def expr) still holds the call<N> method's *original*
+      ;; body — attach-capture-fields only adds capture fields, it never
+      ;; touches method bodies. Ordinarily that staleness is harmless (a
+      ;; plain captured-variable reference rewrites to itself, unchanged),
+      ;; but a `this` reference above rewrites into a genuinely different
+      ;; node shape. interp/make-object (nex.compiler.jvm.runtime/make-
+      ;; captured-function-object) runs *this* class-def's method body at
+      ;; call time — so without this sync, the interpreter would still see
+      ;; the pre-rewrite `this`/bare field or method reference and try to
+      ;; resolve it against the closure's own (fieldless, methodless)
+      ;; class instead of the captured original.
+        call-method-name (str "call" (count params))
+        original-call-method (some #(when (and (= call-method-name (:name %))
+                                               (= (count params) (count (or (:params %) []))))
+                                      %)
+                                   (class-methods (:class-def expr)))]
+    (assoc expr
+           :body rewritten-body
+           :captures capture-vec
+           :class-def (attach-capture-fields
+                       (sync-callable-into-class-def
+                        (:class-def expr)
+                        (assoc original-call-method :body rewritten-body))
+                       capture-vec runtime-object?))))
+
+;; A method call or explicit field access reaching `this` — bare
+;; (`bump()`/`count` as a no-parens access), or via an explicit `this.`
+;; prefix — is rewritten the same way: route it through the captured
+;; `this` identifier, exactly like calling/reading through any other
+;; captured object reference (`other.bump()`), which already works.
+(defn- rewrite-call-for-closures
+  [ctx local-types captures expr]
+  (let [target (:target expr)
+        method (:method expr)
+        bare-target? (nil? target)
+      ;; Explicit `this.foo` is only ever rewritten to the captured-`this`
+      ;; identifier *inside* a closure — outside one, `this` resolves
+      ;; correctly on its own (this is the ordinary, non-nested case: an
+      ;; instance method's own body referencing its own `this`), and
+      ;; substituting it unconditionally broke exactly that: `this.value`
+      ;; in a plain method (no spawn/anonymous-function involved at all)
+      ;; was rewritten into a call on a capture that is only ever bound
+      ;; inside a synthesized closure class.
+        this-target? (and (map? target) (= :this (:type target))
+                          (:inside-closure? ctx))
+        is-field? (false? (:has-parens expr))
+        implicit-this-member?
+        (and bare-target?
+             (not (contains? local-types method))
+             (not (contains? (:var-types ctx) method))
+             (or (this-type-method? ctx method (count (:args expr)))
+                 (and is-field? (this-type-field? ctx method))))
+        _ (when (string? target)
+            (capture-reference! captures local-types (:var-types ctx) target))
+        _ (when (or implicit-this-member? this-target?)
+            (capture-closure-this! captures ctx))
+        args (mapv #(rewrite-expression-for-closures ctx local-types captures %)
+                   (:args expr))
+        new-target (cond
+                     (or implicit-this-member? this-target?)
+                     {:type :identifier :name closure-this-capture-name}
+
+                     target
+                     (rewrite-expression-for-closures ctx local-types captures target)
+
+                     :else nil)]
+    (when (and bare-target?
+               (not implicit-this-member?)
+               (contains? (:var-types ctx) method)
+               (not (contains? local-types method)))
+      (swap! captures assoc method (get (:var-types ctx) method)))
+    (assoc expr :target new-target :args args)))
+
+(defn- rewrite-if-for-closures
+  [ctx local-types captures expr]
+  (assoc expr
+         :condition (rewrite-expression-for-closures ctx local-types captures (:condition expr))
+         :then (first (rewrite-statements-for-closures* ctx local-types captures (:then expr)))
+         :elseif (mapv (fn [clause]
+                         (assoc clause
+                                :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
+                                :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
+                       (:elseif expr))
+         :else (first (rewrite-statements-for-closures* ctx local-types captures (:else expr)))))
+
+(defn- rewrite-spawn-for-closures
+  [ctx local-types captures expr]
+  (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
+        fn-expr (make-synthetic-anonymous-function-expr
+                 []
+                 "Any"
+                 (:body expr))
+        rewritten-fn (rewrite-expression-for-closures nested-ctx {} (atom {}) fn-expr)]
+    (assoc expr :fn-expr rewritten-fn)))
+
 (defn- rewrite-expression-for-closures
   [ctx local-types captures expr]
   (cond
-    (not (map? expr)) expr
+    (not (map? expr))
+    expr
 
     (= :this (:type expr))
     (if (and (:this-type ctx) (:inside-closure? ctx))
@@ -2794,125 +3057,14 @@
           {:type :identifier :name closure-this-capture-name})
       expr)
 
-    ;; A bare field read of one of the enclosing method's own fields (`count`,
-    ;; meaning `this.count`): a spawn/anonymous-function body is dispatched to
-    ;; the tree-walking interpreter at runtime (nex.compiler.jvm.runtime/make-
-    ;; captured-function-object), with `this` captured like any other outer
-    ;; variable under closure-this-capture-name. Rewriting the bare read into
-    ;; an explicit field-get on that captured identifier — the same shape an
-    ;; ordinary captured *other* object's field read already uses — means the
-    ;; interpreter needs no special "this" handling for it at all.
     (= :identifier (:type expr))
-    (if (and (not (contains? local-types (:name expr)))
-             (not (contains? (:var-types ctx) (:name expr)))
-             (this-type-field? ctx (:name expr)))
-      (do (capture-closure-this! captures ctx)
-          {:type :call
-           :target {:type :identifier :name closure-this-capture-name}
-           :method (:name expr)
-           :args []
-           :has-parens false})
-      (do
-        (capture-reference! captures local-types (:var-types ctx) (:name expr))
-        expr))
+    (rewrite-identifier-for-closures ctx local-types captures expr)
 
     (= :anonymous-function (:type expr))
-    (let [params (or (:params expr) [])
-          fn-locals (into {"result" (or (:return-type expr) "Any")}
-                          (map (fn [{:keys [name type]}] [name type]))
-                          params)
-          nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
-          [rewritten-body _ nested-captures]
-          (rewrite-statements-for-closures nested-ctx fn-locals (:body expr))
-          capture-vec (->> nested-captures
-                           (map (fn [[name type]] {:name name :type type}))
-                           (sort-by :name)
-                           vec)
-          ;; A name this nested closure captures is free from *this* scope's
-          ;; point of view too, unless `local-types` (this level's own
-          ;; params/lets) already supplies it. When it isn't, the enclosing
-          ;; closure must also capture it — it has to hold the value in a
-          ;; field of its own so it can hand it to the nested closure's
-          ;; constructor at the point it builds it. Without this, only
-          ;; directly-referenced names ever reach `captures` here, so a
-          ;; capture two (or more) closures deep never propagates outward:
-          ;; the enclosing closure compiles as if it captured nothing, and
-          ;; lowering the nested closure's construction inside it then can't
-          ;; resolve the name at all.
-          _ (doseq [{:keys [name]} capture-vec]
-              (capture-reference! captures local-types (:var-types ctx) name))
-          runtime-object? (seq capture-vec)
-          ;; (:class-def expr) still holds the call<N> method's *original*
-          ;; body — attach-capture-fields only adds capture fields, it never
-          ;; touches method bodies. Ordinarily that staleness is harmless (a
-          ;; plain captured-variable reference rewrites to itself, unchanged),
-          ;; but a `this` reference above rewrites into a genuinely different
-          ;; node shape. interp/make-object (nex.compiler.jvm.runtime/make-
-          ;; captured-function-object) runs *this* class-def's method body at
-          ;; call time — so without this sync, the interpreter would still see
-          ;; the pre-rewrite `this`/bare field or method reference and try to
-          ;; resolve it against the closure's own (fieldless, methodless)
-          ;; class instead of the captured original.
-          call-method-name (str "call" (count params))
-          original-call-method (some #(when (and (= call-method-name (:name %))
-                                                 (= (count params) (count (or (:params %) []))))
-                                       %)
-                                     (class-methods (:class-def expr)))]
-      (assoc expr
-             :body rewritten-body
-             :captures capture-vec
-             :class-def (attach-capture-fields
-                         (sync-callable-into-class-def
-                          (:class-def expr)
-                          (assoc original-call-method :body rewritten-body))
-                         capture-vec runtime-object?)))
+    (rewrite-anonymous-function-for-closures ctx local-types captures expr)
 
-    ;; A method call or explicit field access reaching `this` — bare
-    ;; (`bump()`/`count` as a no-parens access), or via an explicit `this.`
-    ;; prefix — is rewritten the same way: route it through the captured
-    ;; `this` identifier, exactly like calling/reading through any other
-    ;; captured object reference (`other.bump()`), which already works.
     (= :call (:type expr))
-    (let [target (:target expr)
-          method (:method expr)
-          bare-target? (nil? target)
-          ;; Explicit `this.foo` is only ever rewritten to the captured-`this`
-          ;; identifier *inside* a closure — outside one, `this` resolves
-          ;; correctly on its own (this is the ordinary, non-nested case: an
-          ;; instance method's own body referencing its own `this`), and
-          ;; substituting it unconditionally broke exactly that: `this.value`
-          ;; in a plain method (no spawn/anonymous-function involved at all)
-          ;; was rewritten into a call on a capture that is only ever bound
-          ;; inside a synthesized closure class.
-          this-target? (and (map? target) (= :this (:type target))
-                            (:inside-closure? ctx))
-          is-field? (false? (:has-parens expr))
-          implicit-this-member?
-          (and bare-target?
-               (not (contains? local-types method))
-               (not (contains? (:var-types ctx) method))
-               (or (this-type-method? ctx method (count (:args expr)))
-                   (and is-field? (this-type-field? ctx method))))
-          _ (when (string? target)
-              (capture-reference! captures local-types (:var-types ctx) target))
-          _ (when (or implicit-this-member? this-target?)
-              (capture-closure-this! captures ctx))
-          args (mapv #(rewrite-expression-for-closures ctx local-types captures %)
-                     (:args expr))
-          new-target (cond
-                       (or implicit-this-member? this-target?)
-                       {:type :identifier :name closure-this-capture-name}
-
-                       target
-                       (rewrite-expression-for-closures ctx local-types captures target)
-
-                       :else nil)]
-      (when (and bare-target?
-                 (not implicit-this-member?)
-                 (contains? (:var-types ctx) method)
-                 (not (contains? local-types method)))
-        (swap! captures assoc method (get (:var-types ctx) method)))
-      (assoc expr :target new-target :args args))
+    (rewrite-call-for-closures ctx local-types captures expr)
 
     (= :binary (:type expr))
     (assoc expr
@@ -2937,15 +3089,7 @@
                                (:entries expr)))
 
     (= :if (:type expr))
-    (assoc expr
-           :condition (rewrite-expression-for-closures ctx local-types captures (:condition expr))
-           :then (first (rewrite-statements-for-closures* ctx local-types captures (:then expr)))
-           :elseif (mapv (fn [clause]
-                           (assoc clause
-                                  :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
-                                  :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
-                         (:elseif expr))
-           :else (first (rewrite-statements-for-closures* ctx local-types captures (:else expr))))
+    (rewrite-if-for-closures ctx local-types captures expr)
 
     (= :when (:type expr))
     (assoc expr
@@ -2966,13 +3110,7 @@
     (assoc expr :args (mapv #(rewrite-expression-for-closures ctx local-types captures %) (:args expr)))
 
     (= :spawn (:type expr))
-    (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
-          fn-expr (make-synthetic-anonymous-function-expr
-                   []
-                   "Any"
-                   (:body expr))
-          rewritten-fn (rewrite-expression-for-closures nested-ctx {} (atom {}) fn-expr)]
-      (assoc expr :fn-expr rewritten-fn))
+    (rewrite-spawn-for-closures ctx local-types captures expr)
 
     :else expr))
 
@@ -3017,60 +3155,158 @@
 
     :else node))
 
+(defn- rewrite-let-stmt-for-closures
+  [ctx local-types captures stmt]
+  (let [value (if (and (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
+                (update (:value stmt) :body #(rewrite-self-recursive-calls (:name stmt) %))
+                (:value stmt))
+        value' (rewrite-expression-for-closures ctx local-types captures value)
+        stmt' (assoc stmt :value value')
+      ;; anonymous-function-signature-type first, from the ORIGINAL
+      ;; (pre-rewrite) `value` — not infer-prepass-type on the
+      ;; already-rewritten `value'` — for the identical reason
+      ;; box-let-type reads a boxed closure-let's type the same way:
+      ;; infer-prepass-type type-checks the whole body in an
+      ;; isolated, standalone env, which throws (silently swallowed,
+      ;; falling back to "Any") the moment that body references a
+      ;; sibling closure elaborated together with this one (self- or
+      ;; mutual recursion) — a name that isolated check knows nothing
+      ;; about. Without this, an untyped mutually-recursive closure's
+      ;; own LOCAL-TYPES entry (what a SIBLING closure sees when IT
+      ;; captures this one) silently erased to "Any" too, one call
+      ;; site short of box-let-type's own (the backward-referenced
+      ;; half of a mutual pair is never boxed, so it relied on this
+      ;; exact var-type instead) — a lowering-time crash or, further
+      ;; downstream (a REPL session persisting this var-type across
+      ;; cells), a "Method not found" call dispatched against the
+      ;; erased "Any" type in a later, separate cell.
+        var-type (or (:var-type stmt)
+                     (anonymous-function-signature-type value)
+                     (infer-prepass-type ctx local-types value'))]
+    [stmt' (assoc local-types (:name stmt) var-type)]))
+
+;; A bare `count := v` inside a spawn/anonymous-function body means
+;; `this.count := v`. Since the closure body runs on the interpreter (see
+;; the :identifier case above), rewrite it into an explicit member-assign
+;; through the captured `this` identifier — the same shape an ordinary
+;; captured *other* object's field write already uses (`other.count := v`,
+;; unlike the untouched form, does not depend on `this` being resolvable
+;; inside a class the interpreter never sees as the original enclosing
+;; class).
+(defn- rewrite-assign-stmt-for-closures
+  [ctx local-types captures stmt]
+  (if (and (not (contains? local-types (:target stmt)))
+           (not (contains? (:var-types ctx) (:target stmt)))
+           (this-type-field? ctx (:target stmt)))
+    (do (capture-closure-this! captures ctx)
+        [{:type :member-assign
+          :object {:type :identifier :name closure-this-capture-name}
+          :field (:target stmt)
+          :value (rewrite-expression-for-closures ctx local-types captures (:value stmt))}
+         local-types])
+    [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+     local-types]))
+
+(defn- rewrite-member-assign-stmt-for-closures
+  [ctx local-types captures stmt]
+  (let [this-object? (or (nil? (:object stmt))
+                         (= :this (:type (:object stmt))))
+        rewrite-to-capture? (and this-object? (:this-type ctx) (:inside-closure? ctx))]
+    (when rewrite-to-capture?
+      (capture-closure-this! captures ctx))
+    [(assoc stmt
+            :object (cond
+                      rewrite-to-capture? {:type :identifier :name closure-this-capture-name}
+                      (:object stmt) (rewrite-expression-for-closures ctx local-types captures (:object stmt))
+                      :else nil)
+            :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+     local-types]))
+
+(defn- rewrite-if-stmt-for-closures
+  [ctx local-types captures stmt]
+  [(assoc stmt
+          :condition (rewrite-expression-for-closures ctx local-types captures (:condition stmt))
+          :then (first (rewrite-statements-for-closures* ctx local-types captures (:then stmt)))
+          :elseif (mapv (fn [clause]
+                          (assoc clause
+                                 :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
+                                 :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
+                        (:elseif stmt))
+          :else (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt))))
+   local-types])
+
+(defn- rewrite-case-stmt-for-closures
+  [ctx local-types captures stmt]
+  [(assoc stmt
+          :expr (rewrite-expression-for-closures ctx local-types captures (:expr stmt))
+          :clauses (mapv (fn [clause]
+                           (assoc clause
+                                  :values (mapv #(rewrite-expression-for-closures ctx local-types captures %)
+                                                (:values clause))
+                                  :body (first (rewrite-statement-for-closures ctx local-types captures (:body clause)))))
+                         (:clauses stmt))
+          :else (when (:else stmt)
+                  (first (rewrite-statement-for-closures ctx local-types captures (:else stmt)))))
+   local-types])
+
+(defn- rewrite-match-stmt-for-closures
+  [ctx local-types captures stmt]
+  [(assoc stmt
+          :expr (rewrite-expression-for-closures ctx local-types captures (:expr stmt))
+          :clauses (mapv (fn [clause]
+                           (let [clause-local-types (assoc local-types (:var-name clause) (:class-name clause))]
+                             (assoc clause
+                                    :body (first (rewrite-statements-for-closures* ctx clause-local-types captures (:body clause))))))
+                         (:clauses stmt))
+          :else (when (:else stmt)
+                  (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt)))))
+   local-types])
+
+(defn- rewrite-loop-stmt-for-closures
+  [ctx local-types captures stmt]
+  (let [[init' local-types'] (rewrite-statements-for-closures* ctx local-types captures (:init stmt))]
+    [(assoc stmt
+            :init init'
+            :until (rewrite-expression-for-closures ctx local-types' captures (:until stmt))
+            :variant (when (:variant stmt)
+                       (rewrite-expression-for-closures ctx local-types' captures (:variant stmt)))
+            :invariant (mapv (fn [inv]
+                               (assoc inv :condition (rewrite-expression-for-closures ctx local-types' captures (:condition inv))))
+                             (:invariant stmt))
+            :body (first (rewrite-statements-for-closures* ctx local-types' captures (:body stmt))))
+     local-types]))
+
+(defn- rewrite-select-stmt-for-closures
+  [ctx local-types captures stmt]
+  [(assoc stmt
+          :clauses (mapv (fn [{:keys [expr alias body] :as clause}]
+                           (assoc clause
+                                  :expr (rewrite-expression-for-closures ctx local-types captures expr)
+                                  :body (first (rewrite-statements-for-closures* ctx
+                                                                                 (cond-> local-types
+                                                                                   alias (assoc alias "Any"))
+                                                                                 captures
+                                                                                 body))))
+                         (:clauses stmt))
+          :timeout (when-let [timeout (:timeout stmt)]
+                     (assoc timeout
+                            :duration (rewrite-expression-for-closures ctx local-types captures (:duration timeout))
+                            :body (first (rewrite-statements-for-closures* ctx local-types captures (:body timeout)))))
+          :else (when (:else stmt)
+                  (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt)))))
+   local-types])
+
 (defn- rewrite-statement-for-closures
   [ctx local-types captures stmt]
   (case (:type stmt)
     :let
-    ;; A closure literal directly assigned to a `let` may call itself
-    ;; recursively by that name (`let fact := fn(n) do ... fact(n-1) ...
-    ;; end` — see nex.typechecker/check-let, which now lets this
-    ;; type-check by pre-registering the name). Renamed to a bare callN
-    ;; call BEFORE the ordinary closure rewrite below ever runs, so that
-    ;; pass's own capture/`this` handling stays entirely unaware self-
-    ;; recursion exists at all — see rewrite-self-recursive-calls.
-    (let [value (if (and (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
-                  (update (:value stmt) :body #(rewrite-self-recursive-calls (:name stmt) %))
-                  (:value stmt))
-          value' (rewrite-expression-for-closures ctx local-types captures value)
-          stmt' (assoc stmt :value value')
-          var-type (or (:var-type stmt)
-                       (infer-prepass-type ctx local-types value'))]
-      [stmt' (assoc local-types (:name stmt) var-type)])
+    (rewrite-let-stmt-for-closures ctx local-types captures stmt)
 
-    ;; A bare `count := v` inside a spawn/anonymous-function body means
-    ;; `this.count := v`. Since the closure body runs on the interpreter (see
-    ;; the :identifier case above), rewrite it into an explicit member-assign
-    ;; through the captured `this` identifier — the same shape an ordinary
-    ;; captured *other* object's field write already uses (`other.count := v`,
-    ;; unlike the untouched form, does not depend on `this` being resolvable
-    ;; inside a class the interpreter never sees as the original enclosing
-    ;; class).
     :assign
-    (if (and (not (contains? local-types (:target stmt)))
-             (not (contains? (:var-types ctx) (:target stmt)))
-             (this-type-field? ctx (:target stmt)))
-      (do (capture-closure-this! captures ctx)
-          [{:type :member-assign
-            :object {:type :identifier :name closure-this-capture-name}
-            :field (:target stmt)
-            :value (rewrite-expression-for-closures ctx local-types captures (:value stmt))}
-           local-types])
-      [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
-       local-types])
+    (rewrite-assign-stmt-for-closures ctx local-types captures stmt)
 
     :member-assign
-    (let [this-object? (or (nil? (:object stmt))
-                           (= :this (:type (:object stmt))))
-          rewrite-to-capture? (and this-object? (:this-type ctx) (:inside-closure? ctx))]
-      (when rewrite-to-capture?
-        (capture-closure-this! captures ctx))
-      [(assoc stmt
-              :object (cond
-                        rewrite-to-capture? {:type :identifier :name closure-this-capture-name}
-                        (:object stmt) (rewrite-expression-for-closures ctx local-types captures (:object stmt))
-                        :else nil)
-              :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
-       local-types])
+    (rewrite-member-assign-stmt-for-closures ctx local-types captures stmt)
 
     :call
     [(rewrite-expression-for-closures ctx local-types captures stmt)
@@ -3084,72 +3320,19 @@
                     (tc/detachable-version (:target-type stmt)))])
 
     :if
-    [(assoc stmt
-            :condition (rewrite-expression-for-closures ctx local-types captures (:condition stmt))
-            :then (first (rewrite-statements-for-closures* ctx local-types captures (:then stmt)))
-            :elseif (mapv (fn [clause]
-                            (assoc clause
-                                   :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
-                                   :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
-                          (:elseif stmt))
-            :else (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt))))
-     local-types]
+    (rewrite-if-stmt-for-closures ctx local-types captures stmt)
 
     :case
-    [(assoc stmt
-            :expr (rewrite-expression-for-closures ctx local-types captures (:expr stmt))
-            :clauses (mapv (fn [clause]
-                             (assoc clause
-                                    :values (mapv #(rewrite-expression-for-closures ctx local-types captures %)
-                                                  (:values clause))
-                                    :body (first (rewrite-statement-for-closures ctx local-types captures (:body clause)))))
-                           (:clauses stmt))
-            :else (when (:else stmt)
-                    (first (rewrite-statement-for-closures ctx local-types captures (:else stmt)))))
-     local-types]
+    (rewrite-case-stmt-for-closures ctx local-types captures stmt)
 
     :match
-    [(assoc stmt
-            :expr (rewrite-expression-for-closures ctx local-types captures (:expr stmt))
-            :clauses (mapv (fn [clause]
-                             (let [clause-local-types (assoc local-types (:var-name clause) (:class-name clause))]
-                               (assoc clause
-                                      :body (first (rewrite-statements-for-closures* ctx clause-local-types captures (:body clause))))))
-                           (:clauses stmt))
-            :else (when (:else stmt)
-                    (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt)))))
-     local-types]
+    (rewrite-match-stmt-for-closures ctx local-types captures stmt)
 
     :loop
-    [(assoc stmt
-            :init (first (rewrite-statements-for-closures* ctx local-types captures (:init stmt)))
-            :until (rewrite-expression-for-closures ctx local-types captures (:until stmt))
-            :variant (when (:variant stmt)
-                       (rewrite-expression-for-closures ctx local-types captures (:variant stmt)))
-            :invariant (mapv (fn [inv]
-                               (assoc inv :condition (rewrite-expression-for-closures ctx local-types captures (:condition inv))))
-                             (:invariant stmt))
-            :body (first (rewrite-statements-for-closures* ctx local-types captures (:body stmt))))
-     local-types]
+    (rewrite-loop-stmt-for-closures ctx local-types captures stmt)
 
     :select
-    [(assoc stmt
-            :clauses (mapv (fn [{:keys [expr alias body] :as clause}]
-                             (assoc clause
-                                    :expr (rewrite-expression-for-closures ctx local-types captures expr)
-                                    :body (first (rewrite-statements-for-closures* ctx
-                                                                                   (cond-> local-types
-                                                                                     alias (assoc alias "Any"))
-                                                                                   captures
-                                                                                   body))))
-                           (:clauses stmt))
-            :timeout (when-let [timeout (:timeout stmt)]
-                       (assoc timeout
-                              :duration (rewrite-expression-for-closures ctx local-types captures (:duration timeout))
-                              :body (first (rewrite-statements-for-closures* ctx local-types captures (:body timeout)))))
-            :else (when (:else stmt)
-                    (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt)))))
-     local-types]
+    (rewrite-select-stmt-for-closures ctx local-types captures stmt)
 
     :scoped-block
     [(assoc stmt
@@ -3259,9 +3442,9 @@
         (fn [section]
           (if (= :feature-section (:type section))
             (let [patch-member (fn [m]
-                                  (if (= :method (:type m))
-                                    (assoc m :params patched-params :return-type patched-return)
-                                    m))]
+                                 (if (= :method (:type m))
+                                   (assoc m :params patched-params :return-type patched-return)
+                                   m))]
               (update section :members #(mapv patch-member %)))
             section))]
     (update class-def :body #(mapv patch-section %))))
@@ -3323,15 +3506,15 @@
    type annotation of its own to patch from."
   [stmt var-types]
   (let [stmt (cond
-              (and (map? stmt) (= :let (:type stmt)) (:var-type stmt))
-              (update stmt :value #(patch-anonymous-function-types-for-let (:var-type stmt) %))
+               (and (map? stmt) (= :let (:type stmt)) (:var-type stmt))
+               (update stmt :value #(patch-anonymous-function-types-for-let (:var-type stmt) %))
 
-              (and (map? stmt) (= :assign (:type stmt)) (string? (:target stmt))
-                   (contains? var-types (:target stmt)))
-              (update stmt :value #(patch-anonymous-function-types-for-let
+               (and (map? stmt) (= :assign (:type stmt)) (string? (:target stmt))
+                    (contains? var-types (:target stmt)))
+               (update stmt :value #(patch-anonymous-function-types-for-let
                                      (get var-types (:target stmt)) %))
 
-              :else stmt)
+               :else stmt)
         walk (fn [stmts] (first (resolve-anonymous-function-types-in-stmts stmts var-types)))]
     (if-not (map? stmt)
       stmt
@@ -3376,7 +3559,7 @@
 (defn- resolve-functions-anonymous-function-context-types
   [fns]
   (mapv (fn [f] (update f :body #(first (resolve-anonymous-function-types-in-stmts
-                                          % (initial-var-types (:params f))))))
+                                         % (initial-var-types (:params f))))))
         fns))
 
 (defn- resolve-class-anonymous-function-context-types
@@ -3390,14 +3573,14 @@
                       (mapv (fn [m]
                               (if (= :method (:type m))
                                 (update m :body #(first (resolve-anonymous-function-types-in-stmts
-                                                          % (initial-var-types (:params m)))))
+                                                         % (initial-var-types (:params m)))))
                                 m))
                             members)))
             :constructors
             (update section :constructors
                     (fn [ctors]
                       (mapv (fn [c] (update c :body #(first (resolve-anonymous-function-types-in-stmts
-                                                              % (initial-var-types (:params c))))))
+                                                             % (initial-var-types (:params c))))))
                             ctors)))
             section))]
     (update class-def :body #(mapv patch-section %))))
@@ -3446,13 +3629,13 @@
    currently produce for an ordinary generic class."
   (delay
     (first (:classes (parser/ast
-                       (str "class " closure-mut-box-class-name "[T]\n"
-                            "create\n"
-                            "  make(v: T) do value := v end\n"
-                            "feature\n"
-                            "  value: T\n"
-                            "  set(v: T) do value := v end\n"
-                            "end"))))))
+                      (str "class " closure-mut-box-class-name "[T]\n"
+                           "create\n"
+                           "  make(v: T) do value := v end\n"
+                           "feature\n"
+                           "  value: T\n"
+                           "  set(v: T) do value := v end\n"
+                           "end"))))))
 
 (defn- box-target-names
   "Every name a bare `:=` reassigns anywhere reachable in STMTS (including
@@ -3524,35 +3707,83 @@
        (keep (fn [[name n]] (when (> n 1) name)))
        set))
 
+(defn- direct-let-declarations
+  "Every `:let` this pass treats as \"directly\" in STMTS: a plain top-level
+   one, plus — the one deliberate, narrow exception to the \"not nested
+   inside an if/loop/etc.\" rule box-candidate-lets otherwise holds to — a
+   `from`-loop's own control variable, declared in a top-level `:loop`
+   node's `:init` rather than as an ordinary statement (`from let i := 0
+   until ... do ... end` parses `i`'s :let into the :loop node's :init, not
+   as a sibling statement; see nex.walker). That variable is exactly as
+   legitimate a boxing target as any other mutated-and-closed-over :let —
+   `from let i := 0 until i = n do spawn do result := i end ... end` needs
+   `i` boxed for the same reason a `let total := 0` does — but it lives one
+   field deeper, so box-candidate-lets' own plain `filter` over STMTS never
+   saw it without this. A loop nested inside another loop/if/etc. is still
+   out of scope, same as before: only a :loop directly in STMTS is looked
+   into."
+  [stmts]
+  (mapcat (fn [s]
+            (cond
+              (and (map? s) (= :let (:type s))) [s]
+              (and (map? s) (= :loop (:type s))) (filter #(and (map? %) (= :let (:type %))) (:init s))
+              :else nil))
+          stmts))
+
 (defn- box-candidate-lets
   "The {name -> let-stmt} map of every `:let` appearing directly (not
-   nested inside an if/loop/etc.) in STMTS whose name needs boxing per
-   box-target-names/names-touched-inside-closures, excluding any name
-   shadowed anywhere in STMTS (see shadowed-anywhere-names)."
+   nested inside an if/loop/etc. — see direct-let-declarations for the one
+   exception) in STMTS whose name needs boxing per box-target-names/names-
+   touched-inside-closures, excluding any name shadowed anywhere in STMTS
+   (see shadowed-anywhere-names)."
   [stmts]
   (let [reassigned (box-target-names stmts)
         touched-in-closure (names-touched-inside-closures stmts)
         shadowed (shadowed-anywhere-names stmts)]
     (into {}
-          (comp (filter #(= :let (:type %)))
-                (filter #(and (contains? reassigned (:name %))
+          (comp (filter #(and (contains? reassigned (:name %))
                               (contains? touched-in-closure (:name %))
                               (not (contains? shadowed (:name %)))))
                 (map (juxt :name identity)))
-          stmts)))
+          (direct-let-declarations stmts))))
+
+(defn anonymous-function-signature-type
+  "A Function(...) type read directly off an :anonymous-function EXPR's
+   own :params/:return-type — nil for any other node shape. Mirrors
+   nex.typechecker/anonymous-function-provisional-signature exactly, and
+   exists for the identical reason: EXPR's signature is always fully
+   determined by what's written on the literal itself, regardless of
+   what its body references — unlike infer-prepass-type (via
+   tc/infer-expression-type), which type-checks the WHOLE body in an
+   isolated, standalone env to infer a closure's type, and so throws
+   (silently, swallowed by its own try/catch, falling back to \"Any\")
+   the moment that body references a sibling closure the isolated check
+   knows nothing about — exactly the shape of a mutually- or forward-
+   referencing closure. Callers needing an untyped closure-let's type use
+   this FIRST, falling back to infer-prepass-type only when EXPR isn't a
+   closure literal at all."
+  [expr]
+  (when (and (map? expr) (= :anonymous-function (:type expr)))
+    {:base-type "Function"
+     :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
+     :return-type (or (:return-type expr) "Any")}))
 
 (defn- box-let-type
   "The Nex type to instantiate Closure_Mut_Box[T] at for a boxed :let —
-   its own declared :var-type when present, otherwise inferred from its
-   (pre-rewrite) initializer the same way an ordinary untyped :let's type
-   is inferred elsewhere in this pass. Falls back to \"Any\" only when
-   inference itself cannot determine one; T is erased to Object on the JVM
-   regardless, so \"Any\" here costs a convert at an unusual, untyped-let
-   use site, never a lowering failure."
+   its own declared :var-type when present, otherwise its
+   anonymous-function-signature-type (see there for why this can't go
+   through the ordinary infer-prepass-type path other boxed :lets use),
+   or inferred the ordinary way for any other kind of value. Falls back
+   to \"Any\" only when inference itself cannot determine one; T is
+   erased to Object on the JVM regardless, so \"Any\" here costs a
+   convert at an unusual, untyped-let use site, never a lowering
+   failure."
   [ctx local-types let-stmt]
-  (or (:var-type let-stmt)
-      (infer-prepass-type ctx local-types (:value let-stmt))
-      "Any"))
+  (let [value (:value let-stmt)]
+    (or (:var-type let-stmt)
+        (anonymous-function-signature-type value)
+        (infer-prepass-type ctx local-types value)
+        "Any")))
 
 (defn- box-read
   "A bare read of a boxed name — `total` -> `total.value` — as the same
@@ -3650,12 +3881,32 @@
    read or bare call) inside a SIBLING closure-let declared EARLIER in
    STMTS — the set that needs Closure_Mut_Box treatment so the earlier
    closure can hold an indirect reference to something that does not
-   exist yet at its own construction time."
+   exist yet at its own construction time.
+
+   Excludes any name shadowed elsewhere in STMTS (see shadowed-anywhere-
+   names — the same guard box-candidate-lets already applies to the
+   mutation-boxing case) for the identical reason: rewrite-forward-
+   references, like rewrite-boxed-references, is a single shape-agnostic
+   postwalk with no scope tracking of its own, so it cannot tell a
+   shadowing occurrence (a different closure's own same-named parameter,
+   or an unrelated `let` reusing the name) from a genuine forward
+   reference. Without this, a name doing double duty as both a mutual-
+   recursion participant and a plain unrelated parameter elsewhere in the
+   same block hit a lowering-time crash the moment that occurrence was
+   rewritten into a box read it cannot type-check against — the same
+   crash class shadowed-anywhere-names was introduced to close off for
+   mutation boxing. Excluding the name here means self- and mutual
+   recursion between closures simply do not apply for that one name, with
+   the ordinary (already-correct) ambient behavior taking over — never a
+   crash."
   [stmts]
   (let [lets (closure-let-names stmts)
+        shadowed (shadowed-anywhere-names stmts)
         name->index (into {}
                           (keep-indexed (fn [i s]
-                                          (when (contains? lets (:name s)) [(:name s) i])))
+                                          (when (and (contains? lets (:name s))
+                                                     (not (contains? shadowed (:name s))))
+                                            [(:name s) i])))
                           stmts)]
     (into #{}
           (mapcat (fn [[name let-stmt]]
@@ -3666,7 +3917,7 @@
                                          (> (get name->index ref-name) i))
                                 ref-name))
                             refs))))
-          lets)))
+          (select-keys lets (keys name->index)))))
 
 (defn- rewrite-forward-references
   "Rewrite every bare read/call/write of a name in BOXED-NAMES throughout
@@ -3746,42 +3997,69 @@
     (if (empty? candidates)
       stmts
       (let [boxed-names (set (keys candidates))
+            box-wrap (fn [s t]
+                       (assoc s
+                              :var-type {:base-type closure-mut-box-class-name :type-args [t]}
+                              :value {:type :create
+                                      :class-name closure-mut-box-class-name
+                                      :generic-args [t]
+                                      :constructor "make"
+                                      :args [(:value s)]}))
+            ;; One :let (top-level, or nested one level into a top-level
+            ;; :loop's own :init — see direct-let-declarations) threaded
+            ;; through the same lt/acc update either kind gets when it is
+            ;; a plain statement: box-typed and recorded when it is a
+            ;; boxing candidate, otherwise just folded into lt so a LATER
+            ;; boxed let's initializer can still resolve its type.
+            thread-let (fn [[lt acc] s]
+                         (if (contains? candidates (:name s))
+                           (let [t (box-let-type ctx lt s)]
+                             [(assoc lt (:name s) t) (assoc acc (:name s) t)])
+                           [(assoc lt (:name s) (or (:var-type s) (infer-prepass-type ctx lt (:value s)))) acc]))
             ;; Types are resolved against the ORIGINAL (pre-rewrite) lets,
             ;; threading local-types forward exactly like the ordinary
             ;; closure-rewrite :let case does, so a later boxed let's own
             ;; initializer can still refer to an earlier one's declared type.
-            box-types (loop [remaining stmts lt local-types acc {}]
-                        (if (empty? remaining)
-                          acc
-                          (let [s (first remaining)]
-                            (if (and (map? s) (= :let (:type s)) (contains? candidates (:name s)))
-                              (recur (rest remaining)
-                                     (assoc lt (:name s) (box-let-type ctx lt s))
-                                     (assoc acc (:name s) (box-let-type ctx lt s)))
-                              (recur (rest remaining)
-                                     (if (and (map? s) (= :let (:type s)) (:name s))
-                                       (assoc lt (:name s) (or (:var-type s) (infer-prepass-type ctx lt (:value s))))
-                                       lt)
-                                     acc)))))
+            box-types (second
+                       (reduce (fn [[lt acc] s]
+                                 (cond
+                                   (and (map? s) (= :let (:type s)) (:name s))
+                                   (thread-let [lt acc] s)
+
+                                   (and (map? s) (= :loop (:type s)))
+                                   (reduce (fn [state init-let]
+                                             (if (and (map? init-let) (= :let (:type init-let)) (:name init-let))
+                                               (thread-let state init-let)
+                                               state))
+                                           [lt acc]
+                                           (:init s))
+
+                                   :else [lt acc]))
+                               [local-types {}]
+                               stmts))
             rewritten (rewrite-boxed-references boxed-names stmts)]
         (mapv (fn [s]
-                (if (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
-                  (let [t (get box-types (:name s))]
-                    (assoc s
-                           :var-type {:base-type closure-mut-box-class-name :type-args [t]}
-                           :value {:type :create
-                                   :class-name closure-mut-box-class-name
-                                   :generic-args [t]
-                                   :constructor "make"
-                                   :args [(:value s)]}))
-                  s))
+                (cond
+                  (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
+                  (box-wrap s (get box-types (:name s)))
+
+                  (and (map? s) (= :loop (:type s)))
+                  (assoc s :init
+                         (mapv (fn [init-let]
+                                 (if (and (map? init-let) (= :let (:type init-let))
+                                          (contains? boxed-names (:name init-let)))
+                                   (box-wrap init-let (get box-types (:name init-let)))
+                                   init-let))
+                               (:init s)))
+
+                  :else s))
               rewritten)))))
 
 (defn prepare-program-for-closures
   [program opts]
   (let [program (binding [*type-aliases* (merge *type-aliases*
-                                                 (into {} (map (juxt :name :type-expr)
-                                                               (:type-aliases program))))]
+                                                (into {} (map (juxt :name :type-expr)
+                                                              (:type-aliases program))))]
                   (resolve-anonymous-function-context-types program))
         visible-functions (vec (concat (:functions program) (:functions opts)))
         visible-classes (merge-visible-classes (builtin-class-defs)
@@ -3808,9 +4086,11 @@
         rewritten-functions (mapv #(rewrite-callable-for-closures ctx % (:var-types opts))
                                   boxed-functions)
         boxed-statements (box (:var-types opts) (:statements program))
-        [rewritten-statements _ _] (rewrite-statements-for-closures (assoc ctx :functions (vec (concat rewritten-functions (:functions opts))))
-                                                                    (:var-types opts)
-                                                                    boxed-statements)
+        [rewritten-statements _ _]
+        (rewrite-statements-for-closures
+         (assoc ctx :functions (vec (concat rewritten-functions (:functions opts))))
+         (:var-types opts)
+         boxed-statements)
         boxed-classes (mapv (fn [class-def]
                               (update class-def :body
                                       (fn [sections]
@@ -3834,8 +4114,8 @@
         rewritten-classes (mapv #(rewrite-class-for-closures ctx %) boxed-classes)]
     (cond-> program
       true (assoc :functions rewritten-functions
-                   :statements rewritten-statements
-                   :classes rewritten-classes)
+                  :statements rewritten-statements
+                  :classes rewritten-classes)
       @any-boxed? (update :classes #(conj % @closure-mut-box-class-def)))))
 
 (defn collect-anonymous-class-defs
@@ -3872,6 +4152,80 @@
       (walk node)
       (mapv @found @seen-order))))
 
+(defn- lower-instance-this-carrier-field-get
+  "`this.field` (bare, no parens) where FIELD is one of the current class's own
+   fields reached through its composition carrier path."
+  [env method]
+  (let [{:keys [owner field carrier-path nex-type jvm-type]} (get (:fields env) method)]
+    (ir/field-get-node (:internal-name (class-jvm-meta env owner))
+                       field
+                       (carrier-path-target-ir env carrier-path
+                                               (ir/this-node (:this-type env)
+                                                             (exact-class-jvm-type env (:this-type env))))
+                       nex-type
+                       jvm-type)))
+
+(defn- lower-instance-user-field-get
+  [env target-expr method base-type target-ir field-def type-map]
+  (let [nex-type (tc/resolve-generic-type (:field-type field-def) type-map)
+        jvm-type (resolve-jvm-type env nex-type)]
+    (if (= (:type target-expr) :this)
+      (ir/field-get-node (:internal-name (class-jvm-meta env base-type))
+                         method
+                         target-ir
+                         nex-type
+                         jvm-type)
+      (ir/call-runtime-node (str "user-field-get:" method)
+                            [target-ir]
+                            nex-type
+                            jvm-type))))
+
+(defn- lower-instance-user-method-call
+  [env target-expr method args target-ir method-def type-map]
+  (let [nex-type (tc/resolve-generic-type (function-return-type method-def) type-map)
+        jvm-type (resolve-jvm-type env nex-type)]
+    (if (= (:type target-expr) :this)
+      ;; Dispatch self-calls through __outer__ for proper dynamic dispatch.
+      ;; When this object is a composition parent, __outer__ points to the
+      ;; child that contains it, so overridden methods are called correctly.
+      (let [outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                        "__outer__"
+                                        (ir/this-node (:this-type env)
+                                                      (exact-class-jvm-type env (:this-type env)))
+                                        "Any"
+                                        (ir/object-jvm-type "java/lang/Object"))]
+        (ir/call-runtime-node (str "user-method:" method)
+                              (into [outer-ir] (mapv #(lower-expression env %) args))
+                              nex-type
+                              jvm-type))
+      (ir/call-runtime-node (str "user-method:" method)
+                            (into [target-ir] (mapv #(lower-expression env %) args))
+                            nex-type
+                            jvm-type))))
+
+(defn- lower-instance-inherited-parent-call
+  "`this.m(...)` where M is not declared/inherited on the class itself but is a
+   method of a directly-composed parent — dispatched virtually through that
+   parent's carrier field."
+  [env method args]
+  (let [entry (get (direct-parent-method-map env (current-class-def env))
+                   [method (count args)])
+        {:keys [owner-internal-name method-def carrier-owner carrier-field carrier-jvm-type]} entry
+        nex-type (function-return-type method-def)
+        jvm-type (resolve-jvm-type env nex-type)]
+    (ir/call-virtual-node owner-internal-name
+                          (lowered-instance-method-name method-def)
+                          (desc/repl-instance-method-descriptor)
+                          (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
+                                             carrier-field
+                                             (ir/this-node (:this-type env)
+                                                           (exact-class-jvm-type env (:this-type env)))
+                                             (:source-class entry)
+                                             carrier-jvm-type)
+                          (mapv #(lower-expression env %) args)
+                          nex-type
+                          jvm-type)))
+
 (defn- lower-instance-dispatch
   [env target-expr method args has-parens]
   (let [target-type (resolve-type-alias (infer-type env target-expr))
@@ -3893,77 +4247,20 @@
                                    (:declaring-class (or method-def field-def)))]
     (cond
       (and (= (:type target-expr) :this)
-           (if-let [{:keys [owner field carrier-path nex-type jvm-type]}
-                    (get (:fields env) method)]
-             (false? has-parens)
-             false))
-      (let [{:keys [owner field carrier-path nex-type jvm-type]}
-            (get (:fields env) method)]
-        (ir/field-get-node (:internal-name (class-jvm-meta env owner))
-                           field
-                           (carrier-path-target-ir env carrier-path
-                                                   (ir/this-node (:this-type env)
-                                                                 (exact-class-jvm-type env (:this-type env))))
-                           nex-type
-                           jvm-type))
+           (get (:fields env) method)
+           (false? has-parens))
+      (lower-instance-this-carrier-field-get env method)
 
       field-def
-      (let [nex-type (tc/resolve-generic-type (:field-type field-def) type-map)
-            jvm-type (resolve-jvm-type env nex-type)]
-        (if (= (:type target-expr) :this)
-          (ir/field-get-node (:internal-name (class-jvm-meta env base-type))
-                             method
-                             target-ir
-                             nex-type
-                             jvm-type)
-          (ir/call-runtime-node (str "user-field-get:" method)
-                                [target-ir]
-                                nex-type
-                                jvm-type)))
+      (lower-instance-user-field-get env target-expr method base-type target-ir field-def type-map)
 
       method-def
-      (let [nex-type (tc/resolve-generic-type (function-return-type method-def) type-map)
-            jvm-type (resolve-jvm-type env nex-type)]
-        (if (= (:type target-expr) :this)
-          ;; Dispatch self-calls through __outer__ for proper dynamic dispatch.
-          ;; When this object is a composition parent, __outer__ points to the
-          ;; child that contains it, so overridden methods are called correctly.
-          (let [outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                            "__outer__"
-                                            (ir/this-node (:this-type env)
-                                                          (exact-class-jvm-type env (:this-type env)))
-                                            "Any"
-                                            (ir/object-jvm-type "java/lang/Object"))]
-            (ir/call-runtime-node (str "user-method:" method)
-                                  (into [outer-ir] (mapv #(lower-expression env %) args))
-                                  nex-type
-                                  jvm-type))
-          (ir/call-runtime-node (str "user-method:" method)
-                                (into [target-ir] (mapv #(lower-expression env %) args))
-                                nex-type
-                                jvm-type)))
+      (lower-instance-user-method-call env target-expr method args target-ir method-def type-map)
 
       (and (= (:type target-expr) :this)
            (get (direct-parent-method-map env (current-class-def env))
                 [method (count args)]))
-      (let [{:keys [owner-internal-name method-def carrier-owner carrier-field carrier-jvm-type]}
-            (get (direct-parent-method-map env (current-class-def env))
-                 [method (count args)])
-            nex-type (function-return-type method-def)
-            jvm-type (resolve-jvm-type env nex-type)]
-        (ir/call-virtual-node owner-internal-name
-                              (lowered-instance-method-name method-def)
-                              (desc/repl-instance-method-descriptor)
-                              (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
-                                                 carrier-field
-                                                 (ir/this-node (:this-type env)
-                                                               (exact-class-jvm-type env (:this-type env)))
-                                                 (:source-class (get (direct-parent-method-map env (current-class-def env))
-                                                                     [method (count args)]))
-                                                 carrier-jvm-type)
-                              (mapv #(lower-expression env %) args)
-                              nex-type
-                              jvm-type))
+      (lower-instance-inherited-parent-call env method args)
 
       ;; A universal method the class does not declare. The typechecker admits
       ;; the Any protocol on *every* receiver (the "Any" case of its
@@ -4183,7 +4480,7 @@
                                 :long "op:pow-long"
                                 :double "op:pow-double"
                                 (throw (unsupported "Unsupported power lowering type"
-                                                {:expr expr :jvm-type jvm-type})))
+                                                    {:expr expr :jvm-type jvm-type})))
                               [left-ir right-ir]
                               nex-type
                               jvm-type)
@@ -4249,7 +4546,7 @@
       (when (or (nil? then-expr)
                 (nil? else-expr))
         (throw (unsupported "Only expression-shaped or result-assignment if branches are supported in lowering"
-                        {:expr expr})))
+                            {:expr expr})))
       (let [then-ir (lower-expression then-env then-expr)
             else-ir (lower-expression else-env else-expr)
             nex-type (infer-type env expr)
@@ -4297,9 +4594,9 @@
                                              ;; instantiation site — it names
                                              ;; the enclosing method's `this`.
                                              (lower-expression env (if (= name closure-this-capture-name)
-                                                                    {:type :this}
-                                                                    {:type :identifier
-                                                                     :name name}))])
+                                                                     {:type :this}
+                                                                     {:type :identifier
+                                                                      :name name}))])
                                           captures))
                             nex-type
                             (ir/object-jvm-type "java/lang/Object"))
@@ -4371,8 +4668,7 @@
   (if-let [handler (get lower-expression-dispatch (:type expr))]
     (ir/with-debug (handler env expr) expr)
     (throw (unsupported "Unsupported expression node for lowering"
-                    {:expr expr :node-type (:type expr)}))))
-
+                        {:expr expr :node-type (:type expr)}))))
 
 (defn- lower-create-console
   [env expr]
@@ -4408,8 +4704,8 @@
                               jvm-type))
 
       (throw (unsupported "Unsupported Process constructor in compiled lowering"
-                      {:expr expr
-                       :constructor (:constructor expr)})))))
+                          {:expr expr
+                           :constructor (:constructor expr)})))))
 
 (defn- lower-create-channel
   [env expr]
@@ -4436,8 +4732,8 @@
                               (resolve-jvm-type env nex-type)))
 
       (throw (unsupported "Unsupported Channel constructor in compiled lowering"
-                      {:expr expr
-                       :constructor (:constructor expr)})))))
+                          {:expr expr
+                           :constructor (:constructor expr)})))))
 
 (defn- lower-create-array
   [env expr]
@@ -4465,8 +4761,8 @@
                               (resolve-jvm-type env nex-type)))
 
       (throw (unsupported "Unsupported Array constructor in compiled lowering"
-                      {:expr expr
-                       :constructor (:constructor expr)})))))
+                          {:expr expr
+                           :constructor (:constructor expr)})))))
 
 (defn- lower-create-min-heap
   [env expr]
@@ -4503,8 +4799,8 @@
                               (resolve-jvm-type env nex-type)))
 
       (throw (unsupported "Unsupported Min_Heap constructor in compiled lowering"
-                      {:expr expr
-                       :constructor (:constructor expr)})))))
+                          {:expr expr
+                           :constructor (:constructor expr)})))))
 
 (defn- lower-create-single-arg-atomic
   "Builds a `create <Class>.make(value)` lowering handler for the atomic
@@ -4516,7 +4812,7 @@
     (let [nex-type (infer-type env expr)]
       (when-not (= "make" (:constructor expr))
         (throw (unsupported (str "Unsupported " class-name " constructor in compiled lowering")
-                        {:expr expr :constructor (:constructor expr)})))
+                            {:expr expr :constructor (:constructor expr)})))
       (when-not (= 1 (count (:args expr)))
         (throw (ex-info (str class-name ".make expects exactly 1 argument in compiled lowering")
                         {:expr expr})))
@@ -4535,7 +4831,7 @@
                           {:expr expr})))
         (ir/map-literal-node [] nex-type (resolve-jvm-type env nex-type)))
       (throw (unsupported "Unsupported Map constructor in compiled lowering"
-                      {:expr expr :constructor (:constructor expr)})))))
+                          {:expr expr :constructor (:constructor expr)})))))
 
 (defn- lower-create-set
   [env expr]
@@ -4559,7 +4855,7 @@
                               (resolve-jvm-type env nex-type)))
 
       (throw (unsupported "Unsupported Set constructor in compiled lowering"
-                      {:expr expr :constructor (:constructor expr)})))))
+                          {:expr expr :constructor (:constructor expr)})))))
 
 (def ^:private lower-create-builtin-dispatch
   "class-name -> (fn [env expr] ...): the built-in-type half of
@@ -4583,20 +4879,59 @@
 ;; the host constructor with the arguments, so lowering does the same.
 (defn- lower-java-create
   [env expr class-name]
-  (let [nex-type (infer-type env expr)]
-    (ir/call-runtime-node "java-create-object"
-                          (into [(ir/const-node class-name
-                                                "String"
-                                                (ir/object-jvm-type "java/lang/String"))]
-                                (mapv #(lower-expression env %) (:args expr)))
-                          nex-type
-                          (resolve-jvm-type env nex-type))))
+  (let [nex-type (infer-type env expr)
+        jvm-type (resolve-jvm-type env nex-type)
+        arg-irs (mapv #(lower-expression env %) (:args expr))
+        ^Class klass (resolve-java-class-by-name env class-name)
+        resolution (when klass
+                     (resolve-java-call-target
+                      env
+                      (.getConstructors klass)
+                      (mapv :nex-type arg-irs)
+                      (str "create " class-name)))]
+    (cond
+      (and (vector? resolution) (= :fixed (first resolution)))
+      (ir/call-runtime-node "java-create-object-resolved"
+                            (into [(ir/const-node (.getName klass)
+                                                  "String"
+                                                  (ir/object-jvm-type "java/lang/String"))
+                                   (ir/const-node (resolved-param-classes-joined (second resolution))
+                                                  "String"
+                                                  (ir/object-jvm-type "java/lang/String"))]
+                                  arg-irs)
+                            nex-type
+                            jvm-type)
+
+      (and (vector? resolution) (= :varargs (first resolution)))
+      (let [[fixed-classes-joined component-class-name] (resolved-varargs-descriptor (second resolution))]
+        (ir/call-runtime-node "java-create-object-resolved-varargs"
+                              (into [(ir/const-node (.getName klass)
+                                                    "String"
+                                                    (ir/object-jvm-type "java/lang/String"))
+                                     (ir/const-node fixed-classes-joined
+                                                    "String"
+                                                    (ir/object-jvm-type "java/lang/String"))
+                                     (ir/const-node component-class-name
+                                                    "String"
+                                                    (ir/object-jvm-type "java/lang/String"))]
+                                    arg-irs)
+                              nex-type
+                              jvm-type))
+
+      :else
+      (ir/call-runtime-node "java-create-object"
+                            (into [(ir/const-node class-name
+                                                  "String"
+                                                  (ir/object-jvm-type "java/lang/String"))]
+                                  arg-irs)
+                            nex-type
+                            jvm-type))))
 
 (defn- lower-user-create
   [env expr class-name class-def compiled]
   (when-not compiled
     (throw (unsupported "Create of non-compiled class is not supported in lowering"
-                    {:expr expr :class-name class-name})))
+                        {:expr expr :class-name class-name})))
   (when (:deferred? class-def)
     (throw (ex-info "Unsupported create of deferred class in compiled lowering"
                     {:expr expr :class-name class-name})))
@@ -4642,7 +4977,7 @@
       (do
         (when (seq (:args expr))
           (throw (unsupported "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
-                          {:expr expr})))
+                              {:expr expr})))
         (if (seq (:generic-params class-def))
           (ir/call-virtual-node (:internal-name compiled)
                                 (generic-init-method-name)
@@ -4671,7 +5006,6 @@
       (if (and class-def (:import class-def))
         (lower-java-create env expr class-name)
         (lower-user-create env expr class-name class-def compiled)))))
-
 
 (defn- java-object-valued?
   "True when `expr`, used as a call target, is known at lowering time to hold
@@ -4856,9 +5190,9 @@
     (if (= 1 (count by-arity))
       (first by-arity)
       (let [plausible (filter (fn [^java.lang.reflect.Executable c]
-                                 (every? true? (map java-param-compatible?
-                                                    arg-nex-types (.getParameterTypes c))))
-                               by-arity)]
+                                (every? true? (map java-param-compatible?
+                                                   arg-nex-types (.getParameterTypes c))))
+                              by-arity)]
         (case (count plausible)
           1 (first plausible)
           0 (throw (unsupported
@@ -4879,8 +5213,8 @@
         candidates (filter #(= (.getName ^java.lang.reflect.Method %) (:method expr))
                            (.getMethods java-super-klass))
         ^java.lang.reflect.Method m (select-java-callable candidates (count (:args expr)) arg-nex-types
-                                                           "method"
-                                                           (str (.getName java-super-klass) "." (:method expr)))
+                                                          "method"
+                                                          (str (.getName java-super-klass) "." (:method expr)))
         boxed-args (mapv ir/java-arg-box-node arg-irs (.getParameterTypes m))
         nex-type "Any"
         jvm-type (resolve-jvm-type env nex-type)]
@@ -4949,8 +5283,8 @@
   (let [parent-name (single-super-parent-name env)
         parent-def (get (visible-class-map env) parent-name)
         java-super-klass (when (:import parent-def)
-                          (let [^Class klass (resolve-imported-java-type env parent-name)]
-                            (when (and klass (not (.isInterface klass))) klass)))]
+                           (let [^Class klass (resolve-imported-java-type env parent-name)]
+                             (when (and klass (not (.isInterface klass))) klass)))]
     (if java-super-klass
       (lower-java-super-call env expr parent-name java-super-klass arg-irs)
       (lower-nex-super-call env expr parent-name parent-def arg-irs))))
@@ -4975,6 +5309,365 @@
                           arg-irs
                           nex-type
                           jvm-type)))
+
+;; ---------------------------------------------------------------------------
+;; Compile-time Java overload resolution
+;;
+;; Every Java interop call -- instance method, static method, constructor --
+;; used to dispatch at runtime through clojure.lang.Reflector, on both
+;; backends, which performs no real overload resolution: when more than one
+;; method shares a name and arity, Reflector reliably prefers whichever
+;; candidate takes the widest reference type (Object) over a more specific
+;; primitive/numeric one. java.util.ArrayList.remove(int)/(Object) is the
+;; textbook case: `list.remove(1)` silently ran as "remove the value 1", not
+;; "remove index 1" -- and even the *correctly* chosen Method still fails
+;; reflectively, since Nex's Integer is uniformly a boxed Long and reflective
+;; unboxing requires an exact wrapper-class match per parameter (a boxed Long
+;; does not narrow to `int`, even reflectively).
+;;
+;; The compiled backend can do better than the interpreter here: lowering
+;; runs after type checking, so every argument's *static* Nex type is
+;; already known, and Nex's imports already carry the real java.lang.Class
+;; of every Java type it interops with -- enough, in the common case, to
+;; resolve the call to a single Method/Constructor here, at compile time,
+;; the same way javac itself would (a deliberately simplified form of JLS
+;; 15.12.2's applicability + most-specific-method rules). lower-java-
+;; instance-call/-static-owner-call/-create below emit a "-resolved" runtime
+;; node carrying that Method's exact parameter-type descriptor, so
+;; nex.compiler.jvm.runtime's java-call-method-resolved/-static-resolved/
+;; java-create-object-resolved do one unambiguous getMethod/getConstructor
+;; lookup at runtime -- with the right coercion for each parameter's exact
+;; type -- instead of Reflector's own guesswork.
+;;
+;; This pass is deliberately conservative in two ways:
+;;
+;;  1. It only ever engages when there are 2+ non-varargs candidates sharing
+;;     a name/arity in the first place -- an actual overload-resolution
+;;     situation. A single matching method (the overwhelming majority of
+;;     real calls) or a genuinely unresolved one (arity mismatch, varargs,
+;;     no such method) is untouched: it falls straight through to the
+;;     existing runtime-reflective dispatch, unchanged, with its existing
+;;     error messages.
+;;  2. Within that, it resolves (falling back to :bail, never throwing) the
+;;     moment anything isn't precise enough to reason about safely: an
+;;     argument whose Nex type is Any/a generic parameter/a Function
+;;     type/anything else this pass doesn't model, or a candidate set with
+;;     no applicable match at all (this pass's own type modeling being
+;;     incomplete is a reason to defer to the old path, not to fail the
+;;     build). The only new failure mode this pass can ever introduce is a
+;;     compile-time error for a genuine, remaining tie between two equally
+;;     specific candidates -- which a real Java caller would find just as
+;;     ambiguous, and is far better caught at compile time than silently
+;;     mis-resolved at runtime.
+;;
+;; Nex Integer carries no compile-time value-range information (a `let n:
+;; Integer` and a numeric literal have the same static type), so `byte`/
+;; `short` parameters are deliberately never considered applicable targets
+;; here -- only int/long/float/double. An overload set differentiated only
+;; by byte/short still falls back to the pre-existing runtime dispatch,
+;; unchanged from today.
+
+(def ^:private integer-primitive-family
+  "[^Class rank] pairs a Nex Integer argument can supply, most specific
+   first (int before long before float before double) -- see the byte/short
+   note above for why those are absent."
+  [[Integer/TYPE 0] [Integer 0]
+   [Long/TYPE 1] [Long 1]
+   [Float/TYPE 2] [Float 2]
+   [Double/TYPE 3] [Double 3]])
+
+(def ^:private real-primitive-family
+  "[^Class rank] pairs a Nex Real argument can supply, most specific first."
+  [[Float/TYPE 0] [Float 0]
+   [Double/TYPE 1] [Double 1]])
+
+(defn- class-and-supertypes
+  "KLASS plus every superclass and (transitively) every interface it or they
+   implement, in breadth-first order -- so a candidate parameter type's
+   index in the result is its specificity distance from KLASS itself (0 =
+   KLASS exactly, larger = less specific)."
+  [^Class klass]
+  (loop [frontier [klass] seen #{} order []]
+    (if (empty? frontier)
+      order
+      (let [seen' (into seen frontier)
+            next-frontier (->> frontier
+                               (mapcat (fn [^Class k]
+                                         (remove nil? (conj (vec (.getInterfaces k))
+                                                            (.getSuperclass k)))))
+                               distinct
+                               (remove seen'))]
+        (recur next-frontier seen' (into order frontier))))))
+
+(defn- nex-scalar-natural-class
+  "The Java class a Nex scalar value of this base type is boxed as at
+   runtime, on the compiled backend. nil for anything this pass doesn't
+   model as a plain scalar (including Any)."
+  ^Class [base]
+  (case base
+    "Integer" Long
+    "Real" Double
+    "Boolean" Boolean
+    "Char" Character
+    "String" String
+    nil))
+
+(defn- nex-numeric-family
+  [base]
+  (case base
+    "Integer" integer-primitive-family
+    "Real" real-primitive-family
+    nil))
+
+(defn- nex-container-natural-class
+  "The concrete JVM class Nex's own Array/Map/Set are backed by on the
+   compiled backend -- java.util.ArrayList (see arraylist-internal-name in
+   emit.clj), and, since the Map order-preservation fix, LinkedHashMap/
+   LinkedHashSet rather than HashMap/plain sets."
+  ^Class [base]
+  (case base
+    "Array" java.util.ArrayList
+    "Map" java.util.LinkedHashMap
+    "Set" java.util.LinkedHashSet
+    nil))
+
+(defn- resolve-java-class-by-name
+  "Best-effort ^Class for a Java class name as it can appear at a lowering
+   call site: already fully qualified (java-host-class-root-name, or an
+   imported class's own qualified name), a bare imported name, or (mirroring
+   nex.compiler.jvm.runtime/resolve-java-host-class's identical fallback) a
+   bare java.lang name used without an explicit import. nil when none
+   resolves -- never throws, since failing to resolve here just means the
+   caller bails to the existing runtime dispatch."
+  ^Class [env class-name]
+  (or (try (Class/forName class-name) (catch Exception _ nil))
+      (when-let [qn (imported-java-qualified-name env class-name)]
+        (try (Class/forName qn) (catch Exception _ nil)))
+      (try (Class/forName (str "java.lang." class-name)) (catch Exception _ nil))
+      (resolve-imported-java-type env class-name)))
+
+(defn- arg-class-ranks
+  "{^Class -> rank} of every Java class/interface a value of NEX-TYPE (as it
+   appears on an already-lowered argument IR node's :nex-type) can be passed
+   as, rank 0 = most specific. nil when NEX-TYPE isn't precise enough to
+   reason about safely (Any, a generic type parameter, a Function type, a
+   Nex class this pass doesn't resolve to a Java class, ...) -- the caller
+   bails to the existing runtime-reflective dispatch in that case."
+  [env nex-type]
+  (let [base (if (map? nex-type) (:base-type nex-type) nex-type)]
+    (when (and (string? base) (not= base "Any"))
+      (if-let [family (nex-numeric-family base)]
+        (let [natural (nex-scalar-natural-class base)
+              base-rank (count family)
+              ref-part (into {} (map-indexed (fn [i k] [k (+ base-rank i)])
+                                             (class-and-supertypes natural)))]
+          (merge ref-part (into {} family)))
+        (when-let [natural (or (nex-scalar-natural-class base)
+                               (nex-container-natural-class base)
+                               (resolve-java-class-by-name env base))]
+          (into {} (map-indexed (fn [i k] [k i]) (class-and-supertypes natural))))))))
+
+(defn- applicable-params?
+  [params arg-ranks]
+  (every? (fn [[ranks ^Class param]] (contains? ranks param))
+          (map vector arg-ranks params)))
+
+(defn- params-rank-vector
+  [params arg-ranks]
+  (mapv (fn [ranks ^Class param] (get ranks param))
+        arg-ranks params))
+
+(defn- dominates?
+  "True when RANKS-A is at least as specific as RANKS-B in every argument
+   position and strictly more specific in at least one -- strict Pareto
+   dominance over per-argument specificity rank (lower = more specific)."
+  [ranks-a ranks-b]
+  (and (every? true? (map <= ranks-a ranks-b))
+       (some true? (map < ranks-a ranks-b))))
+
+(defn- pick-most-specific
+  "The single most-specific applicable candidate among CANDIDATES for
+   arguments of the given Nex ARG-TYPES, in call order -- shared by the
+   fixed-arity resolver (resolve-java-overload) and the varargs resolver
+   (resolve-java-varargs-overload) below, which differ only in how a
+   candidate's own per-argument Class list is computed (PARAMS-FN).
+
+   Returns the winning candidate, or :bail -- fall back to the existing
+   runtime-reflective dispatch, unchanged -- whenever an argument's Nex
+   type isn't precise enough to reason about safely, or nothing this pass
+   modeled turns out to be applicable. Throws only for a genuine, remaining
+   tie between two-or-more equally specific applicable candidates -- see
+   the namespace-level comment above for why that's the one case this pass
+   reports as a compile-time error rather than bailing."
+  [env candidates params-fn arg-types call-desc]
+  (let [arg-ranks (mapv #(arg-class-ranks env %) arg-types)]
+    (if (some nil? arg-ranks)
+      :bail
+      (let [applicable (filter #(applicable-params? (params-fn %) arg-ranks) candidates)]
+        (if (empty? applicable)
+          :bail
+          (let [ranked (map (fn [c] [c (params-rank-vector (params-fn c) arg-ranks)]) applicable)
+                maximal (filter (fn [[c ranks]]
+                                  (not-any? (fn [[c2 ranks2]]
+                                              (and (not= c c2) (dominates? ranks2 ranks)))
+                                            ranked))
+                                ranked)]
+            (case (count maximal)
+              1 (ffirst maximal)
+              (throw (ex-info
+                      (str "Ambiguous overload of " call-desc
+                           ": " (count maximal) " equally specific Java "
+                           "candidates match the given argument types — "
+                           (str/join ", " (map (comp str first) maximal)))
+                      {:call call-desc
+                       :candidates (mapv (comp str first) maximal)})))))))))
+
+(defn- dedupe-candidates
+  "Deduped by parameter-type signature, not identity: `getMethods` can
+   return more than one Method for what a caller would consider one
+   overload -- most commonly a covariant-return bridge method
+   (StringBuilder.append(String) really does appear twice: the declared one
+   returning StringBuilder, and a synthetic bridge inherited from
+   AbstractStringBuilder returning it, same params). Two candidates with
+   identical parameter types are never a real ambiguity, whichever survives
+   the dedupe calls identically."
+  [candidates]
+  (->> candidates
+       (remove #(and (instance? java.lang.reflect.Method %)
+                     (.isBridge ^java.lang.reflect.Method %)))
+       (map (fn [^java.lang.reflect.Executable e]
+              [(vec (.getParameterTypes e)) e]))
+       (into {})
+       vals))
+
+(defn- resolve-java-overload
+  "Resolve the single most-specific applicable *fixed-arity* candidate
+   among CANDIDATES (java.lang.reflect.Method or Constructor, already
+   filtered to the same name/arity/static-ness by the caller). :bail
+   whenever there isn't real ambiguity to resolve (fewer than 2
+   candidates) -- see pick-most-specific for the rest."
+  [env candidates arg-types call-desc]
+  (let [non-varargs (dedupe-candidates (remove #(.isVarArgs ^java.lang.reflect.Executable %) candidates))]
+    (if (< (count non-varargs) 2)
+      :bail
+      (pick-most-specific env non-varargs
+                          (fn [^java.lang.reflect.Executable e] (vec (.getParameterTypes e)))
+                          arg-types call-desc))))
+
+;; ---------------------------------------------------------------------------
+;; Varargs
+;;
+;; clojure.lang.Reflector -- the mechanism every Java interop call still
+;; ultimately dispatches through, even a compile-time-resolved one -- does
+;; no varargs collapsing at all: `Arrays.asList(1, 2, 3)` fails outright
+;; ("No matching method asList found taking 3 args"), since Reflector
+;; matches by *declared* arity only. The only shape it accepts for a
+;; varargs method is a pre-built array passed as the single trailing
+;; argument -- which Nex has no way to construct, having no first-class
+;; Java array type of its own (Array[T] is backed by ArrayList, not T[]).
+;; So unlike the fixed-arity overload fix above (which only had to pick the
+;; *right* Method among ones Reflector could already reach), varargs
+;; support has to make these calls reachable at all: resolve which varargs
+;; candidate applies, then actually build the trailing array at the call
+;; site (see java-call-method-resolved-varargs et al. in
+;; nex.compiler.jvm.runtime).
+;;
+;; Real Java overload resolution only ever considers a varargs candidate in
+;; its third, least-preferred phase -- a fixed-arity match always wins when
+;; one applies, full stop, never compared on specificity against a varargs
+;; one. resolve-java-call-target below encodes that as a strict priority
+;; order rather than one flat comparison pool: try resolve-java-overload
+;; over the fixed-arity candidates first, and only when that finds nothing
+;; to work with does resolve-java-varargs-overload get tried at all.
+
+(defn- vararg-effective-params
+  "CANDIDATE's per-argument Class list against an actual call of
+   ACTUAL-ARG-COUNT arguments: its own fixed leading parameters unchanged,
+   plus its trailing array parameter's component type repeated once for
+   every argument beyond the fixed prefix."
+  [^java.lang.reflect.Executable candidate actual-arg-count]
+  (let [declared (.getParameterTypes candidate)
+        fixed-count (dec (alength declared))
+        ^Class array-type (aget declared fixed-count)
+        component (.getComponentType array-type)
+        trailing-count (- actual-arg-count fixed-count)]
+    (into (vec (take fixed-count declared)) (repeat trailing-count component))))
+
+(defn- resolve-java-varargs-overload
+  [env candidates arg-types call-desc]
+  (let [actual-arg-count (count arg-types)
+        candidates (dedupe-candidates candidates)]
+    (pick-most-specific env candidates
+                        #(vararg-effective-params % actual-arg-count)
+                        arg-types call-desc)))
+
+(defn- resolve-java-call-target
+  "Resolve a Java call -- instance method, static method, or constructor --
+   against ALL-CANDIDATES (every Method/Constructor on the owning class
+   with the right name and static-ness, arity unfiltered) for arguments of
+   the given Nex ARG-TYPES. A fixed-arity match is always tried first and
+   always preferred when it applies (see the varargs section above);
+   varargs candidates are only even considered when no fixed-arity
+   candidate does.
+
+   Returns :bail, [:fixed <Executable>], or [:varargs <Executable>]; throws
+   only for a genuine tie -- see pick-most-specific."
+  [env all-candidates arg-types call-desc]
+  (let [actual-arg-count (count arg-types)
+        fixed (filter (fn [^java.lang.reflect.Executable e]
+                        (and (not (.isVarArgs e))
+                             (= (alength (.getParameterTypes e)) actual-arg-count)))
+                      all-candidates)
+        vararg (filter (fn [^java.lang.reflect.Executable e]
+                         (and (.isVarArgs e)
+                              (<= (dec (alength (.getParameterTypes e))) actual-arg-count)))
+                       all-candidates)]
+    (cond
+      (>= (count fixed) 2)
+      (let [r (resolve-java-overload env fixed arg-types call-desc)]
+        (if (= r :bail) :bail [:fixed r]))
+
+      ;; A single fixed-arity candidate, no varargs alternative at this
+      ;; arity: today's plain "not enough candidates to bother" case,
+      ;; unchanged -- Reflector already dispatches this correctly on its
+      ;; own.
+      (and (= (count fixed) 1) (empty? vararg))
+      :bail
+
+      ;; A fixed-arity candidate AND one-or-more varargs candidates both
+      ;; textually apply at this exact arity. JLS would still prefer the
+      ;; fixed one, but replaying that precisely needs its own
+      ;; applicability check on the fixed candidate here too -- a class
+      ;; overloading a plain method against a varargs one at the exact
+      ;; same call arity is rare enough that this is left as a bail
+      ;; (deferring to the existing runtime dispatch) rather than adding
+      ;; that check for a corner this narrow.
+      (and (= (count fixed) 1) (seq vararg))
+      :bail
+
+      (empty? vararg)
+      :bail
+
+      :else
+      (let [r (resolve-java-varargs-overload env vararg arg-types call-desc)]
+        (if (= r :bail) :bail [:varargs r])))))
+
+(defn- resolved-param-classes-joined
+  [^java.lang.reflect.Executable resolved]
+  (str/join "," (map #(.getName ^Class %) (.getParameterTypes resolved))))
+
+(defn- resolved-varargs-descriptor
+  "[fixed-param-classes-joined component-class-name] for a resolved
+   varargs Executable -- the encoding java-call-method-resolved-varargs et
+   al. (nex.compiler.jvm.runtime) expect: the fixed leading parameters
+   exactly like a fixed-arity resolution, plus the single component class
+   every trailing actual argument gets collected against."
+  [^java.lang.reflect.Executable resolved]
+  (let [declared (.getParameterTypes resolved)
+        fixed-count (dec (alength declared))
+        ^Class array-type (aget declared fixed-count)]
+    [(str/join "," (map #(.getName ^Class %) (take fixed-count declared)))
+     (.getName (.getComponentType array-type))]))
 
 (defn- lower-class-constant-or-static-field
   [env expr class-target-name]
@@ -5005,24 +5698,71 @@
                               nex-type
                               jvm-type))
       (throw (unsupported "Unsupported class-target access during lowering"
-                      {:expr expr
-                       :target-class class-target-name})))))
+                          {:expr expr
+                           :target-class class-target-name})))))
 
 (defn- lower-java-static-owner-call
   [env expr java-static-owner arg-irs]
   (let [nex-type (or (infer-call-type env expr) "Any")
         jvm-type (resolve-jvm-type env nex-type)]
     (if (:has-parens expr)
-      (ir/call-runtime-node "java-call-static"
-                            (into [(ir/const-node java-static-owner
-                                                  "String"
-                                                  (ir/object-jvm-type "java/lang/String"))
-                                   (ir/const-node (:method expr)
-                                                  "String"
-                                                  (ir/object-jvm-type "java/lang/String"))]
-                                  arg-irs)
-                            nex-type
-                            jvm-type)
+      (let [method-name (:method expr)
+            ^Class owner-class (resolve-java-class-by-name env java-static-owner)
+            same-name-static (when owner-class
+                               (->> (.getMethods owner-class)
+                                    (filter (fn [^java.lang.reflect.Method m]
+                                              (and (= (.getName m) method-name)
+                                                   (java.lang.reflect.Modifier/isStatic (.getModifiers m)))))))
+            resolution (when owner-class
+                         (resolve-java-call-target
+                          env same-name-static (mapv :nex-type arg-irs)
+                          (str java-static-owner "." method-name)))]
+        (cond
+          (and (vector? resolution) (= :fixed (first resolution)))
+          (ir/call-runtime-node "java-call-static-resolved"
+                                (into [(ir/const-node java-static-owner
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       (ir/const-node method-name
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       (ir/const-node (resolved-param-classes-joined (second resolution))
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))]
+                                      arg-irs)
+                                nex-type
+                                jvm-type)
+
+          (and (vector? resolution) (= :varargs (first resolution)))
+          (let [[fixed-classes-joined component-class-name] (resolved-varargs-descriptor (second resolution))]
+            (ir/call-runtime-node "java-call-static-resolved-varargs"
+                                  (into [(ir/const-node java-static-owner
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node method-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node fixed-classes-joined
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node component-class-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))]
+                                        arg-irs)
+                                  nex-type
+                                  jvm-type))
+
+          :else
+          (ir/call-runtime-node "java-call-static"
+                                (into [(ir/const-node java-static-owner
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       (ir/const-node method-name
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))]
+                                      arg-irs)
+                                nex-type
+                                jvm-type)))
       (ir/call-runtime-node "java-get-static-field"
                             [(ir/const-node java-static-owner
                                             "String"
@@ -5082,14 +5822,70 @@
         nex-type (or (infer-call-type env expr) "Any")
         jvm-type (resolve-jvm-type env nex-type)]
     (if (:has-parens expr)
-      (ir/call-runtime-node "java-call-method"
-                            (into [(ir/const-node (:method expr)
-                                                  "String"
-                                                  (ir/object-jvm-type "java/lang/String"))
-                                   target-ir]
-                                  arg-irs)
-                            nex-type
-                            jvm-type)
+      (let [method-name (:method expr)
+            ;; Known only when the receiver's own static Nex type names a
+            ;; real, resolvable Java class -- the common `with "java"` idiom
+            ;; of routing everything through an `Any`-typed local (there is
+            ;; no way for the typechecker to know a real Java type there,
+            ;; see lower-general-receiver-call) leaves this nil, and
+            ;; resolve-java-call-target is never even attempted.
+            receiver-base (base-type-name (resolve-type-alias (infer-type-or-any env target-expr)))
+            ^Class receiver-class (resolve-java-class-by-name env receiver-base)
+            same-name-instance (when receiver-class
+                                 (->> (.getMethods receiver-class)
+                                      (filter (fn [^java.lang.reflect.Method m]
+                                                (and (= (.getName m) method-name)
+                                                     (not (java.lang.reflect.Modifier/isStatic (.getModifiers m))))))))
+            resolution (when receiver-class
+                         (resolve-java-call-target
+                          env same-name-instance (mapv :nex-type arg-irs)
+                          (str receiver-base "." method-name)))]
+        (cond
+          (and (vector? resolution) (= :fixed (first resolution)))
+          (ir/call-runtime-node "java-call-method-resolved"
+                                (into [(ir/const-node method-name
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       (ir/const-node (.getName receiver-class)
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       (ir/const-node (resolved-param-classes-joined (second resolution))
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       target-ir]
+                                      arg-irs)
+                                nex-type
+                                jvm-type)
+
+          (and (vector? resolution) (= :varargs (first resolution)))
+          (let [[fixed-classes-joined component-class-name] (resolved-varargs-descriptor (second resolution))]
+            (ir/call-runtime-node "java-call-method-resolved-varargs"
+                                  (into [(ir/const-node method-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node (.getName receiver-class)
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node fixed-classes-joined
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         (ir/const-node component-class-name
+                                                        "String"
+                                                        (ir/object-jvm-type "java/lang/String"))
+                                         target-ir]
+                                        arg-irs)
+                                  nex-type
+                                  jvm-type))
+
+          :else
+          (ir/call-runtime-node "java-call-method"
+                                (into [(ir/const-node method-name
+                                                      "String"
+                                                      (ir/object-jvm-type "java/lang/String"))
+                                       target-ir]
+                                      arg-irs)
+                                nex-type
+                                jvm-type)))
       (ir/call-runtime-node "java-get-field"
                             [(ir/const-node (:method expr)
                                             "String"
@@ -5253,8 +6049,8 @@
       ;; compiled and ran correctly the moment the class was renamed to
       ;; anything that didn't collide with a builtin name.
       (when-let [constraint-def (some->> (get (:generic-param-constraints env)
-                                             (base-type-name target-type))
-                                        (get (visible-class-map env)))]
+                                              (base-type-name target-type))
+                                         (get (visible-class-map env)))]
         (or (accessible-method-def env constraint-def (:method expr)
                                    (count (:args expr)))
             (accessible-field-def env constraint-def (:method expr))))
@@ -5270,8 +6066,8 @@
       :else
       (or (lower-instance-dispatch env target-expr (:method expr) (:args expr) (:has-parens expr))
           (throw (unsupported "Unsupported target call expression for lowering"
-                          {:expr expr
-                           :target-type target-type}))))))
+                              {:expr expr
+                               :target-type target-type}))))))
 
 (defn- lower-call-with-target
   [env expr target-expr class-target-name arg-irs]
@@ -5316,7 +6112,6 @@
         (if (nil? target-expr)
           (lower-call-without-target env expr arg-irs)
           (lower-call-with-target env expr target-expr class-target-name arg-irs))))))
-
 
 (defn- lower-stmt-let
   [env stmt]
@@ -5480,9 +6275,9 @@
                                       (:nex-type local)
                                       (:jvm-type local))
         else-stmts (if-let [else-body (:else stmt)]
-                      else-body
-                      [{:type :raise
-                        :value {:type :string :value "No matching clause in match"}}])
+                     else-body
+                     [{:type :raise
+                       :value {:type :string :value "No matching clause in match"}}])
         [env'' lowered-clauses] (lower-match-clauses env' tmp-name (:clauses stmt) else-stmts)]
     [(scoped-env env env'')
      (ir/block-node (into [init-local] lowered-clauses))]))
@@ -5546,9 +6341,38 @@
           (if (contains? expression-node-types (:type stmt))
             (lower-expr-statement env stmt)
             (throw (unsupported "Unsupported statement node for lowering"
-                            {:stmt stmt :node-type (:type stmt)}))))]
+                                {:stmt stmt :node-type (:type stmt)}))))]
     [env' (with-stmt-debug lowered stmt)]))
 
+;; `super.field := v` writes the same underlying object as `this` would (the
+;; composition carrier already reaches the parent's storage), but is only
+;; writable when the field's owner is the resolved *parent* — the whole point
+;; being to assign a field the current (sub)class alone isn't allowed to touch
+;; directly. Sharing this path with `:this` (rather than the unconditional throw
+;; this used to be, before `super` field access could even reach lowering — see
+;; `resolve-super-parent-name` in `nex.interpreter` and `nex.typechecker` for the
+;; matching fix there) keeps the writability check and IR shape identical to
+;; `this.field`.
+(defn- lower-this-or-super-field-set
+  [env stmt target-expr super-target? value-ir]
+  (let [field-name (:field stmt)
+        expected-owner (if super-target? (single-super-parent-name env) (:current-class env))
+        field-info (get (:fields env) field-name)
+        writable? (= (:owner field-info) expected-owner)]
+    (when-not writable?
+      (throw (ex-info (field-write-error-message field-name (:owner field-info))
+                      {:field field-name
+                       :declaring-class (:owner field-info)
+                       :target target-expr})))
+    (let [target-ir (carrier-path-target-ir env (:carrier-path field-info)
+                                            (ir/this-node (:this-type env)
+                                                          (exact-class-jvm-type env (:this-type env))))]
+      [env (ir/field-set-node (:internal-name (class-jvm-meta env (:owner field-info)))
+                              field-name
+                              target-ir
+                              value-ir
+                              (:nex-type field-info)
+                              (:jvm-type field-info))])))
 
 (defn- lower-member-assign-stmt [env stmt]
   (let [field-name (:field stmt)
@@ -5560,34 +6384,9 @@
         field-def (when class-def (accessible-field-def env class-def field-name))
         value-ir (lower-expression env (:value stmt))]
     (cond
-      ;; `super.field := v` writes the same underlying object as `this` would
-      ;; (the composition carrier already reaches the parent's storage), but
-      ;; is only writable when the field's owner is the resolved *parent* —
-      ;; the whole point being to assign a field the current (sub)class alone
-      ;; isn't allowed to touch directly. Sharing this branch with `:this`
-      ;; (rather than the unconditional throw this used to be, before `super`
-      ;; field access could even reach lowering — see `resolve-super-parent-name`
-      ;; in `nex.interpreter` and `nex.typechecker` for the matching fix there)
-      ;; keeps the writability check and IR shape identical to `this.field`.
       (and (or super-target? (= (:type target-expr) :this))
            (get (:fields env) field-name))
-      (let [expected-owner (if super-target? (single-super-parent-name env) (:current-class env))
-            field-info (get (:fields env) field-name)
-            writable? (= (:owner field-info) expected-owner)]
-        (when-not writable?
-          (throw (ex-info (field-write-error-message field-name (:owner field-info))
-                          {:field field-name
-                           :declaring-class (:owner field-info)
-                           :target target-expr})))
-        (let [target-ir (carrier-path-target-ir env (:carrier-path field-info)
-                                                (ir/this-node (:this-type env)
-                                                              (exact-class-jvm-type env (:this-type env))))]
-          [env (ir/field-set-node (:internal-name (class-jvm-meta env (:owner field-info)))
-                                  field-name
-                                  target-ir
-                                  value-ir
-                                  (:nex-type field-info)
-                                  (:jvm-type field-info))]))
+      (lower-this-or-super-field-set env stmt target-expr super-target? value-ir)
 
       super-target?
       (let [parent-name (single-super-parent-name env)]
@@ -5618,17 +6417,7 @@
                          :declaring-class (:declaring-class field-def)
                          :target target-expr})))
 
-      (imported-java-qualified-name env owner)
-      [env (ir/call-runtime-node "java-set-field"
-                                 [(ir/const-node field-name
-                                                 "String"
-                                                 (ir/object-jvm-type "java/lang/String"))
-                                  (lower-expression env target-expr)
-                                  value-ir]
-                                 "Void"
-                                 :void)]
-
-      (:with-java? env)
+      (or (imported-java-qualified-name env owner) (:with-java? env))
       [env (ir/call-runtime-node "java-set-field"
                                  [(ir/const-node field-name
                                                  "String"
@@ -5653,32 +6442,32 @@
   ;; the exact same (possibly generic) class as the caller.
   (if-let [{:keys [owner own-class?]}
            (cond
-                   (and (:this-type env)
-                        (string? (:target stmt))
-                        (some #(= (:target stmt) (:parent %))
-                              (:parents (current-class-def env)))
-                        (class-constructor-def (get (visible-class-map env) (:target stmt))
-                                               (:method stmt)
-                                               (count (:args stmt))))
-                   {:owner (:target stmt) :own-class? false}
+             (and (:this-type env)
+                  (string? (:target stmt))
+                  (some #(= (:target stmt) (:parent %))
+                        (:parents (current-class-def env)))
+                  (class-constructor-def (get (visible-class-map env) (:target stmt))
+                                         (:method stmt)
+                                         (count (:args stmt))))
+             {:owner (:target stmt) :own-class? false}
 
-                   (and (:this-type env)
-                        (map? (:target stmt))
-                        (= :super (:type (:target stmt)))
-                        (class-constructor-def (get (visible-class-map env) (single-super-parent-name env))
-                                               (:method stmt)
-                                               (count (:args stmt))))
-                   {:owner (single-super-parent-name env) :own-class? false}
+             (and (:this-type env)
+                  (map? (:target stmt))
+                  (= :super (:type (:target stmt)))
+                  (class-constructor-def (get (visible-class-map env) (single-super-parent-name env))
+                                         (:method stmt)
+                                         (count (:args stmt))))
+             {:owner (single-super-parent-name env) :own-class? false}
 
-                   (and (:this-type env)
-                        (map? (:target stmt))
-                        (= :this (:type (:target stmt)))
-                        (class-constructor-def (current-class-def env)
-                                               (:method stmt)
-                                               (count (:args stmt))))
-                   {:owner (:this-type env) :own-class? true}
+             (and (:this-type env)
+                  (map? (:target stmt))
+                  (= :this (:type (:target stmt)))
+                  (class-constructor-def (current-class-def env)
+                                         (:method stmt)
+                                         (count (:args stmt))))
+             {:owner (:this-type env) :own-class? true}
 
-                   :else nil)]
+             :else nil)]
     (let [ctor-def (class-constructor-def (get (visible-class-map env) owner)
                                           (:method stmt)
                                           (count (:args stmt)))
@@ -5896,39 +6685,124 @@
               :else false))]
     (boolean (walk stmts))))
 
-(defn lower-function
-  [unit-name visible-functions visible-imports fn-def]
-  (let [fn-def (normalized-function-def fn-def)
-        return-type (function-return-type fn-def)
-        visible-classes (vec (concat (:visible-classes fn-def)
+(defn- result-local-init-stmt
+  "Zero-value initializer for a routine's `result` local: the primitive default
+   for a scalar return, an empty collection for a non-detachable Array/Map/Set
+   return (so a body that only mutates `result` without an explicit
+   `result := ...` still has a real object — matching get-default-field-value in
+   the interpreter), and null otherwise (detachable collection returns
+   included)."
+  [result-local]
+  (when result-local
+    (let [jvm-type (:jvm-type result-local)
+          nex-type (:nex-type result-local)
+          base-type (when (map? nex-type) (:base-type nex-type))
+          detachable? (and (map? nex-type) (:detachable nex-type))
+          scalar-default (cond
+                           (= :int jvm-type) 0
+                           (= :long jvm-type) 0
+                           (= :double jvm-type) 0.0
+                           (= :boolean jvm-type) false
+                           (= :char jvm-type) 0
+                           :else nil)
+          init-expr (cond
+                      (some? scalar-default)
+                      (ir/const-node scalar-default nex-type jvm-type)
+
+                      (and (not detachable?) (= base-type "Array"))
+                      (ir/array-literal-node [] nex-type jvm-type)
+
+                      (and (not detachable?) (= base-type "Map"))
+                      (ir/map-literal-node [] nex-type jvm-type)
+
+                      (and (not detachable?) (= base-type "Set"))
+                      (ir/set-literal-node [] nex-type jvm-type)
+
+                      :else
+                      (ir/const-node nil nex-type jvm-type))]
+      (ir/set-local-node (:slot result-local) init-expr nex-type jvm-type))))
+
+(defn- lower-function-env
+  "The initial lowering env for a routine body: visible classes/functions/
+   imports, the enclosing class's field and generic-parameter context, and the
+   REPL-unit slot layout (`this` in slot 1, first free local at slot 3)."
+  [visible-functions visible-imports fn-def]
+  (let [visible-classes (vec (concat (:visible-classes fn-def)
                                      [(:class-def fn-def)]
                                      (keep :class-def visible-functions)))
         current-class (:class-name fn-def)
         generic-param-names (set (concat (map :name (:generic-params (:class-def fn-def)))
                                          (free-function-generic-param-names visible-classes fn-def)))
-        generic-param-constraints (generic-param-constraint-map (:generic-params (:class-def fn-def)))
-        env0 (make-lowering-env {:classes visible-classes
-                                 :functions visible-functions
-                                 :imports visible-imports
-                                 :var-types (field-type-map (:class-def fn-def))
-                                 :compiled-classes (:compiled-classes fn-def)
-                                 :current-class current-class
-                                 :generic-param-names generic-param-names
-                                 :generic-param-constraints generic-param-constraints
-                                 :generic-runtime-values (generic-runtime-field-bindings
-                                                          {:compiled-classes (:compiled-classes fn-def)}
-                                                          current-class
-                                                          (:generic-params (:class-def fn-def)))
-                                 :fields (field-info-map {:compiled-classes (:compiled-classes fn-def)
-                                                          :classes visible-classes
-                                                          :imports visible-imports
-                                                          :generic-param-names generic-param-names}
-                                                         (:class-def fn-def))
-                                 :this-type current-class
-                                 :top-level? false
-                                 :repl? true
-                                 :state-slot 1
-                                 :next-slot 3})
+        generic-param-constraints (generic-param-constraint-map (:generic-params (:class-def fn-def)))]
+    (make-lowering-env {:classes visible-classes
+                        :functions visible-functions
+                        :imports visible-imports
+                        :var-types (field-type-map (:class-def fn-def))
+                        :compiled-classes (:compiled-classes fn-def)
+                        :current-class current-class
+                        :generic-param-names generic-param-names
+                        :generic-param-constraints generic-param-constraints
+                        :generic-runtime-values (generic-runtime-field-bindings
+                                                 {:compiled-classes (:compiled-classes fn-def)}
+                                                 current-class
+                                                 (:generic-params (:class-def fn-def)))
+                        :fields (field-info-map {:compiled-classes (:compiled-classes fn-def)
+                                                 :classes visible-classes
+                                                 :imports visible-imports
+                                                 :generic-param-names generic-param-names}
+                                                (:class-def fn-def))
+                        :this-type current-class
+                        :top-level? false
+                        :repl? true
+                        :state-slot 1
+                        :next-slot 3})))
+
+(defn- lower-function-body-stmts
+  "Lower a routine body, returning `[env lowered-stmts]`. When the routine
+   returns a value and its final statement is an expression (or a `result :=`
+   / call / convert), that tail is lowered as an implicit assignment to
+   `result`; otherwise the body is lowered as-is and must assign `result`
+   itself."
+  [env body result-local fn-def]
+  (if (:return-type fn-def)
+    (if (empty? body)
+      [env []]
+      (let [leading-statements (butlast body)
+            final-stmt (last body)]
+        (if (and (not (body-assigns-result? leading-statements))
+                 (or (and (= :assign (:type final-stmt))
+                          (= "result" (:target final-stmt)))
+                     (and (contains? expression-node-types (:type final-stmt))
+                          (or (not= :if (:type final-stmt))
+                              (implicit-if-expression? env final-stmt)))
+                     (= :call (:type final-stmt))
+                     (= :convert (:type final-stmt))))
+          (let [[env' lowered-leading] (lower-statements env leading-statements)
+                implicit-result-expr? (and (not (and (= :assign (:type final-stmt))
+                                                     (= "result" (:target final-stmt))))
+                                           (not= "Void" (infer-type env' final-stmt)))
+                final-expr (when implicit-result-expr? final-stmt)
+                [env'' lowered-tail]
+                (if final-expr
+                  [env' (with-stmt-debug
+                          (ir/set-local-node (:slot result-local)
+                                             (lower-expression env' final-expr)
+                                             (:nex-type result-local)
+                                             (:jvm-type result-local))
+                          final-stmt)]
+                  (lower-statement env' final-stmt))]
+            [env'' (conj lowered-leading lowered-tail)])
+          ;; Statement-shaped tails are valid as long as they assign to `result`
+          ;; somewhere in the lowered body.
+          (lower-statements env body))))
+    (lower-statements env body)))
+
+(defn lower-function
+  [unit-name visible-functions visible-imports fn-def]
+  (let [fn-def (normalized-function-def fn-def)
+        return-type (function-return-type fn-def)
+        current-class (:class-name fn-def)
+        env0 (lower-function-env visible-functions visible-imports fn-def)
         [env-with-params params]
         (reduce (fn [[env acc] {:keys [name type]}]
                   (let [[env' local] (env-add-local env name type)]
@@ -5940,42 +6814,7 @@
           (let [[env' local] (env-add-local env-with-params "result" return-type)]
             [(env-add-local-alias env' "Result" local) local])
           [env-with-params nil])
-        result-init-stmt
-        (when result-local
-          (let [jvm-type (:jvm-type result-local)
-                nex-type (:nex-type result-local)
-                base-type (when (map? nex-type) (:base-type nex-type))
-                detachable? (and (map? nex-type) (:detachable nex-type))
-                scalar-default (cond
-                                 (= :int jvm-type) 0
-                                 (= :long jvm-type) 0
-                                 (= :double jvm-type) 0.0
-                                 (= :boolean jvm-type) false
-                                 (= :char jvm-type) 0
-                                 :else nil)
-                ;; Attached Array/Map/Set results default to an empty
-                ;; collection (matching get-default-field-value in the
-                ;; interpreter) instead of null, so a body that only ever
-                ;; mutates `result` (e.g. `result.append(...)`) without an
-                ;; explicit `result := ...` still has a real object to
-                ;; mutate. Detachable collection returns keep the null
-                ;; default, same as every other detachable reference type.
-                init-expr (cond
-                            (some? scalar-default)
-                            (ir/const-node scalar-default nex-type jvm-type)
-
-                            (and (not detachable?) (= base-type "Array"))
-                            (ir/array-literal-node [] nex-type jvm-type)
-
-                            (and (not detachable?) (= base-type "Map"))
-                            (ir/map-literal-node [] nex-type jvm-type)
-
-                            (and (not detachable?) (= base-type "Set"))
-                            (ir/set-literal-node [] nex-type jvm-type)
-
-                            :else
-                            (ir/const-node nil nex-type jvm-type))]
-            (ir/set-local-node (:slot result-local) init-expr nex-type jvm-type)))
+        result-init-stmt (result-local-init-stmt result-local)
         effective-require (or (:effective-require fn-def) (:require fn-def))
         effective-ensure (or (:effective-ensure fn-def) (:ensure fn-def))
         [env-with-old old-snapshot-stmts old-field-locals]
@@ -5998,38 +6837,7 @@
                    :deferred? true
                    :override? (boolean (:override? fn-def))})
       (let [body-stmts
-            (if (:return-type fn-def)
-              (if (empty? body)
-                [env-with-old []]
-                (let [leading-statements (butlast body)
-                      final-stmt (last body)]
-                  (if (and (not (body-assigns-result? leading-statements))
-                           (or (and (= :assign (:type final-stmt))
-                                    (= "result" (:target final-stmt)))
-                               (and (contains? expression-node-types (:type final-stmt))
-                                    (or (not= :if (:type final-stmt))
-                                        (implicit-if-expression? env-with-old final-stmt)))
-                               (= :call (:type final-stmt))
-                               (= :convert (:type final-stmt))))
-                    (let [[env' lowered-leading] (lower-statements env-with-old leading-statements)
-                          implicit-result-expr? (and (not (and (= :assign (:type final-stmt))
-                                                               (= "result" (:target final-stmt))))
-                                                     (not= "Void" (infer-type env' final-stmt)))
-                          final-expr (when implicit-result-expr? final-stmt)
-                          [env'' lowered-tail]
-                          (if final-expr
-                            [env' (with-stmt-debug
-                                    (ir/set-local-node (:slot result-local)
-                                                       (lower-expression env' final-expr)
-                                                       (:nex-type result-local)
-                                                       (:jvm-type result-local))
-                                    final-stmt)]
-                            (lower-statement env' final-stmt))]
-                      [env'' (conj lowered-leading lowered-tail)])
-                    ;; Statement-shaped tails are valid as long as they assign to `result`
-                    ;; somewhere in the lowered body.
-                    (lower-statements env-with-old body))))
-              (lower-statements env-with-old body))
+            (lower-function-body-stmts env-with-old body result-local fn-def)
             [env-after-body raw-body-stmts] body-stmts
             [env-after-rescue lowered-body] (lower-body-with-rescue env-with-old env-after-body raw-body-stmts (:rescue fn-def))
             require-stmts (mapv #(assertion-ir env-with-old :require %) effective-require)
@@ -6158,40 +6966,89 @@
                                       (:params ctor-def))
           own-param-jvm-types (mapv #(resolve-jvm-type env0 (:type %)) (:params ctor-def))
           boxed-args (mapv (fn [arg ^Class pc]
-                              (ir/java-arg-box-node (lower-expression env-with-params arg) pc))
-                            (:args (first (:body ctor-def)))
-                            (.getParameterTypes ^java.lang.reflect.Constructor java-constructor))]
+                             (ir/java-arg-box-node (lower-expression env-with-params arg) pc))
+                           (:args (first (:body ctor-def)))
+                           (.getParameterTypes ^java.lang.reflect.Constructor java-constructor))]
       {:ctor-name (:name ctor-def)
        :arity (count (:params ctor-def))
        :own-descriptor (desc/method-descriptor own-param-jvm-types :void)
        :super-descriptor (Type/getConstructorDescriptor ^java.lang.reflect.Constructor java-constructor)
        :boxed-args boxed-args})))
 
+(defn- strip-java-super-ctor-call
+  "Drop a leading explicit Java-super constructor call from CTOR-DEF's body: the
+   real forwarding lives in a dedicated <init> overload (java-super-ctor-forward-
+   spec, emitted separately by lower-class-def), so in the ordinary ctor-method
+   body a zero-arg call is just the implicit case and a real-argument call is
+   already handled. Arguments are still validated eagerly here (throws on a
+   non-simple argument or an unresolvable overload)."
+  [visible-classes class-def ctor-def]
+  (if-let [{:keys [nex-name klass]} (java-superclass-parent {:classes visible-classes} class-def)]
+    (let [first-stmt (first (:body ctor-def))]
+      (if (java-super-constructor-call? nex-name first-stmt)
+        (do
+          (when (seq (:args first-stmt))
+            (resolve-super-ctor-call klass nex-name (:name class-def) ctor-def
+                                     (:args first-stmt)))
+          (update ctor-def :body rest))
+        ctor-def))
+    ctor-def))
+
+(defn- shim-parent-super-call-ir
+  "The virtual call an inherited-constructor shim makes to the real constructor
+   on its composed parent, forwarding the shim's own params plus the parent's
+   generic-runtime args."
+  [env class-def ctor-def compiled-classes class-name shim-parent]
+  (let [cc {:compiled-classes compiled-classes}
+        parent-meta (class-jvm-meta cc shim-parent)
+        target-ir (ir/field-get-node (:internal-name (class-jvm-meta cc class-name))
+                                     (parent-field-name shim-parent)
+                                     (ir/this-node class-name (exact-class-jvm-type cc class-name))
+                                     shim-parent
+                                     (exact-class-jvm-type cc shim-parent))]
+    (ir/call-virtual-node (:internal-name parent-meta)
+                          (lowered-constructor-method-name ctor-def)
+                          (desc/repl-instance-method-descriptor)
+                          target-ir
+                          (into (mapv (fn [{:keys [name]}]
+                                        (let [{:keys [slot nex-type jvm-type]} (get (:locals env) name)]
+                                          (ir/local-node name slot nex-type jvm-type)))
+                                      (:params ctor-def))
+                                (parent-generic-runtime-args env class-def shim-parent))
+                          shim-parent
+                          (resolve-jvm-type cc shim-parent))))
+
+(defn- constructor-fn-node
+  "Assemble a lowered constructor method: runtime-type field sets, `old`
+   snapshots and `require` checks, then CORE-BODY (the lowered ctor statements,
+   or a shim's super-call), then `ensure` checks and the class-invariant
+   validation `return`."
+  [{:keys [unit-name class-name ctor-def params compiled-classes locals
+           runtime-field-set-stmts old-snapshot-stmts require-env ensure-env core-body]}]
+  (ir/fn-node {:name (:name ctor-def)
+               :owner unit-name
+               :emitted-name (lowered-constructor-method-name ctor-def)
+               :params params
+               :return-type class-name
+               :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+               :locals locals
+               :body (vec (concat runtime-field-set-stmts
+                                  old-snapshot-stmts
+                                  (map #(assertion-ir require-env :require %) (:require ctor-def))
+                                  core-body
+                                  (map #(assertion-ir ensure-env :ensure %) (:ensure ctor-def))
+                                  [(ir/return-node
+                                    (validate-object-state-ir {:compiled-classes compiled-classes}
+                                                              class-name
+                                                              (ir/this-node class-name
+                                                                            (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                                              class-name)
+                                    class-name
+                                    (ir/object-jvm-type "java/lang/Object"))]))}))
+
 (defn- lower-constructor
   [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
-  (let [ctor-def (if-let [{:keys [nex-name klass]} (java-superclass-parent {:classes visible-classes} class-def)]
-                   (let [first-stmt (first (:body ctor-def))]
-                     (if (java-super-constructor-call? nex-name first-stmt)
-                       (do
-                         ;; Validate eagerly (throws on a non-simple argument
-                         ;; or an unresolvable overload) even though the
-                         ;; resolved constructor itself isn't needed here —
-                         ;; the real forwarding lives in the dedicated <init>
-                         ;; overload (see java-super-ctor-forward-spec,
-                         ;; called separately from lower-class-def).
-                         (when (seq (:args first-stmt))
-                           (resolve-super-ctor-call klass nex-name (:name class-def) ctor-def
-                                                    (:args first-stmt)))
-                         ;; Either way this statement is now redundant in the
-                         ;; ordinary ctor-method body: a zero-arg call is
-                         ;; exactly the implicit case, and a real-argument
-                         ;; call's forwarding now lives in <init>. Drop it so
-                         ;; the ordinary body-lowering below never sees a
-                         ;; call to the "new" selector, which is not an
-                         ;; ordinary Nex method.
-                         (update ctor-def :body rest))
-                       ctor-def))
-                   ctor-def)
+  (let [ctor-def (strip-java-super-ctor-call visible-classes class-def ctor-def)
         class-name (:name class-def)
         generic-param-names (set (map :name (:generic-params class-def)))
         generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
@@ -6237,69 +7094,27 @@
         (add-old-field-snapshots env-with-runtime (:ensure ctor-def))
         env-with-old (assoc env-with-old :old-field-locals old-field-locals)]
     (if-let [shim-parent (:shim-parent ctor-def)]
-      (let [parent-meta (class-jvm-meta {:compiled-classes compiled-classes} shim-parent)
-            target-ir (ir/field-get-node (:internal-name (class-jvm-meta {:compiled-classes compiled-classes} class-name))
-                                         (parent-field-name shim-parent)
-                                         (ir/this-node class-name
-                                                       (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                         shim-parent
-                                         (exact-class-jvm-type {:compiled-classes compiled-classes} shim-parent))
-            call-ir (ir/call-virtual-node (:internal-name parent-meta)
-                                          (lowered-constructor-method-name ctor-def)
-                                          (desc/repl-instance-method-descriptor)
-                                          target-ir
-                                          (into (mapv (fn [{:keys [name]}]
-                                                        (let [{:keys [slot nex-type jvm-type]}
-                                                              (get (:locals env-with-runtime) name)]
-                                                          (ir/local-node name slot nex-type jvm-type)))
-                                                      (:params ctor-def))
-                                          (parent-generic-runtime-args env-with-runtime class-def shim-parent))
-                                          shim-parent
-                                          (resolve-jvm-type {:compiled-classes compiled-classes} shim-parent))]
-        (ir/fn-node {:name (:name ctor-def)
-                     :owner unit-name
-                     :emitted-name (lowered-constructor-method-name ctor-def)
-                     :params params
-                     :return-type class-name
-                     :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-                     :locals (vec (vals (:locals env-with-old)))
-                     :body (vec (concat runtime-field-set-stmts
-                                        old-snapshot-stmts
-                                        (map #(assertion-ir env-with-old :require %) (:require ctor-def))
-                                        [(ir/pop-node call-ir)]
-                                        (map #(assertion-ir env-with-old :ensure %) (:ensure ctor-def))
-                                        [(ir/return-node
-                                          (validate-object-state-ir {:compiled-classes compiled-classes}
-                                                                    class-name
-                                                                    (ir/this-node class-name
-                                                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                                                    class-name)
-                                          class-name
-                                          (ir/object-jvm-type "java/lang/Object"))]))}))
+      (constructor-fn-node
+       {:unit-name unit-name :class-name class-name :ctor-def ctor-def :params params
+        :compiled-classes compiled-classes
+        :locals (vec (vals (:locals env-with-old)))
+        :runtime-field-set-stmts runtime-field-set-stmts
+        :old-snapshot-stmts old-snapshot-stmts
+        :require-env env-with-old :ensure-env env-with-old
+        :core-body [(ir/pop-node (shim-parent-super-call-ir
+                                  env-with-runtime class-def ctor-def compiled-classes
+                                  class-name shim-parent))]})
       (let [[env-after-body raw-body] (lower-statements env-with-old (vec (:body ctor-def)))
             [env-after-rescue lowered-body] (lower-body-with-rescue env-with-old env-after-body raw-body (:rescue ctor-def))]
-        (ir/fn-node {:name (:name ctor-def)
-                     :owner unit-name
-                     :emitted-name (lowered-constructor-method-name ctor-def)
-                     :params params
-                     :return-type class-name
-                     :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-                     :locals (vec (vals (:locals env-after-rescue)))
-                     :body (vec (concat runtime-field-set-stmts
-                                        old-snapshot-stmts
-                                        (map #(assertion-ir env-with-old :require %) (:require ctor-def))
-                                        lowered-body
-                                        (map #(assertion-ir (assoc env-after-rescue :old-field-locals old-field-locals)
-                                                            :ensure %)
-                                             (:ensure ctor-def))
-                                        [(ir/return-node
-                                          (validate-object-state-ir {:compiled-classes compiled-classes}
-                                                                    class-name
-                                                                    (ir/this-node class-name
-                                                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                                                    class-name)
-                                          class-name
-                                          (ir/object-jvm-type "java/lang/Object"))]))})))))
+        (constructor-fn-node
+         {:unit-name unit-name :class-name class-name :ctor-def ctor-def :params params
+          :compiled-classes compiled-classes
+          :locals (vec (vals (:locals env-after-rescue)))
+          :runtime-field-set-stmts runtime-field-set-stmts
+          :old-snapshot-stmts old-snapshot-stmts
+          :require-env env-with-old
+          :ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
+          :core-body lowered-body})))))
 
 (defn- lower-generic-init-method
   [unit-name visible-functions visible-imports visible-classes class-def compiled-classes]
@@ -6355,7 +7170,8 @@
                                       (ir/object-jvm-type "java/lang/Object"))]))})))
 
 (defn- make-delegation-method-node
-  [env class-meta class-name compiled-classes {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]
+  [env class-meta class-name compiled-classes
+   {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]
   (let [;; method-def is declared by source-class, so its parameter/return types
         ;; may name the *parent's* generic params — resolve with both the
         ;; subclass's generics (env) and the declaring class's in scope, or a
@@ -6708,6 +7524,83 @@
                   {:nex-error :duplicate-method
                    :class class-name :name dup-name :arity dup-arity})))))))
 
+(defn- lower-class-instance-fields
+  "The lowered non-constant instance fields of CLASS-DEF. Resolves each JVM type
+   through ENV (not an ad-hoc map) so an imported-Java-typed field qualifies to
+   its real internal name — without :imports, resolve-jvm-type would emit a
+   descriptor the JVM can never link (NoClassDefFoundError at link time)."
+  [env class-def]
+  (mapv (fn [field]
+          {:name (:name field)
+           :nex-type (:field-type field)
+           :jvm-type (resolve-jvm-type env (:field-type field))})
+        (remove :constant? (class-fields class-def))))
+
+(defn- lower-class-constants
+  "The lowered constant fields of CLASS-DEF, each with its value expression
+   lowered in a fresh class-scoped env (which carries :imports, so an
+   imported-Java-typed constant resolves the same way instance fields do)."
+  [class-def class-name visible-functions visible-imports compiled-classes visible-classes]
+  (mapv (fn [field]
+          (let [constant-env (make-lowering-env {:classes visible-classes
+                                                 :functions visible-functions
+                                                 :imports visible-imports
+                                                 :compiled-classes compiled-classes
+                                                 :generic-param-names (set (map :name (:generic-params class-def)))
+                                                 :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
+                                                 :current-class class-name
+                                                 :this-type class-name
+                                                 :top-level? false
+                                                 :repl? true})
+                nex-type (or (:field-type field)
+                             (infer-type constant-env (:value field)))]
+            {:name (:name field)
+             :nex-type nex-type
+             :jvm-type (resolve-jvm-type constant-env nex-type)
+             :value (lower-expression constant-env (:value field))}))
+        (filter :constant? (class-fields class-def))))
+
+(defn- inherited-constructor-shims
+  "Constructors a class inherits verbatim from its composed parents: for each
+   parent constructor whose name the class does not itself declare, a copy
+   tagged with `:shim-parent` so lower-constructor forwards it to that parent."
+  [class-def visible-classes own-ctor-names]
+  (->> (:parents class-def)
+       (remove #(= "Any" (:parent %)))
+       (mapcat (fn [{:keys [parent]}]
+                 (let [parent-def (get (visible-class-map {:classes visible-classes}) parent)]
+                   (for [ctor-def (class-constructors parent-def)
+                         :when (not (contains? own-ctor-names (:name ctor-def)))]
+                     (assoc ctor-def :shim-parent parent)))))
+       vec))
+
+(defn- lower-own-methods
+  [env class-def class-name class-meta visible-functions visible-imports visible-classes compiled-classes]
+  (mapv (fn [method-def]
+          (lower-function (:jvm-name class-meta)
+                          visible-functions
+                          visible-imports
+                          (merge method-def
+                                 {:class-name class-name
+                                  :class-def class-def
+                                  :visible-classes visible-classes
+                                  :deferred? (lowered-deferred-method? class-def method-def)
+                                  :override? (method-override? env class-def method-def)
+                                  :compiled-classes compiled-classes}
+                                 (effective-method-contracts env class-def method-def))))
+        (class-methods class-def)))
+
+(defn- lower-delegation-methods
+  "Forwarding stubs for parent methods a composed class exposes but does not
+   itself override."
+  [env class-def class-name class-meta compiled-classes own-method-names]
+  (->> (direct-parent-method-map env class-def)
+       vals
+       (remove (fn [{:keys [method-def]}]
+                 (contains? own-method-names
+                            [(:name method-def) (count (or (:params method-def) []))])))
+       (mapv #(make-delegation-method-node env class-meta class-name compiled-classes %))))
+
 (defn lower-class-def
   [class-def opts]
   (assert-distinct-lowered-methods! (:name class-def) class-def)
@@ -6737,14 +7630,7 @@
         visible-functions (vec (:functions opts))
         visible-imports (vec (:imports opts))
         own-ctor-names (set (map :name (class-constructors class-def)))
-        inherited-shims (->> (:parents class-def)
-                             (remove #(= "Any" (:parent %)))
-                             (mapcat (fn [{:keys [parent]}]
-                                       (let [parent-def (get (visible-class-map {:classes (:classes opts)}) parent)]
-                                         (for [ctor-def (class-constructors parent-def)
-                                               :when (not (contains? own-ctor-names (:name ctor-def)))]
-                                           (assoc ctor-def :shim-parent parent)))))
-                             vec)
+        inherited-shims (inherited-constructor-shims class-def (:classes opts) own-ctor-names)
         constructors (->> (concat (class-constructors class-def) inherited-shims)
                           (mapv (fn [ctor-def]
                                   (lower-constructor (:jvm-name class-meta)
@@ -6772,30 +7658,11 @@
                                                         (:classes opts)
                                                         class-def
                                                         compiled-classes)))
-        own-methods (->> (class-methods class-def)
-                         (mapv (fn [method-def]
-                                 (lower-function (:jvm-name class-meta)
-                                                 visible-functions
-                                                 visible-imports
-                                                 (merge method-def
-                                                        {:class-name class-name
-                                                         :class-def class-def
-                                                         :visible-classes (:classes opts)
-                                                         :deferred? (lowered-deferred-method? class-def method-def)
-                                                         :override? (method-override? env class-def method-def)
-                                                         :compiled-classes compiled-classes}
-                                                        (effective-method-contracts env class-def method-def))))))
+        own-methods (lower-own-methods env class-def class-name class-meta
+                                       visible-functions visible-imports (:classes opts) compiled-classes)
         own-method-names (set (map (fn [m] [(:name m) (count (:params m))]) (class-methods class-def)))
-        delegation-methods (->> (direct-parent-method-map env class-def)
-                                vals
-                                (remove (fn [{:keys [method-def]}]
-                                          (contains? own-method-names
-                                                     [(:name method-def) (count (or (:params method-def) []))])))
-                                (mapv #(make-delegation-method-node env
-                                                                    class-meta
-                                                                    class-name
-                                                                    compiled-classes
-                                                                    %)))
+        delegation-methods (lower-delegation-methods env class-def class-name class-meta
+                                                     compiled-classes own-method-names)
         invariant-methods (when (class-declares-invariant-in-hierarchy? (visible-class-map env) class-name)
                             [(lower-invariant-method (:jvm-name class-meta)
                                                      visible-functions
@@ -6804,45 +7671,14 @@
                                                      class-def
                                                      compiled-classes)])
         methods (vec (concat own-methods delegation-methods invariant-methods))
-        fields (mapv (fn [field]
-                       {:name (:name field)
-                        :nex-type (:field-type field)
-                        ;; Must resolve through `env` (not a minimal ad-hoc map),
-                        ;; since an imported-Java-typed field (e.g. `label:
-                        ;; JLabel`) needs :imports to qualify to its real
-                        ;; internal name (javax/swing/JLabel) — without it,
-                        ;; resolve-jvm-type falls through to treating the bare
-                        ;; Nex-source name as an unqualified internal class
-                        ;; name, emitting a field descriptor the JVM can never
-                        ;; resolve (NoClassDefFoundError: JLabel at link time).
-                        :jvm-type (resolve-jvm-type env (:field-type field))})
-                     (remove :constant? (class-fields class-def)))
+        fields (lower-class-instance-fields env class-def)
         runtime-type-fields (mapv (fn [{:keys [name]}]
                                     {:name (generic-runtime-field-name name)
                                      :nex-type "String"
                                      :jvm-type (string-jvm-type)})
                                   (:generic-params class-def))
-        constants (mapv (fn [field]
-                          (let [constant-env (make-lowering-env {:classes (:classes opts)
-                                                                 :functions visible-functions
-                                                                 :imports visible-imports
-                                                                 :compiled-classes compiled-classes
-                                                                 :generic-param-names (set (map :name (:generic-params class-def)))
-                                                                 :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
-                                                                 :current-class class-name
-                                                                 :this-type class-name
-                                                                 :top-level? false
-                                                                 :repl? true})
-                                nex-type (or (:field-type field)
-                                             (infer-type constant-env (:value field)))]
-                            {:name (:name field)
-                             :nex-type nex-type
-                             ;; Same fix as `fields` above: resolve through
-                             ;; constant-env (which has :imports), not a
-                             ;; minimal map missing it.
-                             :jvm-type (resolve-jvm-type constant-env nex-type)
-                             :value (lower-expression constant-env (:value field))}))
-                        (filter :constant? (class-fields class-def)))]
+        constants (lower-class-constants class-def class-name visible-functions
+                                         visible-imports compiled-classes (:classes opts))]
     {:name class-name
      :jvm-name (:jvm-name class-meta)
      :internal-name (:internal-name class-meta)
@@ -6860,7 +7696,7 @@
      :java-super-class (when-let [{:keys [^Class klass]} (java-superclass-parent env class-def)]
                          (desc/internal-class-name (.getName klass)))
      :java-bridge-methods (into (java-interface-bridge-methods env class-def
-                                                                (java-interface-parents env class-def))
+                                                               (java-interface-parents env class-def))
                                 (java-superclass-override-bridge-methods
                                  env class-def
                                  (:klass (java-superclass-parent env class-def))))
@@ -6891,6 +7727,32 @@
             (recur (rest ss) (assoc vt (:name stmt) ty) (assoc acc (:name stmt) ty)))
           (recur (rest ss) vt acc))))))
 
+(defn- repl-cell-body-with-return
+  "Append the REPL cell's trailing `return` to its lowered body: the tail
+   expression's value when it has one (popping first, and returning nil, when
+   that value is Void), else a bare `return nil`."
+  [lowered-body final-expr-ir tail-stmt]
+  (let [nil-return (ir/return-node (ir/const-node nil "Any"
+                                                  (ir/object-jvm-type "java/lang/Object"))
+                                   "Any"
+                                   (ir/object-jvm-type "java/lang/Object"))]
+    (cond
+      (and final-expr-ir (= "Void" (:nex-type final-expr-ir)))
+      (conj lowered-body
+            (with-stmt-debug (ir/pop-node final-expr-ir) tail-stmt)
+            (with-stmt-debug nil-return tail-stmt))
+
+      final-expr-ir
+      (conj lowered-body
+            (with-stmt-debug
+              (ir/return-node final-expr-ir
+                              (:nex-type final-expr-ir)
+                              (ir/object-jvm-type "java/lang/Object"))
+              tail-stmt))
+
+      :else
+      (conj lowered-body nil-return))))
+
 (defn lower-repl-cell
   "Lower a narrow REPL/program body to a first compiler unit."
   [program opts]
@@ -6898,93 +7760,65 @@
                                   (into {} (map (juxt :name :type-expr)
                                                 (:type-aliases program))))
             *skip-contracts?* (boolean (:skip-contracts? opts))]
-  (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
-        actual-classes (vec (user-class-defs program))
-        anonymous-classes (vec (collect-anonymous-class-defs program))
-        emitted-anonymous-classes (vec (remove :closure-runtime-object? anonymous-classes))
-        visible-imports (vec (or (:imports opts) (:imports program)))
-        imported-classes (->> visible-imports
-                              (keep (fn [{:keys [qualified-name source]}]
-                                      (when (and (nil? source) qualified-name)
-                                        {:name (last (str/split qualified-name #"\."))
-                                         :body []
-                                         :import qualified-name})))
-                              vec)
-        visible-functions (vec (concat (:functions program) (:functions opts)))
-        visible-classes (merge-visible-classes (builtin-class-defs)
-                                               imported-classes
-                                               actual-classes
-                                               anonymous-classes
-                                               (:classes opts)
-                                               (keep :class-def visible-functions))
-        env (make-lowering-env {:classes visible-classes
-                                :functions visible-functions
-                                :imports visible-imports
-                                :compiled-classes (:compiled-classes opts)
-                                :var-types (:var-types opts)
-                                :top-level? true
-                                :repl? true
-                                :state-slot 0
-                                :next-slot 1})
-        statements (vec (:statements program))
-        globals-map (compute-top-level-globals env (:var-types opts) statements)
-        tail-stmt (last statements)
-        return-tail? (repl-tail-returns-value? env tail-stmt)
-        leading-statements (if return-tail? (pop statements) statements)
-        [env' lowered-body] (lower-statements env leading-statements)
-        [env'' tail-stmts final-expr-ir] (if return-tail?
-                                          (lower-repl-tail env' tail-stmt)
-                                          [env' [] nil])
-        lowered-body' (if return-tail?
-                        (into lowered-body tail-stmts)
-                        lowered-body)
-        lowered-body''
-        (cond
-          (and final-expr-ir (= "Void" (:nex-type final-expr-ir)))
-          (conj lowered-body'
-                (with-stmt-debug (ir/pop-node final-expr-ir) tail-stmt)
-                (with-stmt-debug
-                  (ir/return-node
-                   (ir/const-node nil "Any"
-                                  (ir/object-jvm-type "java/lang/Object"))
-                   "Any"
-                   (ir/object-jvm-type "java/lang/Object"))
-                  tail-stmt))
-
-          final-expr-ir
-          (conj lowered-body'
-                (with-stmt-debug
-                  (ir/return-node
-                   final-expr-ir
-                   (:nex-type final-expr-ir)
-                   (ir/object-jvm-type "java/lang/Object"))
-                  tail-stmt))
-
-          :else
-          (conj lowered-body'
-                (ir/return-node
-                 (ir/const-node nil "Any"
-                                (ir/object-jvm-type "java/lang/Object"))
-                 "Any"
-                 (ir/object-jvm-type "java/lang/Object"))))]
-    {:env env''
-     :unit (binding [*top-level-globals* globals-map]
-             (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
-                     :kind :repl-cell
-                     :source-file (:source-file opts)
-                     :locals (vec (vals (:locals env'')))
-                     :classes (mapv #(lower-class-def % {:compiled-classes (:compiled-classes opts)
-                                                         :classes visible-classes
-                                                         :functions visible-functions
-                                                         :imports visible-imports
-                                                         :source-file (:source-file opts)})
-                                    (concat actual-classes emitted-anonymous-classes))
-                     :functions (mapv #(lower-function unit-name
-                                                       visible-functions
-                                                       visible-imports
-                                                       (assoc %
-                                                              :visible-classes visible-classes
-                                                              :compiled-classes (:compiled-classes opts)))
-                                      (remove :declaration-only? (:functions program)))
-                     :body lowered-body''
-                     :result-jvm-type (ir/object-jvm-type "java/lang/Object")}))})))
+    (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
+          actual-classes (vec (user-class-defs program))
+          anonymous-classes (vec (collect-anonymous-class-defs program))
+          emitted-anonymous-classes (vec (remove :closure-runtime-object? anonymous-classes))
+          visible-imports (vec (or (:imports opts) (:imports program)))
+          imported-classes (->> visible-imports
+                                (keep (fn [{:keys [qualified-name source]}]
+                                        (when (and (nil? source) qualified-name)
+                                          {:name (last (str/split qualified-name #"\."))
+                                           :body []
+                                           :import qualified-name})))
+                                vec)
+          visible-functions (vec (concat (:functions program) (:functions opts)))
+          visible-classes (merge-visible-classes (builtin-class-defs)
+                                                 imported-classes
+                                                 actual-classes
+                                                 anonymous-classes
+                                                 (:classes opts)
+                                                 (keep :class-def visible-functions))
+          env (make-lowering-env {:classes visible-classes
+                                  :functions visible-functions
+                                  :imports visible-imports
+                                  :compiled-classes (:compiled-classes opts)
+                                  :var-types (:var-types opts)
+                                  :top-level? true
+                                  :repl? true
+                                  :state-slot 0
+                                  :next-slot 1})
+          statements (vec (:statements program))
+          globals-map (compute-top-level-globals env (:var-types opts) statements)
+          tail-stmt (last statements)
+          return-tail? (repl-tail-returns-value? env tail-stmt)
+          leading-statements (if return-tail? (pop statements) statements)
+          [env' lowered-body] (lower-statements env leading-statements)
+          [env'' tail-stmts final-expr-ir] (if return-tail?
+                                             (lower-repl-tail env' tail-stmt)
+                                             [env' [] nil])
+          lowered-body' (if return-tail?
+                          (into lowered-body tail-stmts)
+                          lowered-body)
+          lowered-body'' (repl-cell-body-with-return lowered-body' final-expr-ir tail-stmt)]
+      {:env env''
+       :unit (binding [*top-level-globals* globals-map]
+               (ir/unit {:name (or (:name opts) "nex/repl/Cell_0001")
+                         :kind :repl-cell
+                         :source-file (:source-file opts)
+                         :locals (vec (vals (:locals env'')))
+                         :classes (mapv #(lower-class-def % {:compiled-classes (:compiled-classes opts)
+                                                             :classes visible-classes
+                                                             :functions visible-functions
+                                                             :imports visible-imports
+                                                             :source-file (:source-file opts)})
+                                        (concat actual-classes emitted-anonymous-classes))
+                         :functions (mapv #(lower-function unit-name
+                                                           visible-functions
+                                                           visible-imports
+                                                           (assoc %
+                                                                  :visible-classes visible-classes
+                                                                  :compiled-classes (:compiled-classes opts)))
+                                          (remove :declaration-only? (:functions program)))
+                         :body lowered-body''
+                         :result-jvm-type (ir/object-jvm-type "java/lang/Object")}))})))

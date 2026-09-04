@@ -5,4 +5,4 @@
 (defn relative-path?
   [^String path]
   (when (and path (not (str/blank? path)))
-       (not (.isAbsolute (File. path)))))
+    (not (.isAbsolute (File. path)))))

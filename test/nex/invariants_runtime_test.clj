@@ -26,9 +26,9 @@ end"]
       (is (nil? (check-invariants code {"value" 10})))
       (is (nil? (check-invariants code {"value" 0})))
       (is (thrown-with-msg?
-            Exception
-            #"Class invariant violation: non_negative"
-            (check-invariants code {"value" -5}))))))
+           Exception
+           #"Class invariant violation: non_negative"
+           (check-invariants code {"value" -5}))))))
 
 (deftest multi-invariant-boundary-test
   (testing "Multiple invariants enforce field boundaries"
@@ -43,10 +43,10 @@ end"]
       (is (nil? (check-invariants code {"day" 1 "hour" 0})))
       (is (nil? (check-invariants code {"day" 31 "hour" 23})))
       (is (thrown-with-msg?
-            Exception
-            #"Class invariant violation: valid_day"
-            (check-invariants code {"day" 0 "hour" 12})))
+           Exception
+           #"Class invariant violation: valid_day"
+           (check-invariants code {"day" 0 "hour" 12})))
       (is (thrown-with-msg?
-            Exception
-            #"Class invariant violation: valid_hour"
-            (check-invariants code {"day" 15 "hour" 25}))))))
+           Exception
+           #"Class invariant violation: valid_hour"
+           (check-invariants code {"day" 15 "hour" 25}))))))

@@ -50,9 +50,9 @@
       :array-literal (str "[" (str/join ", " (map format-expression (:elements expr))) "]")
       :set-literal (str "#{" (str/join ", " (map format-expression (:elements expr))) "}")
       :map-literal (str "{" (str/join ", " (map (fn [{:keys [key value]}]
-                                                   (str (format-expression key) ": "
-                                                        (format-expression value)))
-                                                 (:entries expr))) "}")
+                                                  (str (format-expression key) ": "
+                                                       (format-expression value)))
+                                                (:entries expr))) "}")
       ;; Default
       (pr-str expr))
     :else (str expr)))
@@ -104,8 +104,8 @@
                        (when (seq params)
                          (str "**Parameters:**\n"
                               (str/join "\n" (map (fn [{:keys [name type]}]
-                                                   (str "- `" name "`: `" (format-type type) "`"))
-                                                 params))
+                                                    (str "- `" name "`: `" (format-type type) "`"))
+                                                  params))
                               "\n"))
                        (when return-type
                          (str "**Returns:** `" (format-type return-type) "`\n"))
@@ -131,8 +131,8 @@
                        (when (seq params)
                          (str "**Parameters:**\n"
                               (str/join "\n" (map (fn [{:keys [name type]}]
-                                                   (str "- `" name "`: `" (format-type type) "`"))
-                                                 params))
+                                                    (str "- `" name "`: `" (format-type type) "`"))
+                                                  params))
                               "\n"))
                        (when (seq require)
                          (str "**Pre-conditions:**\n"
@@ -150,10 +150,10 @@
         constructor-sections (filter #(= :constructors (:type %)) body)
         ;; Extract members and tag them with their section's visibility
         members-with-visibility (mapcat (fn [section]
-                                         (let [visibility (:visibility section)]
-                                           (map #(assoc % :visibility visibility)
-                                                (:members section))))
-                                       feature-sections)
+                                          (let [visibility (:visibility section)]
+                                            (map #(assoc % :visibility visibility)
+                                                 (:members section))))
+                                        feature-sections)
         fields (filter #(= :field (:type %)) members-with-visibility)
         methods (filter #(= :method (:type %)) members-with-visibility)
         constructors (mapcat :constructors constructor-sections)]
@@ -167,11 +167,11 @@
   (when (seq generic-params)
     (str " ["
          (str/join ", " (map (fn [{:keys [name constraint detachable]}]
-                              (let [prefix (if detachable "?" "")]
-                              (if constraint
-                                (str prefix name " -> " constraint)
-                                (str prefix name))))
-                            generic-params))
+                               (let [prefix (if detachable "?" "")]
+                                 (if constraint
+                                   (str prefix name " -> " constraint)
+                                   (str prefix name))))
+                             generic-params))
          "]")))
 
 (defn format-inheritance
@@ -180,8 +180,8 @@
   (when (seq parents)
     (str "\n\n**Inherits from:** "
          (str/join ", " (map (fn [{:keys [parent]}]
-                              (str "`" parent "`"))
-                            parents))
+                               (str "`" parent "`"))
+                             parents))
          "\n")))
 
 (defn generate-class-doc
@@ -251,17 +251,17 @@
                       [(when (seq imports)
                          (str "## Imports\n\n"
                               (str/join "\n" (map (fn [{:keys [qualified-name source]}]
-                                                   (str "- `" qualified-name "`"
-                                                        (when source (str " from " source))))
-                                                 imports))))
+                                                    (str "- `" qualified-name "`"
+                                                         (when source (str " from " source))))
+                                                  imports))))
                        (when (seq interns)
                          (str "## Interns\n\n"
                               (str/join "\n" (map (fn [{:keys [path class-name alias]}]
-                                                   (str "- `" (if path
-                                                               (str path "/" class-name)
-                                                               class-name) "`"
-                                                        (when alias (str " as `" alias "`"))))
-                                                 interns))))
+                                                    (str "- `" (if path
+                                                                 (str path "/" class-name)
+                                                                 class-name) "`"
+                                                         (when alias (str " as `" alias "`"))))
+                                                  interns))))
                        (str/join "\n\n---\n\n" (map generate-class-doc classes))]))))
 
 (defn generate-doc-from-file

@@ -84,9 +84,9 @@
    classpath so it doesn't re-run dependency resolution."
   [^java.io.File f]
   (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
-                            (into-array String
-                                        ["java" "-cp" (System/getProperty "java.class.path")
-                                         "clojure.main" "-m" "nex.eval" (.getPath f)]))]
+            (into-array String
+                        ["java" "-cp" (System/getProperty "java.class.path")
+                         "clojure.main" "-m" "nex.eval" (.getPath f)]))]
     (.put (.environment pb) "NEX_USER_DIR" (System/getProperty "user.dir"))
     (.redirectErrorStream pb true)
     (let [proc (.start pb)

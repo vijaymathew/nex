@@ -79,8 +79,7 @@ do
   let g := 999
   result := inner()
 end
-print(outer())"
-  )
+print(outer())")
 
 (deftest global-read-is-lexical-on-compiled-backend
   (testing "compiled: inner() reads the global g (100), not outer()'s local g"

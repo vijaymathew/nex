@@ -6,6 +6,7 @@
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as compiled-runtime]
             [nex.debugger :as dbg]
+            [nex.lower :as lower]
             [nex.typechecker :as tc]
             [clojure.string :as str]
             [clojure.edn :as edn]
@@ -51,7 +52,8 @@
   ["class" "enum" "deferred" "declare" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
    "let" "create" "convert" "to" "fn" "function" "and" "or" "old" "this" "note"
-   "with" "import" "intern" "private" "raise" "rescue" "retry" "assert" "spawn" "select" "timeout" "repeat" "across" "case" "of"
+   "with" "import" "intern" "private" "raise" "rescue" "retry" "assert" "spawn"
+   "select" "timeout" "repeat" "across" "case" "of"
    "true" "false" "nil"
    ;; strictly 'result' is not a keyword, but a pre-defined variable name.
    "result"])
@@ -330,7 +332,6 @@
         trailing-operator?
         (> open-blocks end-count))))
 
-
 (defn read-input
   "Read potentially multi-line input from the user"
   []
@@ -433,9 +434,9 @@
         (doseq [[class-name class-def] classes]
           (let [parents (:parents class-def)
                 parent-names (when (seq parents)
-                              (str " (inherits: "
-                                   (str/join ", " (map :parent parents))
-                                   ")"))]
+                               (str " (inherits: "
+                                    (str/join ", " (map :parent parents))
+                                    ")"))]
             (println (str "  • " class-name parent-names))))))))
 
 (defn show-vars [ctx]
@@ -446,8 +447,8 @@
         (println "Defined variables:")
         (doseq [[var-name value] bindings]
           (let [value-str (if (instance? nex.interpreter.NexObject value)
-                           (str "#<" (:class-name value) " object>")
-                           (pr-str value))]
+                            (str "#<" (:class-name value) " object>")
+                            (pr-str value))]
             (println (str "  • " var-name " = " value-str))))))))
 
 (declare eval-code)
@@ -537,7 +538,7 @@
 (defn- repl-cmd-typecheck-status [ctx input]
   (do
     (println (str "Type checking is currently: "
-                 (if @*type-checking-enabled* "ENABLED" "DISABLED")))
+                  (if @*type-checking-enabled* "ENABLED" "DISABLED")))
     ctx))
 
 (defn- repl-cmd-load [ctx input]
@@ -911,8 +912,7 @@
 (def ^:private repl-commands
   "Ordered REPL command table; first match wins (mirrors the original cond order).
    :names = exact/alias match on the lower-cased input; :prefix = str/starts-with?."
-  [
-   {:names #{":help" ":h" ":?"} :handler repl-cmd-help}
+  [{:names #{":help" ":h" ":?"} :handler repl-cmd-help}
    {:names #{":quit" ":q" ":exit"} :handler repl-cmd-quit}
    {:names #{":clear" ":reset"} :handler repl-cmd-clear}
    {:names #{":classes"} :handler repl-cmd-classes}
@@ -961,7 +961,6 @@
 ;;
 ;; Code Evaluation
 ;;
-
 
 (defn wrap-as-method
   "Wrap code in a temporary class and method structure for parsing"
@@ -1051,9 +1050,9 @@
     (string? type-val) type-val
     (map? type-val) (let [base (:base-type type-val)
                           params (or (:type-params type-val) (:type-args type-val))]
-                     (if (seq params)
-                       (str base "[" (str/join ", " (map format-type params)) "]")
-                       base))
+                      (if (seq params)
+                        (str base "[" (str/join ", " (map format-type params)) "]")
+                        base))
     :else (str type-val)))
 
 (defn infer-result-type
@@ -1496,9 +1495,9 @@
    `ex-info` (after printing each error) on failure; otherwise returns nil."
   [ctx ast source-id]
   (when (and @*type-checking-enabled*
-           (= (:type ast) :program)
-           (or (seq (:classes ast)) (seq (:functions ast))
-               (seq (:statements ast)) (seq (:calls ast))))
+             (= (:type ast) :program)
+             (or (seq (:classes ast)) (seq (:functions ast))
+                 (seq (:statements ast)) (seq (:calls ast))))
     ;; Create an augmented AST that includes previously defined classes
     ;; so the type checker knows about them
     (let [prev-functions (vals @(:function-asts @*compiled-repl-session*))
@@ -1547,7 +1546,7 @@
                           ast)
           augmented-ast (if (or (seq prev-functions) (seq intern-functions))
                           (update augmented-ast :functions
-                                 #(vec (concat prev-functions intern-functions %)))
+                                  #(vec (concat prev-functions intern-functions %)))
                           augmented-ast)
           ;; Make every type alias declared so far in the session visible to
           ;; the checker, not just any declared in the current input.
@@ -1739,6 +1738,23 @@
       (doseq [stmt (:body method-def)]
         (when (and (map? stmt) (= (:type stmt) :let))
           (let [remembered-type (or (:var-type stmt)
+                                    ;; Checked before infer-expression-type,
+                                    ;; not after — see nex.lower/box-let-type
+                                    ;; and nex.compiler.jvm.repl/sync-var-
+                                    ;; types-from-ast! for the identical fix
+                                    ;; and why: infer-expression-type type-
+                                    ;; checks the WHOLE body in an isolated,
+                                    ;; standalone env, and throws (silently
+                                    ;; swallowed, returning nil here) the
+                                    ;; moment that body references a sibling
+                                    ;; closure elaborated alongside it — a
+                                    ;; self- or mutually-recursive closure-
+                                    ;; let. Without this, such a closure's
+                                    ;; type was never remembered here at
+                                    ;; all, so it was simply unresolvable —
+                                    ;; not merely erased to Any — from any
+                                    ;; later, separate REPL cell.
+                                    (lower/anonymous-function-signature-type (:value stmt))
                                     (tc/infer-expression-type
                                      (:value stmt)
                                      {:classes (vals @(:classes exec-ctx))

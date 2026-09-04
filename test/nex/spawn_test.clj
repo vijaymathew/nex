@@ -288,7 +288,7 @@ end"
     (with-compiled-repl ctx
       (let [output (with-out-str
                      (repl/eval-code ctx
-                       "let t1: Task[Integer] := spawn do result := 1 end
+                                     "let t1: Task[Integer] := spawn do result := 1 end
 let t2: Task[Integer] := spawn do result := 2 end
 let t3: Task[Integer] := spawn do result := 3 end
 let results: Array[Task[Integer]] := [t1, t2, t3]
@@ -302,7 +302,7 @@ print(all.length)"))]
     (with-compiled-repl ctx
       (let [output (with-out-str
                      (repl/eval-code ctx
-                       "let t: Task[Integer] := spawn do raise \"task boom\" end
+                                     "let t: Task[Integer] := spawn do raise \"task boom\" end
 do
   t.await
 rescue
@@ -316,7 +316,7 @@ end"))]
     (with-compiled-repl ctx
       (let [output (with-out-str
                      (repl/eval-code ctx
-                       "let ch: Channel[Integer] := create Channel[Integer].with_capacity(0)
+                                     "let ch: Channel[Integer] := create Channel[Integer].with_capacity(0)
 let sender: Task := spawn do ch.send(99) end
 let value: Integer := ch.receive
 print(value)
@@ -329,7 +329,7 @@ sender.await"))]
     (with-compiled-repl ctx
       (let [output (with-out-str
                      (repl/eval-code ctx
-                       "let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+                                     "let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
 ch.try_send(7)
 select
   when ch.receive as v then

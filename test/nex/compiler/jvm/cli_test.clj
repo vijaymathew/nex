@@ -155,8 +155,8 @@ end")
 let a := create Account.make(create Money.make(100.0))
 print(a.balance.amount)")
         (let [{:keys [exit out]} (run-process! (.getPath tmp-dir)
-                                                nex-bin "compile" "jvm"
-                                                (.getPath main-file) (.getPath out-dir))]
+                                               nex-bin "compile" "jvm"
+                                               (.getPath main-file) (.getPath out-dir))]
           (is (not (str/includes? out "Cannot find intern file")) out)
           (is (= 0 exit) out)
           (is (.exists expected-jar))

@@ -89,9 +89,9 @@ end"
       (is (= 1 (count (:parents thing-class))))
       (is (= "Any" (:parent (first (:parents thing-class)))))))
 
-(deftest typecheck-child-assignable-to-parent-type
-  (testing "a child instance is accepted where the parent type is declared"
-    (let [code "class Animal
+  (deftest typecheck-child-assignable-to-parent-type
+    (testing "a child instance is accepted where the parent type is declared"
+      (let [code "class Animal
   feature
     speak() do
       print(\"Animal speaks\")
@@ -111,13 +111,13 @@ class Test
       let a: Animal := create Dog
     end
 end"
-          result (tc/type-check (p/ast code))]
-      (is (:success result))
-      (is (empty? (:errors result))))))
+            result (tc/type-check (p/ast code))]
+        (is (:success result))
+        (is (empty? (:errors result))))))
 
-(deftest typecheck-override-incompatible-return-type-fails
-  (testing "overriding a method with an incompatible return type is rejected by the typechecker"
-    (let [code "class Base
+  (deftest typecheck-override-incompatible-return-type-fails
+    (testing "overriding a method with an incompatible return type is rejected by the typechecker"
+      (let [code "class Base
   feature
     value(): Integer do
       result := 1
@@ -130,13 +130,13 @@ class Child inherit Base
       result := \"one\"
     end
 end"
-          result (tc/type-check (p/ast code))]
-      (is (not (:success result)))
-      (is (seq (:errors result))))))
+            result (tc/type-check (p/ast code))]
+        (is (not (:success result)))
+        (is (seq (:errors result))))))
 
-(deftest typecheck-inherited-method-callable-on-child
-  (testing "a method defined on the parent is callable on a child-typed variable"
-    (let [code "class Animal
+  (deftest typecheck-inherited-method-callable-on-child
+    (testing "a method defined on the parent is callable on a child-typed variable"
+      (let [code "class Animal
   feature
     speak(): String do
       result := \"Animal speaks\"
@@ -153,13 +153,13 @@ class Test
       let s: String := d.speak
     end
 end"
-          result (tc/type-check (p/ast code))]
-      (is (:success result))
-      (is (empty? (:errors result))))))
+            result (tc/type-check (p/ast code))]
+        (is (:success result))
+        (is (empty? (:errors result))))))
 
-(deftest typecheck-super-call-resolves-parent-signature
-  (testing "a super constructor call in a child constructor typechecks against the parent signature"
-    (let [code "class Base
+  (deftest typecheck-super-call-resolves-parent-signature
+    (testing "a super constructor call in a child constructor typechecks against the parent signature"
+      (let [code "class Base
   feature
     x: Integer
   create
@@ -174,6 +174,6 @@ class Child inherit Base
       Base.make(v)
     end
 end"
-          result (tc/type-check (p/ast code))]
-      (is (:success result))
-      (is (empty? (:errors result)))))))
+            result (tc/type-check (p/ast code))]
+        (is (:success result))
+        (is (empty? (:errors result)))))))

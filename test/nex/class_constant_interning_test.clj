@@ -144,3 +144,41 @@ print(Palette.NAMED.length())")
   (testing "scalar + object + collection constants lower together on the compiled backend"
     (dotimes [_ 5]
       (is (= ["255" "0" "3"] (run-compiled mixed-constant-kinds-program))))))
+
+(def constant-parens-call-program
+  "class Point
+  feature
+    x: Integer
+    greet(): String do
+      result := \"hi\"
+    end
+  create
+    make(v: Integer) do x := v end
+end
+
+class Origin
+  feature
+    POINT = create Point.make(0)
+end
+
+print(Origin.POINT.x)
+print(Origin.POINT.greet())")
+
+(deftest interpreter-parens-call-on-class-constant-does-not-crash-write-back
+  ;; `Origin.POINT.greet()` parses to a :call whose own target is itself a
+  ;; :call node ({:target "Origin" :method "POINT" :has-parens false}) — a
+  ;; class-constant access, not a field read off some parent object. After
+  ;; invoking `greet`, invoke-found-nex-method tries to write the (possibly
+  ;; mutated) receiver back into its source expression via
+  ;; write-back-target!, which blindly treated any `X.Y` call-shaped target
+  ;; as \"field Y read off object X\" and called `env-lookup` on X — throwing
+  ;; \"Undefined variable: Origin\", since a class name is never an env
+  ;; binding. `Origin.POINT.x` (no parens, a field read) hit the exact same
+  ;; write-back path and did NOT crash, because eval-call-with-target
+  ;; short-circuits field access with no parens elsewhere first — it's
+  ;; specifically a *parenthesized method call* immediately after a
+  ;; class-constant access that reached this bug. Compiled backend was
+  ;; never affected (no equivalent write-back step there); this pins the
+  ;; interpreter fix without weakening compiled-backend coverage.
+  (testing "a paren'd method call chained off a class-constant access (X.CONST.method()) does not crash the interpreter"
+    (is (= ["0" "\"hi\""] (run-interpreted constant-parens-call-program)))))

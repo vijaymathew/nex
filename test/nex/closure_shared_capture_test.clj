@@ -46,6 +46,17 @@
         compiled)
       (finally (.delete f)))))
 
+(defn- run-compiled
+  "Printed output of CODE on the compiled backend only — for a case where
+   the interpreter is known to disagree (see loop-control-variable-...-
+   test below), not just an untested one."
+  [code]
+  (let [f (java.io.File/createTempFile "closure_shared_capture" ".nex")]
+    (try
+      (spit f code)
+      (str/split-lines (str/trim-newline (with-out-str (e/eval-file (.getPath f) {}))))
+      (finally (.delete f)))))
+
 (deftest sibling-top-level-closures-share-a-mutated-capture-test
   (testing "two top-level closures capturing the same reassigned local see
             each other's writes, and the enclosing scope's own later read
@@ -238,3 +249,55 @@ do
   result := acc
 end
 print(compute())")))))
+
+(deftest loop-control-variable-captured-by-a-spawn-does-not-crash-the-compiled-backend-test
+  ;; `from let i := 0 until i = n do spawn do result := i end ... end` — a
+  ;; `from`-loop's own control variable lives in the :loop node's :init,
+  ;; not as an ordinary :let statement (nex.walker parses `from let i :=
+  ;; 0 ...` that way), a shape two separate lowering passes silently did
+  ;; not know about:
+  ;;
+  ;;  1. box-candidate-lets only scanned :let statements directly in a
+  ;;     statement list for boxing candidates, never a :loop node's own
+  ;;     :init — so `i` was never boxed at all, and the compiled backend
+  ;;     crashed at lowering with "Unable to infer expression type" the
+  ;;     moment the spawn body referenced it.
+  ;;  2. Once that was fixed, a second, independent bug surfaced: the
+  ;;     :loop case of rewrite-statement-for-closures rewrote :init but
+  ;;     discarded the updated local-types that introduces (using the
+  ;;     ORIGINAL local-types for :until/:body instead) — so `i` was
+  ;;     never resolvable as a local *or* an outer variable while
+  ;;     rewriting the loop body, and capture-reference! silently
+  ;;     captured nothing for it at all.
+  ;;
+  ;; The program itself is a genuine data race regardless of backend: N
+  ;; spawned tasks each read the ONE shared, mutating box for `i`
+  ;; whenever their own thread happens to get scheduled, with no
+  ;; synchronization against the main thread's own `i := i + 1` between
+  ;; iterations — so the exact values are not, and never were, meant to
+  ;; be deterministic here (a fresh per-iteration `let captured := i`
+  ;; before the spawn, not the loop's own shared counter, is the pattern
+  ;; that gets a deterministic per-iteration value — see the -is-visible-
+  ;; after-await tests above and closure_mutual_recursion_test.clj). What
+  ;; this test actually pins is only that the compiled backend no longer
+  ;; crashes at lowering, and that the race resolves to *some* coherent
+  ;; result — each task sees a value `i` genuinely held at some point
+  ;; during the run, not garbage.
+  (testing "a from-loop's own control variable, captured by a spawn nested in the loop body, lowers and runs on the compiled backend without crashing"
+    (let [[line] (run-compiled "let tasks: Array[Task[Integer]] := []
+from
+  let i: Integer := 0
+until
+  i = 5
+do
+  let t: Task[Integer] := spawn do
+    result := i * 10
+  end
+  tasks.add(t)
+  i := i + 1
+end
+let results: Array[Integer] := await_all(tasks)
+print(results)")
+          values (->> (re-seq #"\d+" line) (map #(Integer/parseInt %)))]
+      (is (= 5 (count values)) (str "expected 5 results, got " (pr-str line)))
+      (is (every? #{0 10 20 30 40 50} values) (str "every result should be i*10 for some i in 0..5, got " (pr-str line))))))

@@ -21,10 +21,21 @@
 (def ^:private atom-internal-name "clojure/lang/Atom")
 (def ^:private arraylist-internal-name "java/util/ArrayList")
 (def ^:private hashmap-internal-name "java/util/HashMap")
+;; Map values are typed/cast/described as plain HashMap throughout this file
+;; (hashmap-internal-name, above) since that's the wider, already-pervasive
+;; static type -- but the two sites that actually allocate a fresh instance
+;; (a `{...}` literal, and a Map-typed field's zero-value) construct a
+;; LinkedHashMap instead: HashMap iterates in hash-bucket order, not
+;; insertion order, which diverged from the interpreter's portable map (which
+;; does preserve insertion order) -- `m.keys()` on the same `put` sequence
+;; came back in a different order per backend. LinkedHashMap IS-A HashMap, so
+;; every existing CHECKCAST/INVOKEVIRTUAL against hashmap-internal-name still
+;; resolves correctly against it; only the allocation site needs to change.
+(def ^:private linkedhashmap-internal-name "java/util/LinkedHashMap")
 (def ^:private linkedhashset-internal-name "java/util/LinkedHashSet")
 (def ^:private rt-internal-name "clojure/lang/RT")
 (def ^:private var-internal-name "clojure/lang/Var")
- (def ^:private throwable-internal-name "java/lang/Throwable")
+(def ^:private throwable-internal-name "java/lang/Throwable")
 (def ^:dynamic *local-debug-ranges* nil)
 
 (declare emit-const!)
@@ -126,18 +137,18 @@
 (defn user-class-spec
   ([class-spec] (user-class-spec class-spec {}))
   ([class-spec {:keys [classes-edn imports-edn]}]
-  {:internal-name (:internal-name class-spec)
-   :binary-name (desc/binary-class-name (:jvm-name class-spec))
-   :source-file (:source-file class-spec)
-   :super-name (or (:java-super-class class-spec) "java/lang/Object")
-   :interfaces (vec (:interfaces class-spec))
-   :flags Opcodes/ACC_PUBLIC
-   :fields (vec
-            (concat
-             [{:name "__outer__"
-               :descriptor "Ljava/lang/Object;"
-               :flags Opcodes/ACC_PUBLIC
-               :jvm-type (ir/object-jvm-type "java/lang/Object")}
+   {:internal-name (:internal-name class-spec)
+    :binary-name (desc/binary-class-name (:jvm-name class-spec))
+    :source-file (:source-file class-spec)
+    :super-name (or (:java-super-class class-spec) "java/lang/Object")
+    :interfaces (vec (:interfaces class-spec))
+    :flags Opcodes/ACC_PUBLIC
+    :fields (vec
+             (concat
+              [{:name "__outer__"
+                :descriptor "Ljava/lang/Object;"
+                :flags Opcodes/ACC_PUBLIC
+                :jvm-type (ir/object-jvm-type "java/lang/Object")}
               ;; The state that created this object, so the emitted `equals`/
               ;; `hashCode` below can reach Nex semantics. Java hands those two
               ;; methods nothing but the receiver, yet answering them means
@@ -145,118 +156,133 @@
               ;; form takes a NexReplState as its first argument. Set at the
               ;; `:new` site (see emit-expr! :new), which is the only place a
               ;; user object is constructed with state in scope.
-              {:name "__state__"
-               :descriptor (str "L" repl-state-internal-name ";")
-               :flags Opcodes/ACC_PUBLIC
-               :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
-             (map (fn [{:keys [name jvm-type]}]
-                    {:name name
-                     :descriptor (desc/jvm-type->descriptor jvm-type)
-                     :flags Opcodes/ACC_PRIVATE
-                     :jvm-type jvm-type})
-                  (:composition-fields class-spec))
-             (map (fn [{:keys [name jvm-type]}]
-                    {:name name
-                     :descriptor (desc/jvm-type->descriptor jvm-type)
-                     :flags Opcodes/ACC_PRIVATE
-                     :jvm-type jvm-type})
-                  (:runtime-type-fields class-spec))
-             (map (fn [{:keys [name jvm-type nex-type]}]
-                    {:name name
-                     :descriptor (desc/jvm-type->descriptor jvm-type)
-                     :flags Opcodes/ACC_PUBLIC
-                     :jvm-type jvm-type
-                     :nex-type nex-type})
-                  (:fields class-spec))))
-   :static-fields (mapv (fn [{:keys [name jvm-type]}]
-                          {:name name
-                           :descriptor (desc/jvm-type->descriptor jvm-type)
-                           :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC Opcodes/ACC_FINAL)
-                           :jvm-type jvm-type})
-                        (:constants class-spec))
-   :methods (vec
-             (concat
-              [{:name "<init>"
-                :descriptor "()V"
+               {:name "__state__"
+                :descriptor (str "L" repl-state-internal-name ";")
                 :flags Opcodes/ACC_PUBLIC
-                :kind :user-default-constructor
-                :owner (:internal-name class-spec)
-                :super-name (or (:java-super-class class-spec) "java/lang/Object")
-                :composition-fields (:composition-fields class-spec)
-                :runtime-type-fields (:runtime-type-fields class-spec)
-                :fields (:fields class-spec)}]
+                :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
+             ;; Package-private (no ACC_PRIVATE), not private: a composition
+             ;; field holds an ancestor object (_parent_Base, say), and a
+             ;; class more than one inheritance level down needs to reach
+             ;; through an INTERMEDIATE ancestor's own composition field to
+             ;; get at a further-back one -- Grandchild.__ctor forwarding to
+             ;; Parent.make(...) via Child's own `_parent_Base` field, not
+             ;; just Child's immediate one. JVM `private` is only visible
+             ;; within the exact declaring class, which an intermediate
+             ;; ancestor never is from a further subclass's perspective, so
+             ;; a 3-level (or deeper) generic inheritance chain crashed at
+             ;; class-load time with IllegalAccessError. Every class the
+             ;; compiler emits for one program shares one package (see
+             ;; class-jvm-meta), so package-private is exactly the right
+             ;; width: visible to every other class this program generates,
+             ;; not part of any public API a real Java caller could see.
+              (map (fn [{:keys [name jvm-type]}]
+                     {:name name
+                      :descriptor (desc/jvm-type->descriptor jvm-type)
+                      :flags 0
+                      :jvm-type jvm-type})
+                   (:composition-fields class-spec))
+              (map (fn [{:keys [name jvm-type]}]
+                     {:name name
+                      :descriptor (desc/jvm-type->descriptor jvm-type)
+                      :flags 0
+                      :jvm-type jvm-type})
+                   (:runtime-type-fields class-spec))
+              (map (fn [{:keys [name jvm-type nex-type]}]
+                     {:name name
+                      :descriptor (desc/jvm-type->descriptor jvm-type)
+                      :flags Opcodes/ACC_PUBLIC
+                      :jvm-type jvm-type
+                      :nex-type nex-type})
+                   (:fields class-spec))))
+    :static-fields (mapv (fn [{:keys [name jvm-type]}]
+                           {:name name
+                            :descriptor (desc/jvm-type->descriptor jvm-type)
+                            :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC Opcodes/ACC_FINAL)
+                            :jvm-type jvm-type})
+                         (:constants class-spec))
+    :methods (vec
+              (concat
+               [{:name "<init>"
+                 :descriptor "()V"
+                 :flags Opcodes/ACC_PUBLIC
+                 :kind :user-default-constructor
+                 :owner (:internal-name class-spec)
+                 :super-name (or (:java-super-class class-spec) "java/lang/Object")
+                 :composition-fields (:composition-fields class-spec)
+                 :runtime-type-fields (:runtime-type-fields class-spec)
+                 :fields (:fields class-spec)}]
               ;; One further <init> overload per own constructor that
               ;; forwards real arguments into the Java superclass
               ;; constructor (see nex.lower/java-super-ctor-forward-spec) —
               ;; alongside, never instead of, the shared zero-arg one above,
               ;; which every other constructor (no super-args, or none at
               ;; all) still targets.
-              (map (fn [{:keys [own-descriptor super-descriptor boxed-args]}]
-                     {:name "<init>"
-                      :descriptor own-descriptor
-                      :flags Opcodes/ACC_PUBLIC
-                      :kind :user-default-constructor
-                      :owner (:internal-name class-spec)
-                      :super-name (or (:java-super-class class-spec) "java/lang/Object")
-                      :super-descriptor super-descriptor
-                      :boxed-args boxed-args
-                      :composition-fields (:composition-fields class-spec)
-                      :runtime-type-fields (:runtime-type-fields class-spec)
-                      :fields (:fields class-spec)})
-                   (:java-super-ctor-forwards class-spec))
-              [{:name "set_outer"
-                :descriptor "(Ljava/lang/Object;)V"
-                :flags Opcodes/ACC_PUBLIC
-                :kind :set-outer
-                :owner (:internal-name class-spec)
-                :composition-fields (:composition-fields class-spec)}
-               {:name "<clinit>"
-                :descriptor "()V"
-                :flags (+ Opcodes/ACC_STATIC)
-                :kind :class-initializer
-                :owner (:internal-name class-spec)
-                :constants (:constants class-spec)
-                :classes-edn classes-edn
-                :imports-edn imports-edn}
+               (map (fn [{:keys [own-descriptor super-descriptor boxed-args]}]
+                      {:name "<init>"
+                       :descriptor own-descriptor
+                       :flags Opcodes/ACC_PUBLIC
+                       :kind :user-default-constructor
+                       :owner (:internal-name class-spec)
+                       :super-name (or (:java-super-class class-spec) "java/lang/Object")
+                       :super-descriptor super-descriptor
+                       :boxed-args boxed-args
+                       :composition-fields (:composition-fields class-spec)
+                       :runtime-type-fields (:runtime-type-fields class-spec)
+                       :fields (:fields class-spec)})
+                    (:java-super-ctor-forwards class-spec))
+               [{:name "set_outer"
+                 :descriptor "(Ljava/lang/Object;)V"
+                 :flags Opcodes/ACC_PUBLIC
+                 :kind :set-outer
+                 :owner (:internal-name class-spec)
+                 :composition-fields (:composition-fields class-spec)}
+                {:name "<clinit>"
+                 :descriptor "()V"
+                 :flags (+ Opcodes/ACC_STATIC)
+                 :kind :class-initializer
+                 :owner (:internal-name class-spec)
+                 :constants (:constants class-spec)
+                 :classes-edn classes-edn
+                 :imports-edn imports-edn}
                ;; Java's equality, delegating to Nex's. Set and Map are a
                ;; LinkedHashSet and a HashMap on this backend, so membership,
                ;; dedup and key lookup are decided by these two methods and
                ;; nothing else — without them a class's `equals`/`hash` override
                ;; is ignored the moment its instances go into a collection, and
                ;; `#{a, b}` keeps two objects the program considers one.
-               {:name "equals"
-                :descriptor "(Ljava/lang/Object;)Z"
-                :flags Opcodes/ACC_PUBLIC
-                :kind :object-equals
-                :owner (:internal-name class-spec)}
-               {:name "hashCode"
-                :descriptor "()I"
-                :flags Opcodes/ACC_PUBLIC
-                :kind :object-hash-code
-                :owner (:internal-name class-spec)}]
-              (map (fn [fn-node]
-                     {:name (:emitted-name fn-node)
-                      :descriptor (repl-fn-method-descriptor)
-                      :flags (+ Opcodes/ACC_PUBLIC)
-                      :kind :instance-ctor-fn
-                      :fn-node fn-node})
-                   (:constructors class-spec))
-              (keep (fn [fn-node]
-                      (when-not (:deferred? fn-node)
-                        {:name (:emitted-name fn-node)
-                         :descriptor (repl-fn-method-descriptor)
-                         :flags Opcodes/ACC_PUBLIC
-                         :kind :instance-fn
-                         :fn-node fn-node}))
-                    (:methods class-spec))
-              (map (fn [bridge]
-                     {:name (:java-name bridge)
-                      :descriptor (:descriptor bridge)
-                      :flags Opcodes/ACC_PUBLIC
-                      :kind :interface-bridge
-                      :owner (:internal-name class-spec)
-                      :bridge bridge})
-                   (:java-bridge-methods class-spec))))}))
+                {:name "equals"
+                 :descriptor "(Ljava/lang/Object;)Z"
+                 :flags Opcodes/ACC_PUBLIC
+                 :kind :object-equals
+                 :owner (:internal-name class-spec)}
+                {:name "hashCode"
+                 :descriptor "()I"
+                 :flags Opcodes/ACC_PUBLIC
+                 :kind :object-hash-code
+                 :owner (:internal-name class-spec)}]
+               (map (fn [fn-node]
+                      {:name (:emitted-name fn-node)
+                       :descriptor (repl-fn-method-descriptor)
+                       :flags (+ Opcodes/ACC_PUBLIC)
+                       :kind :instance-ctor-fn
+                       :fn-node fn-node})
+                    (:constructors class-spec))
+               (keep (fn [fn-node]
+                       (when-not (:deferred? fn-node)
+                         {:name (:emitted-name fn-node)
+                          :descriptor (repl-fn-method-descriptor)
+                          :flags Opcodes/ACC_PUBLIC
+                          :kind :instance-fn
+                          :fn-node fn-node}))
+                     (:methods class-spec))
+               (map (fn [bridge]
+                      {:name (:java-name bridge)
+                       :descriptor (:descriptor bridge)
+                       :flags Opcodes/ACC_PUBLIC
+                       :kind :interface-bridge
+                       :owner (:internal-name class-spec)
+                       :bridge bridge})
+                    (:java-bridge-methods class-spec))))}))
 
 (defn launcher-class-spec
   [{:keys [internal-name binary-name source-file program-internal-name classes-edn imports-edn]}]
@@ -295,7 +321,7 @@
     (.visitLocalVariable mv
                          ^String (str name)
                          ^String (or descriptor
-                                      (desc/jvm-type->descriptor jvm-type))
+                                     (desc/jvm-type->descriptor jvm-type))
                          nil
                          (or (get-in local-ranges [slot :start]) start-label)
                          (or (get-in local-ranges [slot :end]) end-label)
@@ -451,9 +477,9 @@
 
         (= (ir/object-jvm-type "java/util/HashMap") jvm-type)
         (do
-          (.visitTypeInsn mv Opcodes/NEW hashmap-internal-name)
+          (.visitTypeInsn mv Opcodes/NEW linkedhashmap-internal-name)
           (.visitInsn mv Opcodes/DUP)
-          (.visitMethodInsn mv Opcodes/INVOKESPECIAL hashmap-internal-name "<init>" "()V" false))
+          (.visitMethodInsn mv Opcodes/INVOKESPECIAL linkedhashmap-internal-name "<init>" "()V" false))
 
         (= (ir/object-jvm-type "java/util/LinkedHashSet") jvm-type)
         (do
@@ -622,7 +648,7 @@
     (= :double jvm-type) Opcodes/DLOAD
     (ir/object-jvm-type? jvm-type) Opcodes/ALOAD
     :else (throw (ex-info "Unsupported local load type"
-                    {:jvm-type jvm-type}))))
+                          {:jvm-type jvm-type}))))
 
 (defn- emit-stack-coerce!
   [^MethodVisitor mv from-jvm-type to-jvm-type]
@@ -665,8 +691,6 @@
     (throw (ex-info "Unsupported JVM stack coercion"
                     {:from-jvm-type from-jvm-type
                      :to-jvm-type to-jvm-type}))))
-
-(declare emit-expr!)
 
 (defn- emit-as-int!
   "Emit `expr` and narrow its result to a 32-bit int, inserting L2I when it is a
@@ -832,7 +856,6 @@
     (.visitInsn mv Opcodes/ICONST_1)
     (.visitLabel mv end-label)))
 
-(declare emit-expr!)
 (declare emit-binary!)
 (declare emit-compare!)
 (declare emit-stmt!)
@@ -932,17 +955,17 @@
    compact spec (see direct-runtime-helper-specs)."
   [^MethodVisitor mv args state-slot spec]
   (vec (mapcat
-         (fn [tok]
-           (case tok
-             :state      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
-             :e0         [(fn [] (emit-expr! mv (first args) state-slot))]
-             :b0         [(fn [] (emit-boxed-expr! mv (first args) state-slot))]
-             :b1         [(fn [] (emit-boxed-expr! mv (second args) state-slot))]
-             :b2         [(fn [] (emit-boxed-expr! mv (nth args 2) state-slot))]
-             :args       [(fn [] (emit-boxed-arg-array! mv args state-slot))]
-             :args-drop2 [(fn [] (emit-boxed-arg-array! mv (vec (drop 2 args)) state-slot))]
-             :bvar       (mapv (fn [arg] (fn [] (emit-boxed-expr! mv arg state-slot))) args)))
-         spec)))
+        (fn [tok]
+          (case tok
+            :state      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
+            :e0         [(fn [] (emit-expr! mv (first args) state-slot))]
+            :b0         [(fn [] (emit-boxed-expr! mv (first args) state-slot))]
+            :b1         [(fn [] (emit-boxed-expr! mv (second args) state-slot))]
+            :b2         [(fn [] (emit-boxed-expr! mv (nth args 2) state-slot))]
+            :args       [(fn [] (emit-boxed-arg-array! mv args state-slot))]
+            :args-drop2 [(fn [] (emit-boxed-arg-array! mv (vec (drop 2 args)) state-slot))]
+            :bvar       (mapv (fn [arg] (fn [] (emit-boxed-expr! mv arg state-slot))) args)))
+        spec)))
 
 (def ^:private direct-runtime-helper-specs
   "helper key -> [runtime-fn-name arg-emitter-spec]. Spec tokens (read by
@@ -1202,9 +1225,9 @@
 
 (defn- emit-map-literal!
   [^MethodVisitor mv expr state-slot]
-  (.visitTypeInsn mv Opcodes/NEW hashmap-internal-name)
+  (.visitTypeInsn mv Opcodes/NEW linkedhashmap-internal-name)
   (.visitInsn mv Opcodes/DUP)
-  (.visitMethodInsn mv Opcodes/INVOKESPECIAL hashmap-internal-name "<init>" "()V" false)
+  (.visitMethodInsn mv Opcodes/INVOKESPECIAL linkedhashmap-internal-name "<init>" "()V" false)
   (doseq [{:keys [key value]} (:entries expr)]
     (.visitInsn mv Opcodes/DUP)
     (emit-boxed-expr-for-storage! mv key state-slot)
@@ -1551,7 +1574,6 @@
   (.visitInsn mv Opcodes/POP)
   jvm-type)
 
-
 (defn- emit-array-method-sort!
   [^MethodVisitor mv {:keys [target jvm-type] :as expr} state-slot]
   (let [arg-emitters (cond-> [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
@@ -1651,7 +1673,6 @@
     (handler mv expr state-slot)
     (throw (ex-info "Unsupported collection method emission"
                     {:expr expr}))))
-
 
 (defn- emit-map-method-get!
   [^MethodVisitor mv {:keys [target args jvm-type]} state-slot]
@@ -1795,7 +1816,6 @@
     (throw (ex-info "Unsupported collection method emission"
                     {:expr expr}))))
 
-
 (defn- emit-set-method-contains!
   [^MethodVisitor mv {:keys [target args]} state-slot]
   (emit-runtime-call! mv "set-contains"
@@ -1917,7 +1937,6 @@
     (throw (ex-info "Unsupported collection method emission"
                     {:expr expr}))))
 
-
 (defn- emit-collection-method!
   [^MethodVisitor mv expr state-slot]
   (case (:collection-kind expr)
@@ -2014,7 +2033,6 @@
     (handler mv expr state-slot)
     (throw (ex-info "Unsupported concurrency method emission"
                     {:expr expr}))))
-
 
 (defn- emit-expr-const!
   [^MethodVisitor mv expr _state-slot]
@@ -2333,7 +2351,6 @@
     (handler mv expr state-slot)
     (throw (ex-info "Unsupported IR expression emission"
                     {:expr expr :op (:op expr)}))))
-
 
 (defn- emit-binary!
   [^MethodVisitor mv expr state-slot]
@@ -2771,7 +2788,6 @@
     (handler mv stmt state-slot)
     (throw (ex-info "Unsupported IR statement emission"
                     {:stmt stmt :op (:op stmt)}))))
-
 
 (defn- emit-function-arg-prologue!
   [^MethodVisitor mv fn-node arg-array-slot]

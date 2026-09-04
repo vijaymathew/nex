@@ -6,7 +6,6 @@
             [nex.types.builtins :as bi]
             [nex.types.concurrency :as conc]
             [nex.types.bootstrap :as bootstrap]
-            [nex.types.bootstrap :as bootstrap]
             [nex.types.datetime :as dt]
             [nex.types.http :as http]
             [nex.types.json :as json-types]
@@ -329,6 +328,191 @@
                                           :class (.getName (.getClass target))})))]
     (.set field target value)
     nil))
+
+;; ---------------------------------------------------------------------------
+;; Java calls resolved at compile time (see the "Compile-time Java overload
+;; resolution" section of nex.lower). java-call-method/-static and
+;; java-create-object above resolve the target Method/Constructor at RUNTIME
+;; via clojure.lang.Reflector, which performs no real overload resolution --
+;; when a name is overloaded, it reliably prefers a wider reference-type
+;; (Object) candidate over a more specific primitive/numeric one
+;; (java.util.ArrayList.remove(int)/(Object) is the textbook case). The
+;; *-resolved variants below are used instead whenever nex.lower already
+;; picked the single applicable candidate at compile time: PARAM-CLASSES-
+;; JOINED is that candidate's exact parameter-type descriptor (comma-joined
+;; binary class names, primitives spelled "int"/"long"/etc.), which pins an
+;; unambiguous getMethod/getConstructor lookup here and drives per-argument
+;; coercion to that exact type -- fixing both the wrong-overload selection
+;; and the separate reflective invoke failure a resolved-but-uncoerced call
+;; would still hit (Nex's Integer is uniformly a boxed Long; Method.invoke
+;; requires an exact wrapper-class match per parameter, so a boxed Long
+;; reflectively invoking an `int` parameter throws IllegalArgumentException
+;; even once the right Method has been found).
+
+(defn- resolve-one-param-class
+  ^Class [^String name]
+  (case name
+    "int" Integer/TYPE
+    "long" Long/TYPE
+    "short" Short/TYPE
+    "byte" Byte/TYPE
+    "float" Float/TYPE
+    "double" Double/TYPE
+    "boolean" Boolean/TYPE
+    "char" Character/TYPE
+    (Class/forName name)))
+
+(defn- resolve-param-classes
+  [^String joined]
+  (if (or (nil? joined) (zero? (.length joined)))
+    []
+    (mapv resolve-one-param-class (str/split joined #","))))
+
+(defn- coerce-arg-for-resolved-param
+  "ARG, as Nex represents it natively (a boxed Long for Integer, a boxed
+   Double for Real, ...), converted to the exact wrapper/primitive class
+   PARAM-CLASS declares. Reference-typed parameters need no conversion --
+   ARG is already the right runtime object (a java.lang.String, a compiled
+   Nex object instance implementing the target interface directly via
+   bytecode `implements`, an ArrayList/LinkedHashMap/LinkedHashSet, ...) and
+   reflection widens a reference argument to a wider declared parameter type
+   on its own. Narrowing a numeric argument is checked, not truncated --
+   raises a clear error rather than silently wrapping, matching how Nex's
+   own arithmetic already treats overflow (see emit.clj's checked negation)."
+  [^Class param-class arg]
+  (cond
+    (or (= param-class Integer/TYPE) (= param-class Integer))
+    (let [l (long arg)]
+      (when (or (> l Integer/MAX_VALUE) (< l Integer/MIN_VALUE))
+        (throw (ex-info (str "Value " l " does not fit in a Java int parameter")
+                        {:value l :target-type "int"})))
+      (int l))
+
+    (or (= param-class Short/TYPE) (= param-class Short))
+    (let [l (long arg)]
+      (when (or (> l Short/MAX_VALUE) (< l Short/MIN_VALUE))
+        (throw (ex-info (str "Value " l " does not fit in a Java short parameter")
+                        {:value l :target-type "short"})))
+      (short l))
+
+    (or (= param-class Byte/TYPE) (= param-class Byte))
+    (let [l (long arg)]
+      (when (or (> l Byte/MAX_VALUE) (< l Byte/MIN_VALUE))
+        (throw (ex-info (str "Value " l " does not fit in a Java byte parameter")
+                        {:value l :target-type "byte"})))
+      (byte l))
+
+    (or (= param-class Long/TYPE) (= param-class Long))
+    (long arg)
+
+    (or (= param-class Float/TYPE) (= param-class Float))
+    (float arg)
+
+    (or (= param-class Double/TYPE) (= param-class Double))
+    (double arg)
+
+    :else
+    arg))
+
+(defn java-call-method-resolved
+  [_state method-name receiver-class-name param-classes-joined target args]
+  (let [^Class owner (Class/forName ^String receiver-class-name)
+        param-classes (resolve-param-classes param-classes-joined)
+        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
+                                                (into-array Class param-classes))
+        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
+    (.invoke m target (to-array coerced))))
+
+(defn java-call-static-resolved
+  [_state class-name method-name param-classes-joined args]
+  (let [^Class owner (Class/forName ^String class-name)
+        param-classes (resolve-param-classes param-classes-joined)
+        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
+                                                (into-array Class param-classes))
+        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
+    (.invoke m nil (to-array coerced))))
+
+(defn java-create-object-resolved
+  [_state class-name param-classes-joined args]
+  (let [^Class klass (Class/forName ^String class-name)
+        param-classes (resolve-param-classes param-classes-joined)
+        ^java.lang.reflect.Constructor c (.getConstructor klass (into-array Class param-classes))
+        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
+    (.newInstance c (to-array coerced))))
+
+;; ---------------------------------------------------------------------------
+;; Varargs (see the "Varargs" section of nex.lower). clojure.lang.Reflector
+;; -- and even a resolved single-Method getMethod/invoke pair, above -- has
+;; no way to call a varargs method with loose trailing arguments: Java
+;; reflection requires the array to already be built and passed as the
+;; final actual argument. FIXED-CLASSES-JOINED/COMPONENT-CLASS-NAME are
+;; exactly what nex.lower's resolve-java-call-target already resolved at
+;; compile time: the fixed leading parameters (as for a plain resolved
+;; call), plus the single component type every trailing Nex argument
+;; collects against.
+
+(defn- array-class-of
+  "^Class for COMPONENT-CLASS[] -- java.lang.reflect.Array is the only
+   portable way to obtain this without a compile-time array-type literal,
+   since COMPONENT-CLASS is only known by name at this point."
+  ^Class [^Class component-class]
+  (.getClass (java.lang.reflect.Array/newInstance component-class 0)))
+
+(defn- build-varargs-array
+  [^Class component-class values]
+  (let [n (count values)
+        arr (java.lang.reflect.Array/newInstance component-class n)]
+    (dotimes [i n]
+      (java.lang.reflect.Array/set arr i (coerce-arg-for-resolved-param component-class (nth values i))))
+    arr))
+
+(defn- resolve-declared-varargs-method
+  "The real java.lang.reflect.Method/Constructor this call resolved to:
+   FIXED-CLASSES followed by the array type itself (COMPONENT-CLASS[]) --
+   getMethod/getConstructor need the *declared* signature, not the
+   per-argument component type resolve-java-call-target matched trailing
+   arguments against."
+  [fixed-classes component-class]
+  (conj (vec fixed-classes) (array-class-of component-class)))
+
+(defn java-call-method-resolved-varargs
+  [_state method-name receiver-class-name fixed-classes-joined component-class-name target args]
+  (let [^Class owner (Class/forName ^String receiver-class-name)
+        fixed-classes (resolve-param-classes fixed-classes-joined)
+        ^Class component-class (resolve-one-param-class component-class-name)
+        fixed-count (count fixed-classes)
+        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
+                                                (into-array Class (resolve-declared-varargs-method
+                                                                   fixed-classes component-class)))
+        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
+        varargs-array (build-varargs-array component-class (drop fixed-count args))]
+    (.invoke m target (to-array (conj (vec coerced-fixed) varargs-array)))))
+
+(defn java-call-static-resolved-varargs
+  [_state class-name method-name fixed-classes-joined component-class-name args]
+  (let [^Class owner (Class/forName ^String class-name)
+        fixed-classes (resolve-param-classes fixed-classes-joined)
+        ^Class component-class (resolve-one-param-class component-class-name)
+        fixed-count (count fixed-classes)
+        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
+                                                (into-array Class (resolve-declared-varargs-method
+                                                                   fixed-classes component-class)))
+        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
+        varargs-array (build-varargs-array component-class (drop fixed-count args))]
+    (.invoke m nil (to-array (conj (vec coerced-fixed) varargs-array)))))
+
+(defn java-create-object-resolved-varargs
+  [_state class-name fixed-classes-joined component-class-name args]
+  (let [^Class klass (Class/forName ^String class-name)
+        fixed-classes (resolve-param-classes fixed-classes-joined)
+        ^Class component-class (resolve-one-param-class component-class-name)
+        fixed-count (count fixed-classes)
+        ^java.lang.reflect.Constructor c (.getConstructor klass
+                                                          (into-array Class (resolve-declared-varargs-method
+                                                                             fixed-classes component-class)))
+        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
+        varargs-array (build-varargs-array component-class (drop fixed-count args))]
+    (.newInstance c (to-array (conj (vec coerced-fixed) varargs-array)))))
 
 (defn spawn-function-object
   [state fn-obj]
@@ -707,7 +891,11 @@
   [v]
   (cond
     (rt/nex-map? v)
-    (let [^java.util.Map m (java.util.HashMap.)]
+    ;; LinkedHashMap, not HashMap: `rt/nex-map-entries` yields the portable
+    ;; map's own insertion order (e.g. object-key order from json_parse), and
+    ;; a plain HashMap would scramble it to hash-bucket order the moment a
+    ;; portable map crosses into the compiled backend's representation.
+    (let [^java.util.Map m (java.util.LinkedHashMap.)]
       (doseq [[k val] (rt/nex-map-entries v)]
         (.put m (portable-value->compiled k) (portable-value->compiled val)))
       m)
@@ -820,6 +1008,39 @@
   nil)
 
 (defn- rebuild-interpreter-ctx
+  "Build a fresh interpreter context from this compiled REPL session's own
+   state — used whenever a call has to be dispatched back through the
+   interpreter (see invoke-interpreter-object-method/invoke-function-object
+   below).
+
+   KNOWN LIMITATION (accepted, not planned to be fixed — see
+   docs/md/SYNTAX.md's mutual-recursion section and definition-of-nex
+   &sect;4.5): the `(:classes ctx)` merge below intentionally includes
+   `@(:classes state)` so an interpreted closure can reach a function/class
+   defined in a LATER REPL input (that IS this merge's whole point) — but
+   `@(:classes state)` also holds nex.lower/prepare-program-for-closures'
+   own REWRITTEN synthetic closure classes (its Closure_Mut_Box handling for
+   mutually recursive `let`-bound closures — see box-forward-referenced-
+   closures there), registered under the SAME synthetic name
+   (\"AnonymousFunction_N\") the ORIGINAL, correctly-working interpreter
+   object was itself built from when its OWN defining input ran. If that
+   object's value later has to be re-dispatched through THIS rebuilt ctx —
+   which happens for any interpreter-native value, exactly the case here —
+   it runs under the REWRITTEN class-def instead of the one it was actually
+   built with, expecting a captured field to be boxed when the real captured
+   value never was: \"Method not found: value\"/\"call1\", even though the
+   interpreter handles the very same mutual recursion correctly natively,
+   with no box involved at all, when it isn't relayed through this bridge.
+   A single self-recursive closure, or a whole mutually-recursive group
+   invoked from within the SAME input that defined it, never hits this path
+   this way and is unaffected — only a later, separate input calling into a
+   mutually-recursive PAIR defined earlier does. Fixing it for real means
+   keeping the rewritten, box-aware class-defs available for compiling NEW
+   code that references such a closure, while never substituting them in
+   when re-executing an EXISTING interpreter-native object's own method —
+   which is a change to this shared bridge, not to the closure code alone,
+   so it's deliberately left as documented behavior rather than patched
+   here."
   [state]
   (let [ctx (interp/make-context)]
     (reset! (:bindings (:globals ctx)) {})
@@ -905,27 +1126,27 @@
     ;; compiled runtime cannot reflect user methods off an interpreter object, so
     ;; dispatch it back through the interpreter — mirroring invoke-function-object.
     (invoke-interpreter-object-method state target method-name args)
-  (let [^Class cls (.getClass target)
-        lowered-name (lowered-instance-method-name method-name (count args))]
-    (if-let [[effective-target ^Method method] (find-user-method target lowered-name)]
-      (invoke-reflective! method effective-target (object-array [state (object-array args)]))
-      (let [runtime-name (runtime-type-name state target)]
-        (if (and (= method-name "cursor")
-                 (empty? args)
-                 (string? runtime-name)
-                 (runtime-compatible-with? state runtime-name "Cursor"))
-          target
-          (let [builtin-result (try
-                                 (if (typeinfo/get-type-name target)
-                                   (bi/call-builtin-method nil target target method-name args)
-                                   ::not-found)
-                                 (catch Exception _ ::not-found))]
-            (if (not= builtin-result ::not-found)
-              builtin-result
-              (throw (ex-info (str "Method not found: " method-name)
-                              {:method method-name
-                               :arity (count args)
-                               :class (.getName cls)}))))))))))
+    (let [^Class cls (.getClass target)
+          lowered-name (lowered-instance-method-name method-name (count args))]
+      (if-let [[effective-target ^Method method] (find-user-method target lowered-name)]
+        (invoke-reflective! method effective-target (object-array [state (object-array args)]))
+        (let [runtime-name (runtime-type-name state target)]
+          (if (and (= method-name "cursor")
+                   (empty? args)
+                   (string? runtime-name)
+                   (runtime-compatible-with? state runtime-name "Cursor"))
+            target
+            (let [builtin-result (try
+                                   (if (typeinfo/get-type-name target)
+                                     (bi/call-builtin-method nil target target method-name args)
+                                     ::not-found)
+                                   (catch Exception _ ::not-found))]
+              (if (not= builtin-result ::not-found)
+                builtin-result
+                (throw (ex-info (str "Method not found: " method-name)
+                                {:method method-name
+                                 :arity (count args)
+                                 :class (.getName cls)}))))))))))
 
 (defn- get-user-field
   [target field-name]
@@ -1131,7 +1352,10 @@
                          (.getClass value)
                          (reify java.util.function.Function
                            (apply [_ _]
-                             (boolean (find-user-method value (lowered-instance-method-name synthetic-invariant-method-name 0))))))))
+                             (boolean
+                              (find-user-method
+                               value
+                               (lowered-instance-method-name synthetic-invariant-method-name 0))))))))
 
 (defn validate-object-state
   "Validate an object's class invariant after construction or a public call.
@@ -2050,7 +2274,7 @@
   [value]
   (cond
     (instance? java.util.Map value)
-    (java.util.HashMap. ^java.util.Map value)
+    (java.util.LinkedHashMap. ^java.util.Map value)
 
     (instance? java.util.Collection value)
     (java.util.ArrayList. ^java.util.Collection value)
@@ -2115,13 +2339,18 @@
   (rt/nex-set-remove! s v))
 
 (defn map-get
+  ;; A stored value can legitimately be nil (e.g. a Map[String, Any]
+  ;; round-tripped from JSON, where a `null` becomes a present key with a
+  ;; nil value) — checking `(nil? v)` alone can't tell that apart from an
+  ;; absent key, so it's `map-contains-key` that decides presence, not the
+  ;; retrieved value. Mirrors the interpreter's identical fix in
+  ;; nex.types.builtins's :Map "get".
   [state m key]
-  (let [v (if (rt/nex-map? m)
-            (rt/nex-map-get m key)
-            (hashmap-deep-get m key nil))]
-    (if (nil? v)
-      (bi/report-contract-violation bi/Precondition "key_must_exist" "has_key")
-      v)))
+  (if (map-contains-key m key)
+    (if (rt/nex-map? m)
+      (rt/nex-map-get m key)
+      (hashmap-deep-get m key nil))
+    (bi/report-contract-violation bi/Precondition "key_must_exist" "has_key")))
 
 (defn map-try-get
   [state m key default]
@@ -2328,6 +2557,30 @@
 
    "java-set-field"
    (fn [_state args] (java-set-field! (first args) (second args) (nth args 2)))
+
+   "java-call-method-resolved"
+   (fn [state args] (java-call-method-resolved state (nth args 0) (nth args 1) (nth args 2)
+                                               (nth args 3) (vec (drop 4 args))))
+
+   "java-call-static-resolved"
+   (fn [state args] (java-call-static-resolved state (nth args 0) (nth args 1) (nth args 2)
+                                               (vec (drop 3 args))))
+
+   "java-create-object-resolved"
+   (fn [state args] (java-create-object-resolved state (nth args 0) (nth args 1)
+                                                 (vec (drop 2 args))))
+
+   "java-call-method-resolved-varargs"
+   (fn [state args] (java-call-method-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
+                                                       (nth args 3) (nth args 4) (vec (drop 5 args))))
+
+   "java-call-static-resolved-varargs"
+   (fn [state args] (java-call-static-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
+                                                       (nth args 3) (vec (drop 4 args))))
+
+   "java-create-object-resolved-varargs"
+   (fn [state args] (java-create-object-resolved-varargs state (nth args 0) (nth args 1) (nth args 2)
+                                                         (vec (drop 3 args))))
 
    "spawn-function-object"
    (fn [state args] (spawn-function-object state (first args)))

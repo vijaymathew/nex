@@ -13,10 +13,11 @@
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap])
   (:import [clj_antlr ParseError]
-                   [java.lang.reflect Field]
-                   [java.nio.charset StandardCharsets]
-                   [java.util.concurrent CompletableFuture ExecutionException Executors TimeUnit TimeoutException CancellationException]
-                   [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
+           [java.lang.reflect Field]
+           [java.nio.charset StandardCharsets]
+           [java.util.concurrent CompletableFuture ExecutionException Executors
+            TimeUnit TimeoutException CancellationException]
+           [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
 (declare nex-format-value)
 (declare eval-node)
@@ -170,17 +171,17 @@
   [e]
   (let [raw (or (ex-message e) "")]
     (cond
-         (instance? java.lang.ArithmeticException e)
-         (cond
-           (re-find #"(?i)overflow" raw)                 "Arithmetic overflow"
-           (re-find #"(?i)divide by zero|/ by zero" raw) "Division by zero"
-           :else raw)
-         (instance? java.lang.NumberFormatException e)     "Not a valid number"
-         (instance? java.lang.ClassCastException e)        "Type error: a value was not of the expected type"
-         (instance? clojure.lang.ArityException e)         "Wrong number of arguments"
-         (instance? java.lang.NullPointerException e)      "Used a value that is void (nil)"
-         (instance? java.lang.IndexOutOfBoundsException e) (if (seq raw) raw "Index out of bounds")
-         :else (if (seq raw) raw (str e)))))
+      (instance? java.lang.ArithmeticException e)
+      (cond
+        (re-find #"(?i)overflow" raw)                 "Arithmetic overflow"
+        (re-find #"(?i)divide by zero|/ by zero" raw) "Division by zero"
+        :else raw)
+      (instance? java.lang.NumberFormatException e)     "Not a valid number"
+      (instance? java.lang.ClassCastException e)        "Type error: a value was not of the expected type"
+      (instance? clojure.lang.ArityException e)         "Wrong number of arguments"
+      (instance? java.lang.NullPointerException e)      "Used a value that is void (nil)"
+      (instance? java.lang.IndexOutOfBoundsException e) (if (seq raw) raw "Index out of bounds")
+      :else (if (seq raw) raw (str e)))))
 
 (def nex-console-print rt/nex-console-print)
 (def nex-console-println rt/nex-console-println)
@@ -199,24 +200,24 @@
 (def nex-process-command rt/nex-process-command)
 
 (defn- http-response-headers->nex-map
-     [headers]
-     (http/http-response-headers->nex-map headers))
+  [headers]
+  (http/http-response-headers->nex-map headers))
 
 (defn- make-http-response-object
-     [status body headers]
-     (http/make-http-response-object make-object status body headers))
+  [status body headers]
+  (http/make-http-response-object make-object status body headers))
 
 (defn- make-http-server-request-object
-     [method-name path-value body-text header-map route-params query-map]
-     (http/make-http-server-request-object make-object method-name path-value body-text header-map route-params query-map))
+  [method-name path-value body-text header-map route-params query-map]
+  (http/make-http-server-request-object make-object method-name path-value body-text header-map route-params query-map))
 
 (defn- make-http-server-default-response-object
-     []
-     (http/make-http-server-default-response-object make-object))
+  []
+  (http/make-http-server-default-response-object make-object))
 
 (defn- http-exchange-headers->nex-map
-     [headers]
-     (http/http-exchange-headers->nex-map headers))
+  [headers]
+  (http/http-exchange-headers->nex-map headers))
 
 (def java-http-request bi/java-http-request)
 
@@ -232,7 +233,6 @@
 (def http-server-response-headers http/http-server-response-headers)
 
 (def start-http-server! bi/start-http-server!)
-
 
 ;; Built-in IO / cursor / primitive predicates imported from nex.types.runtime
 (def nex-console? rt/nex-console?)
@@ -573,68 +573,68 @@
 (def java-call-method bi/java-call-method)
 
 (defn runtime-resolve-call-user-method
-     [ctx target method-name arg-values]
-     (let [resolver (requiring-resolve 'nex.compiler.jvm.runtime/call-compiled-user-method)
-           compiled-state-slot (:compiled-state ctx)
-           state (cond
-                   (instance? clojure.lang.IDeref compiled-state-slot) @compiled-state-slot
-                   (some? compiled-state-slot) compiled-state-slot
-                   :else nil)]
-       (resolver state target method-name arg-values)))
+  [ctx target method-name arg-values]
+  (let [resolver (requiring-resolve 'nex.compiler.jvm.runtime/call-compiled-user-method)
+        compiled-state-slot (:compiled-state ctx)
+        state (cond
+                (instance? clojure.lang.IDeref compiled-state-slot) @compiled-state-slot
+                (some? compiled-state-slot) compiled-state-slot
+                :else nil)]
+    (resolver state target method-name arg-values)))
 
 (defn- reflected-field
-     [^Class cls field-name]
-     (or (try
-           (.getField cls field-name)
-           (catch Exception _ nil))
-         (some (fn [^Field field]
-                 (when (= (.getName field) field-name)
-                   (.setAccessible field true)
-                   field))
-               (.getDeclaredFields cls))))
+  [^Class cls field-name]
+  (or (try
+        (.getField cls field-name)
+        (catch Exception _ nil))
+      (some (fn [^Field field]
+              (when (= (.getName field) field-name)
+                (.setAccessible field true)
+                field))
+            (.getDeclaredFields cls))))
 
 (defn- composition-fields
-     [^Class cls]
-     (->> (.getDeclaredFields cls)
-          (filter (fn [^Field field] (str/starts-with? (.getName field) "_parent_")))
-          (map (fn [^Field field]
-                 (.setAccessible field true)
-                 field))))
+  [^Class cls]
+  (->> (.getDeclaredFields cls)
+       (filter (fn [^Field field] (str/starts-with? (.getName field) "_parent_")))
+       (map (fn [^Field field]
+              (.setAccessible field true)
+              field))))
 
 (defn- deep-reflected-field
-     [value field-name]
-     (or (when-let [^Field field (reflected-field (.getClass value) field-name)]
-           [value field])
-         (some (fn [^Field parent-field]
-                 (when-let [parent-value (.get parent-field value)]
-                   (deep-reflected-field parent-value field-name)))
-               (composition-fields (.getClass value)))))
+  [value field-name]
+  (or (when-let [^Field field (reflected-field (.getClass value) field-name)]
+        [value field])
+      (some (fn [^Field parent-field]
+              (when-let [parent-value (.get parent-field value)]
+                (deep-reflected-field parent-value field-name)))
+            (composition-fields (.getClass value)))))
 
 (defn- compiled-object-field
-     [value field-name]
-     (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
-       [true (.get field owner)]))
+  [value field-name]
+  (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
+    [true (.get field owner)]))
 
 (defn- compiled-object-field-set!
-     [value field-name new-value]
-     (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
-       (.set field owner new-value)
-       true))
+  [value field-name new-value]
+  (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
+    (.set field owner new-value)
+    true))
 
 (defn- compiled-runtime-class-name
-     [ctx value]
-     (when value
-       (let [binary-name (.getName (.getClass value))
-             simple-name (last (str/split binary-name #"\."))
-             known-classes @(:classes ctx)]
-         (cond
-           (contains? known-classes simple-name)
-           simple-name
+  [ctx value]
+  (when value
+    (let [binary-name (.getName (.getClass value))
+          simple-name (last (str/split binary-name #"\."))
+          known-classes @(:classes ctx)]
+      (cond
+        (contains? known-classes simple-name)
+        simple-name
 
-           :else
-           (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
-             (when (contains? known-classes candidate)
-               candidate))))))
+        :else
+        (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
+          (when (contains? known-classes candidate)
+            candidate))))))
 
 (defn register-specialized-class
   "Register a specialized (type-realized) class in the context."
@@ -760,14 +760,14 @@
    (->NexObject class-name field-values closure-env)))
 
 (defonce ^:private concurrent-executor
-     (Executors/newCachedThreadPool))
+  (Executors/newCachedThreadPool))
 
 (defn shutdown-runtime!
-     "Release shared JVM runtime resources so short-lived tools and test runners can exit cleanly."
-     []
-     (.shutdown ^java.util.concurrent.ExecutorService concurrent-executor)
-     (when-not (.awaitTermination ^java.util.concurrent.ExecutorService concurrent-executor 100 TimeUnit/MILLISECONDS)
-       (.shutdownNow ^java.util.concurrent.ExecutorService concurrent-executor)))
+  "Release shared JVM runtime resources so short-lived tools and test runners can exit cleanly."
+  []
+  (.shutdown ^java.util.concurrent.ExecutorService concurrent-executor)
+  (when-not (.awaitTermination ^java.util.concurrent.ExecutorService concurrent-executor 100 TimeUnit/MILLISECONDS)
+    (.shutdownNow ^java.util.concurrent.ExecutorService concurrent-executor)))
 
 (defn nex-object?
   "Check if a value is a Nex object instance."
@@ -837,7 +837,7 @@
   [ctx body alias value]
   (let [body-ctx (if alias
                    (assoc ctx :current-env (doto (make-env (:current-env ctx))
-                                            (env-define alias value)))
+                                             (env-define alias value)))
                    ctx)]
     (last (map #(eval-node body-ctx %) body))))
 
@@ -1159,31 +1159,31 @@
          (throw (ex-info (str "Undefined constant: " (:name class-def) "." constant-name)
                          {:class-name (:name class-def)
                           :constant constant-name})))
-        (let [source-class (:declaring-class constant class-def)
+       (let [source-class (:declaring-class constant class-def)
               ;; :qualified-name over bare :name when present (register-qualified-classes!
               ;; stamps it onto every interned class's registration, alias or
               ;; not — docs/proposals/namespaces.md, Phase 3): two different
               ;; interned classes sharing a bare name would otherwise share
               ;; one cache entry for a same-named constant, each seeing
               ;; whichever one happened to evaluate and cache first.
-              cache-key [(or (:qualified-name source-class) (:name source-class)) constant-name]
-              cache (:constant-cache ctx)]
+             cache-key [(or (:qualified-name source-class) (:name source-class)) constant-name]
+             cache (:constant-cache ctx)]
           ;; A class constant denotes one canonical value for the whole run, so
           ;; evaluate its initializer once and intern the result. Without this an
           ;; object-valued constant would allocate a fresh instance per read
           ;; (`C.K == C.K` would be false); the compiled backend interns via a
           ;; write-once static field, and this matches it.
-          (if (and cache (contains? @cache cache-key))
-            (get @cache cache-key)
-            (let [const-env (make-env (:globals ctx))
-                  next-visiting (conj visiting visit-key)
-                  eval-ctx (assoc ctx
-                                  :current-env const-env
-                                  :current-class-name (:name source-class)
-                                  :constant-visiting next-visiting)
-                  value (eval-node eval-ctx (:value constant))]
-              (when cache (swap! cache assoc cache-key value))
-              value)))))))
+         (if (and cache (contains? @cache cache-key))
+           (get @cache cache-key)
+           (let [const-env (make-env (:globals ctx))
+                 next-visiting (conj visiting visit-key)
+                 eval-ctx (assoc ctx
+                                 :current-env const-env
+                                 :current-class-name (:name source-class)
+                                 :constant-visiting next-visiting)
+                 value (eval-node eval-ctx (:value constant))]
+             (when cache (swap! cache assoc cache-key value))
+             value)))))))
 
 (defn bind-class-constants!
   "Bind all constants visible from class-def into env. Constants of a class that is
@@ -1559,7 +1559,7 @@
       :else :literal)))
 
 (defn- intern-search-roots
-     "Return directories to search for project-local interned classes.
+  "Return directories to search for project-local interned classes.
       Prefer the currently loaded source file's directory when available, then
       fall back to the user's original working directory.
 
@@ -1578,62 +1578,62 @@
       `nex script.nex` run instead exports the project root via the
       NEX_USER_DIR env var (see bin/nex) and never sets the property, so
       both are checked here."
-     [ctx]
-     (let [source-dir (when-let [source (:debug-source ctx)]
-                        (let [f (clojure.java.io/file source)]
-                          (when (.isAbsolute f)
-                            (.getParentFile f))))
-           user-dir (when-let [udir (or (System/getProperty "nex.user.dir")
-                                        (System/getenv "NEX_USER_DIR"))]
-                      (clojure.java.io/file udir))
-           pwd (clojure.java.io/file ".")]
-       (->> [source-dir user-dir pwd]
-            (remove nil?)
-            distinct)))
+  [ctx]
+  (let [source-dir (when-let [source (:debug-source ctx)]
+                     (let [f (clojure.java.io/file source)]
+                       (when (.isAbsolute f)
+                         (.getParentFile f))))
+        user-dir (when-let [udir (or (System/getProperty "nex.user.dir")
+                                     (System/getenv "NEX_USER_DIR"))]
+                   (clojure.java.io/file udir))
+        pwd (clojure.java.io/file ".")]
+    (->> [source-dir user-dir pwd]
+         (remove nil?)
+         distinct)))
 
 (defn find-intern-file
-     "Search for an intern file in the specified locations.
+  "Search for an intern file in the specified locations.
       Returns the absolute path if found, otherwise throws an exception."
-     [ctx path class-name]
-     (let [filenames (intern-filenames class-name)
-           current-root (System/getenv "NEX_USER_DIR")
-           current-dir (map #(str (clojure.java.io/file current-root %)) filenames)
-           local-roots (intern-search-roots ctx)
-           local-direct (mapcat (fn [root]
-                                  (map #(str (clojure.java.io/file root %)) filenames))
-                                local-roots)
-           local-lib (when (seq path)
-                       (mapcat (fn [root]
-                                 (concat
-                                  (map #(str (clojure.java.io/file root "lib" path %)) filenames)
-                                  (map #(str (clojure.java.io/file root "lib" path "src" %)) filenames)))
-                               local-roots))
-           home-deps (if (seq path)
-                       (concat
-                        (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/" %) filenames)
-                        (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/src/" %) filenames))
-                       (concat
-                        (map #(str (System/getProperty "user.home") "/.nex/deps/" %) filenames)
-                        (map #(str (System/getProperty "user.home") "/.nex/deps/src/" %) filenames)))
+  [ctx path class-name]
+  (let [filenames (intern-filenames class-name)
+        current-root (System/getenv "NEX_USER_DIR")
+        current-dir (map #(str (clojure.java.io/file current-root %)) filenames)
+        local-roots (intern-search-roots ctx)
+        local-direct (mapcat (fn [root]
+                               (map #(str (clojure.java.io/file root %)) filenames))
+                             local-roots)
+        local-lib (when (seq path)
+                    (mapcat (fn [root]
+                              (concat
+                               (map #(str (clojure.java.io/file root "lib" path %)) filenames)
+                               (map #(str (clojure.java.io/file root "lib" path "src" %)) filenames)))
+                            local-roots))
+        home-deps (if (seq path)
+                    (concat
+                     (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/" %) filenames)
+                     (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/src/" %) filenames))
+                    (concat
+                     (map #(str (System/getProperty "user.home") "/.nex/deps/" %) filenames)
+                     (map #(str (System/getProperty "user.home") "/.nex/deps/src/" %) filenames)))
            ;; A path-qualified intern (e.g. `intern net/Http_Server`) names a
            ;; module under that path, so the path-qualified locations (./lib/<path>
            ;; and the dependency cache) must be searched BEFORE the unqualified
            ;; same-directory locations. Otherwise a source file that merely shares
            ;; the module's bare filename (e.g. examples/http_server.nex) would
            ;; shadow the real library module.
-           locations (vec (if (seq path)
-                            (concat local-lib home-deps current-dir local-direct)
-                            (concat current-dir local-direct home-deps)))
-           found (first (filter #(-> % clojure.java.io/file .exists) locations))]
-       (if found
-         found
-         (throw (ex-info (str "Cannot find intern file for "
-                              (if (seq path)
-                                (str path "/" class-name)
-                                class-name))
-                        {:path path
-                         :class-name class-name
-                         :searched-locations locations})))))
+        locations (vec (if (seq path)
+                         (concat local-lib home-deps current-dir local-direct)
+                         (concat current-dir local-direct home-deps)))
+        found (first (filter #(-> % clojure.java.io/file .exists) locations))]
+    (if found
+      found
+      (throw (ex-info (str "Cannot find intern file for "
+                           (if (seq path)
+                             (str path "/" class-name)
+                             class-name))
+                      {:path path
+                       :class-name class-name
+                       :searched-locations locations})))))
 
 (defn- parse-interned-file
   "Parse an interned file's own source, wrapping a ParseError with the
@@ -1657,13 +1657,13 @@
     (parser/ast source)
     (catch ParseError e
       (throw (ex-info (str "Syntax error in " file-path)
-                       {:nex/intern-parse-error true
-                        :file-path file-path
-                        :source source
-                        :parse-error e})))))
+                      {:nex/intern-parse-error true
+                       :file-path file-path
+                       :source source
+                       :parse-error e})))))
 
 (defn- register-qualified-classes!
-     "Also register each of file-ast's own directly-declared classes under its
+  "Also register each of file-ast's own directly-declared classes under its
       qualified key (path-joined with the bare name, e.g. \"finance.Account\"
       for `intern finance/Account\" — see qualify-name), mirroring
       resolve-interned*'s :qualified-name stamping for static analysis, but
@@ -1690,21 +1690,21 @@
       exactly what eval-class-constant's cache-key needs to avoid conflating
       two classes' constants under one cache entry just because they share a
       bare name (docs/proposals/namespaces.md, Phase 3)."
-     [ctx path direct-classes]
-     (doseq [{:keys [name] :as class-def} direct-classes]
-       (let [qn (qualify-name path name)]
-         (when (not= qn name)
-           (register-class ctx (assoc class-def :name qn :qualified-name qn))
-           (when (get @(:classes ctx) name)
-             (swap! (:classes ctx) update name assoc :qualified-name qn))))))
+  [ctx path direct-classes]
+  (doseq [{:keys [name] :as class-def} direct-classes]
+    (let [qn (qualify-name path name)]
+      (when (not= qn name)
+        (register-class ctx (assoc class-def :name qn :qualified-name qn))
+        (when (get @(:classes ctx) name)
+          (swap! (:classes ctx) update name assoc :qualified-name qn))))))
 
 (defn process-intern
-     "Load and interpret an external file, then register the class with the given alias."
-     [ctx {:keys [path class-name alias]}]
-     (let [file-path (find-intern-file ctx path class-name)
+  "Load and interpret an external file, then register the class with the given alias."
+  [ctx {:keys [path class-name alias]}]
+  (let [file-path (find-intern-file ctx path class-name)
            ;; Load and parse the external file
-           file-content (slurp file-path)
-           file-ast (parse-interned-file file-path file-content)
+        file-content (slurp file-path)
+        file-ast (parse-interned-file file-path file-content)
            ;; Interpret the file under ITS OWN :debug-source, not the
            ;; caller's — intern-search-roots (see its docstring) resolves a
            ;; NESTED intern relative to :debug-source's directory, so a bare
@@ -1719,20 +1719,20 @@
            ;; the static analysis path (resolve-interned*, used for type
            ;; checking and the compiled backend) already gets this right by
            ;; rebinding :debug-source the same way per recursive call.
-           _ (eval-node (assoc ctx :debug-source file-path) file-ast)
-           _ (register-qualified-classes! ctx path (:classes file-ast))
+        _ (eval-node (assoc ctx :debug-source file-path) file-ast)
+        _ (register-qualified-classes! ctx path (:classes file-ast))
            ;; Look up the class that was registered
-           registered-class (get @(:classes ctx) class-name)
+        registered-class (get @(:classes ctx) class-name)
            ;; Determine the name to use (alias or original)
-           intern-name (or alias class-name)]
-       (when-not registered-class
-         (throw (ex-info (str "Class " class-name " not found in file " file-path)
-                        {:file file-path :class-name class-name})))
+        intern-name (or alias class-name)]
+    (when-not registered-class
+      (throw (ex-info (str "Class " class-name " not found in file " file-path)
+                      {:file file-path :class-name class-name})))
        ;; Register the class under the new name (if alias is provided)
-       (when alias
-         (swap! (:classes ctx) assoc alias registered-class))
+    (when alias
+      (swap! (:classes ctx) assoc alias registered-class))
        ;; Return the class name that was registered
-       intern-name))
+    intern-name))
 
 (defn- qualify-name
   "Combine an intern path (`finance`, or a multi-segment `net/http`) with a
@@ -1770,7 +1770,7 @@
   (mapv #(assoc % :qualified-name (qualify-name path (:name %)) :source-file source-file) defs))
 
 (defn- resolve-interned*
-     "Traverse intern declarations recursively and collect the class
+  "Traverse intern declarations recursively and collect the class
       definitions, import declarations, free functions, and `declare type`
       aliases they bring into scope for static analysis. Returns
       {:classes [...] :imports [...] :functions [...] :type-aliases [...]
@@ -1802,32 +1802,32 @@
       it exists so a later ambiguity-detection pass has a stable identity to
       key on, without changing any behavior today (see
       docs/proposals/namespaces.md, Phase 1)."
-     [source-id program seen-files]
-     (letfn [(resolve* [current-source current-program seen]
-               (let [ctx (assoc (make-context) :debug-source current-source)]
-                 (reduce
-                  (fn [{:keys [classes imports functions type-aliases seen]} {:keys [path class-name alias]}]
-                    (let [file-path (find-intern-file ctx path class-name)
-                          canonical (.getCanonicalPath (clojure.java.io/file file-path))]
-                      (if (contains? seen canonical)
-                        {:classes classes :imports imports :functions functions
-                         :type-aliases type-aliases :seen seen}
-                        (let [file-ast (parse-interned-file file-path (slurp file-path))
-                              nested (resolve* canonical file-ast (conj seen canonical))
+  [source-id program seen-files]
+  (letfn [(resolve* [current-source current-program seen]
+            (let [ctx (assoc (make-context) :debug-source current-source)]
+              (reduce
+               (fn [{:keys [classes imports functions type-aliases seen]} {:keys [path class-name alias]}]
+                 (let [file-path (find-intern-file ctx path class-name)
+                       canonical (.getCanonicalPath (clojure.java.io/file file-path))]
+                   (if (contains? seen canonical)
+                     {:classes classes :imports imports :functions functions
+                      :type-aliases type-aliases :seen seen}
+                     (let [file-ast (parse-interned-file file-path (slurp file-path))
+                           nested (resolve* canonical file-ast (conj seen canonical))
                               ;; Classes/functions declared directly in this file are
                               ;; qualified by the path *this* intern statement used to
                               ;; reach it; classes/functions coming from `nested` were
                               ;; already qualified, by their own path, when the inner
                               ;; recursive call resolved them.
-                              direct-classes (stamp-qualified-names path canonical (:classes file-ast))
-                              all-file-classes (concat direct-classes (:classes nested))
-                              all-file-imports (concat (:imports file-ast) (:imports nested))
+                           direct-classes (stamp-qualified-names path canonical (:classes file-ast))
+                           all-file-classes (concat direct-classes (:classes nested))
+                           all-file-imports (concat (:imports file-ast) (:imports nested))
                               ;; Free functions defined in an interned module are
                               ;; brought into scope too, so a library can export
                               ;; helper/combinator functions, not just classes.
-                              direct-functions (stamp-qualified-names path canonical (:functions file-ast))
-                              all-file-functions (concat direct-functions (:functions nested))
-                              all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
+                           direct-functions (stamp-qualified-names path canonical (:functions file-ast))
+                           all-file-functions (concat direct-functions (:functions nested))
+                           all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
                               ;; Points at the *qualified* name (qualify-name path
                               ;; class-name), not the bare class-name — an unpathed
                               ;; intern makes this a no-op (qualify-name returns the
@@ -1845,49 +1845,49 @@
                               ;; above), ambiguous bare name or not, so resolving
                               ;; through it instead is strictly safer, not just a fix
                               ;; for the colliding case.
-                              alias-type-alias (when (and alias
-                                                          (some #(= (:name %) class-name) all-file-classes))
-                                                 [{:name alias :type-expr (qualify-name path class-name)}])]
-                          {:classes (into classes all-file-classes)
-                           :imports (into imports all-file-imports)
-                           :functions (into functions all-file-functions)
-                           :type-aliases (into type-aliases (concat all-file-type-aliases alias-type-alias))
-                           :seen (:seen nested)}))))
-                  {:classes [] :imports [] :functions [] :type-aliases [] :seen seen}
-                  (:interns current-program))))]
-       (resolve* source-id program seen-files)))
+                           alias-type-alias (when (and alias
+                                                       (some #(= (:name %) class-name) all-file-classes))
+                                              [{:name alias :type-expr (qualify-name path class-name)}])]
+                       {:classes (into classes all-file-classes)
+                        :imports (into imports all-file-imports)
+                        :functions (into functions all-file-functions)
+                        :type-aliases (into type-aliases (concat all-file-type-aliases alias-type-alias))
+                        :seen (:seen nested)}))))
+               {:classes [] :imports [] :functions [] :type-aliases [] :seen seen}
+               (:interns current-program))))]
+    (resolve* source-id program seen-files)))
 
 (defn resolve-interned-classes
-     "Resolve intern declarations to the class ASTs they bring into scope for static analysis.
+  "Resolve intern declarations to the class ASTs they bring into scope for static analysis.
       Returns a flat sequence of class definitions, including recursively interned classes.
       Aliased interns are represented as an additional class entry with the alias name."
-     ([source-id program]
-      (resolve-interned-classes source-id program #{}))
-     ([source-id program seen-files]
-      (:classes (resolve-interned* source-id program seen-files))))
+  ([source-id program]
+   (resolve-interned-classes source-id program #{}))
+  ([source-id program seen-files]
+   (:classes (resolve-interned* source-id program seen-files))))
 
 (defn resolve-interned-imports
-     "Resolve intern declarations to the import declarations they bring into scope
+  "Resolve intern declarations to the import declarations they bring into scope
       for static analysis (recursively, deduplicated). These let the typechecker
       see the host-class imports declared inside interned modules."
-     ([source-id program]
-      (resolve-interned-imports source-id program #{}))
-     ([source-id program seen-files]
-      (distinct (:imports (resolve-interned* source-id program seen-files)))))
+  ([source-id program]
+   (resolve-interned-imports source-id program #{}))
+  ([source-id program seen-files]
+   (distinct (:imports (resolve-interned* source-id program seen-files)))))
 
 (defn resolve-interned-functions
-     "Resolve intern declarations to the free-function definitions they bring into
+  "Resolve intern declarations to the free-function definitions they bring into
       scope (recursively), so the typechecker and compiled backend can see a
       library's exported functions. The runtime interpreter registers them when it
       evaluates the interned module, so this is only needed for static analysis
       and compilation."
-     ([source-id program]
-      (resolve-interned-functions source-id program #{}))
-     ([source-id program seen-files]
-      (:functions (resolve-interned* source-id program seen-files))))
+  ([source-id program]
+   (resolve-interned-functions source-id program #{}))
+  ([source-id program seen-files]
+   (:functions (resolve-interned* source-id program seen-files))))
 
 (defn resolve-interned-type-aliases
-     "Resolve intern declarations to the `declare type` aliases (including
+  "Resolve intern declarations to the `declare type` aliases (including
       refinement types) they bring into scope for static analysis
       (recursively). check-program only ever reads :type-aliases off the root
       program's own parse, so a refinement type declared in an interned file
@@ -1896,10 +1896,10 @@
       alias itself when it evaluates the interned module (an ordinary
       top-level statement), so this is only needed for static analysis and
       compilation, exactly like resolve-interned-functions."
-     ([source-id program]
-      (resolve-interned-type-aliases source-id program #{}))
-     ([source-id program seen-files]
-      (:type-aliases (resolve-interned* source-id program seen-files))))
+  ([source-id program]
+   (resolve-interned-type-aliases source-id program #{}))
+  ([source-id program seen-files]
+   (:type-aliases (resolve-interned* source-id program seen-files))))
 
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes functions statements calls duplicate-functions
@@ -2003,8 +2003,21 @@
                              (nex-map? coll)   (do (nex-map-put coll idx value) true)
                              :else false))
 
+                         ;; `target` must actually be a value-bearing expression
+                         ;; here, not a bare class name: `Origin.POINT` (a
+                         ;; class-constant access) parses to this exact shape
+                         ;; (`{:target "Origin" :method "POINT" :has-parens
+                         ;; false}`), and `eval-target` on the string "Origin"
+                         ;; is a plain `env-lookup` — which throws "Undefined
+                         ;; variable: Origin", since a class name is never an
+                         ;; env binding. A class constant isn't a writable
+                         ;; slot anyway, so skip straight to the alias-based
+                         ;; `:else` fallback below rather than resolving
+                         ;; `target` at all.
                          (and (false? has-parens)
-                              target)
+                              target
+                              (not (and (string? target)
+                                        (lookup-class-if-exists ctx target))))
                          (let [parent (eval-target target)]
                            (if (and (nex-object? parent)
                                     (contains? (:fields parent) (keyword method)))
@@ -2093,34 +2106,34 @@
             _ (env-define method-env "result" default-result)
             _ (env-define method-env "this" current-obj)
             new-ctx (-> ctx
-                       (assoc :current-env method-env)
-                       (assoc :current-object current-obj)
-                       (assoc :current-target (:current-target ctx))
-                       (assoc :current-class-name parent-class-name)
-                       (assoc :current-method-name method)
-                       (update :debug-stack (fnil conj [])
-                               {:class parent-class-name
-                                :method method
-                                :env method-env
-                                :arg-names (set (map :name (or params [])))
-                                :field-names (set (map :name all-fields))
-                                :source (:debug-source ctx)})
-                       (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
+                        (assoc :current-env method-env)
+                        (assoc :current-object current-obj)
+                        (assoc :current-target (:current-target ctx))
+                        (assoc :current-class-name parent-class-name)
+                        (assoc :current-method-name method)
+                        (update :debug-stack (fnil conj [])
+                                {:class parent-class-name
+                                 :method method
+                                 :env method-env
+                                 :arg-names (set (map :name (or params [])))
+                                 :field-names (set (map :name all-fields))
+                                 :source (:debug-source ctx)})
+                        (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
             _ (if-let [rescue (:rescue callable)]
                 (eval-body-with-rescue new-ctx (:body callable) rescue)
                 (doseq [stmt (:body callable)]
                   (eval-node new-ctx stmt)))
             updated-fields (reduce (fn [m field]
-                                    (let [field-name (:name field)
-                                          field-key (keyword field-name)
-                                          val (try
-                                                (env-lookup method-env field-name)
-                                                (catch Exception _ ::not-found))]
-                                      (if (not= val ::not-found)
-                                        (assoc m field-key val)
-                                        m)))
-                                  (:fields current-obj)
-                                  all-fields)
+                                     (let [field-name (:name field)
+                                           field-key (keyword field-name)
+                                           val (try
+                                                 (env-lookup method-env field-name)
+                                                 (catch Exception _ ::not-found))]
+                                       (if (not= val ::not-found)
+                                         (assoc m field-key val)
+                                         m)))
+                                   (:fields current-obj)
+                                   all-fields)
             updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
             result (let [res (try
                                (env-lookup method-env "result")
@@ -2187,8 +2200,8 @@
                 ;; one. `env-lookup` alone just threw "Undefined variable" for
                 ;; every such call target, even one an external call (e.g.
                 ;; `obj.label`) would have dispatched correctly.
-                (eval-node ctx {:type :identifier :name target-name})
-                (eval-node ctx target))))]
+                  (eval-node ctx {:type :identifier :name target-name})
+                  (eval-node ctx target))))]
     {:target-name target-name
      :super-target? super-target?
      :super-parent-name super-parent-name
@@ -2201,16 +2214,51 @@
   "Java static method or field access inside a `with \"java\"` block."
   [ctx target-name method has-parens arg-values]
   (let [klass (or (resolve-imported-java-class ctx target-name)
-                          (try (Class/forName (str "java.lang." target-name)) (catch Exception _ nil))
-                          (throw (ex-info (str "Undefined Java class: " target-name) {:class-name target-name})))]
-            (if has-parens
+                  (try (Class/forName (str "java.lang." target-name)) (catch Exception _ nil))
+                  (throw (ex-info (str "Undefined Java class: " target-name) {:class-name target-name})))]
+    (if has-parens
               ;; `method` here also covers ClassName.new(args) — Clojure's
               ;; Reflector special-cases the literal name "new" as
               ;; constructor invocation — so arguments need the same
               ;; Java-interface Proxy-wrapping java-create-object applies.
-              (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values)))
-              (let [^java.lang.reflect.Field field (.getField klass method)]
-                (.get field nil)))))
+      (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values)))
+      (let [^java.lang.reflect.Field field (.getField klass method)]
+        (.get field nil)))))
+
+(defn- read-back-method-fields
+  "Collect the object's fields back out of METHOD-ENV after the body ran. A
+   field shadowed by a same-named parameter is kept at its original value
+   unless the body explicitly wrote it via `this.field := ...` (tracked in
+   MODIFIED-FIELDS)."
+  [method-env fields all-fields param-names modified-fields]
+  (reduce (fn [m field]
+            (let [field-name (:name field)
+                  field-key (keyword field-name)]
+              (if (and (contains? param-names field-name)
+                       (not (contains? @modified-fields field-name)))
+                m
+                (let [val (try
+                            (env-lookup method-env field-name)
+                            (catch Exception _ ::not-found))]
+                  (if (not= val ::not-found)
+                    (assoc m field-key val)
+                    m)))))
+          fields
+          all-fields))
+
+(defn- method-result-value
+  "The routine's `result` value after the body ran — honouring an explicit
+   `result :=` flag, else the last value `result` holds, else nil."
+  [method-env]
+  (let [result-flag (try
+                      (env-lookup method-env "__result_assigned__")
+                      (catch Exception _ ::not-found))]
+    (if (= result-flag "result")
+      (env-lookup method-env "result")
+      (let [res (try
+                  (env-lookup method-env "result")
+                  (catch Exception _ ::not-found))]
+        (when (not= res ::not-found) res)))))
 
 (defn- invoke-found-nex-method
   "Invoke a method that resolved via `lookup-method-with-inheritance` on an
@@ -2221,19 +2269,19 @@
    exception doesn't leave `target` holding a half-written object."
   [ctx target target-name class-def method method-lookup obj has-parens arg-values]
   (let [method-def (:method method-lookup)
-      params (:params method-def)]
+        params (:params method-def)]
     (ensure-callable-defined! method-def)
     ;; Bug fix: disallow paren-less calls to methods that require arguments
     (when (and (false? has-parens) (seq params))
       (throw (ex-info (str method " requires arguments")
                       {:method method :params (mapv :name params)})))
     (let [source-class (:source-class method-lookup)
-        all-fields (get-all-fields ctx class-def)
-        effective-require (:effective-require method-lookup)
-        effective-ensure (:effective-ensure method-lookup)
-        has-postconditions? (seq effective-ensure)
-        old-values (when has-postconditions? (snapshot-old-field-values (:fields obj)))
-        source-obj (or (-> obj meta write-back-source-key) obj)]
+          all-fields (get-all-fields ctx class-def)
+          effective-require (:effective-require method-lookup)
+          effective-ensure (:effective-ensure method-lookup)
+          has-postconditions? (seq effective-ensure)
+          old-values (when has-postconditions? (snapshot-old-field-values (:fields obj)))
+          source-obj (or (-> obj meta write-back-source-key) obj)]
       (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
             param-names (set (map :name params))
             ;; Define fields first, then params — so params shadow fields
@@ -2246,61 +2294,36 @@
             modified-fields (atom #{})
             return-type (:return-type method-def)
             default-result (if return-type
-                            (get-default-field-value return-type)
-                            nil)
+                             (get-default-field-value return-type)
+                             nil)
             _ (env-define method-env "result" default-result)
             _ (env-define method-env "this" obj)
             new-ctx (-> ctx
-                       (assoc :current-env method-env)
-                       (assoc :current-object obj)
-                       (assoc :current-target target-name)
-                       (assoc :current-class-name (:name source-class))
-                       (assoc :current-method-name method)
-                       (assoc :old-values old-values)
-                       (assoc :modified-fields modified-fields)
-                       (update :debug-stack (fnil conj [])
-                               {:class (:name source-class)
-                                :method method
-                                :env method-env
-                                :arg-names (set (map :name (or params [])))
-                                :field-names (set (map name (keys (:fields obj))))
-                                :source (:debug-source ctx)})
-                       (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
+                        (assoc :current-env method-env)
+                        (assoc :current-object obj)
+                        (assoc :current-target target-name)
+                        (assoc :current-class-name (:name source-class))
+                        (assoc :current-method-name method)
+                        (assoc :old-values old-values)
+                        (assoc :modified-fields modified-fields)
+                        (update :debug-stack (fnil conj [])
+                                {:class (:name source-class)
+                                 :method method
+                                 :env method-env
+                                 :arg-names (set (map :name (or params [])))
+                                 :field-names (set (map name (keys (:fields obj))))
+                                 :source (:debug-source ctx)})
+                        (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
             _ (when-let [require-assertions effective-require]
                 (check-assertions new-ctx require-assertions Precondition))
             _ (if-let [rescue (:rescue method-def)]
                 (eval-body-with-rescue new-ctx (:body method-def) rescue)
                 (doseq [stmt (:body method-def)]
                   (eval-node new-ctx stmt)))
-            updated-fields (reduce (fn [m field]
-                                    (let [field-name (:name field)
-                                          field-key (keyword field-name)]
-                                      ;; Skip fields shadowed by params unless explicitly modified via this.field :=
-                                      (if (and (contains? param-names field-name)
-                                               (not (contains? @modified-fields field-name)))
-                                        m
-                                        (let [val (try
-                                                    (env-lookup method-env field-name)
-                                                    (catch Exception _ ::not-found))]
-                                          (if (not= val ::not-found)
-                                            (assoc m field-key val)
-                                            m)))))
-                                  (:fields obj)
-                                  all-fields)
+            updated-fields (read-back-method-fields method-env (:fields obj) all-fields
+                                                    param-names modified-fields)
             updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
-            result-flag (try
-                          (env-lookup method-env "__result_assigned__")
-                          (catch Exception _ ::not-found))
-            result (cond
-                     (= result-flag "result")
-                     (env-lookup method-env "result")
-                     :else
-                     (let [res (try
-                                 (env-lookup method-env "result")
-                                 (catch Exception _ ::not-found))]
-                       (if (not= res ::not-found)
-                         res
-                         nil)))]
+            result (method-result-value method-env)]
         (try
           (when-let [ensure-assertions effective-ensure]
             (check-assertions new-ctx ensure-assertions Postcondition))
@@ -2349,29 +2372,29 @@
 (defn- invoke-compiled-object-call
   [ctx obj method has-parens arg-values]
   (let [compiled-class-name (compiled-runtime-class-name ctx obj)
-                compiled-class-def (when compiled-class-name
-                                     (lookup-class-if-exists ctx compiled-class-name))]
-            (if compiled-class-def
-              (if (and (empty? arg-values)
-                       (false? has-parens))
-                (if-let [_ (lookup-field-with-inheritance ctx
-                                                          compiled-class-def
-                                                          method
-                                                          (:current-class-name ctx))]
-                  (if-let [[_ field-value] (compiled-object-field obj method)]
-                    field-value
-                    (throw (ex-info (str "Undefined field: " method)
-                                    {:field method
-                                     :class-name compiled-class-name})))
-                  (if-let [_ (lookup-field-with-inheritance-any-visibility ctx
-                                                                           compiled-class-def
-                                                                           method)]
-                    (throw (ex-info (str "Undefined field: " method)
-                                    {:field method
-                                     :class-name compiled-class-name}))
-                    (runtime-resolve-call-user-method ctx obj method arg-values)))
-                (runtime-resolve-call-user-method ctx obj method arg-values))
-              (java-call-method ctx obj method arg-values))))
+        compiled-class-def (when compiled-class-name
+                             (lookup-class-if-exists ctx compiled-class-name))]
+    (if compiled-class-def
+      (if (and (empty? arg-values)
+               (false? has-parens))
+        (if-let [_ (lookup-field-with-inheritance ctx
+                                                  compiled-class-def
+                                                  method
+                                                  (:current-class-name ctx))]
+          (if-let [[_ field-value] (compiled-object-field obj method)]
+            field-value
+            (throw (ex-info (str "Undefined field: " method)
+                            {:field method
+                             :class-name compiled-class-name})))
+          (if-let [_ (lookup-field-with-inheritance-any-visibility ctx
+                                                                   compiled-class-def
+                                                                   method)]
+            (throw (ex-info (str "Undefined field: " method)
+                            {:field method
+                             :class-name compiled-class-name}))
+            (runtime-resolve-call-user-method ctx obj method arg-values)))
+        (runtime-resolve-call-user-method ctx obj method arg-values))
+      (java-call-method ctx obj method arg-values))))
 
 (defn- eval-call-with-target
   [ctx {:keys [target method has-parens]} arg-values]
@@ -2433,7 +2456,33 @@
       (invoke-nex-object-call ctx target target-name method obj has-parens arg-values)
 
       (get-type-name obj)
-      (call-builtin-method ctx (or target-name target) obj method arg-values)
+      ;; `get-type-name` classifies by JVM class alone (`nex-array?` etc. are
+      ;; literally `instance? java.util.ArrayList`), so a *real* Java
+      ;; ArrayList/HashMap/LinkedHashSet obtained via `with "java"` interop
+      ;; (`create ArrayList`, an interned collection returned from a Java
+      ;; API, ...) is indistinguishable at this point from Nex's own
+      ;; Array/Map/Set, which reuse those same JVM classes as their runtime
+      ;; representation. A method name Nex's builtin type doesn't define —
+      ;; `size` (Nex arrays use `length`), `containsKey`, `remove(Object)`,
+      ;; `isEmpty`, ... — used to hard-crash here with "Method not found on
+      ;; type", even though the real Java object plainly has it. Inside a
+      ;; `with "java"` block, fall back to real reflection before giving up.
+      ;; This does NOT fix the inverse: a method name that collides with a
+      ;; same-named Nex builtin method (`add`, `get`, `contains`, ...) still
+      ;; silently dispatches to the Nex builtin's semantics rather than the
+      ;; real Java method — those happen to agree for the common collection
+      ;; operations, but are not guaranteed to. A real fix needs these two
+      ;; representations kept distinguishable at the value level; out of
+      ;; scope here.
+      (if (:with-java? ctx)
+        (try
+          (call-builtin-method ctx (or target-name target) obj method arg-values)
+          (catch clojure.lang.ExceptionInfo e
+            (if (and (= method (:method (ex-data e)))
+                     (str/starts-with? (.getMessage e) "Method not found on type"))
+              (java-call-method ctx obj method arg-values)
+              (throw e))))
+        (call-builtin-method ctx (or target-name target) obj method arg-values))
 
       :else
       (invoke-compiled-object-call ctx obj method has-parens arg-values))))
@@ -2483,43 +2532,43 @@
                                                             (:current-class-name ctx))]
           (if method-lookup
             (let [all-fields (get-all-fields ctx class-def)
-              current-env (:current-env ctx)
-              updated-fields (reduce (fn [m field]
-                                      (let [field-name (:name field)
-                                            field-key (keyword field-name)
-                                            val (try
-                                                  (env-lookup current-env field-name)
-                                                  (catch Exception _ ::not-found))]
-                                        (if (not= val ::not-found)
-                                          (assoc m field-key val)
-                                          m)))
-                                    (:fields current-obj)
-                                    all-fields)
-              updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
-              target-name (:current-target ctx)]
-            (if (string? target-name)
+                  current-env (:current-env ctx)
+                  updated-fields (reduce (fn [m field]
+                                           (let [field-name (:name field)
+                                                 field-key (keyword field-name)
+                                                 val (try
+                                                       (env-lookup current-env field-name)
+                                                       (catch Exception _ ::not-found))]
+                                             (if (not= val ::not-found)
+                                               (assoc m field-key val)
+                                               m)))
+                                         (:fields current-obj)
+                                         all-fields)
+                  updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
+                  target-name (:current-target ctx)]
+              (if (string? target-name)
               ;; The enclosing method was invoked on a plain variable, so route
               ;; the self-call back through that variable to propagate any
               ;; field mutations to the caller.
-              (let [_ (env-set! (-> ctx :current-env :parent) target-name updated-obj)
-                    result (eval-node ctx {:type :call
-                                           :target target-name
-                                           :method method
-                                           :args args})
-                    called-obj (env-lookup (-> ctx :current-env :parent) target-name)
-                    _ (when called-obj
-                        (doseq [[field-name field-val] (:fields called-obj)]
-                          (env-set! current-env (name field-name) field-val)))]
-                result)
+                (let [_ (env-set! (-> ctx :current-env :parent) target-name updated-obj)
+                      result (eval-node ctx {:type :call
+                                             :target target-name
+                                             :method method
+                                             :args args})
+                      called-obj (env-lookup (-> ctx :current-env :parent) target-name)
+                      _ (when called-obj
+                          (doseq [[field-name field-val] (:fields called-obj)]
+                            (env-set! current-env (name field-name) field-val)))]
+                  result)
               ;; The enclosing method was invoked on a non-variable target
               ;; (e.g. `a.b.m()`), so there is no caller variable to route
               ;; through. Dispatch straight to the current object; rewriting
               ;; with a nil target would re-enter this branch forever
               ;; (StackOverflow).
-              (eval-node ctx {:type :call
-                              :target {:type :literal :value updated-obj}
-                              :method method
-                              :args args})))
+                (eval-node ctx {:type :call
+                                :target {:type :literal :value updated-obj}
+                                :method method
+                                :args args})))
             (if-let [builtin (get builtins method)]
               (apply builtin ctx arg-values)
               (throw (ex-info (str "Undefined method: " method)
@@ -2544,7 +2593,6 @@
       (if target
         (eval-call-with-target ctx expr arg-values)
         (eval-call-without-target ctx method args has-parens arg-values)))))
-
 
 (defmethod eval-node :this
   [ctx _]
@@ -2605,7 +2653,7 @@
         compiled-class-name (when-not (nex-object? target-obj)
                               (compiled-runtime-class-name ctx target-obj))
         compiled-class-def (when compiled-class-name
-                            (lookup-class-if-exists ctx compiled-class-name))]
+                             (lookup-class-if-exists ctx compiled-class-name))]
     (if compiled-class-def
       (let [compiled-field-def (lookup-field-with-inheritance ctx compiled-class-def field caller-class-name)]
         (when-not compiled-field-def
@@ -2731,7 +2779,7 @@
             (throw e)
             ;; Real exception — run rescue
             (let [exc-value (if (and (instance? clojure.lang.ExceptionInfo e)
-                                    (= :nex-exception (:type (ex-data e))))
+                                     (= :nex-exception (:type (ex-data e))))
                               (:value (ex-data e))
                               (nex-error-message e))
                   rescue-env (make-env (:current-env ctx))
@@ -3092,16 +3140,16 @@
   [ctx class-def]
   (let [;; Get fields from parents first
         parent-fields (when-let [parents (get-parent-classes ctx class-def)]
-                       (mapcat (fn [parent-info]
-                                (get-all-fields ctx (:class-def parent-info)))
-                              parents))
+                        (mapcat (fn [parent-info]
+                                  (get-all-fields ctx (:class-def parent-info)))
+                                parents))
         ;; Get fields from current class
         current-fields (->> (:body class-def)
-                           (mapcat (fn [section]
-                                    (when (= (:type section) :feature-section)
-                                      (:members section))))
-                           (filter #(and (= (:type %) :field)
-                                         (not (:constant? %)))))]
+                            (mapcat (fn [section]
+                                      (when (= (:type section) :feature-section)
+                                        (:members section))))
+                            (filter #(and (= (:type %) :field)
+                                          (not (:constant? %)))))]
     (concat parent-fields current-fields)))
 
 (defn lookup-constructor
@@ -3260,50 +3308,105 @@
    "Channel"          create-channel-builtin
    "Set"              create-set-builtin})
 
+(defn- resolve-effective-class-name
+  "The registry key `create ClassName[T, ...]` resolves to: the already-
+   specialized class if present, otherwise a freshly specialized class-def
+   registered under this reference's own spec-name (which may differ from the
+   template's when reached through an alias or qualified name)."
+  [ctx class-name generic-args]
+  (if (seq generic-args)
+    (let [spec-name (specialized-class-name class-name generic-args)]
+      (if (lookup-specialized-class ctx spec-name)
+        spec-name
+        (let [template (get @(:classes ctx) class-name)]
+          (when-not template
+            (throw (ex-info (str "Undefined template class: " class-name)
+                            {:class-name class-name})))
+          (when-not (:generic-params template)
+            (throw (ex-info (str "Class " class-name " is not generic")
+                            {:class-name class-name})))
+          (when (not= (count (:generic-params template)) (count generic-args))
+            (throw (ex-info (str "Type argument count mismatch for " class-name
+                                 ": expected " (count (:generic-params template))
+                                 ", got " (count generic-args))
+                            {:class-name class-name
+                             :expected (count (:generic-params template))
+                             :got (count generic-args)})))
+          ;; specialize-class computes its own internal spec-name from the
+          ;; TEMPLATE's own :name (:template-name, e.g. "Box") — unrelated to
+          ;; how THIS call reached it. Through an alias (`intern .../Box as
+          ;; BA`) that produces "Box[Integer]" while `spec-name` here is
+          ;; "BA[Integer]": a real class-def gets registered, but under a
+          ;; different key than the caller is about to look up, so object
+          ;; creation falls through to the Java-interop fallback and fails
+          ;; with "Undefined class". Re-stamping :name to `spec-name` makes
+          ;; the registry key match what callers through THIS reference ask
+          ;; for; :template-name is untouched.
+          (let [specialized (assoc (specialize-class template generic-args) :name spec-name)]
+            (register-specialized-class ctx specialized)
+            spec-name))))
+    class-name))
+
+(defn- run-user-constructor
+  "Execute CLASS-DEF's CONSTRUCTOR against ARGS in a fresh constructor env
+   (fields bound first, then params so they shadow), checking pre/post
+   conditions, and return the resulting field map."
+  [ctx class-def class-name effective-class-name constructor args initial-field-map all-fields]
+  (let [ctor-def (lookup-constructor-with-inheritance ctx class-def constructor)]
+    (when-not ctor-def
+      (throw (ex-info (str "Constructor not found: " class-name "." constructor)
+                      {:class-name class-name :constructor constructor})))
+    (let [ctor-env (make-env (:current-env ctx))
+          _ (doseq [[field-name field-val] initial-field-map]
+              (env-define ctor-env (name field-name) field-val))
+          _ (bind-class-constants! ctx ctor-env class-def)
+          ;; Params bound after fields so a param shadows a same-named field.
+          params (:params ctor-def)
+          arg-values (mapv #(eval-node ctx %) args)
+          _ (when params
+              (doseq [[param arg-val] (map vector params arg-values)]
+                (env-define ctor-env (:name param) arg-val)))
+          temp-obj (make-object effective-class-name initial-field-map)
+          source-class-name (:name (:source-class ctor-def))
+          new-ctx (-> ctx
+                      (assoc :current-env ctor-env)
+                      (assoc :current-object temp-obj)
+                      (assoc :current-class-name source-class-name)
+                      (assoc :current-method-name constructor)
+                      (assoc :in-constructor? true)
+                      (update :debug-stack (fnil conj [])
+                              {:class source-class-name
+                               :method (or constructor "make")
+                               :env ctor-env
+                               :arg-names (set (map :name (or params [])))
+                               :field-names (set (map name (keys initial-field-map)))
+                               :source (:debug-source ctx)})
+                      (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
+          _ (when-let [require-assertions (:require ctor-def)]
+              (check-assertions new-ctx require-assertions Precondition))
+          _ (if-let [rescue (:rescue ctor-def)]
+              (eval-body-with-rescue new-ctx (:body ctor-def) rescue)
+              (doseq [stmt (:body ctor-def)]
+                (eval-node new-ctx stmt)))
+          ;; Read the (possibly mutated) field values back out of the env.
+          updated-fields (reduce (fn [m field]
+                                   (let [field-name (:name field)
+                                         field-key (keyword field-name)
+                                         val (try
+                                               (env-lookup ctor-env field-name)
+                                               (catch Exception _ ::not-found))]
+                                     (if (not= val ::not-found)
+                                       (assoc m field-key val)
+                                       m)))
+                                 initial-field-map
+                                 all-fields)
+          _ (when-let [ensure-assertions (:ensure ctor-def)]
+              (check-assertions new-ctx ensure-assertions Postcondition))]
+      updated-fields)))
+
 (defn- create-user-object
   [ctx class-name generic-args constructor args]
-  ;; Resolve effective class name (handle generic specialization)
-  (let [effective-class-name
-        (if (seq generic-args)
-          (let [spec-name (specialized-class-name class-name generic-args)]
-            (if (lookup-specialized-class ctx spec-name)
-              spec-name
-              ;; Need to create the specialization
-              (let [template (get @(:classes ctx) class-name)]
-                (when-not template
-                  (throw (ex-info (str "Undefined template class: " class-name)
-                                  {:class-name class-name})))
-                (when-not (:generic-params template)
-                  (throw (ex-info (str "Class " class-name " is not generic")
-                                  {:class-name class-name})))
-                (when (not= (count (:generic-params template)) (count generic-args))
-                  (throw (ex-info (str "Type argument count mismatch for " class-name
-                                       ": expected " (count (:generic-params template))
-                                       ", got " (count generic-args))
-                                  {:class-name class-name
-                                   :expected (count (:generic-params template))
-                                   :got (count generic-args)})))
-                ;; specialize-class computes its own internal spec-name from
-                ;; the TEMPLATE's own :name (:template-name below, e.g. "Box")
-                ;; — the class-def's identity as far as its own body is
-                ;; concerned, unrelated to how THIS call reached it. When
-                ;; class-name is an alias (`intern .../Box as BA`) or a
-                ;; qualified reference, that produces "Box[Integer]" while
-                ;; `spec-name` here (computed from class-name, e.g. "BA") is
-                ;; "BA[Integer]" — a real class-def gets registered, but under
-                ;; a DIFFERENT key than the one register-specialized-class's
-                ;; caller (this same function, just below) is about to look
-                ;; it up by, so the immediately-following object-creation
-                ;; falls through to the Java-interop fallback and fails with
-                ;; "Undefined class". Re-stamping :name to `spec-name` here
-                ;; makes the registry key match what every caller through
-                ;; THIS reference actually asks for; :template-name (the
-                ;; template's own identity) is untouched, so anything that
-                ;; needs to know what this was specialized *from* still can.
-                (let [specialized (assoc (specialize-class template generic-args) :name spec-name)]
-                  (register-specialized-class ctx specialized)
-                  spec-name))))
-          class-name)
+  (let [effective-class-name (resolve-effective-class-name ctx class-name generic-args)
         class-def (lookup-class-if-exists ctx effective-class-name)
         _ (when (and class-def (:deferred? class-def))
             (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
@@ -3321,62 +3424,8 @@
         ;; If a constructor is specified, call it and update fields
         final-field-map (when class-def
                           (if constructor
-                            (let [ctor-def (lookup-constructor-with-inheritance ctx class-def constructor)]
-                              (when-not ctor-def
-                                (throw (ex-info (str "Constructor not found: " class-name "." constructor)
-                                                {:class-name class-name :constructor constructor})))
-                              ;; Create environment for constructor execution
-                              (let [ctor-env (make-env (:current-env ctx))
-                                    ;; Bind fields as local variables FIRST
-                                    _ (doseq [[field-name field-val] initial-field-map]
-                                        (env-define ctor-env (name field-name) field-val))
-                                    _ (bind-class-constants! ctx ctor-env class-def)
-                                    ;; Bind parameters SECOND (so they shadow fields with same name)
-                                    params (:params ctor-def)
-                                    arg-values (mapv #(eval-node ctx %) args)
-                                    _ (when params
-                                        (doseq [[param arg-val] (map vector params arg-values)]
-                                          (env-define ctor-env (:name param) arg-val)))
-                                    temp-obj (make-object effective-class-name initial-field-map)
-                                    source-class-name (:name (:source-class ctor-def))
-                                    new-ctx (-> ctx
-                                               (assoc :current-env ctor-env)
-                                               (assoc :current-object temp-obj)
-                                               (assoc :current-class-name source-class-name)
-                                               (assoc :current-method-name constructor)
-                                               (assoc :in-constructor? true)
-                                               (update :debug-stack (fnil conj [])
-                                                       {:class source-class-name
-                                                        :method (or constructor "make")
-                                                        :env ctor-env
-                                                        :arg-names (set (map :name (or params [])))
-                                                        :field-names (set (map name (keys initial-field-map)))
-                                                        :source (:debug-source ctx)})
-                                               (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
-                                    ;; Check pre-conditions
-                                    _ (when-let [require-assertions (:require ctor-def)]
-                                        (check-assertions new-ctx require-assertions Precondition))
-                                    ;; Execute constructor body
-                                    _ (if-let [rescue (:rescue ctor-def)]
-                                        (eval-body-with-rescue new-ctx (:body ctor-def) rescue)
-                                        (doseq [stmt (:body ctor-def)]
-                                          (eval-node new-ctx stmt)))
-                                    ;; Update object fields from modified environment
-                                 updated-fields (reduce (fn [m field]
-                                                         (let [field-name (:name field)
-                                                               field-key (keyword field-name)
-                                                               val (try
-                                                                     (env-lookup ctor-env field-name)
-                                                                     (catch Exception _ ::not-found))]
-                                                           (if (not= val ::not-found)
-                                                             (assoc m field-key val)
-                                                             m)))
-                                                       initial-field-map
-                                                       all-fields)
-                                    ;; Check post-conditions
-                                    _ (when-let [ensure-assertions (:ensure ctor-def)]
-                                        (check-assertions new-ctx ensure-assertions Postcondition))]
-                                updated-fields))
+                            (run-user-constructor ctx class-def class-name effective-class-name
+                                                  constructor args initial-field-map all-fields)
                             ;; No constructor: use default initialization
                             initial-field-map))
         ;; Create the final object
@@ -3402,25 +3451,24 @@
     (handler ctx constructor args)
     (create-user-object ctx class-name generic-args constructor args)))
 
-
 (defmethod eval-node :spawn
   [ctx {:keys [body]}]
   (make-task
-       (CompletableFuture/supplyAsync
-        (reify java.util.function.Supplier
-          (get [_]
-            (let [spawn-env (make-env (:current-env ctx))
-                  _ (env-define spawn-env "result" nil)
-                  spawn-ctx (assoc ctx :current-env spawn-env)]
-              (doseq [stmt body]
-                (eval-node spawn-ctx stmt))
-              (let [result-flag (try
-                                  (env-lookup spawn-env "__result_assigned__")
-                                  (catch Exception _ ::not-found))]
-                (if (= result-flag "result")
-                  (env-lookup spawn-env "result")
-                  nil)))))
-        concurrent-executor)))
+   (CompletableFuture/supplyAsync
+    (reify java.util.function.Supplier
+      (get [_]
+        (let [spawn-env (make-env (:current-env ctx))
+              _ (env-define spawn-env "result" nil)
+              spawn-ctx (assoc ctx :current-env spawn-env)]
+          (doseq [stmt body]
+            (eval-node spawn-ctx stmt))
+          (let [result-flag (try
+                              (env-lookup spawn-env "__result_assigned__")
+                              (catch Exception _ ::not-found))]
+            (if (= result-flag "result")
+              (env-lookup spawn-env "result")
+              nil)))))
+    concurrent-executor)))
 
 (defmethod eval-node :literal
   [_ctx node]
@@ -3440,7 +3488,7 @@
         (if (contains? old-values (keyword var-name))
           (get old-values (keyword var-name))
           (throw (ex-info (str "'old' can only be used on object fields in postconditions")
-                         {:variable var-name}))))
+                          {:variable var-name}))))
       ;; More complex expression: evaluate it in an environment with old values
       (let [old-env (make-env (:current-env ctx))
             _ (doseq [[field-name field-val] old-values]
@@ -3448,7 +3496,7 @@
             old-ctx (assoc ctx :current-env old-env)]
         (eval-node old-ctx expr)))
     (throw (ex-info "'old' can only be used in postconditions"
-                   {:expr expr}))))
+                    {:expr expr}))))
 
 (defmethod eval-node :with
   [ctx {:keys [target body]}]
@@ -3486,7 +3534,6 @@
    been written as it ran (see `add-output`); this only collects it."
   [ast]
   (interpret-and-get-output ast))
-
 
 ;; ---------------------------------------------------------------------------
 ;; Engine-hook registration: give the extracted builtin library

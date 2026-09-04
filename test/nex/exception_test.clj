@@ -105,9 +105,9 @@ end")
 (deftest raise-without-rescue-test
   (testing "raise without rescue propagates exception"
     (is (thrown-with-msg?
-          clojure.lang.ExceptionInfo
-          #"error msg"
-          (execute-method "class Test
+         clojure.lang.ExceptionInfo
+         #"error msg"
+         (execute-method "class Test
   feature
     demo() do
       raise \"error msg\"
@@ -127,7 +127,7 @@ end")))))
     end
 end")]
       (is (= ["\"caught me\""] (:output result)))
-      (is (nil? (:exception result)))))) 
+      (is (nil? (:exception result))))))
 
 (deftest rescue-with-retry-test
   (testing "rescue with retry re-executes body"
@@ -191,9 +191,9 @@ end"
 (deftest raise-integer-value-test
   (testing "raise with non-string value"
     (is (thrown-with-msg?
-          clojure.lang.ExceptionInfo
-          #"42"
-          (execute-method "class Test
+         clojure.lang.ExceptionInfo
+         #"42"
+         (execute-method "class Test
   feature
     demo() do
       raise 42

@@ -98,7 +98,7 @@ end"
 
 (deftest set-from-array-top-level-expression
   (testing "bare constructor expressions work at the REPL"
-      (let [ctx (repl/init-repl-context)
+    (let [ctx (repl/init-repl-context)
           output (binding [repl/*type-checking-enabled* (atom false)
                            repl/*repl-var-types* (atom {})]
                    (with-out-str

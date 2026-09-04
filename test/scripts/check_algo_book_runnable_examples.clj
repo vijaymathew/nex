@@ -189,7 +189,7 @@
                                           vec)
                       prefix-blocks (->> blocks
                                          (filter #(< (:start %) end))
-                                          vec)]
+                                         vec)]
                   {:heading heading
                    :blocks section-blocks
                    :prefix-blocks prefix-blocks})))

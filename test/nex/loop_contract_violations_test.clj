@@ -33,9 +33,9 @@
     end
 end"]
       (is (thrown-with-msg?
-            Exception
-            #"Loop invariant violation"
-            (execute-first-method-body code))))))
+           Exception
+           #"Loop invariant violation"
+           (execute-first-method-body code))))))
 
 (deftest loop-variant-must-decrease-test
   (testing "Loop variant must strictly decrease"
@@ -54,9 +54,9 @@ end"]
     end
 end"]
       (is (thrown-with-msg?
-            Exception
-            #"Loop variant must decrease"
-            (execute-first-method-body code))))))
+           Exception
+           #"Loop variant must decrease"
+           (execute-first-method-body code))))))
 
 (deftest valid-loop-contracts-pass-test
   (testing "Valid loop with invariant+variant runs successfully"
