@@ -6611,7 +6611,15 @@
           []
           (vec (keep (fn [g]
                        (let [pos (get global-pos g)]
-                         (when (or (nil? pos) (>= pos watermark))
+                         ;; `pos = watermark` can only mean g's own `let` IS the
+                         ;; watermark statement (each top-level statement has a
+                         ;; unique index) — e.g. `let Nil_List := create
+                         ;; Cons.make(...)`, where the statement both defines
+                         ;; the global and is the first to enter user code. That
+                         ;; self-entry can't observe g before g's own assignment
+                         ;; completes, so only a position strictly after the
+                         ;; watermark is a real violation.
+                         (when (or (nil? pos) (> pos watermark))
                            (type-error
                             (str "Global '" g "' is read by a function or class body but is "
                                  "not initialized before the first call into user code"

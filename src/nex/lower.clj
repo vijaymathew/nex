@@ -5914,8 +5914,23 @@
   (let [target-ir (lower-expression env target-expr)
         base-type (base-type-name target-type)
         nex-type (infer-type env expr)
-        jvm-type (resolve-jvm-type env nex-type)]
-    (ir/call-runtime-node (str "builtin-method:" base-type ":" (:method expr))
+        jvm-type (resolve-jvm-type env nex-type)
+        method (:method expr)
+        ;; A receiver whose *static* type is literally `Any` (e.g. a field or
+        ;; parameter declared `Any`) reaches `to_string`/`equals` here too —
+        ;; the runtime *value* behind it may still be a compiled user object
+        ;; overriding either. "builtin-method:Any:*" wires to the stateless
+        ;; `bi/call-builtin-method`, whose :Any defaults only understand the
+        ;; interpreter's object maps and silently misread a compiled object
+        ;; (to_string renders `#object[...]`, equals compares identity) — see
+        ;; the "any:to_string"/"any:equals" runtime dispatch comment for the
+        ;; same fix already applied to the known-user-class-without-override
+        ;; case (`lower-instance-user-method-call`'s Any-protocol fallback).
+        ;; Reuse that same state-aware path here instead.
+        helper (if (and (= base-type "Any") (contains? #{"to_string" "equals"} method))
+                 (str "any:" method)
+                 (str "builtin-method:" base-type ":" method))]
+    (ir/call-runtime-node helper
                           (into [target-ir] arg-irs)
                           nex-type
                           jvm-type)))
