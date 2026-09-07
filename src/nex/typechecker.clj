@@ -3408,9 +3408,34 @@
             ;; would slip past check-expression's Void-as-value guard.
         (or (resolve-generic-type (:return-type method-sig) type-map) "Void")))))
 
+(defn- anonymous-function-class-name?
+  "Whether NAME is a synthesized closure-wrapper class — `fn(...) do ... end`
+   literals compile to `AnonymousFunction_N` (nex.walker's next-fn-id
+   counter; see nex.repl's identically-named check). Distinguishes a
+   genuine named `function`/method body (part of the readable-globals
+   \"static world\", §7) from a closure literal's own body, which stays on
+   ordinary sequential-let/shadow-guarded resolution instead — see
+   check-bare-name-call's global fallback for why that distinction matters."
+  [^String name]
+  (.startsWith name "AnonymousFunction_"))
+
 (defn- check-bare-name-call
   "A bare `f(args)` that is neither a builtin nor a known callable variable:
-   an implicit-`this` method call inside a class body, else an error."
+   an implicit-`this` method call inside a class body, a readable top-level
+   global holding a callable (§7 — e.g. `let sort: Sort := selection` called
+   as `sort(a)` from inside a function body, where `sort` never reaches
+   :vars), else an error.
+
+   The global fallback is withheld inside a closure literal's own body
+   (anonymous-function-class-name?): a `let`-bound closure sibling calling
+   another by name is resolved by register-closure-let-signatures!'s own
+   pre-registration into :vars, which deliberately excludes a name shadowed
+   elsewhere (see shadowed-closure-let-names) so a genuine forward
+   reference is cleanly rejected rather than silently misresolved. Since
+   the closure's OWN name is also, incidentally, a top-level global,
+   falling further back to env-lookup-global here would defeat that
+   exclusion — resolving the very reference the shadow guard exists to
+   reject, just through a different, unguarded path."
   [env method args]
   (if-let [current-class (env-lookup-var env "__current_class__")]
     (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
@@ -3430,16 +3455,21 @@
                               {:error (type-error
                                        (str "Expected " (:type param) ", got " arg-type))})))))
         (or (:return-type method-sig) "Void"))
+      (if-let [global-type (and (not (anonymous-function-class-name? current-class))
+                                (expand-type-aliases env (env-lookup-global env method)))]
+        (check-function-object-call env method args global-type)
+        (do
+          (doseq [arg args] (check-expression env arg))
+          (throw (ex-info (str "Undefined function or method: " method)
+                          {:error (type-error
+                                   (str "Undefined function or method: " method))})))))
+    (if-let [global-type (expand-type-aliases env (env-lookup-global env method))]
+      (check-function-object-call env method args global-type)
       (do
         (doseq [arg args] (check-expression env arg))
-        (throw (ex-info (str "Undefined function or method: " method)
+        (throw (ex-info (str "Undefined function: " method)
                         {:error (type-error
-                                 (str "Undefined function or method: " method))}))))
-    (do
-      (doseq [arg args] (check-expression env arg))
-      (throw (ex-info (str "Undefined function: " method)
-                      {:error (type-error
-                               (str "Undefined function: " method))})))))
+                                 (str "Undefined function: " method))}))))))
 
 (defn check-call
   "Check the type of a method call"

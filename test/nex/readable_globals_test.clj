@@ -109,6 +109,63 @@ print(f(40))")
     (is (= ["41"] (run-compiled param-shadows-global)))
     (is (= ["41"] (run-interpreted param-shadows-global)))))
 
+(def global-callable-called-by-bare-name
+  "declare type Adder = Function(Integer): Integer
+
+let add_one: Adder := fn(x: Integer): Integer do result := x + 1 end
+
+function apply_it(): Integer
+do
+  result := add_one(41)
+end
+
+print(apply_it())")
+
+(deftest free-function-calls-a-global-callable-by-bare-name
+  (testing "a free function calls a top-level global holding a Function
+            value, by bare name — `add_one(41)`, not `add_one.call1(41)`.
+            Regression test: check-bare-name-call (typechecker) and
+            function-object-binding-type (lowering) both only ever
+            consulted lexical :vars, never the readable-globals table, so
+            a bare call to a global callable failed type-checking with
+            \"Undefined function or method\" (typechecker fix) and, once
+            that was patched, still crashed the compiled backend with
+            \"Used a value that is void (nil)\" (the JVM lowering silently
+            resolving the callee to a null REPL-function-name lookup)."
+    (is (= ["42"] (run-compiled global-callable-called-by-bare-name)))
+    (is (= ["42"] (run-interpreted global-callable-called-by-bare-name)))))
+
+;; --- watermark self-reference -------------------------------------------------
+
+(def global-whose-own-initializer-is-the-watermark
+  "class Cell
+feature x: Integer
+create make(v: Integer) do x := v end
+end
+
+let root := create Cell.make(0)
+
+function describe(): Integer
+do
+  result := root.x
+end
+
+print(describe())")
+
+(deftest global-whose-own-let-is-the-watermark-is-not-self-rejected
+  (testing "a global's own defining `let` can itself be the statement that
+            first enters user code (`create Cell.make(...)`), making its
+            position equal to the watermark — that must not be flagged as
+            reading itself before initialization. Regression test: the
+            watermark check used `>=` instead of `>` when comparing a
+            global's def-position against the watermark, so `global-pos ==
+            watermark` (only possible for the global's own statement, since
+            positions are unique) was wrongly rejected."
+    (let [{:keys [success errors]} (type-check global-whose-own-initializer-is-the-watermark)]
+      (is (true? success) (pr-str errors)))
+    (is (= ["0"] (run-compiled global-whose-own-initializer-is-the-watermark)))
+    (is (= ["0"] (run-interpreted global-whose-own-initializer-is-the-watermark)))))
+
 ;; --- static rejections -------------------------------------------------------
 
 (def global-after-entry-point

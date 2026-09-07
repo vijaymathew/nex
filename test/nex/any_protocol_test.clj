@@ -106,6 +106,76 @@ let b: Base := create Sub.make(7)
 print(b.to_string)
 print(b)")))))
 
+(deftest to-string-on-any-typed-field-honours-user-override
+  (testing "a receiver whose *static* type is literally Any (a field/param
+            declared `Any`, not just a superclass lacking the method) still
+            dispatches to the runtime value's own `to_string`/`equals` — not
+            the stateless :Any builtin default. Regression test: on the
+            compiled backend this lowered to \"builtin-method:Any:to_string\",
+            wired to a stateless wrapper that can't recognize a compiled user
+            object and fell back to Object.toString() (`#object[...]`) /
+            identity equals, instead of the state-aware `any:to_string`/
+            `any:equals` runtime dispatch already used for the analogous
+            known-user-class-without-override case."
+    (is (= ["Box(Box(42))" "\"Box(Box(42))\""]
+           (both "class Box
+feature
+  v: Any
+create
+  make(v: Any)
+  do
+    this.v := v
+  end
+feature
+  to_string: String
+  do
+    result := \"Box(\" + v.to_string + \")\"
+  end
+end
+let inner := create Box.make(42)
+let outer := create Box.make(inner)
+print(outer)
+print(outer.to_string)")))))
+
+(deftest equals-on-any-typed-field-honours-user-override
+  (testing "`equals` on an Any-typed receiver dispatches to the runtime
+            value's own override, mirroring to-string-on-any-typed-field-
+            honours-user-override above."
+    (is (= ["true" "false"]
+           (both "class Point
+feature
+  x: Integer
+create
+  make(v: Integer)
+  do
+    x := v
+  end
+feature
+  equals(other: Any): Boolean
+  do
+    if convert other to p: Point then
+      result := x = p.x
+    else
+      result := false
+    end
+  end
+  hash: Integer do result := x end
+end
+class Holder
+feature
+  v: Any
+create
+  make(v: Any)
+  do
+    this.v := v
+  end
+end
+let a := create Holder.make(create Point.make(1))
+let b := create Holder.make(create Point.make(1))
+let c := create Holder.make(create Point.make(2))
+print(a.v.equals(b.v))
+print(a.v.equals(c.v))")))))
+
 (deftest enum-member-has-any-to-string
   ;; An enum union member now gets an auto-generated `to_string` returning
   ;; its own declared name (a member is a canonical named constant — see
