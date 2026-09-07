@@ -2492,7 +2492,14 @@
   [env name]
   (resolve-type-alias
    (or (get-in (:locals env) [name :nex-type])
-       (get (:var-types env) name))))
+       (get (:var-types env) name)
+       ;; A readable top-level global (§7) holding a callable, invoked as a
+       ;; bare `f(args)` from inside a function/class body (e.g. `let sort:
+       ;; Sort := selection` ... `sort(a)`). Without this, function-object-
+       ;; call? never recognizes the binding as callable, and the call falls
+       ;; through to lower-call-without-target's REPL-fn fallback, which
+       ;; silently lowers to a null read.
+       (get (:globals env) name))))
 
 (defn- function-object-call?
   [env name arity]
