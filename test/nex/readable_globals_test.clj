@@ -249,6 +249,44 @@ print(describe())")
     (is (= ["0"] (run-compiled global-whose-own-initializer-is-the-watermark)))
     (is (= ["0"] (run-interpreted global-whose-own-initializer-is-the-watermark)))))
 
+;; --- watermark is per-statement reachability, not a single whole-program cutoff
+
+(def sequential-construction-then-later-read
+  "class Box
+create
+  make(v: Integer) do this.v := v end
+feature v: Integer
+end
+
+let a := create Box.make(1)
+let b := create Box.make(2)
+
+function sum(): Integer
+do
+  result := a.v + b.v
+end
+
+print(sum())")
+
+(deftest later-global-built-via-create-is-not-rejected-by-an-earlier-unrelated-create
+  (testing "two top-level globals each built by `create SomeClass.make(...)`,
+            where the later one (b) is read inside a function body. Regression
+            test: the old watermark was a single whole-program cutoff — the
+            position of the FIRST top-level statement that entered user code
+            at all, `create Box.make(1)` here — so any later-defined global
+            used anywhere in the static world was rejected outright, even
+            though Box's constructor body can't possibly read it. The
+            reachability-based check instead asks whether the specific thing
+            invoked (Box's constructor, which reads nothing) can transitively
+            reach a read of `b` — it can't, so this is legal, matching
+            delivery_main.nex's `let console := ...; let map := create
+            Terrain_Map.make(...); let robot := create Robot.with_map(map)`
+            shape from the bug report this fix addresses."
+    (let [{:keys [success errors]} (type-check sequential-construction-then-later-read)]
+      (is (true? success) (pr-str errors)))
+    (is (= ["3"] (run-compiled sequential-construction-then-later-read)))
+    (is (= ["3"] (run-interpreted sequential-construction-then-later-read)))))
+
 ;; --- static rejections -------------------------------------------------------
 
 (def global-after-entry-point
@@ -263,8 +301,53 @@ let g := 5")
   (testing "a global read by a body but bound after the first user call is rejected"
     (let [{:keys [success errors]} (type-check global-after-entry-point)]
       (is (false? success))
-      (is (some #(str/includes? (tc/format-type-error %) "not initialized before the first call")
+      (is (some #(str/includes? (tc/format-type-error %) "not initialized before this call")
                 errors)))))
+
+(def global-read-via-transitive-free-function-chain
+  "function inner(): Integer
+do
+  result := g
+end
+function outer(): Integer
+do
+  result := inner()
+end
+outer()
+let g := 5")
+
+(deftest watermark-rejects-a-global-read-two-calls-deep
+  (testing "the reachability closure is transitive: outer() itself never
+            reads g, but it calls inner(), which does — the watermark check
+            must still catch this, not just a body's own direct reads."
+    (let [{:keys [success errors]} (type-check global-read-via-transitive-free-function-chain)]
+      (is (false? success))
+      (is (some #(str/includes? (tc/format-type-error %) "Global 'g'") errors)))))
+
+(def global-read-via-a-method-call
+  "class Reader
+create
+  make do end
+feature
+  read_it(): Integer
+  do
+    result := g
+  end
+end
+
+let r := create Reader.make
+print(r.read_it())
+let g := 5")
+
+(deftest watermark-rejects-a-global-read-through-a-method-call
+  (testing "the call-graph reachability closure also follows `.method(...)`
+            calls (resolved conservatively by name+arity, since the
+            receiver's static type isn't tracked at this pre-typecheck
+            pass), not just bare free-function calls — r.read_it() runs
+            before g's own `let`, and read_it's body reads g."
+    (let [{:keys [success errors]} (type-check global-read-via-a-method-call)]
+      (is (false? success))
+      (is (some #(str/includes? (tc/format-type-error %) "Global 'g'") errors)))))
 
 (def assign-to-global
   "let g := 5
