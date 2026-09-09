@@ -3,7 +3,13 @@
    the body of any free function or class routine (§7.4 of the Definition). The
    read is lexical: a body resolves a free name to the global, never to a caller's
    local. A def-before-use watermark rejects programs that could read a global
-   before its `let` has run. Covers both backends plus the two static rejections."
+   before its `let` has run. Covers both backends plus the two static rejections.
+
+   Also covers the analogous case for top-level `function`s (also readable
+   everywhere, §7): a class's own method must take priority, by name+arity,
+   over a same-named global function reachable through that same readable-
+   globals mechanism, with a same-named-but-different-arity global still
+   reachable as a fallback when no own method matches."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [nex.parser :as p]
@@ -134,6 +140,83 @@ print(apply_it())")
             resolving the callee to a null REPL-function-name lookup)."
     (is (= ["42"] (run-compiled global-callable-called-by-bare-name)))
     (is (= ["42"] (run-interpreted global-callable-called-by-bare-name)))))
+
+;; --- a class's own method vs. a same-named global function -------------------
+
+(def own-method-shadows-mismatched-arity-global
+  "function greet(): String
+do
+  result := \"global\"
+end
+
+class Greeter
+create
+  make do end
+feature
+  hello(a, b: String): String
+  do
+    result := greet(a, b)
+  end
+
+  greet(a, b: String): String
+  do
+    result := \"own:\" + a + b
+  end
+end
+
+let g := create Greeter.make
+print(g.hello(\"x\", \"y\"))")
+
+(deftest class-own-method-shadows-a-same-named-global-of-different-arity
+  (testing "a bare self-call inside a class method resolves to the class's
+            OWN method of that name+arity, not a same-named top-level
+            `function` of a different arity, even though the global is
+            readable from inside the class body (§7). Regression test: both
+            backends resolved any env-bound global before ever checking
+            whether the enclosing class had its own matching method —
+            compiled: check-call tried env-lookup-var (which finds the
+            0-arity global's synthesized Function class) before
+            check-bare-name-call's self-method lookup, so
+            check-function-object-call rejected the call with \"Function
+            `greet` takes 0 arguments, 2 given\"; interpreter:
+            eval-call-without-target's env-lookup found the same global
+            Function object first and dispatched `call2` on it, which
+            doesn't exist on a 0-arity Function (\"Method not found:
+            call2\")."
+    (is (= ["\"own:xy\""] (run-compiled own-method-shadows-mismatched-arity-global)))
+    (is (= ["\"own:xy\""] (run-interpreted own-method-shadows-mismatched-arity-global)))))
+
+(def falls-back-to-global-when-no-own-method-matches-arity
+  "function greet(x: Integer): Integer
+do
+  result := x + 100
+end
+
+class Calc
+create
+  make do end
+feature
+  add_hundred(x: Integer): Integer
+  do
+    result := greet(x)
+  end
+
+  greet(a, b: Integer): Integer
+  do
+    result := a + b
+  end
+end
+
+let c := create Calc.make
+print(c.add_hundred(5))")
+
+(deftest class-falls-back-to-global-function-when-no-own-method-matches-call-arity
+  (testing "the class-own-method-shadows-global priority above is arity-scoped,
+            not name-scoped: a bare call whose arg count matches the global
+            (1) but not the class's own same-named method (2) still falls
+            back to the global function, exactly as before this fix."
+    (is (= ["105"] (run-compiled falls-back-to-global-when-no-own-method-matches-arity)))
+    (is (= ["105"] (run-interpreted falls-back-to-global-when-no-own-method-matches-arity)))))
 
 ;; --- watermark self-reference -------------------------------------------------
 

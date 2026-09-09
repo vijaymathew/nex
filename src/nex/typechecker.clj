@@ -3495,9 +3495,24 @@
         (throw (ambiguous-function-reference-error method qualified-names)))
       (if-let [checker (get builtin-call-checkers method)]
         (checker env args)
-        (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
-          (check-function-object-call env method args var-type)
-          (check-bare-name-call env method args))))))
+        (let [current-class (env-lookup-var env "__current_class__")]
+          (if (and current-class
+                   (lookup-class-method env current-class method (count args) current-class))
+            ;; An own method of the enclosing class, matched by name+arity,
+            ;; takes priority over a same-named readable global (§7) — a free
+            ;; `function` is registered as a :var reachable from anywhere in
+            ;; the static world (check-program's function-variable
+            ;; registration loop), so without this check the env-lookup-var
+            ;; branch below would resolve a bare self-call to the unrelated
+            ;; global instead of the class's own method (e.g. a private
+            ;; helper shadowed by a same-named top-level function), tripping
+            ;; check-function-object-call's arity check against the wrong
+            ;; signature. check-bare-name-call re-derives this same
+            ;; current-class/method-sig pair to actually perform the call.
+            (check-bare-name-call env method args)
+            (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
+              (check-function-object-call env method args var-type)
+              (check-bare-name-call env method args))))))))
 
 (defn- check-create-array
   [env {:keys [generic-args constructor args]}]
