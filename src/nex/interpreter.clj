@@ -2491,11 +2491,29 @@
   "A call with no receiver: `method` is either a callable bound in the
    current env (a local Function, a compiled top-level function, or a host
    fn), or — failing that — an implicit call on `this` inside the currently
-   executing method, or a global builtin."
+   executing method, or a global builtin.
+
+   An own method of the currently executing object, matched by name+arity,
+   is checked first and wins over the env-lookup below: env-lookup walks up
+   to the root env, where a same-named top-level `function` is also bound
+   (readable-globals, §7), so without this a self-call whose class defines
+   its own method of that name would resolve to the unrelated global
+   instead — e.g. dispatching `call2` on a 0-arity global Function object
+   and blowing up with \"Method not found: call2\". Mirrors the analogous
+   fix in nex.typechecker/check-call for the compiled backend."
   [ctx method args has-parens arg-values]
-  (let [fn-obj (try
-                 (env-lookup (:current-env ctx) method)
-                 (catch Exception _ ::not-found))]
+  (let [current-obj (:current-object ctx)
+        own-method-sig (when (and current-obj (not (false? has-parens)))
+                          (lookup-method-with-inheritance ctx
+                                                          (lookup-class ctx (:class-name current-obj))
+                                                          method
+                                                          (count args)
+                                                          (:current-class-name ctx)))
+        fn-obj (if own-method-sig
+                 ::not-found
+                 (try
+                   (env-lookup (:current-env ctx) method)
+                   (catch Exception _ ::not-found)))]
     (if (not= fn-obj ::not-found)
       (let [compiled-callable? (boolean (compiled-runtime-class-name ctx fn-obj))]
         (cond

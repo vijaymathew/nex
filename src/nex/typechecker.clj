@@ -3495,9 +3495,24 @@
         (throw (ambiguous-function-reference-error method qualified-names)))
       (if-let [checker (get builtin-call-checkers method)]
         (checker env args)
-        (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
-          (check-function-object-call env method args var-type)
-          (check-bare-name-call env method args))))))
+        (let [current-class (env-lookup-var env "__current_class__")]
+          (if (and current-class
+                   (lookup-class-method env current-class method (count args) current-class))
+            ;; An own method of the enclosing class, matched by name+arity,
+            ;; takes priority over a same-named readable global (§7) — a free
+            ;; `function` is registered as a :var reachable from anywhere in
+            ;; the static world (check-program's function-variable
+            ;; registration loop), so without this check the env-lookup-var
+            ;; branch below would resolve a bare self-call to the unrelated
+            ;; global instead of the class's own method (e.g. a private
+            ;; helper shadowed by a same-named top-level function), tripping
+            ;; check-function-object-call's arity check against the wrong
+            ;; signature. check-bare-name-call re-derives this same
+            ;; current-class/method-sig pair to actually perform the call.
+            (check-bare-name-call env method args)
+            (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
+              (check-function-object-call env method args var-type)
+              (check-bare-name-call env method args))))))))
 
 (defn- check-create-array
   [env {:keys [generic-args constructor args]}]
@@ -6579,84 +6594,191 @@
               :when (= (:type member) :field)]
           (:name member))))
 
-(defn- statement-enters-static-world?
-  "True if a top-level statement can transfer control into user-written code:
-   it calls a user free function, or creates a user-defined class (running its
-   constructor). Method calls need not be considered: the receiver object must
-   have been created first, so a `create` always precedes the first method call."
-  [fn-names user-class-names stmt]
-  (some (fn [node]
-          (and (map? node)
-               (or (and (= :call (:type node))
-                        (nil? (:target node))
-                        (contains? fn-names (:method node)))
-                   (and (= :create (:type node))
-                        (contains? user-class-names (:class-name node))))))
-        (tree-seq coll? seq stmt)))
+(defn- call-and-create-nodes
+  "Every :call and :create node found anywhere within BODY, at any depth."
+  [body]
+  (into [] (filter #(and (map? %) (#{:call :create} (:type %)))) (tree-seq coll? seq body)))
+
+(defn- collect-callable-bodies
+  "Index every callable body in the program — free functions plus class
+   methods and constructors — for the watermark's call-graph reachability
+   analysis (see check-global-watermark). Returns:
+     :bodies         {def-key -> {:body :bound}}, :bound being the names
+                      that shadow a global inside that body (params, and for
+                      a class member also its class's field names) — what
+                      body-global-refs needs to tell a real global read from
+                      a same-named local/param/field.
+     :fn-names       the set of free-function names
+     :method-index   {[class-name method-name arity] -> def-key}, exact
+     :method-by-name {[method-name arity] -> #{def-key}}, across every
+                      class — a pre-typecheck pass has no receiver type to
+                      resolve a `.method(...)` call against, so it is
+                      resolved conservatively by name+arity alone
+     :ctor-index     {[class-name ctor-name arity] -> def-key}, exact
+     :ctors-by-class {class-name -> #{def-key}}, every constructor of a
+                      class — the fallback when a `create`'s named
+                      constructor+arity isn't found exactly (e.g. an
+                      inherited constructor)"
+  [normalized-functions classes]
+  (let [fn-rows (for [f normalized-functions]
+                  {:def-key [:fn (:name f)] :body (:body f)
+                   :bound (body-bound-names (:params f) #{} (:body f))})
+        member-rows (for [c classes
+                          :let [cname (:name c) fields (class-field-names c)]
+                          section (:body c)
+                          :when (#{:feature-section :constructors} (:type section))
+                          :let [kind (if (= (:type section) :constructors) :ctor :method)]
+                          member (if (= kind :ctor) (:constructors section) (:members section))
+                          :when (:body member)]
+                      {:def-key [:member cname kind (:name member) (count (:params member))]
+                       :kind kind :class cname :name (:name member)
+                       :arity (count (:params member)) :body (:body member)
+                       :bound (body-bound-names (:params member) fields (:body member))})
+        method-rows (filter #(= (:kind %) :method) member-rows)
+        ctor-rows (filter #(= (:kind %) :ctor) member-rows)]
+    {:bodies (into {} (map (juxt :def-key #(select-keys % [:body :bound])))
+                   (concat fn-rows member-rows))
+     :fn-names (set (map :name normalized-functions))
+     :method-index (into {} (map (fn [r] [[(:class r) (:name r) (:arity r)] (:def-key r)])) method-rows)
+     :method-by-name (reduce (fn [m r] (update m [(:name r) (:arity r)] (fnil conj #{}) (:def-key r)))
+                             {} method-rows)
+     :ctor-index (into {} (map (fn [r] [[(:class r) (:name r) (:arity r)] (:def-key r)])) ctor-rows)
+     :ctors-by-class (reduce (fn [m r] (update m (:class r) (fnil conj #{}) (:def-key r)))
+                             {} ctor-rows)}))
+
+(defn- method-defs-by-name
+  "Every def-key registered under any arity for METHOD (any class) — the
+   fallback when an exact [name arity] lookup in :method-by-name misses."
+  [method-by-name method]
+  (apply set/union #{} (keep (fn [[[n _] ks]] (when (= n method) ks)) method-by-name)))
+
+(defn- invoked-def-keys
+  "The def-key(s) a single :call/:create NODE, found inside the body of
+   OWNER-CLASS (nil for a free function or a top-level statement), might
+   invoke — used to walk the call graph one hop. A name matching nothing
+   registered (a builtin, or code that will fail type-checking on its own
+   merits regardless) contributes no def-key: builtins never read a user
+   global, and an otherwise-invalid program is rejected by body-checking
+   anyway, so under-resolving it here cannot hide a real unsafe read."
+  [{:keys [fn-names method-index method-by-name ctor-index ctors-by-class]} owner-class node]
+  (case (:type node)
+    :call
+    (let [{:keys [target method args]} node
+          arity (count args)]
+      (if (nil? target)
+        ;; No explicit receiver: inside a class member this is ambiguous
+        ;; between an implicit self-call and a free-function call (the same
+        ;; ambiguity nex.typechecker/check-call resolves using type info
+        ;; this pre-typecheck pass doesn't have) — include whichever of the
+        ;; two actually exist by this name+arity so a real read is never
+        ;; missed regardless of which way it really resolves, falling back
+        ;; to the any-class method table (catches an inherited self-call
+        ;; this simple per-class index misses) when neither matches.
+        (let [self (when owner-class (get method-index [owner-class method arity]))
+              free (when (contains? fn-names method) [:fn method])
+              primary (cond-> #{} self (conj self) free (conj free))]
+          (if (seq primary) primary (method-defs-by-name method-by-name method)))
+        (let [exact (get method-by-name [method arity])]
+          (if (seq exact) exact (method-defs-by-name method-by-name method)))))
+    :create
+    (let [{:keys [class-name constructor args]} node
+          ctor-name (or constructor "make")
+          arity (count args)
+          exact (get ctor-index [class-name ctor-name arity])]
+      (if exact #{exact} (get ctors-by-class class-name #{})))
+    nil))
+
+(defn- callable-direct-reads
+  [global-names bodies]
+  (into {} (map (fn [[k {:keys [body bound]}]] [k (body-global-refs global-names bound body)])) bodies))
+
+(defn- callable-call-edges
+  "For each def-key, the def-key(s) directly invoked anywhere in its body."
+  [index bodies]
+  (into {}
+        (map (fn [[k {:keys [body]}]]
+               (let [owner-class (when (= (first k) :member) (second k))]
+                 [k (apply set/union #{}
+                           (keep #(invoked-def-keys index owner-class %) (call-and-create-nodes body)))])))
+        bodies))
+
+(defn- callable-transitive-reads
+  "Fixed-point closure of DIRECT-READS over CALL-EDGES: reads[k] ends up as
+   k's own direct global reads unioned with the reads of everything k
+   (transitively) calls. A plain iterate-to-fixed-point (not a DFS with a
+   visited guard) so mutual/self recursion in the call graph converges
+   correctly instead of needing special-casing — the global-name universe is
+   finite, so this always terminates."
+  [direct-reads call-edges]
+  (loop [reads direct-reads]
+    (let [reads' (reduce-kv (fn [acc k callees]
+                              (update acc k into (mapcat #(get reads % #{}) callees)))
+                            reads call-edges)]
+      (if (= reads' reads) reads (recur reads')))))
+
+(defn- statement-reachable-reads
+  "Every global STMT could read, directly or transitively, by way of any
+   call/create node appearing anywhere within it (at any depth, so this
+   covers calls nested in argument expressions too)."
+  [index reads stmt]
+  (apply set/union #{}
+         (keep (fn [node]
+                 (let [ks (invoked-def-keys index nil node)]
+                   (when (seq ks) (apply set/union #{} (map #(get reads % #{}) ks)))))
+               (call-and-create-nodes stmt))))
+
+(defn- global-let-name
+  [global-names stmt]
+  (when (and (map? stmt) (= :let (:type stmt)) (contains? global-names (:name stmt)))
+    (:name stmt)))
 
 (defn- check-global-watermark
-  "Enforce the def-before-use watermark for readable globals (§7): every global
-   referenced by any function or class body must be initialized before the first
-   top-level statement that enters user code. Returns a vector of TypeError."
+  "Enforce the def-before-use watermark for readable globals (§7): a global
+   must be initialized before any top-level statement that could — directly,
+   or transitively through however many function/method calls — read it.
+
+   This is a per-statement call-graph reachability check, not a single
+   whole-program cutoff: a `create`/call whose invoked body (transitively)
+   never reads a not-yet-defined global is fine no matter how early it runs.
+   That is what makes ordinary sequential construction legal —
+   `let a := create A.make(...)` then `let b := create B.make(a)` then a
+   function reading both `a` and `b` — where a single \"first statement that
+   runs any user code at all\" cutoff would reject `b` (and anything defined
+   after it) the moment `A.make` itself counted as \"entering user code\",
+   regardless of whether `A.make` could ever actually reach `b`.
+
+   Returns a vector of TypeError."
   [statements normalized-functions classes globals-map]
   (let [global-names (set (keys globals-map))]
     (if (empty? global-names)
       []
-      (let [fn-names (set (map :name normalized-functions))
-            user-class-names (set (map :name classes))
-            ;; Earliest top-level statement index that enters user code.
-            watermark (first (keep-indexed
-                              (fn [i s]
-                                (when (statement-enters-static-world?
-                                       fn-names user-class-names s)
-                                  i))
-                              statements))
-            ;; Position (top-level statement index) where each global is defined.
-            global-pos (reduce (fn [m [i s]]
-                                 (if (and (map? s) (= :let (:type s))
-                                          (contains? global-names (:name s))
-                                          (not (contains? m (:name s))))
-                                   (assoc m (:name s) i)
-                                   m))
-                               {}
-                               (map-indexed vector statements))
-            ;; Globals read anywhere in the static world.
-            used (apply set/union
-                        (concat
-                         (for [f normalized-functions]
-                           (body-global-refs global-names
-                                             (body-bound-names (:params f) #{} (:body f))
-                                             (:body f)))
-                         (for [c classes
-                               :let [fields (class-field-names c)]
-                               section (:body c)
-                               :when (#{:feature-section :constructors} (:type section))
-                               member (concat (:members section) (:constructors section))
-                               :when (:body member)]
-                           (body-global-refs global-names
-                                             (body-bound-names (:params member) fields (:body member))
-                                             (:body member)))))]
-        (if (nil? watermark)
-          ;; No statement ever enters user code, so no body runs: nothing to check.
-          []
-          (vec (keep (fn [g]
-                       (let [pos (get global-pos g)]
-                         ;; `pos = watermark` can only mean g's own `let` IS the
-                         ;; watermark statement (each top-level statement has a
-                         ;; unique index) — e.g. `let Nil_List := create
-                         ;; Cons.make(...)`, where the statement both defines
-                         ;; the global and is the first to enter user code. That
-                         ;; self-entry can't observe g before g's own assignment
-                         ;; completes, so only a position strictly after the
-                         ;; watermark is a real violation.
-                         (when (or (nil? pos) (> pos watermark))
-                           (type-error
-                            (str "Global '" g "' is read by a function or class body but is "
-                                 "not initialized before the first call into user code"
-                                 (when-let [wl (:dbg/line (nth statements watermark nil))]
-                                   (str " (line " wl ")"))
-                                 ". Move its `let` above that point.")))))
-                     (sort used))))))))
+      (let [index (collect-callable-bodies normalized-functions classes)
+            direct-reads (callable-direct-reads global-names (:bodies index))
+            call-edges (callable-call-edges index (:bodies index))
+            reads (callable-transitive-reads direct-reads call-edges)]
+        (loop [defined #{}
+               reported #{}
+               remaining statements
+               errors []]
+          (if-let [stmt (first remaining)]
+            (let [reachable (statement-reachable-reads index reads stmt)
+                  violations (-> (set/intersection reachable global-names)
+                                 (set/difference defined)
+                                 (set/difference reported))
+                  errors' (into errors
+                                (map (fn [g]
+                                       (type-error
+                                        (str "Global '" g "' is read by a function or class body but is "
+                                             "not initialized before this call"
+                                             (when-let [wl (:dbg/line stmt)] (str " (line " wl ")"))
+                                             ". Move its `let` above that point."))))
+                                (sort violations))
+                  gname (global-let-name global-names stmt)]
+              (recur (cond-> defined gname (conj gname))
+                     (into reported violations)
+                     (rest remaining)
+                     errors'))
+            (vec errors)))))))
 
 (defn check-program
   "Type check a complete program.
