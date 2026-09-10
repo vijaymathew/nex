@@ -1882,3 +1882,72 @@ print(a.balance.amount)")
           (.delete main-file)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(deftest file-eval-enum-union-in-interned-file-type-checks-and-runs-test
+  (testing "an `enum union` declared in a path-interned file resolves its own
+            generated member constants (each `Status.Variant = create
+            Variant.make()`) when check-program type-checks that file under its
+            qualified namespace — the qualified first pass runs before any
+            bare-name registration, so the initializer must already name the
+            variant by its qualified key. Same for a hand-written
+            `K = create Sibling.make(...)` constant in an interned module.
+            Regression: nex.interpreter/stamp-qualified-names left both kinds of
+            constant initializer pointing at the bare sibling name, so the
+            qualified first pass reported `Undefined class: <Variant>`."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-enum-intern-" (System/nanoTime)))
+          lib-dir (io/file tmp-dir "lib" "model")
+          task-file (io/file lib-dir "Task.nex")
+          main-file (io/file tmp-dir "main.nex")]
+      (.mkdirs lib-dir)
+      (spit task-file "enum union Status
+  Pending
+  In_Transit
+  Delivered
+end
+
+class Point
+feature
+  x: Integer
+create
+  make(v: Integer) do x := v end
+end
+
+class Task
+feature
+  ORIGIN = create Point.make(0)
+  status: Status
+create
+  make(id: String) do
+    this.status := Status.Pending
+  end
+feature
+  advance() do status := Status.In_Transit end
+  rank(): Integer do result := status.ordinal end
+  base(): Integer do result := ORIGIN.x end
+end")
+      (spit main-file "intern model/Task
+
+let t := create Task.make(\"T1\")
+print(t.rank)
+t.advance()
+print(t.rank)
+print(t.base)
+print(Status.values.length)
+print(Status.Pending < Status.Delivered)
+print(Status.In_Transit.to_string)")
+      (try
+        (let [compiled (with-out-str (e/eval-file (.getPath main-file) {}))
+              interpreted (with-out-str (e/eval-file (.getPath main-file) {:interpret? true}))]
+          (is (not (.contains compiled "Undefined class")) compiled)
+          (is (not (.contains compiled "Type checking failed")) compiled)
+          (is (= (.trim ^String compiled) (.trim ^String interpreted))
+              "compiled and interpreted output must agree")
+          (is (.contains compiled "0\n1\n0\n3\ntrue") compiled)
+          (is (.contains compiled "\"In_Transit\"") compiled))
+        (finally
+          (.delete task-file)
+          (.delete main-file)
+          (.delete lib-dir)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
