@@ -1746,6 +1746,65 @@
     (str (str/replace path #"/" ".") "." own-name)
     own-name))
 
+(defn- qualify-sibling-create-refs
+  "Rewrite `create Sibling.…` nodes anywhere inside a value-expression tree to
+   the namespace-qualified class name, for every Sibling that is one of this
+   file's own classes (SIBLING-NAMES). Only `:create` targets are touched, and
+   only when they name a sibling — a bare `:identifier` that happens to share a
+   sibling's name (e.g. an `enum union` parent's `values` array, whose elements
+   reference the member *constants*, not the variant classes) is left alone."
+  [value path sibling-names]
+  (cond
+    (not (map? value))
+    value
+
+    (and (= (:type value) :create)
+         (contains? sibling-names (:class-name value)))
+    (-> value
+        (assoc :class-name (qualify-name path (:class-name value)))
+        (cond-> (:args value)
+          (update :args (fn [args]
+                          (mapv #(qualify-sibling-create-refs % path sibling-names) args)))))
+
+    :else
+    (reduce-kv (fn [m k v]
+                 (assoc m k
+                        (cond
+                          (map? v)    (qualify-sibling-create-refs v path sibling-names)
+                          (vector? v) (mapv #(qualify-sibling-create-refs % path sibling-names) v)
+                          :else       v)))
+               {}
+               value)))
+
+(defn- qualify-constant-sibling-refs
+  "check-program type-checks a class constant's initializer eagerly, under the
+   class's qualified identity, BEFORE any interned class is registered under its
+   bare name (nex.typechecker/check-program, Phase 3). So a constant that names
+   a sibling class by its bare name — most sharply, the `P.Variant = create
+   Variant.make()` members an `enum union` desugars to — cannot resolve that
+   sibling unless the reference is rewritten to the key it IS registered under
+   during that pass: the qualified one. Only constants are affected (nothing
+   else is checked eagerly); ordinary method bodies run after bare registration."
+  [class-def path sibling-names]
+  (if (or (empty? path) (not= (:type class-def) :class))
+    class-def
+    (update class-def :body
+            (fn [body]
+              (mapv (fn [section]
+                      (if (= (:type section) :feature-section)
+                        (update section :members
+                                (fn [members]
+                                  (mapv (fn [m]
+                                          (if (and (= (:type m) :field)
+                                                   (:constant? m)
+                                                   (:value m))
+                                            (update m :value
+                                                    qualify-sibling-create-refs path sibling-names)
+                                            m))
+                                        members)))
+                        section))
+                    body)))))
+
 (defn- stamp-qualified-names
   "Attach :qualified-name to each class/fn-def declared directly in a
    just-interned file, using the path that file was interned under. Every
@@ -1767,7 +1826,11 @@
    line 65 OF. check-program reads this back to annotate exactly such an
    error with the file it actually happened in (see with-source-file)."
   [path source-file defs]
-  (mapv #(assoc % :qualified-name (qualify-name path (:name %)) :source-file source-file) defs))
+  (let [sibling-names (into #{} (keep :name) defs)]
+    (mapv #(-> %
+               (assoc :qualified-name (qualify-name path (:name %)) :source-file source-file)
+               (qualify-constant-sibling-refs path sibling-names))
+          defs)))
 
 (defn- resolve-interned*
   "Traverse intern declarations recursively and collect the class

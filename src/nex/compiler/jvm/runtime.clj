@@ -1213,7 +1213,16 @@
     (if (and (instance? clojure.lang.ExceptionInfo throwable)
              (= :nex-exception (:type (ex-data throwable))))
       (:value (ex-data throwable))
-      (.getMessage ^Throwable throwable))))
+      ;; A host throwable's own message is what `exception` binds to. Some
+      ;; carry none — `StackOverflowError` and friends have a null
+      ;; getMessage — which bound `exception` to nil, so `exception.to_string`
+      ;; in the rescue block rendered "nil" with nothing to say what was
+      ;; caught. Fall back to the throwable's class name so `exception` is
+      ;; always a real, informative string.
+      (let [msg (.getMessage ^Throwable throwable)]
+        (if (str/blank? msg)
+          (.getName (class throwable))
+          msg)))))
 
 (defn- compiled-runtime-class-name
   [state value]

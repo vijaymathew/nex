@@ -15,3 +15,17 @@
       (is (= :f (rt/state-get-fn state "f")))
       (is (= "nex/repl/Cell_0001" (rt/next-class-name! state "Cell")))
       (is (= "nex/repl/Fns_0002" (rt/next-class-name! state "Fns"))))))
+
+(deftest exception-value-test
+  (testing "a nex-raised value passes through unchanged"
+    (is (= "boom" (rt/exception-value (rt/make-raised-exception "boom")))))
+  (testing "a host throwable with a message surfaces the message"
+    (is (= "/ by zero" (rt/exception-value (ArithmeticException. "/ by zero")))))
+  (testing "a host throwable with no message still binds a real string, never nil
+            (regression: StackOverflowError.getMessage is null, so
+            `exception.to_string` in a rescue block rendered \"nil\")"
+    (let [v (rt/exception-value (StackOverflowError.))]
+      (is (some? v))
+      (is (= "java.lang.StackOverflowError" v))))
+  (testing "a blank message also falls back to the throwable's toString"
+    (is (= "java.lang.RuntimeException" (rt/exception-value (RuntimeException. "  "))))))
