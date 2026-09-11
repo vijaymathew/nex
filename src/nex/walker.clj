@@ -281,7 +281,15 @@
     node))
 
 (defn- build-function-node
-  [name rest declaration-only?]
+  "POS ({:row :column}, 0-based, from node-pos on the raw parse node -- a bare
+   token has no metadata of its own to carry it) is stamped onto the
+   synthesized method-def as :dbg/line/:dbg/col: this map is built by hand
+   rather than through transform-node, so it never gets attach-debug-pos's
+   usual treatment, and a type error on one of its params/return-type (a
+   generic-arity mismatch, say) would otherwise report no location at all --
+   see with-type-error-location in nex.typechecker, which relies on exactly
+   this key to backfill one."
+  [name rest declaration-only? pos]
   (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
         generic-params (first (filter #(and (sequential? %)
                                             (= :genericParams (first %)))
@@ -315,16 +323,18 @@
         class-name (str fn-name "_Function")
         method-name (str "call" (count params-v))
         generic-params-v (when generic-params (transform-node generic-params))
-        method-def {:type :method
-                    :name method-name
-                    :params params-v
-                    :return-type return-type-v
-                    :declaration-only? declaration-only?
-                    :note (when note-clause (transform-node note-clause))
-                    :require (when require-clause (transform-node require-clause))
-                    :body body
-                    :ensure (when ensure-clause (transform-node ensure-clause))
-                    :rescue (when rescue-clause (transform-node rescue-clause))}
+        method-def (cond-> {:type :method
+                            :name method-name
+                            :params params-v
+                            :return-type return-type-v
+                            :declaration-only? declaration-only?
+                            :note (when note-clause (transform-node note-clause))
+                            :require (when require-clause (transform-node require-clause))
+                            :body body
+                            :ensure (when ensure-clause (transform-node ensure-clause))
+                            :rescue (when rescue-clause (transform-node rescue-clause))}
+                     (:row pos) (assoc :dbg/line (inc (:row pos)))
+                     (:column pos) (assoc :dbg/col (inc (:column pos))))
         class-def {:type :class
                    :name class-name
                    :generic-params generic-params-v
@@ -1275,12 +1285,14 @@
          :classes (into [parent] variant-classes)}))))
 
 (defn- handle-function-decl
-  [[_ _function-kw name & rest]]
-  (build-function-node name rest false))
+  [node]
+  (let [[_ _function-kw name & rest] node]
+    (build-function-node name rest false (node-pos node))))
 
 (defn- handle-declare-function-decl
-  [[_ _declare-kw _function-kw name & rest]]
-  (build-function-node name rest true))
+  [node]
+  (let [[_ _declare-kw _function-kw name & rest] node]
+    (build-function-node name rest true (node-pos node))))
 
 (defn- handle-anonymous-function
   [[_ _fn-kw & rest]]
@@ -1623,15 +1635,23 @@
      :type (when type-node (transform-node type-node))}))
 
 (defn- handle-declare-type-decl
-  [[_ _declare-kw _type-kw name _eq type-node & rest]]
+  [[_ _declare-kw _type-kw name & rest]]
   ;; `declare type X = Base` is a structural alias. `... where n: <expr>`
   ;; makes it a refinement type: still an alias to Base for type checking, but
   ;; the predicate is recorded so the refinement pass can inject narrowing
   ;; checks. (Base is kept as :type-expr, so aliasing/transparency is free.)
-  (let [base {:type :type-alias
-              :name (token-text name)
-              :type-expr (transform-node type-node)}
-        where-clause (first (filter #(and (sequential? %) (= :whereClause (first %))) rest))]
+  ;;
+  ;; An optional `genericParams` (`declare type Pair[T] = ...`) sits between
+  ;; the name and `=`, so `type-node`/`where-clause` are found by tag rather
+  ;; than position -- the fixed positional destructuring this replaced broke
+  ;; the moment that optional piece was introduced.
+  (let [generic-params-node (first (filter #(and (sequential? %) (= :genericParams (first %))) rest))
+        type-node (first (filter #(and (sequential? %) (= :type (first %))) rest))
+        where-clause (first (filter #(and (sequential? %) (= :whereClause (first %))) rest))
+        base (cond-> {:type :type-alias
+                      :name (token-text name)
+                      :type-expr (transform-node type-node)}
+               generic-params-node (assoc :generic-params (transform-node generic-params-node)))]
     (if where-clause
       (assoc base :refinement (transform-node where-clause))
       base)))
@@ -2246,15 +2266,26 @@
                    (:safe? part)
                    (assoc :safe? true)))
 
+                ;; `name[Integer]` (no call following, or a call-suffix part
+                ;; still to come): stash the explicit type args on the
+                ;; accumulator so the call-suffix branch below (or the final
+                ;; bare-reference value, if no call follows) can carry them.
+                :explicit-generic-args
+                (if (map? acc)
+                  (assoc acc :explicit-generic-args (:args part))
+                  acc)
+
                 :call-suffix
                 (cond
                   ;; Function call: f(...)
                   (and (map? acc) (= :identifier (:type acc)))
-                  {:type :call
-                   :target nil
-                   :method (:name acc)
-                   :args (:args part)
-                   :has-parens true}
+                  (cond-> {:type :call
+                           :target nil
+                           :method (:name acc)
+                           :args (:args part)
+                           :has-parens true}
+                    (:explicit-generic-args acc)
+                    (assoc :explicit-generic-args (:explicit-generic-args acc)))
 
                   ;; Method call split as memberAccess + callSuffix: obj.m(...)
                   (and (map? acc)
@@ -2280,7 +2311,13 @@
 
 (defn- handle-postfix-part
   [[_ part]]
-  (transform-node part))
+  ;; A bare `genericArgs` postfix part (`name[Integer]`) is tagged distinctly
+  ;; from handle-generic-args's own plain-vector return (shared with
+  ;; createExpression, which extracts it from the raw node itself rather than
+  ;; through this dispatch) so handle-postfix's reduce below can recognize it.
+  (if (and (sequential? part) (= :genericArgs (first part)))
+    {:type :explicit-generic-args :args (transform-node part)}
+    (transform-node part)))
 
 (defn- handle-member-access
   [[_ & children]]
