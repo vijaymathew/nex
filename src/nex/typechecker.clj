@@ -5286,11 +5286,14 @@
   (check-old-and-retry! "routine" name params require body ensure)
   (require-declared-param-types! class-name "method" name params)
   ;; Validate parameter and return type annotations (generic constraints)
-  (doseq [param params]
-    (when (:type param)
-      (validate-type-annotation env (:type param))))
-  (when return-type
-    (validate-type-annotation env return-type))
+  (with-type-error-location
+    method
+    (fn []
+      (doseq [param params]
+        (when (:type param)
+          (validate-type-annotation env (:type param))))
+      (when return-type
+        (validate-type-annotation env return-type))))
   ;; Check that methods using Result declare a return type
   (when (and (not return-type)
              (or (some references-result? body)
@@ -5370,9 +5373,12 @@
     (env-add-var ctor-env "__in_constructor__" true)
 
     ;; Validate parameter type annotations (generic constraints)
-    (doseq [param params]
-      (when (:type param)
-        (validate-type-annotation env (:type param))))
+    (with-type-error-location
+      constructor
+      (fn []
+        (doseq [param params]
+          (when (:type param)
+            (validate-type-annotation env (:type param))))))
     ;; Add parameters
     (doseq [param params]
       (env-add-var ctor-env (:name param) (or (:type param) "Any")))
@@ -5464,7 +5470,9 @@
                                           (let [inferred-type (check-expression const-env (:value member))
                                                 final-type (or (:field-type member) inferred-type)]
                                             (when (:field-type member)
-                                              (validate-type-annotation const-env (:field-type member))
+                                              (with-type-error-location
+                                                member
+                                                (fn [] (validate-type-annotation const-env (:field-type member))))
                                               (when (any-into-concrete-without-convert? const-env (:field-type member) inferred-type)
                                                 (throw-any-narrowing-error! (str "constant '" (:name member) "'") (:field-type member)))
                                               (when-not (types-compatible? const-env inferred-type (:field-type member))
@@ -6021,7 +6029,9 @@
               (check-method class-env name member)))
           (= (:type member) :field)
           (when-not (:constant? member)
-            (validate-type-annotation class-env (:field-type member)))))
+            (with-type-error-location
+              member
+              (fn [] (validate-type-annotation class-env (:field-type member)))))))
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]
