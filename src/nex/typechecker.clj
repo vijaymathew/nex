@@ -9,6 +9,8 @@
 ;;
 
 (declare env-lookup-type-alias)
+(declare env-lookup-type-alias-generic-params)
+(declare resolve-generic-type)
 (declare type-error)
 
 (def ^:dynamic *strict-undefined-targets*
@@ -45,6 +47,12 @@
     ;; naming its synthesized call-dispatch class).
     :ambiguous-functions (atom {})
     :type-aliases (atom {})
+    ;; Generic parameter list for a `declare type Name[T, ...] = ...` alias
+    ;; ({name -> [{:name "T" ...} ...]}), keyed separately from :type-aliases
+    ;; itself so every existing env-lookup-type-alias caller (which expects
+    ;; the raw, unparameterized body back) is untouched — only
+    ;; expand-type-aliases and validate-generic-args need this.
+    :type-alias-generic-params (atom {})
     :non-nil-vars (atom #{})
     :across-cursors (atom {})
     ;; Names this env's block has declared with `let` (per-env, not inherited), so
@@ -226,6 +234,22 @@
     t
     (when (:parent env)
       (env-lookup-type-alias (:parent env) name))))
+
+(defn env-add-type-alias-generic-params
+  [env name generic-params]
+  (when (seq generic-params)
+    (swap! (:type-alias-generic-params env) assoc name generic-params)))
+
+(defn env-lookup-type-alias-generic-params
+  "The generic-param list a `declare type Name[T, ...] = ...` alias was
+   declared with, or nil for a plain (non-generic) alias. Tolerates envs
+   without the registry, same as env-lookup-type-alias."
+  [env name]
+  (if-let [gp (when-let [m (:type-alias-generic-params env)]
+                (get @m name))]
+    gp
+    (when (:parent env)
+      (env-lookup-type-alias-generic-params (:parent env) name))))
 
 (declare normalize-type type-name-string)
 
@@ -669,11 +693,29 @@
         (:return-type type-expr) (update :return-type (partial expand-type-aliases env)))
 
       (:base-type type-expr)
-      (let [expanded-base (if-let [a (env-lookup-type-alias env (:base-type type-expr))]
-                            (expand-type-aliases env a)
-                            type-expr)]
-        (if (not= expanded-base type-expr)
-          expanded-base
+      (let [alias-name (:base-type type-expr)
+            alias-body (env-lookup-type-alias env alias-name)
+            alias-generic-params (env-lookup-type-alias-generic-params env alias-name)
+            explicit-args (or (:type-args type-expr) (:type-params type-expr))]
+        (cond
+          ;; A generic alias applied with explicit args (`Pair[Integer]`):
+          ;; substitute the alias's own generic-param names for those args in
+          ;; its stored body, then keep expanding -- the substituted body may
+          ;; itself reference another alias.
+          (and alias-body (seq alias-generic-params) (seq explicit-args))
+          (let [type-map (into {} (map (fn [p a] [(:name p) a]) alias-generic-params explicit-args))]
+            (expand-type-aliases env (resolve-generic-type alias-body type-map)))
+
+          ;; A plain (non-generic) alias, or a generic one referenced bare
+          ;; with no explicit args (its own generic-param names are left
+          ;; unresolved in the body, exactly as an unspecialized class would
+          ;; be) -- either way, expand straight to the stored body. Any
+          ;; :type-args on THIS map are meaningless for a non-generic alias
+          ;; and are dropped, matching prior behavior.
+          alias-body
+          (expand-type-aliases env alias-body)
+
+          :else
           (cond-> type-expr
             (:type-params type-expr)
             (update :type-params #(mapv (partial expand-type-aliases env) %))
@@ -1020,16 +1062,49 @@
           ;; structural type for a1 from the class's callN method and
           ;; recursing, rather than duplicating the contravariant-params/
           ;; covariant-return comparison here.
-          (and (string? a1) (map? a2) (= (:base-type a2) "Function") (:param-types a2)
-               (class-subtype? env a1 "Function")
-               (when-let [method-sig (lookup-class-method env a1 (str "call" (count (:param-types a2)))
-                                                          (count (:param-types a2)))]
-                 (types-compatible? env
-                                    {:base-type "Function"
-                                     :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
-                                                        (:params method-sig))
-                                     :return-type (:return-type method-sig)}
-                                    a2)))
+          ;;
+          ;; A1 is a MAP rather than a bare string when it names a still- (or
+          ;; explicitly-)parameterized generic class — a generic function
+          ;; pinned to a concrete type via `name[Integer]` (see
+          ;; resolve-explicit-generic-args) resolves to exactly this shape.
+          ;; Its callN signature is stated in the class's OWN unresolved
+          ;; generic-param names (e.g. literally "T"), so those must be
+          ;; substituted via A1's :type-args before the structural comparison
+          ;; below means anything — the identical substitution
+          ;; nex.lower/infer-call-type performs for the same reason on the
+          ;; compiled backend's own, separate return-type inference.
+          ;;
+          ;; Excludes a1 already being the literal structural "Function"
+          ;; shape itself (a1's own :base-type = "Function") -- that case is
+          ;; NOT a class reference at all, it's a genuine two-signatures
+          ;; comparison, and belongs solely to the contravariant/covariant
+          ;; function-signature branch further below. Without this exclusion,
+          ;; a1 = "Function" trivially satisfies class-subtype? against
+          ;; itself and resolves to the generic, Any-typed builtin callN
+          ;; (register-function-call-methods!) instead, discarding the real
+          ;; parameter/return types and recursing on a degraded signature —
+          ;; for a nested Function-in-Function type this recurses forever
+          ;; (StackOverflowError), and for anything else it would silently
+          ;; accept incompatible signatures as Any-compatible.
+          (and (or (string? a1) (and (map? a1) (not= (:base-type a1) "Function")))
+               (map? a2) (= (:base-type a2) "Function") (:param-types a2)
+               (let [a1-base (if (string? a1) a1 (:base-type a1))]
+                 (and (class-subtype? env a1-base "Function")
+                      (when-let [method-sig (lookup-class-method env a1-base (str "call" (count (:param-types a2)))
+                                                                 (count (:param-types a2)))]
+                        (let [type-map (when (map? a1)
+                                        (let [class-def (env-lookup-class env a1-base)
+                                              explicit-args (or (:type-args a1) (:type-params a1))]
+                                          (when (seq explicit-args)
+                                            (into {} (map (fn [p a] [(:name p) a])
+                                                         (:generic-params class-def) explicit-args)))))
+                              raw-sig {:base-type "Function"
+                                       :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
+                                                          (:params method-sig))
+                                       :return-type (:return-type method-sig)}]
+                          (types-compatible? env
+                                             (if (seq type-map) (resolve-generic-type raw-sig type-map) raw-sig)
+                                             a2))))))
           ;; Function type with signature is compatible with bare Function
           (and (map? a1) (= (:base-type a1) "Function") (:param-types a1) (= a2 "Function"))
           ;; Two function signatures: parameters CONTRAVARIANT, return COVARIANT.
@@ -1092,17 +1167,24 @@
                                   (:type-params a1) (:type-params a2))))))))
 
 (defn validate-generic-args
-  "Validate generic arguments against a class's generic constraints."
+  "Validate generic arguments against a class's generic constraints -- or, when
+   CLASS-NAME instead names a `declare type Name[T, ...] = ...` generic alias,
+   against that alias's own generic-param list. Aliases and classes share one
+   name to look up against here (a name is never both), so this single check
+   covers `Pair[Integer]` in an annotation exactly like `Box[Integer]`, with
+   no separate alias-specific arity path."
   [env class-name generic-args]
   (when (seq generic-args)
-    (let [class-def (env-lookup-class env class-name)]
-      (when (and class-def (:generic-params class-def))
-        (when (not= (count (:generic-params class-def)) (count generic-args))
+    (let [class-def (env-lookup-class env class-name)
+          generic-params (or (:generic-params class-def)
+                             (env-lookup-type-alias-generic-params env class-name))]
+      (when (seq generic-params)
+        (when (not= (count generic-params) (count generic-args))
           (throw (ex-info (str "Type argument count mismatch for " class-name)
                           {:error (type-error
-                                   (str "Expected " (count (:generic-params class-def))
+                                   (str "Expected " (count generic-params)
                                         " type arguments, got " (count generic-args)))})))
-        (doseq [[param arg] (map vector (:generic-params class-def) generic-args)]
+        (doseq [[param arg] (map vector generic-params generic-args)]
           (when-let [constraint (:constraint param)]
             (when-not (types-compatible? env arg constraint)
               (throw (ex-info (str "Type argument " arg " does not satisfy constraint " constraint)
@@ -1745,10 +1827,33 @@
                                      (:field-type member)))))))))]
     (bind-fields class-name {} #{} false)))
 
+(defn- resolve-explicit-generic-args
+  "Pin BASE-NAME (a bare variable/class name resolved from an identifier or a
+   bare call, e.g. a free function's synthesized call-dispatch class) to a
+   concrete instantiation when the reference/call site wrote explicit type
+   arguments (`linear_search[Integer]`, `linear_search[Integer](...)`) --
+   mirroring check-create-user-class's own explicit-`[...]` handling for
+   `create Foo[Integer]`. Once wrapped this way, the existing
+   build-generic-type-map (already used for `create`) resolves the generic
+   binding for check-function-object-call with no further changes there.
+
+   No-op (returns BASE-NAME unchanged) when EXPLICIT-GENERIC-ARGS is empty --
+   the overwhelmingly common case, an ordinary unparameterized reference."
+  [env base-name explicit-generic-args]
+  (if (and base-name (seq explicit-generic-args))
+    (let [class-def (env-lookup-class env base-name)]
+      (when-not (seq (:generic-params class-def))
+        (throw (ex-info (str base-name " is not generic")
+                        {:error (type-error (str "'" base-name "' is not generic; it takes no [...] type arguments"))})))
+      (validate-generic-args env base-name explicit-generic-args)
+      {:base-type base-name :type-args explicit-generic-args})
+    base-name))
+
 (defn check-identifier
   "Check the type of an identifier"
-  [env {:keys [name] :as expr}]
-  (if-let [var-type (env-lookup-var env name)]
+  [env {:keys [name explicit-generic-args] :as expr}]
+  (if-let [var-type (when-let [vt (env-lookup-var env name)]
+                      (resolve-explicit-generic-args env vt explicit-generic-args))]
     (if (and (env-var-non-nil? env name)
              (detachable-type? var-type))
       (attachable-type var-type)
@@ -3473,7 +3578,7 @@
 
 (defn check-call
   "Check the type of a method call"
-  [env {:keys [target method args] :as expr}]
+  [env {:keys [target method args explicit-generic-args] :as expr}]
   (cond
     (and (map? target) (= :create (:type target)) (nil? method))
     (if (nil? (:constructor target))
@@ -3510,7 +3615,9 @@
             ;; signature. check-bare-name-call re-derives this same
             ;; current-class/method-sig pair to actually perform the call.
             (check-bare-name-call env method args)
-            (if-let [var-type (expand-type-aliases env (env-lookup-var env method))]
+            (if-let [var-type (when-let [vt (env-lookup-var env method)]
+                                (expand-type-aliases
+                                 env (resolve-explicit-generic-args env vt explicit-generic-args)))]
               (check-function-object-call env method args var-type)
               (check-bare-name-call env method args))))))))
 
@@ -6864,8 +6971,9 @@
          (register-builtin-methods env)
 
        ;; Register type aliases first so they are available throughout the program.
-         (doseq [{:keys [name type-expr]} (or type-aliases [])]
-           (env-add-type-alias env name type-expr))
+         (doseq [{:keys [name type-expr generic-params]} (or type-aliases [])]
+           (env-add-type-alias env name type-expr)
+           (env-add-type-alias-generic-params env name generic-params))
 
        ;; First pass: collect every interned class under its qualified
        ;; identity (see qualified-class-defs) — including one that will go on

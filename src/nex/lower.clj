@@ -186,6 +186,14 @@
 ;; nested function/method/constructor lowering picks it up automatically.
 (def ^:dynamic *type-aliases* {})
 
+;; Generic-param list for a `declare type Name[T, ...] = ...` alias
+;; ({name -> [{:name "T" ...} ...]}), the lowering-side counterpart of
+;; nex.typechecker's :type-alias-generic-params env entry. Bound alongside
+;; *type-aliases* (same two call sites) so resolve-type-alias below can
+;; substitute an explicit `Name[Integer]` the same way
+;; nex.typechecker/expand-type-aliases does for the typechecking pass.
+(def ^:dynamic *type-alias-generic-params* {})
+
 ;; Program top-level `let` globals (name -> nex-type), bound once at the lowering
 ;; entry point. Readable from the static world (§7): an otherwise-unknown
 ;; identifier in a non-top-level body that names a global lowers to a `top-get`
@@ -225,15 +233,39 @@
 
 (defn- resolve-type-alias
   "Expand a declared type alias to its underlying type expression, following
-   chains (`H -> G -> Function(...)`). Non-alias types are returned unchanged."
+   chains (`H -> G -> Function(...)`). Non-alias types are returned unchanged.
+
+   A generic alias (`declare type Pair[T] = Function(T, T): T`) applied with
+   explicit type args (`{:base-type \"Pair\" :type-args [\"Integer\"]}`, from a
+   `Pair[Integer]`-typed parameter/field) is expanded by substituting its own
+   generic-param names in its stored body before continuing to follow the
+   chain -- mirroring nex.typechecker/expand-type-aliases exactly, since both
+   need the same answer (there just isn't one shared env to hang a single
+   implementation off of: the typechecker resolves per-program env, lowering
+   via this program-global dynamic var)."
   [t]
   (loop [t t
          seen #{}]
-    (if (and (string? t)
-             (contains? *type-aliases* t)
-             (not (contains? seen t)))
+    (cond
+      (and (string? t)
+           (contains? *type-aliases* t)
+           (not (contains? seen t)))
       (recur (get *type-aliases* t) (conj seen t))
-      t)))
+
+      (and (map? t)
+           (string? (:base-type t))
+           (contains? *type-alias-generic-params* (:base-type t))
+           (not (contains? seen (:base-type t))))
+      (let [alias-name (:base-type t)
+            gparams (get *type-alias-generic-params* alias-name)
+            explicit-args (or (:type-args t) (:type-params t))
+            body (get *type-aliases* alias-name)]
+        (if (and body (seq gparams) (seq explicit-args))
+          (recur (tc/resolve-generic-type body (zipmap (map :name gparams) explicit-args))
+                 (conj seen alias-name))
+          (recur (or body t) (conj seen alias-name))))
+
+      :else t)))
 
 (defn- builtin-runtime-receiver-type?
   [env t]
@@ -1018,9 +1050,22 @@
              ;; own return type; use it rather than the generic `Any` so calls
              ;; like `if pred(x)` lower with a concrete (e.g. Boolean) type.
              (or (and (map? binding-type) (:return-type binding-type)) "Any")
+             ;; BASE-TYPE here can be a still-generic user class (a generic
+             ;; free function's own synthesized call-dispatch class, pinned
+             ;; by an explicit `name[Integer]` reference -- see
+             ;; nex.typechecker/resolve-explicit-generic-args): its callN
+             ;; method-def's declared return type is stated in the class's OWN
+             ;; unresolved generic-param names (e.g. "T"), which must be
+             ;; substituted through BINDING-TYPE's :type-args before use --
+             ;; exactly like infer-target-call-type does for an ordinary
+             ;; `x.method(...)` on a parameterized receiver, just above. Left
+             ;; unresolved, "T" reaches codegen as if it were a real class
+             ;; name and fails to link at runtime with a bogus
+             ;; ClassNotFoundException.
              (some-> (get (visible-class-map env) base-type)
                      (class-method-def call-name (count (:args expr)))
-                     function-return-type))))
+                     function-return-type
+                     (#(tc/resolve-generic-type % (generic-type-map env binding-type)))))))
        (get builtin-free-function-return-types (:method expr))
        ;; A bare call whose :method is a dot-qualified name
        ;; (nex.walker/resolve-qualified-function-calls already rewrote
@@ -4081,7 +4126,11 @@
   [program opts]
   (let [program (binding [*type-aliases* (merge *type-aliases*
                                                 (into {} (map (juxt :name :type-expr)
-                                                              (:type-aliases program))))]
+                                                              (:type-aliases program))))
+                          *type-alias-generic-params* (merge *type-alias-generic-params*
+                                                             (into {} (keep (fn [{:keys [name generic-params]}]
+                                                                              (when (seq generic-params) [name generic-params])))
+                                                                   (:type-aliases program)))]
                   (resolve-anonymous-function-context-types program))
         visible-functions (vec (concat (:functions program) (:functions opts)))
         visible-classes (merge-visible-classes (builtin-class-defs)
@@ -7796,6 +7845,10 @@
   (binding [*type-aliases* (merge *type-aliases*
                                   (into {} (map (juxt :name :type-expr)
                                                 (:type-aliases program))))
+            *type-alias-generic-params* (merge *type-alias-generic-params*
+                                               (into {} (keep (fn [{:keys [name generic-params]}]
+                                                                (when (seq generic-params) [name generic-params])))
+                                                     (:type-aliases program)))
             *skip-contracts?* (boolean (:skip-contracts? opts))]
     (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
           actual-classes (vec (user-class-defs program))

@@ -56,9 +56,13 @@ declareFunctionDecl
 
 // `declare type X = Base` is a structural alias. With an optional `where`
 // predicate it becomes a refinement type: Base narrowed by a boolean predicate,
-// checked at narrowing boundaries (see the refinement pass in walker.clj).
+// checked at narrowing boundaries (see the refinement pass in walker.clj). An
+// optional `genericParams` (`declare type Pair[T] = Function(T, T): T`) makes
+// it a generic alias: `Base` may mention those names freely, and a use site
+// substitutes them via `genericArgs` the same way a class does
+// (`Pair[Integer]`) -- see expand-type-aliases in typechecker.clj.
 declareTypeDecl
-    : DECLARE TYPE_KW IDENTIFIER EQUAL type whereClause?
+    : DECLARE TYPE_KW IDENTIFIER genericParams? EQUAL type whereClause?
     ;
 
 // `where` is a SOFT keyword, matched the same way as `alias` (see aliasClause
@@ -440,9 +444,17 @@ postfix
     : primary postfixPart*
     ;
 
+// `genericArgs` here lets a generic free function be pinned to a concrete
+// instantiation explicitly, either as a bare reference (`linear_search[Integer]`,
+// no call following) or immediately before a call (`linear_search[Integer](2, xs)`).
+// Reuses the same `genericArgs` rule `createExpression` already uses. No
+// ambiguity with `arrayLiteral`: `[` only starts a fresh `arrayLiteral` as its
+// own `primary`, never as a *continuation* of a preceding primary the way a
+// `postfixPart` is -- that position accepted no `[` at all before this.
 postfixPart
     : memberAccess
     | callSuffix
+    | genericArgs
     ;
 
 // `union` is a soft keyword, reserved only in its declaration position
