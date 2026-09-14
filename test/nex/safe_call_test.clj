@@ -1,9 +1,26 @@
 (ns nex.safe-call-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [nex.eval :as e]
             [nex.parser :as p]
             [nex.repl :as repl]
             [nex.typechecker :as tc]))
+
+(defn- eval-on-both-backends
+  "Printed output of CODE on the compiled (whole-program JVM) and
+   tree-walking-interpreter backends, via nex.eval/eval-file -- the same
+   entry point the `nex` CLI itself uses to run a script, unlike
+   nex.repl/eval-code's incremental per-cell compilation, which has its own,
+   narrower eligibility check and can silently decline a construct (falling
+   back to the interpreter) that whole-program compilation handles fine.
+   Returns [compiled-output interpreted-output]."
+  [code]
+  (let [f (java.io.File/createTempFile "safe_call" ".nex")]
+    (try
+      (spit f code)
+      [(with-out-str (e/eval-file (.getPath f) {}))
+       (with-out-str (e/eval-file (.getPath f) {:interpret? true}))]
+      (finally (.delete f)))))
 
 (def safe-call-code
   "class Node
@@ -207,6 +224,138 @@ feature
     result := value
   end
 end")
+
+(deftest safe-call-compound-receiver-desugars-to-attached-test-when-test
+  (testing "`?.` on a compound (non-identifier) receiver binds it once via an attached-test guard, instead of silently dropping the guard the way a bare `/= nil` comparison would for a receiver that isn't a plain variable"
+    (let [ast (p/ast "class Node
+feature
+  value: Integer
+  next: ?Node
+end
+class Box
+feature
+  head: ?Node
+end
+let b: Box := create Box
+print(b.head?.value)")
+          print-call (last (:statements ast))
+          arg (-> print-call :args first)]
+      (is (= :when (:type arg)))
+      (is (= :attached-test (-> arg :condition :type)))
+      (is (str/starts-with? (-> arg :condition :var-name) "__safe_receiver_"))
+      (is (= :call (-> arg :condition :value :type)))
+      (is (= "b" (-> arg :condition :value :target)))
+      (is (= "head" (-> arg :condition :value :method)))
+      (is (= :call (-> arg :consequent :type)))
+      (is (= (-> arg :condition :var-name) (-> arg :consequent :target)))
+      (is (= "value" (-> arg :consequent :method)))
+      (is (= :nil (-> arg :alternative :type))))))
+
+(deftest safe-call-chained-compound-receiver-desugars-to-and-chain-test
+  (testing "`a?.b?.c` folds into a flat `and`-chain of attached-tests rather than nesting a :when inside an attached-test's own :value -- the latter shape type-checks fine but crashes the JVM backend at runtime (lower-attached-test-expression allocates its own scratch local only after choosing its VALUE's lowering env, so a VALUE that itself needs a fresh local, as any nested :when does, collides with it)"
+    (let [ast (p/ast "class Node
+feature
+  value: Integer
+  next: ?Node
+end
+let n: Node := create Node
+print(n.next?.next?.value)")
+          print-call (last (:statements ast))
+          arg (-> print-call :args first)
+          condition (:condition arg)]
+      (is (= :when (:type arg)))
+      (is (= :binary (:type condition)))
+      (is (= "and" (:operator condition)))
+      (is (= :attached-test (-> condition :left :type)))
+      (is (= :attached-test (-> condition :right :type)))
+      ;; The right guard's own VALUE reads the left guard's binding by name
+      ;; -- a plain call, never a nested :when.
+      (is (= :call (-> condition :right :value :type)))
+      (is (= (-> condition :left :var-name) (-> condition :right :value :target)))
+      (is (= "next" (-> condition :right :value :method)))
+      (is (= (-> condition :right :var-name) (-> arg :consequent :target)))
+      (is (= "value" (-> arg :consequent :method)))
+      (is (= :nil (-> arg :alternative :type))))))
+
+(def ^:private compound-safe-nav-code
+  "class Node
+create
+  make(v: Integer) do
+    value := v
+  end
+feature
+  value: Integer
+  next: ?Node
+  link(n: Node) do
+    this.next := n
+  end
+end
+
+class Box
+create
+  make(n: ?Node) do
+    head := n
+  end
+feature
+  head: ?Node
+end
+
+let n1: Node := create Node.make(1)
+let n2: Node := create Node.make(2)
+n1.link(n2)
+let full: Box := create Box.make(n1)
+let empty: Box := create Box.make(nil)
+print(full.head?.value)
+print(empty.head?.value)
+print(full.head?.next?.value)
+print(n2.next?.next?.value)")
+
+(deftest safe-call-compound-and-chained-receiver-evaluates-test
+  (testing "`?.` on a compound receiver, including a chained `a?.b?.c`, type-checks and evaluates correctly on both backends -- regression coverage for: (1) a compound receiver's guard being silently dropped, rejected at typecheck time as an unguarded detachable access; (2) fixing that exposing a JVM-backend gap where a nil-producing safe-nav's result inferred as a bare (non-detachable) Integer instead of ?Integer, crashing on unboxing null at runtime"
+    (let [checked (tc/type-check (p/ast compound-safe-nav-code))]
+      (is (:success checked) (pr-str (:errors checked))))
+    (let [[compiled interpreted] (eval-on-both-backends compound-safe-nav-code)]
+      (doseq [[backend output] [["compiled" compiled] ["interpreted" interpreted]]]
+        (is (not (str/includes? output "Error")) (str backend ": " output))
+        (is (= "1\nnil\n2\nnil\n" output) (str backend ": " (pr-str output)))))))
+
+(deftest and-chain-attached-test-guard-can-reference-earlier-binding-test
+  (testing "a later `and` conjunct's own guarded VALUE expression can reference an earlier conjunct's attached-test binding, not just the branch body -- this is what the chained `?.` desugaring above relies on (see safe-call-chained-compound-receiver-desugars-to-and-chain-test), and matches the documented behavior of `?p.age as a and ?q.age as b` guards more generally"
+    (let [code "class Node
+create
+  make(v: Integer) do
+    value := v
+  end
+feature
+  value: Integer
+  next: ?Node
+end
+let n: Node := create Node.make(1)
+if ?n.next as t1 and ?t1.next as t2 then
+  print(t2.value)
+else
+  print(-1)
+end"
+          checked (tc/type-check (p/ast code))]
+      (is (:success checked) (pr-str (:errors checked))))
+    (let [[compiled interpreted] (eval-on-both-backends
+                                   "class Node
+create
+  make(v: Integer) do
+    value := v
+  end
+feature
+  value: Integer
+  next: ?Node
+end
+let n: Node := create Node.make(1)
+if ?n.next as t1 and ?t1.next as t2 then
+  print(t2.value)
+else
+  print(-1)
+end")]
+      (doseq [[backend output] [["compiled" compiled] ["interpreted" interpreted]]]
+        (is (= "-1\n" output) (str backend ": " (pr-str output)))))))
 
 (deftest bare-safe-call-expression-echoes-value-test
   (testing "a bare safe call typed at the REPL echoes the receiver's value"

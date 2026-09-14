@@ -233,21 +233,82 @@
 
 (defn- desugar-safe-expression-call [call-node]
   (if (and (:safe? call-node)
-           (string? (:target call-node))
+           (:target call-node)
            (:method call-node))
-    (let [target-name (:target call-node)]
+    (let [target (:target call-node)
+          ;; TARGET is a *prior* `?.` in the very same postfix chain
+          ;; (`a?.b?.c`: by the time `?.c` is folded in, TARGET is already
+          ;; `a?.b`'s own desugared :when node, with :condition/:consequent
+          ;; of its own) exactly when it carries this function's own
+          ;; metadata -- call-target passes such a node through unchanged
+          ;; (see handle-postfix), so the with-meta below survives on it
+          ;; untouched. The metadata itself only marks that TARGET is one of
+          ;; these nodes; the data folded into the new condition below comes
+          ;; from TARGET directly, not from the metadata (which holds the
+          ;; *pre*-desugar call-node, for a different consumer -- see
+          ;; statement-position-node).
+          chained? (and (map? target) (some? (::safe-call (meta target))))]
       ;; The origin travels as metadata, so the node itself is unchanged for
       ;; every consumer, but a safe call that turns out to be a whole statement
       ;; can still be re-desugared to the guarded-block form; see the :statement
       ;; handler.
       (with-meta
-        {:type :when
-         :condition {:type :binary
-                     :operator "/="
-                     :left {:type :identifier :name target-name}
-                     :right {:type :nil}}
-         :consequent (dissoc call-node :safe?)
-         :alternative {:type :nil}}
+        (cond
+          (string? target)
+          {:type :when
+           :condition {:type :binary
+                       :operator "/="
+                       :left {:type :identifier :name target}
+                       :right {:type :nil}}
+           :consequent (dissoc call-node :safe?)
+           :alternative {:type :nil}}
+
+          ;; Fold this guard into the prior `?.`'s `and`-chain instead of
+          ;; nesting a `:when` inside an attached-test's `:value` (the
+          ;; `:else` case just below, applied to TARGET itself, would do
+          ;; exactly that): lower.clj's lower-attached-test-expression
+          ;; allocates its scratch JVM local *after* choosing VALUE's
+          ;; lowering env, so a VALUE that itself needs fresh locals (any
+          ;; nested :when does, once it has to bind its own temp) collides
+          ;; with that scratch slot instead of getting one of its own — a
+          ;; real bug, previously unreachable because no VALUE expression
+          ;; here ever needed a fresh local before. `?p.age as a and
+          ;; ?q.age as b` never has this problem (each attached-test's own
+          ;; VALUE is a plain expression), so chaining into the same
+          ;; `and`-of-attached-tests shape this walker already produces
+          ;; for that reuses its already-correct, already-tested slot
+          ;; threading (lower-boolean-condition's "and" case) instead of
+          ;; adding a second, parallel mechanism.
+          chained?
+          (let [temp-name (str "__safe_receiver_" (swap! next-fn-id inc) "__")]
+            {:type :when
+             :condition {:type :binary
+                         :operator "and"
+                         :left (:condition target)
+                         :right {:type :attached-test
+                                 :value (:consequent target)
+                                 :var-name temp-name}}
+             :consequent (-> call-node (dissoc :safe?) (assoc :target temp-name))
+             :alternative {:type :nil}})
+
+          ;; A compound receiver (`x.y?.z`, not a bare identifier and not a
+          ;; chained `?.`): reuse the `?<expr> as <name>` object-test
+          ;; machinery to evaluate TARGET exactly once into a synthetic
+          ;; binding, rather than the plain `/= nil` comparison above, which
+          ;; only reads a variable that already exists — every backend
+          ;; (typechecker's apply-condition-branch-refinement!, lower's
+          ;; ensure-attached-test-bindings/refine-condition-branch-env, the
+          ;; interpreter's :attached-test eval) already narrows a `:when`
+          ;; condition shaped this way, since it's the same node `if ?p.age
+          ;; as a then ... end` produces.
+          :else
+          (let [temp-name (str "__safe_receiver_" (swap! next-fn-id inc) "__")]
+            {:type :when
+             :condition {:type :attached-test
+                         :value target
+                         :var-name temp-name}
+             :consequent (-> call-node (dissoc :safe?) (assoc :target temp-name))
+             :alternative {:type :nil}}))
         {::safe-call call-node}))
     call-node))
 
