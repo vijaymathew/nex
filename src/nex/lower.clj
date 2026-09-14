@@ -557,6 +557,36 @@
     (assoc-in env' [:var-types (:var-name condition)] (:target-type condition))
     env'))
 
+(defn- attached-test-branch-env
+  "`env` extended with a fresh `:var-types` entry for every `?<expr> as
+   <name>` guard in CONDITION (recursing through `and`, like
+   tc/attached-test-guards).
+
+   Unlike a `convert` guard, whose bound type is written in the AST
+   (convert-branch-env reads it straight off), an attached-test's isn't —
+   normally that gap is covered by ensure-attached-test-bindings, which
+   allocates a real local slot (with a type inferred the same way, via
+   infer-type-or-any) before refine-condition-branch-env ever narrows it.
+   But nex.walker/desugar-safe-expression-call's compound-receiver case
+   nests one `:when`/attached-test's bind-value inside another (`x.y?.z?.w`
+   desugars to an outer attached-test whose value is itself the inner
+   attached-test's `:when`) — and ensure-attached-test-bindings computes the
+   *outer* binding's type by calling infer-type on that inner `:when` before
+   the inner binding has been ensured anywhere, so infer-type-when's own
+   refine-condition-branch-env call finds nothing to narrow and silently
+   drops it, collapsing the inner binding's type to \"Any\" and then a real
+   field/method lookup through it during actual lowering fails with
+   \"Unable to infer expression type during lowering\". Calling this first
+   (a pure type-only registration, no slot allocated) lets infer-type-if/
+   infer-type-when resolve a condition's own attached-test guards no matter
+   how deep the nesting, independent of whatever the real codegen path has
+   or hasn't ensured yet."
+  [env' condition]
+  (reduce (fn [acc {:keys [name value]}]
+            (assoc-in acc [:var-types name] (tc/attachable-type (infer-type-or-any acc value))))
+          env'
+          (tc/attached-test-guards condition)))
+
 (defn- infer-type-identifier
   [env expr]
   (or (get-in (:locals env) [(:name expr) :nex-type])
@@ -694,7 +724,9 @@
 
 (defn- infer-type-if
   [env expr]
-  (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
+  (let [then-env (refine-condition-branch-env (attached-test-branch-env
+                                                (convert-branch-env env (:condition expr))
+                                                (:condition expr))
                                               (:condition expr)
                                               :then)
         else-env (refine-condition-branch-env env (:condition expr) :else)]
@@ -711,15 +743,25 @@
 ;; silently failed.
 (defn- infer-type-when
   [env expr]
-  (let [then-env (refine-condition-branch-env (convert-branch-env env (:condition expr))
+  (let [then-env (refine-condition-branch-env (attached-test-branch-env
+                                                (convert-branch-env env (:condition expr))
+                                                (:condition expr))
                                               (:condition expr)
                                               :then)
         else-env (refine-condition-branch-env env (:condition expr) :else)
         cons-type (infer-type-or-any then-env (:consequent expr))
         alt-type (infer-type-or-any else-env (:alternative expr))]
+    ;; Detachable-wrap the surviving branch's type when the other is bare
+    ;; `nil` -- mirroring tc/check-expr-when's cons-nil?/alt-nil? handling
+    ;; exactly (a `?.` whose value comes back nil takes this `alt-type =
+    ;; "Nil"` branch). Without it, a concrete-but-still-nilable result (e.g.
+    ;; `Integer`) resolves to that type's ordinary, non-detachable jvm-type
+    ;; -- a primitive `long` for Integer -- and reading it back where the
+    ;; value is actually nil unboxes a null Long, crashing with a raw NPE
+    ;; instead of running the branch that produced nil.
     (cond
-      (= alt-type "Nil") cons-type
-      (= cons-type "Nil") alt-type
+      (= alt-type "Nil") (tc/detachable-version cons-type)
+      (= cons-type "Nil") (tc/detachable-version alt-type)
       :else cons-type)))
 
 (def ^:private infer-type-dispatch

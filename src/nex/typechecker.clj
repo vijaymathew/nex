@@ -2309,6 +2309,36 @@
 
     env))
 
+(defn- check-condition
+  "Type-check a boolean CONDITION for its overall (Boolean) type, threading
+   each `and` conjunct's own convert/attached-test binding into a scratch
+   child env before checking the next conjunct — so a later conjunct's own
+   VALUE expression can reference an earlier one's bound name (`?x as t1 and
+   ?t1.y as t2`), the same way apply-condition-branch-refinement! already
+   threads bindings sequentially through a single `doseq` when building the
+   `:then` branch's env. Without this, only the *body* of a `?x as t1 and
+   ?t1.y as t2`-guarded branch could see t1 (via that already-threaded
+   refinement); checking the raw condition itself — done once up front by
+   both check-if and check-expr-when just to confirm it's Boolean — used
+   env unchanged across both sides, so t1 read as undefined there even
+   though the very same condition's *branch* would have resolved it fine.
+   A plain check-expression call for every other condition shape (a bare
+   `and` node still recurses into its own two sides here, so a 3+-conjunct
+   left-associated chain threads all the way through)."
+  [env condition]
+  (if (and (map? condition) (= :binary (:type condition)) (= "and" (:operator condition)))
+    (let [scratch (make-type-env env)
+          left-type (check-condition scratch (:left condition))]
+      (apply-condition-branch-refinement! scratch (:left condition) :then)
+      (let [right-type (check-condition scratch (:right condition))]
+        (if (and (= left-type "Boolean") (= right-type "Boolean"))
+          "Boolean"
+          (throw (ex-info "Operator and requires Boolean operands"
+                          {:error (type-error
+                                   (str "Operator and requires Boolean operands, got "
+                                        (display-type left-type) " and " (display-type right-type)))})))))
+    (check-expression env condition)))
+
 (defn convert-guard-binding
   "Extract convert-bound variable info from condition of form:
    convert <expr> to <var>:<Type>"
@@ -4076,7 +4106,7 @@
 
 (defn- check-expr-when
   [env expr]
-  (let [cond-type (check-expression env (:condition expr))
+  (let [cond-type (check-condition env (:condition expr))
         cons-env (doto (make-type-env env)
                    (apply-condition-branch-refinement! (:condition expr) :then))
         alt-env (doto (make-type-env env)
@@ -4569,7 +4599,7 @@
 (defn check-if
   "Check an if statement"
   [env {:keys [condition then elseif else] :as stmt}]
-  (let [cond-type (check-expression env condition)]
+  (let [cond-type (check-condition env condition)]
     (when-not (= cond-type "Boolean")
       (throw (ex-info "If condition must be Boolean"
                       {:error (type-error
