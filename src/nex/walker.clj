@@ -341,6 +341,96 @@
     :else
     node))
 
+(defn- phantom-call-glue-point?
+  "A `:call` node is a *phantom application* (`handle-postfix`'s `Call on
+   expression result: (expr)(...)` branch) when its own opening paren
+   followed something that was already a complete expression, rather than
+   a bare identifier or an existing `.method` reference -- `:method` is
+   left `nil` and `:target` holds that whole preceding expression. The one
+   argument list nex actually writes this way on purpose is a genuine
+   curried call, `(fn(...) ...)(x)`, whose own `(` sits right after its
+   target -- on one line, or immediately after it even split across lines
+   itself (`f(a,\\n b)(c)`).
+
+   The far more common way to reach this shape is two entirely unrelated
+   statements the grammar glued into one: `stmt1` on its own line
+   immediately followed by `(stmt2)...` on the next, with no operator
+   between them. `postfixPart*` is greedy and a bare `(` is valid
+   `callSuffix` syntax, so `print(a)` then `(create Foo).bar(a)` parses as
+   \"call print(a)'s (Void) result with argument (create Foo), then call
+   .bar on that\" -- see nex-paren-continuation-parse-gotcha in dev notes.
+   clj-antlr's interpreted parser mode never evaluates semantic predicates
+   (confirmed: `sempred` on ParserInterpreter is Recognizer's default,
+   which always returns true), so this can't be rejected in the grammar
+   itself; it has to be undone here, after the fact, from source position.
+
+   handle-postfix stamps exactly the two lines needed to tell the two apart
+   precisely: `:glue-paren-line`, this call-suffix's own line (i.e. its `('s
+   true position -- NOT the argument's, which can differ from it, e.g.
+   `print(a)(\\n  create Foo).bar(a)` keeps its `(` on print(a)'s own line
+   even though the argument wraps), and `:glue-target-line`, :target's own
+   most recently known line as of just before this call-suffix. A glue
+   point is exactly when the former is strictly later than the latter."
+  [node]
+  (and (map? node)
+       (= :call (:type node))
+       (nil? (:method node))
+       (map? (:target node))
+       (= 1 (count (:args node)))
+       (:glue-target-line node)
+       (:glue-paren-line node)
+       (> (:glue-paren-line node) (:glue-target-line node))))
+
+(defn- split-glued-statement
+  "Undo a false merge detected by phantom-call-glue-point?, splitting NODE
+   back into the two (or more, for a run of 3+ glued lines) statements the
+   source actually wrote. Recurses down :target so a glue point buried
+   under further chaining (`(create Foo).bar(a)`, where the glue point is
+   beneath the `.bar` call) is still found and the `.bar` call re-attached
+   to the right-hand half. Always returns a vector, even a single-element
+   one for an ordinary statement with nothing to split -- but every :call
+   node passed through here, split or not, comes out with handle-postfix's
+   :glue-target-line/:glue-paren-line bookkeeping stripped; nothing past
+   the walker should see them.
+
+   A split-off fragment does NOT get statement-position-node applied here,
+   even though it may turn out to need the paren-less-call/guarded-block
+   restoration an ordinary bare-identifier/safe-call statement gets from
+   handle-statement (`print(a)\n(b)` needs it; `print(a)\n(b).c(d)` must
+   NOT get it, since there `b` stays a plain receiver for `.c` -- and
+   whether a given split-off fragment is this call's own final element or
+   goes on to be re-wrapped as an ancestor's :target, per the branch
+   below, isn't knowable until splitting is completely done). The caller
+   that starts a split (handle-block/handle-program) is the one place
+   that both applies once and applies correctly, since every element in
+   its final result is genuinely terminal by construction."
+  [node]
+  (cond
+    (phantom-call-glue-point? node)
+    (into (split-glued-statement (:target node))
+          (split-glued-statement (first (:args node))))
+
+    (and (map? node) (= :call (:type node)) (map? (:target node)))
+    (let [split-target (split-glued-statement (:target node))
+          clean (dissoc node :glue-target-line :glue-paren-line)]
+      (if (> (count split-target) 1)
+        ;; call-target here mirrors what handle-postfix's member-access
+        ;; branch does when it first builds :target from acc -- a plain
+        ;; identifier receiver is stored as its bare name string, never as
+        ;; an :identifier node. Splitting bypasses that original call
+        ;; (this fragment wasn't :acc yet when NODE was first built), so a
+        ;; freshly split-off identifier (`(b).c(d)`'s `b`) needs it done
+        ;; here instead; a no-op for every other node shape.
+        (conj (vec (butlast split-target))
+              (assoc clean :target (call-target (last split-target))))
+        [clean]))
+
+    (map? node)
+    [(dissoc node :glue-target-line :glue-paren-line)]
+
+    :else
+    [node]))
+
 (defn- build-function-node
   "POS ({:row :column}, 0-based, from node-pos on the raw parse node -- a bare
    token has no metadata of its own to carry it) is stamped onto the
@@ -1148,7 +1238,15 @@
 (defn- handle-program
   [[_ & nodes]]
   (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
-        transformed (mapv transform-node cleaned-nodes)
+        ;; See handle-block: a top-level statement can be glued to an
+        ;; unrelated next line the same way a block-level one can, and
+        ;; needs the same statement-position-node pass once splitting is
+        ;; fully resolved (harmless no-op here for the non-statement
+        ;; nodes -- classes, functions, imports, ... -- also flowing
+        ;; through this same mapcat).
+        transformed (->> cleaned-nodes
+                         (mapcat #(split-glued-statement (transform-node %)))
+                         (mapv statement-position-node))
         classes (filter #(= :class (:type %)) transformed)
         fn-nodes (filter #(= :function (:type %)) transformed)
         ;; Forward declarations (`declare function`) intentionally repeat a
@@ -1740,7 +1838,17 @@
 
 (defn- handle-block
   [[_ & statements]]
-  (mapv transform-node statements))
+  ;; Each raw `statement` node normally becomes exactly one final statement,
+  ;; but one that the grammar glued to an unrelated next line (see
+  ;; split-glued-statement) expands back into the two (or more) it should
+  ;; have been -- hence mapcat rather than mapv. statement-position-node
+  ;; runs last, over every element of the fully-split result: only here is
+  ;; each one known to be genuinely terminal (see split-glued-statement's
+  ;; docstring for why it can't apply this any earlier), the same
+  ;; restoration handle-statement gives an ordinary, non-glued statement.
+  (->> statements
+       (mapcat #(split-glued-statement (transform-node %)))
+       (mapv statement-position-node)))
 
 (defn- handle-statement
   [[_ stmt]]
@@ -2314,61 +2422,82 @@
         parts (->> parts
                    (filter sequential?)
                    (map transform-node))]
-    (reduce (fn [acc part]
-              (case (:type part)
-                :member-access
-                (desugar-safe-expression-call
-                 (cond-> {:type :call
-                          :target (call-target acc)
-                          :method (:name part)
-                          :args (:args part)}
-                   (some? (:has-parens part))
-                   (assoc :has-parens (:has-parens part))
-                   (:safe? part)
-                   (assoc :safe? true)))
+    ;; `line` tracks the start line of whatever was most recently folded into
+    ;; `acc` -- each `part` already carries its own accurate :dbg/line (it
+    ;; went through transform-node individually), so this is exact, unlike
+    ;; trying to infer a position from unrelated content after the fact. Only
+    ;; the `:else` call-suffix branch below (a phantom application) reads it,
+    ;; to tell a real same-line curried call from two statements the grammar
+    ;; glued across a newline -- see phantom-call-glue-point?.
+    (first
+     (reduce
+      (fn [[acc line] part]
+        [(case (:type part)
+           :member-access
+           (desugar-safe-expression-call
+            (cond-> {:type :call
+                     :target (call-target acc)
+                     :method (:name part)
+                     :args (:args part)}
+              (some? (:has-parens part))
+              (assoc :has-parens (:has-parens part))
+              (:safe? part)
+              (assoc :safe? true)))
 
-                ;; `name[Integer]` (no call following, or a call-suffix part
-                ;; still to come): stash the explicit type args on the
-                ;; accumulator so the call-suffix branch below (or the final
-                ;; bare-reference value, if no call follows) can carry them.
-                :explicit-generic-args
-                (if (map? acc)
-                  (assoc acc :explicit-generic-args (:args part))
-                  acc)
+           ;; `name[Integer]` (no call following, or a call-suffix part
+           ;; still to come): stash the explicit type args on the
+           ;; accumulator so the call-suffix branch below (or the final
+           ;; bare-reference value, if no call follows) can carry them.
+           :explicit-generic-args
+           (if (map? acc)
+             (assoc acc :explicit-generic-args (:args part))
+             acc)
 
-                :call-suffix
-                (cond
-                  ;; Function call: f(...)
-                  (and (map? acc) (= :identifier (:type acc)))
-                  (cond-> {:type :call
-                           :target nil
-                           :method (:name acc)
-                           :args (:args part)
-                           :has-parens true}
-                    (:explicit-generic-args acc)
-                    (assoc :explicit-generic-args (:explicit-generic-args acc)))
+           :call-suffix
+           (cond
+             ;; Function call: f(...)
+             (and (map? acc) (= :identifier (:type acc)))
+             (cond-> {:type :call
+                      :target nil
+                      :method (:name acc)
+                      :args (:args part)
+                      :has-parens true}
+               (:explicit-generic-args acc)
+               (assoc :explicit-generic-args (:explicit-generic-args acc)))
 
-                  ;; Method call split as memberAccess + callSuffix: obj.m(...)
-                  (and (map? acc)
-                       (= :call (:type acc))
-                       (some? (:method acc))
-                       (not (:has-parens acc)))
-                  (desugar-safe-expression-call
-                   (assoc acc
-                          :args (:args part)
-                          :has-parens true))
+             ;; Method call split as memberAccess + callSuffix: obj.m(...)
+             (and (map? acc)
+                  (= :call (:type acc))
+                  (some? (:method acc))
+                  (not (:has-parens acc)))
+             (desugar-safe-expression-call
+              (assoc acc
+                     :args (:args part)
+                     :has-parens true))
 
-                  ;; Call on expression result: (expr)(...)
-                  :else
-                  {:type :call
-                   :target acc
-                   :method nil
-                   :args (:args part)
-                   :has-parens true})
+             ;; Call on expression result: (expr)(...) -- the one
+             ;; legitimate use is a same-line curried call. The far more
+             ;; common way to reach this shape is two unrelated statements
+             ;; the grammar's greedy postfixPart* glued together across a
+             ;; newline (`print(a)` then `(create Foo).bar(a)` on the next
+             ;; line -- see nex-paren-continuation-parse-gotcha in dev
+             ;; notes), so tag it with both this call-suffix's own line
+             ;; (the true position of its `(`) and `line`, ACC's own most
+             ;; recently known one, for split-glued-statement to tell the
+             ;; two apart by afterwards.
+             :else
+             (cond-> {:type :call
+                      :target acc
+                      :method nil
+                      :args (:args part)
+                      :has-parens true}
+               line (assoc :glue-target-line line)
+               (:dbg/line part) (assoc :glue-paren-line (:dbg/line part))))
 
-                acc))
-            base
-            parts)))
+           acc)
+         (or (:dbg/line part) line)])
+      [base (:dbg/line base)]
+      parts))))
 
 (defn- handle-postfix-part
   [[_ part]]
