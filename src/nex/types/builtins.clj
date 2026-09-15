@@ -625,8 +625,15 @@
       :index (atom 0)})})
 
 (def integer-type-methods
-  {"to_string"         ^{:signatures [{:params [] :return-type "String"}]}
-   (fn [n & _] (str n))
+  {"to_string"         ^{:signatures [{:params [] :return-type "String"}
+                                       {:params [{:name "base" :type "Integer"}] :return-type "String"}]}
+   (fn [n & [base]]
+     (if (some? base)
+       (if (contains? #{2 8 10 16} base)
+         (Long/toString (long n) (int base))
+         (throw (ex-info (str "Integer.to_string: base must be 2, 8, 10, or 16, got " base)
+                         {:base base})))
+       (str n)))
    ;; The typechecker has always accepted these three (they're registered
    ;; alongside every other Integer method), but the runtime table never
    ;; defined them — n.to_real() and kin failed with "Method not found",
