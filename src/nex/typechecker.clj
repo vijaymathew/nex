@@ -2992,6 +2992,70 @@
                     (throw (ex-info msg {:error (type-error msg)}))
                     "Any"))))))))))
 
+;; The explicit-class-name spelling of constructor delegation
+;; (`Account.make(owner_name, opening)` from within SavingsAccount.make, or
+;; same-class `Square.make(n, 1.0)` from within another of Square's own
+;; constructors) shares its syntax with an ordinary explicit-class-qualified
+;; feature-method call (`Account.deposit(amount)`, also valid, also checked
+;; below), so it isn't split out until METHOD+arity actually resolves to a
+;; constructor *somewhere* in TARGET-NAME's chain — exactly the shape
+;; check-general-target-call's lookup-class-method falls back to otherwise,
+;; with the exact same defect the check-super-call comment above describes
+;; for `super`: it walks the whole chain looking for any matching-arity
+;; entry, constructors included, so a class name that is neither
+;; CURRENT-CLASS nor one of its ancestors (most often a plain mistake —
+;; writing the current class's own name where the parent's was meant) still
+;; resolves, passes type-checking, and only crashes lowering with an opaque,
+;; unlocated internal error — lowering has no mechanism to call a
+;; constructor through a receiver named after some other class in the chain.
+(defn- explicit-class-constructor-name+arity?
+  [env class-target-name method arity]
+  (boolean (some #(and (= (:name %) method) (= (count (or (:params %) [])) arity))
+                 (lookup-class-constructors env class-target-name))))
+
+(defn- check-explicit-class-constructor-call
+  [env {:keys [method args]} {:keys [target-name current-class]}]
+  (if-let [ctor-def (class-own-constructor env target-name method (count args))]
+    ;; TARGET-NAME must declare this constructor *directly* — class-own-
+    ;; constructor doesn't walk ancestors, so an arity match found only
+    ;; further up TARGET-NAME's own chain (inherited under a name that only
+    ;; coincidentally matches METHOD) falls to the else branch below instead
+    ;; of here, the same restriction check-super-call already applies to the
+    ;; immediate super parent's own constructor.
+    ;;
+    ;; Same-class delegation (one of a class's own constructors calling
+    ;; another) is a real, already-supported feature — but only spelled
+    ;; `this.ctor(...)` (see constructor-delegation-calls below and
+    ;; nex.lower/lower-call-stmt); nex.lower/lower-call-with-target's
+    ;; constructor-delegation branch requires TARGET-NAME to be a *parent*
+    ;; of the current class, so TARGET-NAME = CURRENT-CLASS itself still
+    ;; type-checks fine under class-subtype? (which treats identity as
+    ;; trivially "conforms") but has nowhere to go in lowering — the same
+    ;; "typechecker permissive, lowering crashes" defect this whole function
+    ;; exists to close, just for the self-reference case instead of an
+    ;; unrelated one. Excluded explicitly, with a message pointing at the
+    ;; spelling that actually works, rather than silently reopening it.
+    (cond
+      (= (class-name-identity env current-class) (class-name-identity env target-name))
+      (let [msg (str target-name "." method "(...) cannot delegate to another of "
+                     target-name "'s own constructors this way; use this." method
+                     "(...) instead")]
+        (throw (ex-info msg {:error (type-error msg)})))
+
+      (class-subtype? env current-class target-name)
+      (check-call-signature env method args
+                            {:params (:params ctor-def) :return-type target-name}
+                            {})
+
+      :else
+      (let [msg (str target-name "." method "(...) is not reachable here: "
+                     target-name " is neither " current-class
+                     " itself nor one of its ancestors")]
+        (throw (ex-info msg {:error (type-error msg)}))))
+    (let [msg (str "Constructor not found: " target-name "." method " with "
+                   (count args) " argument(s)")]
+      (throw (ex-info msg {:error (type-error msg)})))))
+
 (defn- check-target-call
   [env {:keys [target method has-parens] :as expr}]
   (let [call-info (resolve-call-target-info env expr)]
@@ -3022,6 +3086,10 @@
            ;; spelling below — just without the name.
            (or (nil? method) (re-matches #"call\d+" (str method))))
       (check-typed-function-call env expr call-info)
+
+      (and (:class-target call-info) has-parens
+           (explicit-class-constructor-name+arity? env (:target-name call-info) method (count (:args expr))))
+      (check-explicit-class-constructor-call env expr call-info)
 
       :else
       (check-general-target-call env expr call-info))))

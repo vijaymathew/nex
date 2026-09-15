@@ -314,6 +314,107 @@ bs.push(3)
 print(bs.size)
 print(bs.is_full)")))))
 
+;; ─── The explicit-class-name spelling of constructor delegation ─────────────
+;;
+;; `ParentClassName.ctor(...)` (used throughout examples/inheritance_example.nex,
+;; e.g. `Account.make(owner_name, opening)`) is a second, older spelling for
+;; the same delegation `super.ctor(...)` performs. Both must be rejected the
+;; same way when they name something invalid: check-general-target-call's
+;; lookup-class-method walks the whole ancestor chain for *any* matching-
+;; arity entry, constructors included, so before check-explicit-class-
+;; constructor-call existed, a class name that was neither the current class
+;; nor a real ancestor (most often the current class's own name written
+;; where the parent's was meant) still type-checked -- passing all the way
+;; to JVM lowering, which has no way to call it, and crashing there with an
+;; opaque, unlocated "internal error in the compiled backend: Unable to
+;; infer expression type during lowering" instead of a real type error.
+
+(deftest explicit-parent-constructor-delegation-test
+  (testing "ParentClassName.make(...) initialises fields declared on the parent"
+    (is (= ["\"blue\"" "3.0"]
+           (both "class Shape
+  feature colour: String
+  create make(c: String) do colour := c end
+end
+class Circle
+  inherit Shape
+  feature radius: Real
+  create make(c: String, r: Real) do
+    Shape.make(c)
+    radius := r
+  end
+end
+let ci := create Circle.make(\"blue\", 3.0)
+print(ci.colour)
+print(ci.radius)")))))
+
+(deftest explicit-parent-feature-method-delegation-test
+  (testing "ParentClassName.method(...) still reaches the parent's own override of an ordinary method"
+    (is (= ["6.0"]
+           (both "class Shape
+  feature
+    area(): Real do result := 0.0 end
+end
+class Circle
+  inherit Shape
+  feature radius: Real
+  create make(r: Real) do radius := r end
+  feature
+    area(): Real do result := Shape.area() + radius * 2.0 end
+end
+let ci := create Circle.make(3.0)
+print(ci.area())")))))
+
+(deftest explicit-self-referential-constructor-call-rejected-test
+  (testing "CurrentClass.ctor(...) naming a constructor arity only an ancestor has is a type error, not a lowering crash"
+    (let [code "class Shape
+  feature colour: String
+  create make(c: String) do colour := c end
+end
+class Circle
+  inherit Shape
+  feature radius: Real
+  create make(c: String, r: Real) do
+    Circle.make(c)
+    radius := r
+  end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (some #(clojure.string/includes? (:message %) "Constructor not found: Circle.make")
+                (:errors result))))))
+
+(deftest explicit-unrelated-class-constructor-call-rejected-test
+  (testing "ClassName.ctor(...) naming an unrelated class's constructor is a type error"
+    (let [code "class Other
+  create make(n: Integer) do n_field := n end
+  feature n_field: Integer
+end
+class Shape
+  feature colour: String
+  create make(c: String) do
+    Other.make(1)
+    colour := c
+  end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (some #(clojure.string/includes? (:message %) "is not reachable here")
+                (:errors result))))))
+
+(deftest explicit-same-class-constructor-call-rejected-with-hint-test
+  (testing "ClassName.ctor(...) delegating to another of ITS OWN constructors is rejected, pointing at this.ctor(...)"
+    (let [code "class Box
+  feature value: Integer
+  create
+    make(v: Integer) do value := v end
+    default do Box.make(0) end
+end"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (some #(clojure.string/includes? (:message %) "use this.make(...) instead")
+                (:errors result))))))
+
 (deftest this-constructor-delegation-test
   (testing "this.ctor(...) delegates to another constructor of the same class"
     (is (= ["0" "42"]
