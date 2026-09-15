@@ -348,6 +348,35 @@ let ci := create Circle.make(\"blue\", 3.0)
 print(ci.colour)
 print(ci.radius)")))))
 
+(deftest explicit-parent-constructor-delegation-renamed-reordered-generics-test
+  ;; Regression: an earlier version of check-explicit-class-constructor-call
+  ;; passed an empty type-map straight to check-call-signature, so a
+  ;; heir that renames/reorders its parent's generic parameters
+  ;; (`Swapped [X, Y] inherit Pair[Y, X]`) failed to type-check its own
+  ;; `Pair.make(y, x)` delegation call with "Expected A, got Y" -- the
+  ;; parent's own, unsubstituted generic parameter names leaking through
+  ;; instead of being resolved against what the heir's inherit clause
+  ;; actually supplies.
+  (testing "ParentClassName.ctor(...) resolves the parent's generic params through a renamed/reordered inherit clause"
+    (is (= ["\"hi\"" "1"]
+           (both "class Pair [A, B]
+  feature
+    first: A
+    second: B
+  create make(a: A, b: B) do
+    first := a
+    second := b
+  end
+end
+class Swapped [X, Y] inherit Pair[Y, X]
+  create make(y: Y, x: X) do
+    Pair.make(y, x)
+  end
+end
+let s := create Swapped[Integer, String].make(\"hi\", 1)
+print(s.first)
+print(s.second)")))))
+
 (deftest explicit-parent-feature-method-delegation-test
   (testing "ParentClassName.method(...) still reaches the parent's own override of an ordinary method"
     (is (= ["6.0"]

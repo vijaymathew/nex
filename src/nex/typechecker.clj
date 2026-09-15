@@ -3013,6 +3013,21 @@
   (boolean (some #(and (= (:name %) method) (= (count (or (:params %) [])) arity))
                  (lookup-class-constructors env class-target-name))))
 
+(defn- self-type-with-own-generic-params
+  "CLASS-NAME as its own receiver type, generic parameters supplied to
+   themselves -- `class Swapped [X, Y] inherit Pair[Y, X]` used from within
+   Swapped's own body becomes {:base-type \"Swapped\" :type-args [\"X\" \"Y\"]}.
+   That is exactly the shape build-member-generic-type-map needs to walk
+   an ancestor's inherit-clause substitution (Pair[Y, X]) and bind the
+   ancestor's own parameter names (A, B) to whatever this class's own
+   constructor body actually has in scope (Y, X) -- a rename, reorder, or
+   both. A non-generic class collapses to its bare name, an identity
+   type-map's worth of information."
+  [env class-name]
+  (if-let [gparams (seq (:generic-params (env-lookup-class env class-name)))]
+    {:base-type class-name :type-args (mapv #(type-name-string (:name %)) gparams)}
+    class-name))
+
 (defn- check-explicit-class-constructor-call
   [env {:keys [method args]} {:keys [target-name current-class]}]
   (if-let [ctor-def (class-own-constructor env target-name method (count args))]
@@ -3045,7 +3060,8 @@
       (class-subtype? env current-class target-name)
       (check-call-signature env method args
                             {:params (:params ctor-def) :return-type target-name}
-                            {})
+                            (build-member-generic-type-map
+                             env (self-type-with-own-generic-params env current-class) target-name))
 
       :else
       (let [msg (str target-name "." method "(...) is not reachable here: "
