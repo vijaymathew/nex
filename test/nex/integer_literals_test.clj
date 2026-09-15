@@ -130,3 +130,70 @@ end")
 end")]
       ;; abs returns integer 7 (no quotes), to_string returns string "-7" (print shows with quotes)
       (is (= ["7" "\"-7\""] output)))))
+
+;; Integer.to_string(base) is the inverse of the 0b/0o/0x literal syntax
+;; tested above: formats a value back into base 2, 8, 10, or 16.
+(deftest to-string-with-base-typechecks
+  (testing "both the zero-arg and one-arg to_string overloads type-check"
+    (let [ast (p/ast "class Test
+  feature
+    demo() do
+      let a: String := (113).to_string()
+      let b: String := (113).to_string(2)
+      let c: String := (113).to_string(8)
+      let d: String := (113).to_string(16)
+    end
+end")
+          result (tc/type-check ast)]
+      (is (:success result))
+      (is (empty? (:errors result))))))
+
+(deftest to-string-with-base-runtime
+  (testing "formats a value in each supported base"
+    (let [output (execute-method-output "class Test
+  feature
+    demo() do
+      print((113).to_string(2))
+      print((113).to_string(8))
+      print((113).to_string(16))
+      print((113).to_string(10))
+    end
+end")]
+      (is (= ["\"1110001\"" "\"161\"" "\"71\"" "\"113\""] output))))
+  (testing "a negative value gets a leading '-' followed by its unsigned magnitude"
+    (let [output (execute-method-output "class Test
+  feature
+    demo() do
+      print((-5).to_string(2))
+    end
+end")]
+      (is (= ["\"-101\""] output)))))
+
+(deftest to-string-with-invalid-base-raises
+  (testing "a base outside {2, 8, 10, 16} raises at runtime, not silently"
+    (is (thrown-with-msg?
+         Exception #"base must be 2, 8, 10, or 16"
+         (execute-method-output "class Test
+  feature
+    demo() do
+      print((113).to_string(3))
+    end
+end")))))
+
+(deftest to-string-with-base-rejects-wrong-argument-shape
+  (testing "a non-Integer base argument is a type error"
+    (let [result (tc/type-check (p/ast "class Test
+  feature
+    demo() do
+      print((113).to_string(\"2\"))
+    end
+end"))]
+      (is (not (:success result)))))
+  (testing "more than one argument is a type error"
+    (let [result (tc/type-check (p/ast "class Test
+  feature
+    demo() do
+      print((113).to_string(2, 8))
+    end
+end"))]
+      (is (not (:success result))))))

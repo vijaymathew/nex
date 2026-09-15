@@ -75,7 +75,8 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
-| `to_string` | none | `String` | Convert to string. |
+| `to_string` | none | `String` | Convert to string (base 10). |
+| `to_string` | `base: Integer` | `String` | Convert to string in `base` (`2`, `8`, `10`, or `16`; any other value raises). A negative value is rendered with a leading `-` followed by its unsigned magnitude in that base. |
 | `abs` | none | `Integer` | Absolute value. |
 | `min` | `other: Integer` | `Integer` | Smaller of two values. |
 | `max` | `other: Integer` | `Integer` | Larger of two values. |
@@ -104,6 +105,12 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 | `greater_than_or_equal` | `other: Integer` | `Boolean` | Numeric `>=`. |
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
+
+```nex
+let n := 113
+print(n.to_string(2))  -- "1110001"
+print(n.to_string(16)) -- "71"
+```
 
 ## `Real`
 
