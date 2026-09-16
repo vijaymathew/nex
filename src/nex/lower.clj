@@ -2593,25 +2593,57 @@
       (inherited-constructor-def env class-def constructor-name arity)))
 
 (defn- direct-parent-method-map
+  "Every method class-def can reach through its `inherit` clauses, own
+   declarations excluded -- including a grandparent's, great-grandparent's,
+   etc., not just a direct parent's. Recurses into each direct parent's own
+   direct-parent-method-map for anything *it* inherits, prepending the hop
+   into that parent's composition field to the :carrier-path recorded there
+   -- exactly direct-parent-field-map's own recursion, reused here via
+   carrier-path-target-ir at the call site instead of a single GETFIELD.
+   Before this, an entry carried a single :carrier-owner/:carrier-field
+   pair reaching only a *direct* parent's own methods (class-methods
+   parent-def, no recursion into parent-def's own parents), so a bare
+   implicit-self call to a method declared two or more `inherit`s above --
+   through an intermediate class that declares no methods of its own, so
+   there was nothing at all for that direct parent's own class-methods to
+   find -- resolved to a nil map entry, destructured into four nil keys,
+   and crashed with the unrelated-looking \"Missing compiled class metadata
+   during lowering\" the moment carrier-owner (nil) was looked up as if it
+   were a real class name."
   [env class-def]
   (reduce (fn [m {:keys [parent]}]
             (if-let [parent-def (and (get (:compiled-classes env) parent)
                                      (get (visible-class-map env) parent))]
               (let [parent-meta (class-jvm-meta env parent)
-                    composition-field (parent-field-name parent)]
-                (reduce (fn [m2 method-def]
-                          (if (contains? m2 [(:name method-def) (count (or (:params method-def) []))])
-                            m2
-                            (assoc m2
-                                   [(:name method-def) (count (or (:params method-def) []))]
-                                   {:source-class parent
-                                    :carrier-owner (:name class-def)
-                                    :carrier-field composition-field
-                                    :owner-internal-name (:internal-name parent-meta)
-                                    :method-def method-def
-                                    :carrier-jvm-type (exact-class-jvm-type env parent)})))
-                        m
-                        (class-methods parent-def)))
+                    hop {:owner (:name class-def)
+                         :field (parent-field-name parent)
+                         :ancestor parent
+                         :ancestor-jvm-type (exact-class-jvm-type env parent)}
+                    m-with-own-methods
+                    (reduce (fn [m2 method-def]
+                              (if (contains? m2 [(:name method-def) (count (or (:params method-def) []))])
+                                m2
+                                (assoc m2
+                                       [(:name method-def) (count (or (:params method-def) []))]
+                                       {:source-class parent
+                                        :carrier-path [hop]
+                                        :owner-internal-name (:internal-name parent-meta)
+                                        :method-def method-def})))
+                            m
+                            (class-methods parent-def))
+                    ;; Methods `parent` itself only reaches through *its own*
+                    ;; `inherit` clauses (a grandparent's, etc.) -- prepend
+                    ;; this hop to reach them from class-def, the owning
+                    ;; class (and so the method's own linking target) staying
+                    ;; whichever ancestor actually declares it.
+                    inherited-by-parent (direct-parent-method-map env parent-def)]
+                (reduce-kv (fn [m2 k info]
+                             (if (contains? m2 k)
+                               m2
+                               (assoc m2 k (update info :carrier-path
+                                                    (fn [path] (into [hop] path))))))
+                           m-with-own-methods
+                           inherited-by-parent))
               m))
           {}
           (remove #(contains? #{"Any" "Function"} (:parent %)) (:parents class-def))))
@@ -4364,22 +4396,21 @@
 (defn- lower-instance-inherited-parent-call
   "`this.m(...)` where M is not declared/inherited on the class itself but is a
    method of a directly-composed parent — dispatched virtually through that
-   parent's carrier field."
+   parent's carrier field, however many `inherit`s up it actually declares m
+   (carrier-path-target-ir walks direct-parent-method-map's own :carrier-path,
+   one GETFIELD per hop, exactly as it already does for a multi-level field)."
   [env method args]
   (let [entry (get (direct-parent-method-map env (current-class-def env))
                    [method (count args)])
-        {:keys [owner-internal-name method-def carrier-owner carrier-field carrier-jvm-type]} entry
+        {:keys [owner-internal-name method-def carrier-path]} entry
         nex-type (function-return-type method-def)
         jvm-type (resolve-jvm-type env nex-type)]
     (ir/call-virtual-node owner-internal-name
                           (lowered-instance-method-name method-def)
                           (desc/repl-instance-method-descriptor)
-                          (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
-                                             carrier-field
-                                             (ir/this-node (:this-type env)
-                                                           (exact-class-jvm-type env (:this-type env)))
-                                             (:source-class entry)
-                                             carrier-jvm-type)
+                          (carrier-path-target-ir env carrier-path
+                                                  (ir/this-node (:this-type env)
+                                                                (exact-class-jvm-type env (:this-type env))))
                           (mapv #(lower-expression env %) args)
                           nex-type
                           jvm-type)))
@@ -5246,19 +5277,15 @@
                               jvm-type))
 
       :else
-      (let [{:keys [owner-internal-name carrier-owner carrier-field carrier-jvm-type]}
+      (let [{:keys [owner-internal-name carrier-path]}
             (get (direct-parent-method-map env (current-class-def env))
                  [(:method expr) (count (:args expr))])]
         (ir/call-virtual-node owner-internal-name
                               (lowered-instance-method-name method-def)
                               (desc/repl-instance-method-descriptor)
-                              (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
-                                                 carrier-field
-                                                 (ir/this-node (:this-type env)
-                                                               (exact-class-jvm-type env (:this-type env)))
-                                                 (:source-class (get (direct-parent-method-map env (current-class-def env))
-                                                                     [(:method expr) (count (:args expr))]))
-                                                 carrier-jvm-type)
+                              (carrier-path-target-ir env carrier-path
+                                                      (ir/this-node (:this-type env)
+                                                                    (exact-class-jvm-type env (:this-type env))))
                               arg-irs
                               nex-type
                               jvm-type)))))
@@ -7424,7 +7451,7 @@
 
 (defn- make-delegation-method-node
   [env class-meta class-name compiled-classes
-   {:keys [source-class carrier-owner carrier-field owner-internal-name method-def carrier-jvm-type]}]
+   {:keys [source-class carrier-path owner-internal-name method-def]}]
   (let [;; method-def is declared by source-class, so its parameter/return types
         ;; may name the *parent's* generic params — resolve with both the
         ;; subclass's generics (env) and the declaring class's in scope, or a
@@ -7448,12 +7475,9 @@
         call-args (mapv (fn [{:keys [name slot nex-type jvm-type]}]
                           (ir/local-node name slot nex-type jvm-type))
                         params)
-        target-ir (ir/field-get-node (:internal-name (class-jvm-meta env carrier-owner))
-                                     carrier-field
-                                     (ir/this-node class-name
-                                                   (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                     source-class
-                                     carrier-jvm-type)
+        target-ir (carrier-path-target-ir {:compiled-classes compiled-classes} carrier-path
+                                          (ir/this-node class-name
+                                                        (exact-class-jvm-type {:compiled-classes compiled-classes} class-name)))
         call-ir (ir/call-virtual-node owner-internal-name
                                       (lowered-instance-method-name method-def)
                                       (desc/repl-instance-method-descriptor)

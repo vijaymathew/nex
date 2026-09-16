@@ -34,7 +34,38 @@
       compiling fine but crashing at run time with NoClassDefFoundError: T.
       Fixed by adding lower-ancestor-instantiation, a lower.clj-local
       counterpart to nex.typechecker's (private, incompatible env shape)
-      ancestor-instantiation, used exactly where the base-types differ."
+      ancestor-instantiation, used exactly where the base-types differ.
+
+   3. A bare (implicit-self) call to an INHERITED GENERIC method —
+      `set_x(p)` inside `Same[P, Q] inherit Base[P, Q]`'s own constructor,
+      say — checked each argument straight against the method's raw
+      declared parameter/return types (`X`, `Y`, Base's own generic
+      params), never resolved to what the current class's own generic
+      arguments actually instantiate them to. The explicit `this.set_x(p)`
+      spelling of the identical call already resolved this correctly, via
+      the shared build-member-generic-type-map/check-call-signature path;
+      nex.typechecker/check-bare-name-call just never used it, hand-
+      rolling the same argument/return checks without a type-map. Fixed by
+      making it delegate to check-call-signature like every other call
+      path already does.
+
+   4. A bare call to a method reached through an INTERMEDIATE class that
+      declares no methods of its own — `set_v(n)` inside `Level2 inherit
+      Level1`'s constructor, where `Level1 inherit Level0` is otherwise
+      empty and `set_v` is `Level0`'s own — crashed with the unrelated-
+      looking \"Missing compiled class metadata during lowering\"
+      (:class-name nil). nex.lower/direct-parent-method-map only ever
+      collected a *direct* parent's own class-methods, with none of
+      direct-parent-field-map's recursion into that parent's own parents —
+      so an empty intermediate class contributed nothing at all to the
+      map, the lookup for `set_v` came back nil, and destructuring nil
+      bound owner-internal-name/carrier-owner/carrier-field all to nil.
+      The explicit `this.set_v(n)` spelling worked throughout, since it
+      resolves the call through a different, already fully-recursive path
+      (inherited-method-def + lower-instance-user-method-call). Fixed by
+      giving direct-parent-method-map the same recursive :carrier-path
+      composition direct-parent-field-map already has, walked at each call
+      site by the same carrier-path-target-ir both now share."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [nex.parser :as p]
@@ -66,7 +97,7 @@ end
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do this.set_x(q)  this.set_y(p) end
+  create make(p: P, q: Q) do set_x(q)  set_y(p) end
 end
 
 let m: Mid[String, Integer] := create Mid[String, Integer].make(\"hello\", 42)
@@ -91,13 +122,13 @@ end
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do this.set_x(q)  this.set_y(p) end
+  create make(p: P, q: Q) do set_x(q)  set_y(p) end
 end
 
 class Leaf
   inherit
     Mid[String, Integer]
-  create make(s: String, i: Integer) do this.set_x(i)  this.set_y(s) end
+  create make(s: String, i: Integer) do set_x(i)  set_y(s) end
 end
 
 let l: Leaf := create Leaf.make(\"hello\", 42)
@@ -122,7 +153,7 @@ end
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do this.set_x(q)  this.set_y(p) end
+  create make(p: P, q: Q) do set_x(q)  set_y(p) end
 end
 
 function first_field[T](b: Base[T, Any]): T do
@@ -154,13 +185,13 @@ end
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do this.set_x(q)  this.set_y(p) end
+  create make(p: P, q: Q) do set_x(q)  set_y(p) end
 end
 
 class Leaf
   inherit
     Mid[String, Integer]
-  create make(s: String, i: Integer) do this.set_x(i)  this.set_y(s) end
+  create make(s: String, i: Integer) do set_x(i)  set_y(s) end
 end
 
 function first_field[T](b: Base[T, Any]): T do
@@ -177,3 +208,63 @@ print(first_field(l))")
   ;; otherwise expects — the fix has to accept both shapes.
   (testing "first_field[T](b: Base[T, Any]) called with a non-generic Leaf (inheriting Mid[String, Integer] inheriting Base[Q, P]) still infers T = Integer"
     (is (= ["42"] (run-compiled generic-fn-inferred-through-non-generic-leaf-program)))))
+
+(def bare-call-to-inherited-generic-method-program
+  "class Base[X, Y]
+  feature
+    x: X
+    y: Y
+    set_x(v: X) do x := v end
+    set_y(v: Y) do y := v end
+  create make(a: X, b: Y) do x := a  y := b end
+end
+
+class Same[P, Q]
+  inherit
+    Base[P, Q]
+  create make(p: P, q: Q) do set_x(p)  set_y(q) end
+end
+
+let s: Same[String, Integer] := create Same[String, Integer].make(\"hi\", 5)
+print(s.x)
+print(s.y)")
+
+(deftest bare-call-to-inherited-generic-method-substitutes-type-params-test
+  ;; Before the fix: \"Expected X, got P\" — check-bare-name-call compared the
+  ;; argument straight against Base's own declared parameter type, never
+  ;; substituted through Same's actual generic arguments the way the
+  ;; explicit this.set_x(p) spelling of the identical call already did.
+  (testing "set_x(p)/set_y(q), called bare inside Same[P, Q] inherit Base[P, Q]'s own constructor, type-check and run"
+    (is (= ["\"hi\"" "5"] (run-compiled bare-call-to-inherited-generic-method-program)))))
+
+(def bare-call-through-empty-intermediate-program
+  "deferred class Level0
+  feature
+    v: Integer
+    set_v(n: Integer) do v := n end
+    val(): Integer deferred
+end
+
+deferred class Level1 inherit Level0 end
+
+class Level2
+  inherit Level1
+  create make(n: Integer) do set_v(n) end
+  feature
+    val(): Integer do result := v end
+end
+
+let lv := create Level2.make(42)
+print(lv.val)")
+
+(deftest bare-call-through-empty-intermediate-class-test
+  ;; Before the fix: \"Missing compiled class metadata during lowering\"
+  ;; (:class-name nil) — direct-parent-method-map only ever collected
+  ;; Level1's own class-methods (none: Level1 declares nothing itself),
+  ;; never recursing into Level1's own parent Level0 the way direct-parent-
+  ;; field-map already does for fields, so the lookup for set_v came back
+  ;; nil and destructuring it bound every key to nil. The explicit
+  ;; this.set_v(n) spelling worked throughout (a different, already
+  ;; fully-recursive lowering path).
+  (testing "set_v(n), called bare from Level2's own constructor, reaches Level0's method through the empty intermediate Level1"
+    (is (= ["42"] (run-compiled bare-call-through-empty-intermediate-program)))))

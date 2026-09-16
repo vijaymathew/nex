@@ -114,7 +114,7 @@ class Priority_Queue [G -> Comparable] inherit Queue[G]
     -- so dequeue (which removes the front) yields elements in priority order.
     enqueue(value: G) do
       items.add(value)
-      this.set_items(items.sort)
+      set_items(items.sort)
     end
 end
 

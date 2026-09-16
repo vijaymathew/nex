@@ -1098,7 +1098,7 @@ end"))
         (repl/eval-code ctx "class Level2
   inherit Level1
   create
-    make(n: Integer) do this.set_v(n) end
+    make(n: Integer) do set_v(n) end
   feature
     val(): Integer do result := v end
 end"))
@@ -1122,7 +1122,7 @@ end"))
         (repl/eval-code ctx "class LevelD
   inherit LevelC
   create
-    make(n: Integer) do this.set_w(n) end
+    make(n: Integer) do set_w(n) end
   feature
     val(): Integer do result := w end
 end"))
@@ -1151,8 +1151,8 @@ end"))
   inherit Middle[Integer, String]
   create
     make(s: String, i: Integer) do
-      this.set_first(s)
-      this.set_second(i)
+      set_first(s)
+      set_second(i)
     end
   feature
     show(): String do result := first + \":\" + second.to_string end
@@ -1266,7 +1266,7 @@ end"))
         (repl/eval-code ctx "class Widget
   inherit NamedThing
   create
-    make(n: Integer) do this.set_w(n) end
+    make(n: Integer) do set_w(n) end
   feature
     label(): Integer do result := w end
 end"))

@@ -3701,22 +3701,21 @@
   [env method args]
   (if-let [current-class (env-lookup-var env "__current_class__")]
     (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
-      (do
-        (when (not= (count args) (count (:params method-sig)))
-          (throw (ex-info (str "Method " method " expects " (count (:params method-sig))
-                               " arguments, got " (count args))
-                          {:error (type-error
-                                   (str "Method " method " expects " (count (:params method-sig))
-                                        " arguments, got " (count args)))})))
-        (doseq [[arg param] (map vector args (:params method-sig))]
-          (let [arg-type (check-expression env arg)]
-            (when (any-into-concrete-without-convert? env (:type param) arg-type)
-              (throw-any-narrowing-error! (str "parameter '" (:name param) "' of " method) (:type param)))
-            (when-not (types-compatible? env arg-type (:type param))
-              (throw (ex-info (str "Argument type mismatch for method " method)
-                              {:error (type-error
-                                       (str "Expected " (:type param) ", got " arg-type))})))))
-        (or (:return-type method-sig) "Void"))
+      ;; A bare call to an INHERITED generic method used to check each
+      ;; argument straight against method-sig's own :params/:return-type —
+      ;; the raw types the *declaring* class wrote them in (e.g. `X`,
+      ;; `Y`), never resolved to what the current class's own generic
+      ;; arguments actually instantiate them to (`P`, `Q` in `Same[P, Q]
+      ;; inherit Base[P, Q]`), even though the explicit `this.method(...)`
+      ;; spelling of the identical call already resolves this correctly via
+      ;; build-member-generic-type-map. check-call-signature is that same,
+      ;; already-correct shared helper; this now builds the same type-map
+      ;; (self-type-with-own-generic-params, exactly as the explicit-target
+      ;; path does) and delegates to it instead of re-checking by hand.
+      (check-call-signature env method args method-sig
+                            (build-member-generic-type-map
+                             env (self-type-with-own-generic-params env current-class)
+                             (:declaring-class method-sig)))
       (if-let [global-type (and (not (anonymous-function-class-name? current-class))
                                 (expand-type-aliases env (env-lookup-global env method)))]
         (check-function-object-call env method args global-type)
