@@ -78,6 +78,60 @@ let q: Point := create Point")]
       (let [q (interp/env-lookup (:globals ctx) "q")]
         (is (= 10 (get (:fields q) :x)))))))
 
+;; Regression: nex.typechecker/check-assignment (the bare `f := v`,
+;; implicit-self spelling) never checked the field's declaring class at all —
+;; only check-target-assignment (the explicit `this.f := v` / `obj.f := v`
+;; spelling, exercised above) did. So a subclass could bypass the "cannot
+;; assign a field outside its declaring class" rule simply by dropping
+;; `this.`, even though the two spellings name the exact same assignment.
+(deftest member-assign-typechecker-rejects-bare-outside-write-test
+  (testing "the bare (implicit-self) spelling of an outside write is rejected
+            exactly like the explicit `this.f := v` spelling"
+    (let [code "class A
+feature
+  f: Integer
+end
+
+class B
+inherit A
+create
+  make(v: Integer) do f := v end
+end
+
+let b := create B.make(9)"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (some #(str/includes? (tc/format-type-error %) "Cannot assign to field f outside of class A")
+                (:errors result))))))
+
+;; The fix for the above must not reject a local `let` that merely shares a
+;; name with an inherited field — env-lookup-var already resolves such a
+;; name to the local (ordinary lexical shadowing), so the declaring-class
+;; check must be skipped whenever a `let` reachable from here, not
+;; lookup-class-field-member's scope-blind field lookup, is what the bare
+;; name actually refers to.
+(deftest member-assign-typechecker-allows-local-shadowing-inherited-field-test
+  (testing "a local variable shadowing an inherited field's name may still be reassigned"
+    (let [code "class A
+feature
+  f: Integer
+end
+
+class B
+inherit A
+create
+  make()
+  do
+    let f := 5
+    f := 10
+    print(f)
+  end
+end
+
+let b := create B.make"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result))))))
+
 (deftest member-assign-interpreter-rejects-multiple-inheritance-parent-writes-test
   (testing "Interpreter rejects direct writes to either parent field from a multiply-inheriting child"
     (let [ctx (interp/make-context)

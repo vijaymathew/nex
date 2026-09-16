@@ -4522,6 +4522,23 @@
                                 " without narrowing it first. Use `convert ... to "
                                 "<name>: " (display-type target-type) " then ... end`."))})))
 
+(defn- let-shadowed?
+  "True when TARGET was introduced by a `let` reachable from ENV — i.e. a
+   local (or an enclosing block's local) currently shadows any same-named
+   field. `:let-names` is per-env (see check-let), fresh for each nested
+   block/routine, and only `let` ever adds to it — a field bound by
+   bind-visible-class-fields! never does — so walking every env from ENV up
+   to the root and checking each one's own set is exactly the same shadowing
+   check env-lookup-var itself performs to resolve TARGET's *type*, applied
+   here to answer whether that resolution would land on a local rather than
+   the field lookup-class-field-member finds independently of scope."
+  [env target]
+  (loop [e env]
+    (cond
+      (nil? e) false
+      (contains? @(:let-names e) target) true
+      :else (recur (:parent e)))))
+
 (defn check-assignment
   "Check an assignment statement"
   [env {:keys [target value] :as stmt}]
@@ -4529,10 +4546,23 @@
     (when (lookup-class-constant env current-class target)
       (throw (ex-info (str "Cannot assign to constant: " target)
                       {:error (type-error (str "Cannot assign to constant: " target))})))
-    (when-let [field-member (lookup-class-field-member env current-class target current-class)]
-      (when (and (:once? field-member) (not (env-lookup-var env "__in_constructor__")))
-        (throw (ex-info (str "Cannot assign to once field outside constructor: " target)
-                        {:error (type-error (str "'" target "' is a once field and can only be assigned in a constructor"))})))))
+    (when (and (not (let-shadowed? env target))
+               (lookup-class-field-member env current-class target current-class))
+      (let [field-member (lookup-class-field-member env current-class target current-class)]
+        (when (and (:once? field-member) (not (env-lookup-var env "__in_constructor__")))
+          (throw (ex-info (str "Cannot assign to once field outside constructor: " target)
+                          {:error (type-error (str "'" target "' is a once field and can only be assigned in a constructor"))})))
+        ;; Bare `f := v` (implicit self) is the other spelling of `this.f := v`
+        ;; — check-target-assignment (the explicit-receiver path) already
+        ;; rejects assigning a field outside the class that declares it,
+        ;; regardless of receiver (`this`, `super`, or any other object),
+        ;; since a subclass cannot attach an inherited field directly. This
+        ;; path used to skip that check entirely, so the bare spelling of the
+        ;; identical assignment silently succeeded where the explicit
+        ;; spelling was rejected.
+        (when-not (= current-class (:declaring-class field-member))
+          (throw (ex-info (str "Cannot assign to field " target)
+                          {:error (field-write-error target (:declaring-class field-member))}))))))
   (let [var-type (env-lookup-var env target)
         val-type (if var-type
                    (check-expression-with-expected env value var-type)
