@@ -65,7 +65,29 @@
       (inherited-method-def + lower-instance-user-method-call). Fixed by
       giving direct-parent-method-map the same recursive :carrier-path
       composition direct-parent-field-map already has, walked at each call
-      site by the same carrier-path-target-ir both now share."
+      site by the same carrier-path-target-ir both now share.
+
+   5. An inherited-but-not-overridden method with two or more parameters —
+      compiled as a thin forwarding stub by nex.lower/make-delegation-
+      method-node, since the JVM has no real `extends` between Nex classes
+      to dispatch through — got its own unpacked parameters' local-variable
+      slots wrong two ways at once. The stub's calling convention is
+      (this=slot 0, state=slot 1, boxed-args-array=slot 2), so a parameter
+      being unpacked FROM that array must land at slot 3 or later; the code
+      instead started numbering unpacked params at slot 2 — the args
+      array's own slot — so unpacking the very first parameter clobbered
+      the array reference the *next* parameter still needed to read from
+      it. Separately, the slot for each parameter after the first was
+      computed as a flat `(+ 2 idx)`, never accounting for a preceding
+      :long/:double (Nex Integer/Real) parameter's actual JVM width of 2
+      slots, not 1 — so two Integer parameters back to back collided their
+      slots outright. Either bug alone produces a JVM VerifyError (\"Bad
+      local variable type\" / \"is not assignable to reference type\") at
+      class-load time; a delegated 2-Integer-parameter method (matching
+      result-slot's own already-width-aware calculation just below it in
+      the same function) hits both at once. Fixed by numbering unpacked
+      params starting at slot 3 and accumulating each preceding param's
+      real JVM width, exactly as result-slot already did."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [nex.parser :as p]
@@ -268,3 +290,32 @@ print(lv.val)")
   ;; fully-recursive lowering path).
   (testing "set_v(n), called bare from Level2's own constructor, reaches Level0's method through the empty intermediate Level1"
     (is (= ["42"] (run-compiled bare-call-through-empty-intermediate-program)))))
+
+(def delegated-two-integer-param-method-program
+  "class Base
+  feature
+    connected(p, q: Integer): Boolean
+    do
+      result := p = q
+    end
+end
+
+class Sub
+  inherit Base
+  create
+    make() do end
+end
+
+let s := create Sub.make
+print(s.connected(1, 1))
+print(s.connected(1, 2))")
+
+(deftest delegated-method-with-two-integer-params-does-not-clobber-slots-test
+  ;; Before the fix: JVM VerifyError (\"Bad local variable type ... is not
+  ;; assignable to reference type\") at class-load time — connected's
+  ;; delegation stub unpacked p and q starting at slot 2 (the boxed args
+  ;; array's own slot, clobbered the moment p was stored there) with each
+  ;; slot computed as a flat `(+ 2 idx)` that ignored p's actual two-slot
+  ;; :long width, so q's slot collided with p's second half too.
+  (testing "connected(p, q: Integer), inherited unoverridden from Base, delegates correctly for both Sub instances"
+    (is (= ["true" "false"] (run-compiled delegated-two-integer-param-method-program)))))

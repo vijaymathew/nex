@@ -7462,14 +7462,29 @@
                                                      (:generic-params
                                                       (get (visible-class-map env) source-class))))}
         return-type (function-return-type method-def)
-        params (map-indexed (fn [idx {:keys [name type]}]
-                              {:name name
-                               :slot (+ 2 idx)
-                               :arg-index idx
-                               :nex-type type
-                               :jvm-type (resolve-jvm-type resolve-env type)})
-                            (:params method-def))
-        result-slot (+ 2 (reduce + (map (fn [{:keys [jvm-type]}]
+        ;; This is the (this=0, state=1, args-array=2) repl-instance calling
+        ;; convention (see the `:next-slot 3` used for the analogous
+        ;; hand-built constructor/generic-init fn-nodes above), so real
+        ;; locals start at slot 3, not 2 -- slot 2 is the incoming args
+        ;; array itself, and the old `(+ 2 idx)` clobbered it while
+        ;; unpacking the very first param. Slot must also accumulate the
+        ;; JVM width of every preceding param -- a :long/:double param
+        ;; consumes 2 local slots, not 1, so a flat `idx`-based offset
+        ;; collides two Integer/Real params onto overlapping slots the
+        ;; moment there's more than one of them (result-slot below already
+        ;; gets this right; params didn't).
+        params (loop [defs (:params method-def) idx 0 slot 3 acc []]
+                 (if (empty? defs)
+                   acc
+                   (let [{:keys [name type]} (first defs)
+                         jvm-type (resolve-jvm-type resolve-env type)]
+                     (recur (rest defs) (inc idx) (+ slot (if (#{:long :double} jvm-type) 2 1))
+                            (conj acc {:name name
+                                       :slot slot
+                                       :arg-index idx
+                                       :nex-type type
+                                       :jvm-type jvm-type})))))
+        result-slot (+ 3 (reduce + (map (fn [{:keys [jvm-type]}]
                                           (if (#{:long :double} jvm-type) 2 1))
                                         params)))
         call-args (mapv (fn [{:keys [name slot nex-type jvm-type]}]
