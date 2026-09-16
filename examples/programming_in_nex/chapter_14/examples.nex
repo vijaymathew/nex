@@ -181,6 +181,7 @@ assert accounts.get(2).describe = "Carol: 200.0 (overdraft limit: 500.0)"
 deferred class Shape3
   feature
     colour: String
+    set_colour(c: String) do colour := c end
     area(): Real deferred
     perimeter(): Real deferred
     describe(): String do
@@ -192,7 +193,7 @@ class Circle3
   inherit Shape3
   create
     make(c: String, r: Real) do
-      colour := c
+      set_colour(c)
       radius := r
     end
   feature

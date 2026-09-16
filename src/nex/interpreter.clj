@@ -2140,6 +2140,39 @@
                         {:class-name current-class-name
                          :parents (mapv :parent parents)}))))))
 
+(defn- refresh-object-fields-from-env
+  "OBJ with every one of its fields' values replaced by ENV's current
+   binding of that field name, where ENV has one (falling back to OBJ's own
+   value otherwise). dispatch-parent-call's own field-sync writes its
+   callee's mutations back into ENV, but it *reads* CURRENT-OBJ as given —
+   during construction, where the object is only ever a one-off snapshot
+   (run-user-constructor's temp-obj, frozen at its initial field values,
+   never updated as ctor-env's fields change) this matters: dispatching a
+   *second* mid-construction call (e.g. a constructor's own field assignment
+   followed later by a call to a setter method) with the stale snapshot as
+   CURRENT-OBJ would sync that stale snapshot's fields back over ENV
+   afterward, clobbering the assignment that ran first. Called at each such
+   call site (never inside dispatch-parent-call itself, which is also used
+   for ordinary parent/super delegation where CURRENT-OBJ is already live)."
+  [ctx obj]
+  (let [class-def (lookup-class-if-exists ctx (:class-name obj))
+        all-fields (when class-def (get-all-fields ctx class-def))
+        env (:current-env ctx)]
+    (if-not all-fields
+      obj
+      (update obj :fields
+              (fn [fields]
+                (reduce (fn [m field]
+                          (let [field-name (:name field)
+                                val (try
+                                      (env-lookup env field-name)
+                                      (catch Exception _ ::not-found))]
+                            (if (not= val ::not-found)
+                              (assoc m (keyword field-name) val)
+                              m)))
+                        fields
+                        all-fields))))))
+
 (defn dispatch-parent-call
   "Dispatch a call to a specific parent class's method/constructor on the current object."
   [ctx current-obj parent-class-name method arg-values]
@@ -2478,7 +2511,36 @@
                             (= :this (:type target))
                             (:current-class-name ctx)
                             (lookup-constructor (lookup-class-if-exists ctx (:current-class-name ctx))
-                                                method))]
+                                                method))
+        ;; `this.method(...)` called *during construction* (:in-constructor?):
+        ;; an ordinary method invoked this way must still write its field
+        ;; mutations back into the constructor's own env (ctor-env in
+        ;; run-user-constructor) — the same env dispatch-parent-call's
+        ;; env-set! sync below already updates for a sibling/parent
+        ;; constructor delegation. invoke-nex-object-call's general dispatch
+        ;; has no such sync: it assumes the object is already a "live" value
+        ;; reachable by name in the calling env, which is not true yet while
+        ;; the constructor that owns it is still running — a field this call
+        ;; sets would otherwise vanish the moment the method returns, since
+        ;; run-user-constructor reads the final field values only from
+        ;; ctor-env, never from whatever object the call happened to touch.
+        ;; Resolved against the object's own concrete class
+        ;; (:class-name (:current-object ctx)), not :current-class-name, so
+        ;; an override further down the hierarchy than the constructor's own
+        ;; declaring class is still honoured — ordinary virtual dispatch,
+        ;; just routed through the field-syncing path while construction is
+        ;; unfinished.
+        this-method-mid-construction? (and (map? target)
+                                           (= :this (:type target))
+                                           (:in-constructor? ctx)
+                                           (:current-object ctx)
+                                           (not this-own-ctor?)
+                                           (lookup-method-with-inheritance
+                                            ctx
+                                            (lookup-class-if-exists
+                                             ctx (:class-name (:current-object ctx)))
+                                            method
+                                            (count arg-values)))]
     (cond
       ;; Java static method or field access inside with "java" block
       java-class?
@@ -2490,6 +2552,19 @@
            (lookup-class-constant ctx class-target method))
       (eval-class-constant ctx class-target method)
 
+      ;; Parent-qualified field read: A.field, mirroring A.routine() —
+      ;; checked before dispatch-parent-call's method/constructor lookup
+      ;; below, which has no notion of a field at all. Read-only: a field
+      ;; write is never qualified this way (nex.typechecker/check-member-
+      ;; assign confines every write to the field's own declaring class,
+      ;; whatever the receiver spelling), so there is no corresponding
+      ;; assignment path to add here.
+      (and parent-class
+           (false? has-parens)
+           (empty? arg-values)
+           (some #(= (:name %) method) (get-all-fields ctx parent-class)))
+      (get (:fields (:current-object ctx)) (keyword method))
+
       ;; Parent-qualified call: A.method() where A is a parent class, or
       ;; super.method()/super.make(...), where the parent is resolved from
       ;; the current class rather than named at the call site.
@@ -2498,6 +2573,10 @@
 
       this-own-ctor?
       (dispatch-parent-call ctx (:current-object ctx) (:current-class-name ctx) method arg-values)
+
+      this-method-mid-construction?
+      (let [live-obj (refresh-object-fields-from-env ctx (:current-object ctx))]
+        (dispatch-parent-call ctx live-obj (:class-name live-obj) method arg-values))
 
       ;; `a(1)(2)(3)` — invoking the result of a call/expression directly, no
       ;; member name to dispatch on (see :postfix's "Call on expression
@@ -2571,10 +2650,21 @@
                                                           (lookup-class ctx (:class-name current-obj))
                                                           method
                                                           (count args)
-                                                          (:current-class-name ctx)))
-        fn-obj (if own-method-sig
-                 ::not-found
-                 (try
+                                                          (:current-class-name ctx)))]
+   ;; A bare call to an own/inherited method *during construction*
+   ;; (:in-constructor?) — the implicit-self spelling of the this.method(...)
+   ;; case eval-call-with-target routes through dispatch-parent-call for the
+   ;; same reason: the object is still being built in the constructor's own
+   ;; env (ctor-env in run-user-constructor), not yet a "live" value bound to
+   ;; a name anywhere, so the branch below (when target-name is not a
+   ;; string) dispatches against a one-off snapshot and discards whatever
+   ;; the call mutates — a field it sets would vanish the moment it returns.
+   (if (and own-method-sig (:in-constructor? ctx))
+     (let [live-obj (refresh-object-fields-from-env ctx current-obj)]
+       (dispatch-parent-call ctx live-obj (:class-name live-obj) method arg-values))
+     (let [fn-obj (if own-method-sig
+                    ::not-found
+                    (try
                    (env-lookup (:current-env ctx) method)
                    (catch Exception _ ::not-found)))]
     (if (not= fn-obj ::not-found)
@@ -2657,7 +2747,7 @@
         (if-let [builtin (get builtins method)]
           (apply builtin ctx arg-values)
           (throw (ex-info (str "Undefined function: " method)
-                          {:function method})))))))
+                          {:function method})))))))))
 
 (defmethod eval-node :call
   [ctx {:keys [target method args has-parens] :as expr}]

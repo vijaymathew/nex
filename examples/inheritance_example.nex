@@ -18,6 +18,8 @@ class Account
     owner: String
     balance: Real
 
+    set_balance(v: Real) do balance := v end
+
     deposit(amount: Real)
       require
         positive: amount > 0.0
@@ -71,7 +73,7 @@ class SavingsAccount
     end
 
     apply_interest() do
-      balance := balance + balance * interest_rate
+      set_balance(balance + balance * interest_rate)
     end
 
     -- Redefines describe(); inherited fields are read directly.
@@ -119,8 +121,8 @@ class Car
   create
     make(car_model: String) do
       model := car_model
-      running := false
-      destination := "nowhere"
+      stop()
+      navigate("nowhere")
     end
 
   feature

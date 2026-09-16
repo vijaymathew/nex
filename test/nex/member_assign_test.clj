@@ -78,6 +78,54 @@ let q: Point := create Point")]
       (let [q (interp/env-lookup (:globals ctx) "q")]
         (is (= 10 (get (:fields q) :x)))))))
 
+;; The declaring-class-only restriction applies uniformly to every field-write
+;; spelling, including the bare form: `f := v` with no receiver at all writes
+;; the exact same field an explicit `this.f := v` would, so exempting it would
+;; let a subclass bypass the very protection the restriction exists for —
+;; only the class that declares a field may change it directly, so its own
+;; contracts and invariants can never be bypassed from outside it.
+(deftest member-assign-typechecker-rejects-bare-write-to-inherited-field-test
+  (testing "the bare (implicit-self) spelling of an outside write is rejected
+            exactly like the explicit `this.f := v` spelling"
+    (let [code "class A
+feature
+  f: Integer
+end
+
+class B
+inherit A
+create
+  make(v: Integer) do f := v end
+end
+
+let b := create B.make(9)"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (some #(str/includes? (tc/format-type-error %) "Cannot assign to field f outside of class A")
+                (:errors result))))))
+
+;; The supported way to reach the same outcome: the declaring class exposes
+;; an ordinary method that performs the assignment on its own behalf, and the
+;; subclass calls it instead of writing the field directly.
+(deftest member-assign-typechecker-allows-setter-method-for-inherited-field-test
+  (testing "a setter method declared by the field's own class may be called
+            from a subclass constructor to initialize it"
+    (let [code "class A
+feature
+  f: Integer
+  set_f(v: Integer) do f := v end
+end
+
+class B
+inherit A
+create
+  make(v: Integer) do set_f(v) end
+end
+
+let b := create B.make(9)"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result))))))
+
 (deftest member-assign-interpreter-rejects-multiple-inheritance-parent-writes-test
   (testing "Interpreter rejects direct writes to either parent field from a multiply-inheriting child"
     (let [ctx (interp/make-context)

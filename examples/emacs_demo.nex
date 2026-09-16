@@ -9,6 +9,9 @@ class DemoClass
     name: String
     active: Boolean
     rate: Real
+    set_count(c: Integer) do count := c end
+    set_name(n: String) do name := n end
+    set_active(a: Boolean) do active := a end
 
   -- Method names are highlighted
   feature
@@ -74,9 +77,9 @@ class ExtendedDemo
 
   create
     make(initial: Integer) do
-      count := initial
-      name := "demo"
-      active := true
+      set_count(initial)
+      set_name("demo")
+      set_active(true)
     end
 
   feature

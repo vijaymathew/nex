@@ -599,9 +599,22 @@
                               :type type})
                            payload))
          ctor-body (if enum-ordinal
-                     [{:type :assign
-                       :target "ordinal"
-                       :value {:type :integer :value enum-ordinal}}]
+                     ;; `ordinal` is the parent's own field, not this variant's —
+                     ;; a bare `ordinal := ...` here would be a subclass writing
+                     ;; a field it does not declare, which field assignment
+                     ;; forbids regardless of spelling (only the declaring class
+                     ;; may assign its own field, so the parent's invariants and
+                     ;; contracts can never be bypassed from outside it). Routed
+                     ;; instead through the parent's own `set_ordinal` method
+                     ;; (enum-parent-class), which does the actual assignment on
+                     ;; the parent's own behalf — an ordinary method call, not a
+                     ;; constructor-delegation one, since `set_ordinal` is a
+                     ;; regular routine the parent declares.
+                     [{:type :call
+                       :target {:type :this}
+                       :method "set_ordinal"
+                       :args [{:type :integer :value enum-ordinal}]
+                       :has-parens true}]
                      (vec (map-indexed
                            (fn [i {:keys [name]}]
                              {:type :assign
@@ -655,9 +668,9 @@
 
 (def ^:private enum-reserved-member-names
   "Names the enum enrichment generates on the parent, so a variant cannot claim
-   them (it would collide with the ordinal field, the compare routine, or the
-   values array)."
-  #{"ordinal" "compare" "values"})
+   them (it would collide with the ordinal field, the compare routine, the
+   set_ordinal method, or the values array)."
+  #{"ordinal" "compare" "set_ordinal" "values"})
 
 (defn- enum-parent-class
   "Parent class for an all-payload-free union — the enum enrichment. It is the
@@ -671,6 +684,18 @@
   [parent-name variant-names note]
   (let [ordinal-field {:type :field :name "ordinal" :field-type "Integer"
                        :once? false :constant? false :value nil :note nil}
+        ;; Each variant's own constructor calls this (`this.set_ordinal(i)`) to
+        ;; set `ordinal` — field assignment is restricted to the declaring
+        ;; class regardless of spelling, so a variant may not assign the
+        ;; parent's own field directly. An ordinary method, dispatched like
+        ;; any other — no constructor-delegation machinery needed, since a
+        ;; variant never overrides it.
+        set-ordinal-method {:type :method :name "set_ordinal"
+                            :params [{:name "o" :type "Integer"}]
+                            :return-type nil :alias nil :note nil :require nil
+                            :body [{:type :assign :target "ordinal"
+                                    :value {:type :identifier :name "o"}}]
+                            :declaration-only? false :ensure nil :rescue nil}
         compare-method {:type :method :name "compare"
                         :params [{:name "other__" :type parent-name}]
                         :return-type "Integer" :alias nil :note nil :require nil
@@ -705,7 +730,7 @@
      :note note
      :parents [{:parent "Comparable"}]
      :body [{:type :feature-section :visibility {:type :public}
-             :members [ordinal-field compare-method]}
+             :members [ordinal-field compare-method set-ordinal-method]}
             {:type :feature-section :visibility {:type :public}
              :members (conj member-constants values-constant)}]
      :invariant nil}))

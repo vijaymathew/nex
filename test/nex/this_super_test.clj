@@ -509,10 +509,18 @@ end
 let w := create Wrapper[String].from_int(\"hi\")
 print(w.value)")))))
 
-(deftest super-field-assignment-test
-  (testing "super.field := v assigns a field declared on the parent"
-    (is (= ["10" "20"]
-           (both "class A
+;; Regression: super.field := v used to alias its declaring-class check to
+;; the super-parent's own name, so it (uniquely among the receiver spellings)
+;; let a subclass write a field it only inherits — a subclass could reach
+;; through `super` and mutate a parent's field directly, bypassing any
+;; contract or invariant the parent's own routines enforce around it. The
+;; check now always compares against the class whose code is actually
+;; running, so `super.field := v` is rejected the same way `this.field := v`
+;; already is for an inherited field.
+(deftest super-field-assignment-is-rejected-test
+  (testing "super.field := v is rejected, naming the field's real declaring class"
+    (let [result (tc/type-check
+                  (p/ast "class A
   feature x: Integer
 end
 class B
@@ -520,6 +528,29 @@ class B
   feature y: Integer
   create make(a: Integer, b: Integer) do
     super.x := a
+    y := b
+  end
+end"))]
+      (is (not (:success result)))
+      (is (some #(clojure.string/includes? (tc/format-type-error %)
+                                           "Cannot assign to field x outside of class A")
+                (:errors result))
+          (pr-str (:errors result))))))
+
+(deftest setter-method-for-parent-field-test
+  (testing "a setter method the parent declares is the supported way to
+            initialize an inherited field, in place of super.field := v"
+    (is (= ["10" "20"]
+           (both "class A
+  feature
+    x: Integer
+    set_x(v: Integer) do x := v end
+end
+class B
+  inherit A
+  feature y: Integer
+  create make(a: Integer, b: Integer) do
+    set_x(a)
     y := b
   end
 end

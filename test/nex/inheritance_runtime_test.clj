@@ -708,6 +708,7 @@ end"))
         (repl/eval-code ctx "class Counter
   feature
     value: Integer
+    set_value(v: Integer) do value := v end
   create make() do value := 0 end
 end"))
       (with-out-str
@@ -717,7 +718,7 @@ end"))
       require
         positive_step: by > 0
       do
-        value := value + by
+        set_value(value + by)
       end
 end"))
       (with-out-str
@@ -889,6 +890,7 @@ end")
   "deferred class Shape
   feature
     colour: String
+    set_colour(c: String) do colour := c end
     area(): Real deferred
     perimeter(): Real deferred
     describe(): String do
@@ -905,7 +907,7 @@ end")
   inherit Shape
   create
     make(c: String, s: Real) do
-      colour := c
+      set_colour(c)
       side := s
     end
   feature
@@ -932,7 +934,7 @@ end"))
   inherit Shape
   create
     make(c: String, r: Real) do
-      colour := c
+      set_colour(c)
       radius := r
     end
   feature
@@ -994,6 +996,7 @@ end"))
         (repl/eval-code ctx "deferred class Named
   feature
     name: String
+    set_name(n: String) do name := n end
     label(): String deferred
     announce(): String do
       result := \"This is \" + name + \": \" + label
@@ -1009,7 +1012,7 @@ end"))
   inherit Named, Sized
   create
     make(n: String, c: Integer) do
-      name := n
+      set_name(n)
       count := c
     end
   feature
@@ -1087,6 +1090,7 @@ end"))
         (repl/eval-code ctx "deferred class Level0
   feature
     v: Integer
+    set_v(n: Integer) do v := n end
     val(): Integer deferred
 end"))
       (with-out-str (repl/eval-code ctx "deferred class Level1 inherit Level0 end"))
@@ -1094,7 +1098,7 @@ end"))
         (repl/eval-code ctx "class Level2
   inherit Level1
   create
-    make(n: Integer) do v := n end
+    make(n: Integer) do set_v(n) end
   feature
     val(): Integer do result := v end
 end"))
@@ -1110,6 +1114,7 @@ end"))
         (repl/eval-code ctx "deferred class LevelA
   feature
     w: Integer
+    set_w(n: Integer) do w := n end
 end"))
       (with-out-str (repl/eval-code ctx "deferred class LevelB inherit LevelA end"))
       (with-out-str (repl/eval-code ctx "deferred class LevelC inherit LevelB end"))
@@ -1117,7 +1122,7 @@ end"))
         (repl/eval-code ctx "class LevelD
   inherit LevelC
   create
-    make(n: Integer) do w := n end
+    make(n: Integer) do set_w(n) end
   feature
     val(): Integer do result := w end
 end"))
@@ -1137,6 +1142,8 @@ end"))
   feature
     first: A
     second: B
+    set_first(v: A) do first := v end
+    set_second(v: B) do second := v end
 end"))
       (with-out-str (repl/eval-code ctx "class Middle [X, Y] inherit Pair[Y, X] end"))
       (with-out-str
@@ -1144,8 +1151,8 @@ end"))
   inherit Middle[Integer, String]
   create
     make(s: String, i: Integer) do
-      first := s
-      second := i
+      set_first(s)
+      set_second(i)
     end
   feature
     show(): String do result := first + \":\" + second.to_string end
@@ -1190,7 +1197,7 @@ end"))
   inherit Shape
   create
     make(c: String, s: Real) do
-      colour := c
+      set_colour(c)
       side := s
     end
   feature
@@ -1217,7 +1224,7 @@ end"))
   inherit Shape
   create
     make(c: String, r: Real) do
-      colour := c
+      set_colour(c)
       radius := r
     end
   feature
@@ -1250,6 +1257,7 @@ end"))
         (repl/eval-code ctx "deferred class Named
   feature
     w: Integer
+    set_w(n: Integer) do w := n end
     label(): Integer deferred
     announce(): String do result := \"L=\" + label.to_string end
 end"))
@@ -1258,7 +1266,7 @@ end"))
         (repl/eval-code ctx "class Widget
   inherit NamedThing
   create
-    make(n: Integer) do w := n end
+    make(n: Integer) do set_w(n) end
   feature
     label(): Integer do result := w end
 end"))
