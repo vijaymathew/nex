@@ -5827,6 +5827,39 @@
     [(str/join "," (map #(.getName ^Class %) (take fixed-count declared)))
      (.getName (.getComponentType array-type))]))
 
+(defn- lower-parent-qualified-field-read
+  "`ClassName.field` — reads the field on the composition slot CLASS-TARGET-
+   NAME's inherit-clause composition backs (see direct-parent-field-map),
+   mirroring how lower-parent-qualified-call reaches CLASS-TARGET-NAME's own
+   routine through the same slot. Like that routine form, this requires
+   CLASS-TARGET-NAME to declare FIELD-NAME directly — reaching a field it
+   only inherits in turn is the same not-yet-supported gap an ancestor
+   constructor call two-plus levels up already has (nex.lower/lower-call-
+   stmt), so it is reported the same way rather than silently falling
+   through to a confusing failure elsewhere."
+  [env class-target-name field-name]
+  (let [target-def (get (visible-class-map env) class-target-name)
+        field (class-field-def target-def field-name)]
+    (when-not field
+      (throw (unsupported
+              (str "reading `" field-name "` through the ancestor name `"
+                   class-target-name "`: " class-target-name " only inherits "
+                   "that field in turn, and the compiled backend requires "
+                   "the named ancestor to declare a qualified field directly.")
+              {:target-class class-target-name :field field-name})))
+    (let [nex-type (:field-type field)
+          jvm-type (resolve-jvm-type env nex-type)]
+      (ir/field-get-node (:internal-name (class-jvm-meta env class-target-name))
+                         field-name
+                         (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                            (parent-field-name class-target-name)
+                                            (ir/this-node (:this-type env)
+                                                          (exact-class-jvm-type env (:this-type env)))
+                                            class-target-name
+                                            (exact-class-jvm-type env class-target-name))
+                         nex-type
+                         jvm-type))))
+
 (defn- lower-class-constant-or-static-field
   [env expr class-target-name]
   (if-let [constant (lookup-class-constant env class-target-name (:method expr))]
@@ -5855,9 +5888,13 @@
                                               (ir/object-jvm-type "java/lang/String"))]
                               nex-type
                               jvm-type))
-      (throw (unsupported "Unsupported class-target access during lowering"
-                          {:expr expr
-                           :target-class class-target-name})))))
+      (if (and (:this-type env)
+               (some #(= class-target-name (:parent %))
+                     (:parents (current-class-def env))))
+        (lower-parent-qualified-field-read env class-target-name (:method expr))
+        (throw (unsupported "Unsupported class-target access during lowering"
+                            {:expr expr
+                             :target-class class-target-name}))))))
 
 (defn- lower-java-static-owner-call
   [env expr java-static-owner arg-irs]

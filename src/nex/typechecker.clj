@@ -2870,18 +2870,21 @@
 (defn- check-class-constant-access
   "`ClassName.member`, with no call parens, on Current — used to disambiguate
    which ancestor's routine to run in a multiple-inheritance diamond
-   (`Second.init`, `Third.make`). A *field* qualified this way (`Second.k`) is
-   not supported: unlike a routine, a field has no dispatch to disambiguate —
-   Nex has no syntax that names one specific ancestor path's copy of a
-   duplicated diamond-inherited field (each path genuinely does get its own
-   storage; verified empirically, a common ancestor's field is duplicated per
-   branch, not shared — a bare unqualified reference to it further down the
-   diamond just silently picks one). Reach a specific branch's copy through a
-   routine instead (which does support qualified dispatch: `B.make_b`,
-   `C.make_c`). This used to fall through to `Any` unchecked
-   (backend-alignment C3a), so `Second.k` type-checked yet failed only later,
-   at lowering or interpretation, with a message naming neither the true
-   cause nor a fix. Rejected here instead, naming the supported form."
+   (`Second.init`, `Third.make`), and, for a field, to *read* one specific
+   ancestor path's copy where repeated inheritance would otherwise duplicate
+   it (Section 4.9's Ambiguous member resolution / Repeated inheritance —
+   `lookup-class-field-member` already applies ordinary visibility here, so a
+   field private to BASE-TYPE is invisible this way exactly as it would be to
+   any other outside access).
+
+   This is READ-only. Field *assignment* has no such qualified form at all —
+   check-member-assign restricts every field write, whatever the receiver
+   spelling (`this.`, `super.`, an explicit ancestor name, or bare), to the
+   field's own declaring class, so that only the class whose contracts and
+   invariants govern a field can ever change it. `ClassName.field := v`
+   reaching this far as a read would be meaningless for an assignment target
+   anyway; the walker routes `:= ` targets to check-member-assign instead,
+   never here."
   [env {:keys [method]} {:keys [base-type type-map current-class target-type]}]
   (if-let [constant (lookup-class-constant env base-type method)]
     (resolve-generic-type (:field-type constant) type-map)
@@ -2892,20 +2895,33 @@
       (check-call-signature env method [] method-sig
                             (member-type-map env target-type type-map method-sig)
                             :arg-types [])
-      (if (and current-class
-               (not= current-class base-type)
-               (class-subtype? env current-class base-type)
-               (lookup-class-field-member env base-type method current-class))
-        (let [msg (str base-type "." method
-                       " is a class-qualified field access, which Nex does not support: "
-                       "only " base-type "." method
-                       "(...) — a routine call — can be qualified by an ancestor's class name. "
-                       "A bare `" method "` reaches one copy but does not let you pick which "
-                       "if it is inherited more than once (multiple inheritance duplicates a "
-                       "common ancestor's field per branch); wrap it in a routine on " base-type
-                       " to reach that branch's copy specifically, and call that instead.")]
-          (throw (ex-info msg {:error (type-error msg)})))
-        "Any"))))
+      (if-let [field-member (and current-class
+                                 (not= current-class base-type)
+                                 (class-subtype? env current-class base-type)
+                                 (lookup-class-field-member env base-type method current-class))]
+        (resolve-generic-type (:field-type field-member)
+                              (member-type-map env target-type type-map field-member))
+        ;; Neither a routine nor a field of BASE-TYPE matched. For an
+        ;; imported Java class (an empty-body placeholder, :import set) that
+        ;; is intentional — static member resolution for those happens via
+        ;; reflection elsewhere, not here — so Any is still correct there.
+        ;; For a real Nex class it is not: silently returning Any here used
+        ;; to let a meaningless access like a bare `B.v` written outside any
+        ;; class body (no enclosing `this` for "B"'s composition slot to be
+        ;; reached from at all — CURRENT-CLASS is nil precisely because
+        ;; there is no such body) type-check clean and fail only later, at
+        ;; lowering or interpretation, with a message naming neither this
+        ;; construct nor why.
+        (let [class-def (env-lookup-class env base-type)]
+          (if (and class-def (not (:import class-def)))
+            (let [msg (if-not current-class
+                        (str base-type "." method
+                             " requires an enclosing class body: there is no current object "
+                             "for the ancestor name to select a routine or field on. Write "
+                             "this on a concrete instance instead, e.g. `x." method "`.")
+                        (str "Method not found: " method " on " base-type))]
+              (throw (ex-info msg {:error (type-error msg)})))
+            "Any"))))))
 
 (defn- check-array-sort-call
   [env {:keys [args]} {:keys [target-type type-map]}]
@@ -4552,14 +4568,13 @@
         (when (and (:once? field-member) (not (env-lookup-var env "__in_constructor__")))
           (throw (ex-info (str "Cannot assign to once field outside constructor: " target)
                           {:error (type-error (str "'" target "' is a once field and can only be assigned in a constructor"))})))
-        ;; Bare `f := v` (implicit self) is the other spelling of `this.f := v`
-        ;; — check-target-assignment (the explicit-receiver path) already
-        ;; rejects assigning a field outside the class that declares it,
-        ;; regardless of receiver (`this`, `super`, or any other object),
-        ;; since a subclass cannot attach an inherited field directly. This
-        ;; path used to skip that check entirely, so the bare spelling of the
-        ;; identical assignment silently succeeded where the explicit
-        ;; spelling was rejected.
+        ;; Bare `f := v` (implicit self) names the same assignment as
+        ;; `this.f := v` — check-member-assign (the explicit-receiver path)
+        ;; already confines a field write to its declaring class regardless
+        ;; of receiver; this path used to skip that check entirely, so the
+        ;; bare spelling of an inherited field silently bypassed it, letting
+        ;; a subclass mutate a parent's field (and any contract or invariant
+        ;; guarding it) without going through the parent's own routines.
         (when-not (= current-class (:declaring-class field-member))
           (throw (ex-info (str "Cannot assign to field " target)
                           {:error (field-write-error target (:declaring-class field-member))}))))))
@@ -5149,10 +5164,17 @@
         (env-add-var env name type)))))
 
 (defn- check-member-assign
-  "Type-check `obj.field := v` / `this.field := v` / `super.field := v`:
-   resolve the field's owning class (the *parent* for `super`), reject writes
-   to a constant, to a `once` field outside a constructor, or to a field the
-   caller's class does not declare, and check the value against the field type."
+  "Type-check `obj.field := v` / `this.field := v` / `super.field := v` /
+   `ClassName.field := v`: resolve the field's owning class (the *parent* for
+   `super`, the named class for an explicit ancestor), reject writes to a
+   constant, to a `once` field outside a constructor, or to a field the
+   *current* class does not itself declare — regardless of receiver spelling,
+   a field write is confined to its declaring class, so only the class whose
+   contracts and invariants govern the field can ever change it (Section
+   4.9's Attachment note: this is exactly why an inherited attachable field
+   can only be attached by delegating to a constructor of its declaring
+   class, never by assigning it directly, however it is spelled) — and check
+   the value against the field type."
   [env stmt]
   (let [field-name (:field stmt)
         object-expr (:object stmt)
@@ -5168,14 +5190,28 @@
         super-target? (and (map? object-expr) (= :super (:type object-expr)))
         super-parent-name (when super-target?
                             (resolve-super-parent-class-name env current-class))
+        ;; `ClassName.field := v` — an explicit ancestor named outright,
+        ;; mirroring the `Shape.describe`/`Shape.make(...)` qualified-call
+        ;; form (Section 4.4). A bare identifier resolving to a real class
+        ;; (env-lookup-class) is treated as naming that class here the same
+        ;; way resolve-call-target-info already treats a call's own bare
+        ;; identifier target — before it is ever considered a variable —
+        ;; since the declaring-class check below rejects the write anyway
+        ;; whenever the named class is not CURRENT-CLASS itself, there is no
+        ;; ambiguity this could silently paper over.
+        class-target? (and (not super-target?)
+                           (map? object-expr)
+                           (= :identifier (:type object-expr))
+                           (env-lookup-class env (:name object-expr)))
         target-expr (or object-expr {:type :this})
-        class-name (if super-target?
-                     super-parent-name
-                     (let [target-type (check-expression env target-expr)
-                           base-target-type (attachable-type target-type)]
-                       (if (map? base-target-type)
-                         (:base-type base-target-type)
-                         base-target-type)))
+        class-name (cond
+                     super-target? super-parent-name
+                     class-target? (:name object-expr)
+                     :else (let [target-type (check-expression env target-expr)
+                                 base-target-type (attachable-type target-type)]
+                             (if (map? base-target-type)
+                               (:base-type base-target-type)
+                               base-target-type)))
         caller-class (if super-target? super-parent-name current-class)
         _ (when-not class-name
             (throw (ex-info "Field assignment target must be an object"
@@ -5195,7 +5231,17 @@
                       {:error (type-error
                                (undefined-field-message
                                 env class-name field-name caller-class nil))})))
-    (when-not (= caller-class (:declaring-class field-member))
+    ;; Write permission is always checked against the class whose code is
+    ;; actually running (CURRENT-CLASS), never CALLER-CLASS — unlike
+    ;; visibility just above, which correctly resolves `super.field` as the
+    ;; parent would see it, allowing a write here would let a subclass reach
+    ;; through `super`/`this`/any receiver and mutate a field only the
+    ;; declaring class's own routines and constructors are meant to touch,
+    ;; bypassing whatever contracts or invariants guard it there. So
+    ;; `super.field := v` is rejected exactly like `this.field := v` for an
+    ;; inherited field: writing is confined to the field's own declaring
+    ;; class, with no explicit-receiver spelling exempted.
+    (when-not (= current-class (:declaring-class field-member))
       (throw (ex-info (str "Cannot assign to field " field-name)
                       {:error (field-write-error field-name (:declaring-class field-member))})))
     (when (any-into-concrete-without-convert? env field-type val-type)

@@ -68,7 +68,7 @@ class Logged_Box [T] inherit Box[T]
   feature
     change_count: Integer
     set(v: T) do
-      value := v
+      super.set(v)
       change_count := change_count + 1
     end
     changes(): Integer do result := change_count end
@@ -95,6 +95,7 @@ class Queue [G]
     make() do items := [] end
   feature
     items: Array[G]
+    set_items(a: Array[G]) do items := a end
     enqueue(value: G) do items.add(value) end
     dequeue(): G do
       result := items.get(0)
@@ -107,13 +108,13 @@ end
 
 class Priority_Queue [G -> Comparable] inherit Queue[G]
   create
-    make() do items := [] end
+    make() do super.make() end
   feature
     -- Insert so that items stays sorted ascending (smallest at the front),
     -- so dequeue (which removes the front) yields elements in priority order.
     enqueue(value: G) do
       items.add(value)
-      items := items.sort
+      this.set_items(items.sort)
     end
 end
 

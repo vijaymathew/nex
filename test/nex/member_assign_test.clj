@@ -78,13 +78,13 @@ let q: Point := create Point")]
       (let [q (interp/env-lookup (:globals ctx) "q")]
         (is (= 10 (get (:fields q) :x)))))))
 
-;; Regression: nex.typechecker/check-assignment (the bare `f := v`,
-;; implicit-self spelling) never checked the field's declaring class at all —
-;; only check-target-assignment (the explicit `this.f := v` / `obj.f := v`
-;; spelling, exercised above) did. So a subclass could bypass the "cannot
-;; assign a field outside its declaring class" rule simply by dropping
-;; `this.`, even though the two spellings name the exact same assignment.
-(deftest member-assign-typechecker-rejects-bare-outside-write-test
+;; The declaring-class-only restriction applies uniformly to every field-write
+;; spelling, including the bare form: `f := v` with no receiver at all writes
+;; the exact same field an explicit `this.f := v` would, so exempting it would
+;; let a subclass bypass the very protection the restriction exists for —
+;; only the class that declares a field may change it directly, so its own
+;; contracts and invariants can never be bypassed from outside it.
+(deftest member-assign-typechecker-rejects-bare-write-to-inherited-field-test
   (testing "the bare (implicit-self) spelling of an outside write is rejected
             exactly like the explicit `this.f := v` spelling"
     (let [code "class A
@@ -104,31 +104,25 @@ let b := create B.make(9)"
       (is (some #(str/includes? (tc/format-type-error %) "Cannot assign to field f outside of class A")
                 (:errors result))))))
 
-;; The fix for the above must not reject a local `let` that merely shares a
-;; name with an inherited field — env-lookup-var already resolves such a
-;; name to the local (ordinary lexical shadowing), so the declaring-class
-;; check must be skipped whenever a `let` reachable from here, not
-;; lookup-class-field-member's scope-blind field lookup, is what the bare
-;; name actually refers to.
-(deftest member-assign-typechecker-allows-local-shadowing-inherited-field-test
-  (testing "a local variable shadowing an inherited field's name may still be reassigned"
+;; The supported way to reach the same outcome: the declaring class exposes
+;; an ordinary method that performs the assignment on its own behalf, and the
+;; subclass calls it instead of writing the field directly.
+(deftest member-assign-typechecker-allows-setter-method-for-inherited-field-test
+  (testing "a setter method declared by the field's own class may be called
+            from a subclass constructor to initialize it"
     (let [code "class A
 feature
   f: Integer
+  set_f(v: Integer) do f := v end
 end
 
 class B
 inherit A
 create
-  make()
-  do
-    let f := 5
-    f := 10
-    print(f)
-  end
+  make(v: Integer) do set_f(v) end
 end
 
-let b := create B.make"
+let b := create B.make(9)"
           result (tc/type-check (p/ast code))]
       (is (:success result) (pr-str (:errors result))))))
 

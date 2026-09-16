@@ -58,12 +58,15 @@
     x: X
     y: Y
   create make(a: X, b: Y) do x := a  y := b end
+  feature
+    set_x(v: X) do x := v end
+    set_y(v: Y) do y := v end
 end
 
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do x := q  y := p end
+  create make(p: P, q: Q) do this.set_x(q)  this.set_y(p) end
 end
 
 let m: Mid[String, Integer] := create Mid[String, Integer].make(\"hello\", 42)
@@ -80,18 +83,21 @@ print(m.y)")
     x: X
     y: Y
   create make(a: X, b: Y) do x := a  y := b end
+  feature
+    set_x(v: X) do x := v end
+    set_y(v: Y) do y := v end
 end
 
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do x := q  y := p end
+  create make(p: P, q: Q) do this.set_x(q)  this.set_y(p) end
 end
 
 class Leaf
   inherit
     Mid[String, Integer]
-  create make(s: String, i: Integer) do x := i  y := s end
+  create make(s: String, i: Integer) do this.set_x(i)  this.set_y(s) end
 end
 
 let l: Leaf := create Leaf.make(\"hello\", 42)
@@ -108,12 +114,15 @@ print(l.y)")
     x: X
     y: Y
   create make(a: X, b: Y) do x := a  y := b end
+  feature
+    set_x(v: X) do x := v end
+    set_y(v: Y) do y := v end
 end
 
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do x := q  y := p end
+  create make(p: P, q: Q) do this.set_x(q)  this.set_y(p) end
 end
 
 function first_field[T](b: Base[T, Any]): T do
@@ -137,18 +146,21 @@ print(first_field(m))")
     x: X
     y: Y
   create make(a: X, b: Y) do x := a  y := b end
+  feature
+    set_x(v: X) do x := v end
+    set_y(v: Y) do y := v end
 end
 
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do x := q  y := p end
+  create make(p: P, q: Q) do this.set_x(q)  this.set_y(p) end
 end
 
 class Leaf
   inherit
     Mid[String, Integer]
-  create make(s: String, i: Integer) do x := i  y := s end
+  create make(s: String, i: Integer) do this.set_x(i)  this.set_y(s) end
 end
 
 function first_field[T](b: Base[T, Any]): T do

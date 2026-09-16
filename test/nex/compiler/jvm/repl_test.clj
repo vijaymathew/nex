@@ -1219,6 +1219,7 @@ end"))
   feature
     owner: String
     balance: Real
+    set_balance(v: Real) do balance := v end
     deposit(amount: Real) do
       balance := balance + amount
     end
@@ -1247,7 +1248,7 @@ class SavingsAccount inherit Account
   feature
     interest_rate: Real
     apply_interest() do
-      balance := balance + balance * interest_rate
+      set_balance(balance + balance * interest_rate)
     end
     describe(): String do
       result := super.describe + \" (savings, rate: \" + interest_rate.to_string + \")\"
@@ -1264,7 +1265,7 @@ class OverdraftAccount inherit Account
     overdraft_limit: Real
     withdraw(amount: Real): Boolean do
       if balance - amount >= -overdraft_limit then
-        balance := balance - amount
+        set_balance(balance - amount)
         result := true
       else
         result := false

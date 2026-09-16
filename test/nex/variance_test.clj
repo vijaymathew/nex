@@ -20,9 +20,9 @@
     (and (not (:success r)) (seq (:errors r)))))
 
 (def ^:private animals
-  "class Animal feature name: String create make do name := \"a\" end end
-   class Dog inherit Animal feature fetch: String do result := \"f\" end create make do name := \"d\" end end
-   class Cat inherit Animal create make do name := \"c\" end end\n")
+  "class Animal feature name: String set_name(n: String) do name := n end create make do name := \"a\" end end
+   class Dog inherit Animal feature fetch: String do result := \"f\" end create make do set_name(\"d\") end end
+   class Cat inherit Animal create make do set_name(\"c\") end end\n")
 
 ;; ---------------------------------------------------------------------------
 ;; Function-value conformance: contravariant parameters, covariant return.
@@ -105,8 +105,8 @@
 
 (deftest override-return-narrowing-accepts
   (testing "an override may narrow the return type (covariant)"
-    (is (accepts? "class Animal feature name: String create make do name := \"a\" end end
-                   class Dog inherit Animal create make do name := \"d\" end end
+    (is (accepts? "class Animal feature name: String set_name(n: String) do name := n end create make do name := \"a\" end end
+                   class Dog inherit Animal create make do set_name(\"d\") end end
                    class Base feature make_it(): Animal do result := create Animal.make end create make do end end
                    class Sub inherit Base feature make_it(): Dog do result := create Dog.make end create make do end end"))))
 

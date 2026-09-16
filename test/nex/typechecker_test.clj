@@ -2001,6 +2001,7 @@ end"
     (let [code "deferred class Shape
   feature
     colour: String
+    set_colour(c: String) do colour := c end
     area(): Real deferred
     perimeter(): Real deferred
 end
@@ -2008,7 +2009,7 @@ end
 class Square inherit Shape
   create
     make(c: String, s: Real) do
-      colour := c
+      set_colour(c)
       side := s
     end
   feature
@@ -2677,9 +2678,14 @@ end"))
 ;; Rejected at type-check time now, naming the field and the supported
 ;; alternative (a routine, which does support `ClassName.routine(...)`
 ;; dispatch).
-(deftest test-class-qualified-field-access-is-rejected
-  (testing "`Parent.field` (no call parens) is a compile-time error, not a
-            silent Any that fails downstream"
+;; `Parent.field` reads: originally rejected outright (a field falling
+;; through to `Any` unchecked, backend-alignment C3a); now a real, supported
+;; form, letting a diamond-inheriting class read one specific ancestor
+;; path's copy the same way `Parent.routine()` already picks one ancestor
+;; path's routine.
+(deftest test-class-qualified-field-read-succeeds
+  (testing "`Parent.field` (no call parens) type-checks as a read of that
+            field, the same as `Parent.routine()` already does for a routine"
     (let [code "class First
                 feature
                   k: Integer
@@ -2710,13 +2716,37 @@ end"))
                 feature
                   total: Integer do result := Second.k + Third.k end
                 end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result))))))
+
+;; Field *assignment* has no such qualified form: a write is confined to the
+;; field's own declaring class regardless of receiver spelling (bare,
+;; `this.`, `super.`, or an explicit ancestor name), so `Parent.field := v`
+;; is rejected the same way `this.field := v` already is for an inherited
+;; field — naming the ancestor changes nothing about who may write it.
+(deftest test-class-qualified-field-write-is-rejected
+  (testing "`Parent.field := v` is rejected, naming the field's real
+            declaring class"
+    (let [code "class First
+                feature
+                  k: Integer
+                create
+                  init(v: Integer) do k := v end
+                end
+
+                class Second
+                inherit First
+                create
+                  init do super.init(10) end
+                feature
+                  reset do Second.k := 0 end
+                end
+
+                let s := create Second.init"
           result (tc/type-check (p/ast code))
           msgs (error-messages result)]
       (is (false? (:success result)))
-      (is (some #(and (str/includes? % "Second.k")
-                      (str/includes? % "class-qualified field access")
-                      (str/includes? % "Second.k(...)"))
-                msgs)
+      (is (some #(str/includes? % "Cannot assign to field k outside of class First") msgs)
           (pr-str msgs)))))
 
 (deftest test-class-qualified-routine-access-still-works

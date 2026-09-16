@@ -18,6 +18,7 @@
   feature
     area(): Integer deferred
     name: String
+    set_name(n: String) do name := n end
     describe(): String do result := name end
 end
 
@@ -27,7 +28,7 @@ class Square
     once side: Integer
     area(): Integer do result := side * side end
   create
-    make(s: Integer) do side := s  name := \"square\" end
+    make(s: Integer) do side := s  set_name(\"square\") end
 end
 
 class Circle
@@ -36,7 +37,7 @@ class Circle
     once r: Integer
     area(): Integer do result := 3 * r * r end
   create
-    make(v: Integer) do r := v  name := \"circle\" end
+    make(v: Integer) do r := v  set_name(\"circle\") end
 end
 
 function total_area[T -> Shape](xs: Array[T]): Integer do

@@ -40,6 +40,10 @@ feature
     is_active := active
   end
 
+  set_balance(v: Real) do
+    balance := v
+  end
+
   show() do
     print("Account ")
     print(account_number)
@@ -65,7 +69,7 @@ create
 
 feature
   apply_interest() do
-    balance := balance + (balance * interest_rate)
+    set_balance(balance + (balance * interest_rate))
   end
 
   withdraw(amount: Real)
