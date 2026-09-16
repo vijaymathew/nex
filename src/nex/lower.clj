@@ -677,23 +677,38 @@
       "Task")))
 
 (defn- infer-type-binary
+  "Result type of a binary op, matching nex.typechecker/check-binary-op's own
+   inference (both must agree, since the typechecker already accepted the
+   program by the time this runs). In particular a numeric operand must be
+   resolved through resolve-type-alias before the is-numeric-type?/
+   numeric-result-type checks, the same way check-binary-op expands aliases
+   first — otherwise a `declare type Quantity = Integer where ...`-typed
+   operand reads as non-numeric here, the arithmetic falls through to
+   left-type unchanged, and a mixed Integer-alias/Real-alias expression (e.g.
+   Quantity * Percentage) infers as the Integer alias instead of promoting to
+   Real, leaving a genuine :double value under a :long IR type that the JVM
+   emitter can't coerce."
   [env expr]
   (let [op (:operator expr)]
     (cond
       (#{"-" "*" "/" "%"} op) (let [left-type (infer-type env (:left expr))
-                                    right-type (infer-type env (:right expr))]
-                                (if (and (tc/is-numeric-type? left-type)
-                                         (tc/is-numeric-type? right-type))
-                                  (tc/numeric-result-type left-type right-type)
+                                    right-type (infer-type env (:right expr))
+                                    left-num (resolve-type-alias left-type)
+                                    right-num (resolve-type-alias right-type)]
+                                (if (and (tc/is-numeric-type? left-num)
+                                         (tc/is-numeric-type? right-num))
+                                  (tc/numeric-result-type left-num right-num)
                                   left-type))
       (= "+" op) (let [left-type (infer-type env (:left expr))
-                       right-type (infer-type env (:right expr))]
+                       right-type (infer-type env (:right expr))
+                       left-num (resolve-type-alias left-type)
+                       right-num (resolve-type-alias right-type)]
                    (if (or (= "String" (base-type-name left-type))
                            (= "String" (base-type-name right-type)))
                      "String"
-                     (if (and (tc/is-numeric-type? left-type)
-                              (tc/is-numeric-type? right-type))
-                       (tc/numeric-result-type left-type right-type)
+                     (if (and (tc/is-numeric-type? left-num)
+                              (tc/is-numeric-type? right-num))
+                       (tc/numeric-result-type left-num right-num)
                        left-type)))
       (= "^" op) (tc/power-result-type (infer-type env (:left expr))
                                        (infer-type env (:right expr)))

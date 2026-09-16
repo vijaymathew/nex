@@ -230,6 +230,26 @@ print(size_of(\"abc\"))")))))
 let q: Quantity := 7
 print(q.to_string)")))))
 
+;; Regression: nex.lower/infer-type-binary re-inferred a binary expression's
+;; result type independently of the typechecker, without expanding refinement
+;; aliases first. `Quantity * Percentage` (Integer/Real refinements) type-checked
+;; fine as Real, but lowering computed it as Quantity (JVM :long) since neither
+;; alias name read as numeric — leaving a genuine Real (:double) value under a
+;; :long IR type, which the JVM emitter rejected with "Unsupported JVM stack
+;; coercion" rather than silently truncating it.
+(deftest compiled-refinement-mixed-numeric-arithmetic-promotes-to-real
+  (testing "an Integer-refinement times a Real-refinement promotes to Real,
+            not the left operand's refinement, so a later Integer-typed use
+            of it (via .round) does not crash the compiled backend"
+    (is (= ["8"]
+           (both "declare type Quantity = Integer where n: n > 0
+declare type Percentage = Real where p: p >= 0.0 and p <= 100.0
+function cut_missing(total_qty: Quantity, percentage: Percentage): Quantity
+do
+  result := total_qty - (total_qty * percentage).round
+end
+print(cut_missing(10, 0.2))")))))
+
 (deftest compiled-refinement-return-type-is-the-base-type
   (testing "the call's result type resolves through the alias, so it binds to the base type"
     ;; A wrong (or "Any") inferred return type here fails to verify rather than
