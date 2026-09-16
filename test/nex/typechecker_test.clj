@@ -2668,3 +2668,93 @@ end"))
           msgs (error-messages result)]
       (is (false? (:success result)))
       (is (some #(str/includes? % "Conflicting inferred types for generic parameter G") msgs) (pr-str msgs)))))
+
+;; Regression (backend-alignment C3a): `ClassName.field` (a class-qualified
+;; field access, no call parens) used to fall through check-class-constant-
+;; access's method/constant lookups straight to "Any" with no diagnostic —
+;; type-checking silently, then failing only later at lowering or
+;; interpretation with a message naming neither the construct nor a fix.
+;; Rejected at type-check time now, naming the field and the supported
+;; alternative (a routine, which does support `ClassName.routine(...)`
+;; dispatch).
+(deftest test-class-qualified-field-access-is-rejected
+  (testing "`Parent.field` (no call parens) is a compile-time error, not a
+            silent Any that fails downstream"
+    (let [code "class First
+                feature
+                  k: Integer
+                create
+                  init(v: Integer) do k := v end
+                end
+
+                class Second
+                inherit First
+                create
+                  init do super.init(10) end
+                end
+
+                class Third
+                inherit First
+                create
+                  make do super.init(20) end
+                end
+
+                class Fourth
+                inherit Second, Third
+                create
+                  init
+                  do
+                    Second.init
+                    Third.make
+                  end
+                feature
+                  total: Integer do result := Second.k + Third.k end
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(and (str/includes? % "Second.k")
+                      (str/includes? % "class-qualified field access")
+                      (str/includes? % "Second.k(...)"))
+                msgs)
+          (pr-str msgs)))))
+
+(deftest test-class-qualified-routine-access-still-works
+  (testing "`Parent.routine(...)` — the supported form of the same syntax —
+            is unaffected by rejecting the field case"
+    (let [code "class First
+                feature
+                  k: Integer
+                create
+                  init(v: Integer) do k := v end
+                end
+
+                class Second
+                inherit First
+                feature
+                  get_k: Integer do result := k end
+                create
+                  init do super.init(10) end
+                end
+
+                class Third
+                inherit First
+                feature
+                  get_k2: Integer do result := k end
+                create
+                  make do super.init(20) end
+                end
+
+                class Fourth
+                inherit Second, Third
+                create
+                  init
+                  do
+                    Second.init
+                    Third.make
+                  end
+                feature
+                  total: Integer do result := Second.get_k() + Third.get_k2() end
+                end"
+          result (tc/type-check (p/ast code))]
+      (is (:success result) (pr-str (:errors result))))))

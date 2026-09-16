@@ -570,6 +570,41 @@ end")
           (when (.exists tmp-dir)
             (delete-tree! tmp-dir)))))))
 
+(deftest compile-jar-unknown-builtin-type-method-falls-back-to-reflection-smoke-test
+  (testing "a method call inside `with \"java\"` on a receiver whose static type is a Nex
+            builtin (here `String`) but whose method name is NOT one of Nex's own builtin
+            methods for that type reflects on the real host value instead of crashing at
+            class-load time. `getBytes` is a real java.lang.String method, not a Nex String
+            method (only `to_bytes` is); it used to typecheck fine inside with-java (assumed
+            Any/host interop) but then lower to a `builtin-method-string-getBytes` runtime-
+            helper Var that was never defined, failing only when the generated class loaded
+            and ran that instruction (`Attempting to call unbound fn`) -- see the
+            `known-builtin-method?` fallback in nex.lower's with-java? dispatch cond."
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-unknown-builtin-method")
+          main-file (io/file tmp-dir "main.nex")
+          out-dir (io/file tmp-dir "out")]
+      (try
+        (.mkdirs tmp-dir)
+        (spit main-file "import java.security.MessageDigest
+import java.math.BigInteger
+
+let text := \"abc\"
+
+with \"java\" do
+  let bytes := text.getBytes()
+  let md := MessageDigest.getInstance(\"SHA-256\")
+  let bi := BigInteger.new(1, md.digest(bytes))
+  print(bi.toString(16))
+end")
+        (let [result (file/compile-jar (.getPath main-file) (.getPath out-dir) {})
+              {:keys [exit out err]} (run-jar! (:jar result))
+              output-lines (remove str/blank? (str/split-lines out))]
+          (is (= 0 exit) err)
+          (is (= ["\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\""] output-lines)))
+        (finally
+          (when (.exists tmp-dir)
+            (delete-tree! tmp-dir)))))))
+
 (deftest compile-jar-implements-runnable-and-is-callable-from-java-test
   (testing "a compiled Nex class inheriting Runnable really `implements` it and a real Java Thread calls back into it"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-jar-smoke-runnable")

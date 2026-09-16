@@ -98,3 +98,59 @@ end
                          "does not support yet"))
       (is (str/includes? (message (ex-info same-text {}))
                          "internal error in the compiled backend")))))
+
+;; Regression: `Grandparent.init(...)` from `Child` (skipping the immediate
+;; parent `Parent`) type-checks fine — check-explicit-class-constructor-call
+;; only requires Grandparent to be a real ancestor, not an immediate parent —
+;; and runs correctly under the interpreter. But lower-call-stmt's qualified-
+;; constructor-call case only recognizes an *immediate* parent, so this used
+;; to fall through to the generic expression-lowering path, which cannot type
+;; a bare ancestor class name as an expression at all, and died with the
+;; unmarked "Unable to infer expression type during lowering" — reported as a
+;; compiler defect rather than the real, nameable gap it is. Now reported as
+;; a gap, naming the construct and pointing at --interpret (which still
+;; works, unchanged).
+(def ^:private non-immediate-ancestor-ctor-call
+  "class Grandparent
+create
+  init(v: Integer) do print(\"Grandparent.init \" + v.to_string) end
+end
+
+class Parent
+inherit Grandparent
+create
+  init(v: Integer) do super.init(v) end
+end
+
+class Child
+inherit Parent
+create
+  init
+  do
+    Grandparent.init(99)
+  end
+end
+
+let c := create Child.init
+")
+
+(deftest non-immediate-ancestor-constructor-call-is-a-named-gap
+  (testing "qualifying a constructor call by a non-immediate ancestor's name
+            is reported as an unsupported construct, not an internal defect"
+    (let [msg (compile-failure non-immediate-ancestor-ctor-call)]
+      (is (str/includes? msg "does not support yet") msg)
+      (is (str/includes? msg "Grandparent.init(...)") msg)
+      (is (str/includes? msg "non-immediate ancestor") msg)
+      (is (str/includes? msg "--interpret") msg)
+      (is (not (str/includes? msg "internal error")) msg))))
+
+(deftest non-immediate-ancestor-constructor-call-still-runs-interpreted
+  (testing "the same program the compiled backend declines still runs correctly
+            under --interpret, since the typechecker and interpreter always
+            supported reaching any ancestor, not just an immediate parent"
+    (let [f (java.io.File/createTempFile "diagnostics" ".nex")]
+      (try
+        (spit f non-immediate-ancestor-ctor-call)
+        (is (= "\"Grandparent.init 99\"\n"
+               (with-out-str (e/eval-file (.getPath f) {:interpret? true}))))
+        (finally (.delete f))))))

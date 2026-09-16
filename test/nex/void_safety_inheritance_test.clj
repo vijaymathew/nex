@@ -93,6 +93,23 @@ end
 let c := create C.make(7)
 print(c.a.i)"))))))
 
+;; Regression: check-attachable-field-initialization! looked for a parent-
+;; constructor call by comparing each call statement's raw :target against the
+;; parent's class name — but `super.make(...)`'s :target is a {:type :super}
+;; node, not the string "B", so it never matched and a legitimate super call
+;; was rejected exactly like subclass-ctor-must-initialize-inherited-attachable
+;; -field's genuinely-missing one, with the same "must call a constructor of B"
+;; message.
+(deftest subclass-ctor-chaining-to-parent-via-super-is-accepted
+  (testing "calling the parent's constructor through `super.` initializes the
+            inherited field, the same as naming the parent class directly"
+    (is (= ["7"] (output (str base "class C inherit B
+create
+  make(v: Integer) do super.make(create A.make(v)) end
+end
+let c := create C.make(7)
+print(c.a.i)"))))))
+
 (deftest subclass-without-own-constructors-is-accepted
   (testing "a subclass that declares none inherits the parent's, which initialize"
     (is (= ["1"] (output (str base "class C inherit B

@@ -2868,6 +2868,20 @@
     nil))
 
 (defn- check-class-constant-access
+  "`ClassName.member`, with no call parens, on Current — used to disambiguate
+   which ancestor's routine to run in a multiple-inheritance diamond
+   (`Second.init`, `Third.make`). A *field* qualified this way (`Second.k`) is
+   not supported: unlike a routine, a field has no dispatch to disambiguate —
+   Nex has no syntax that names one specific ancestor path's copy of a
+   duplicated diamond-inherited field (each path genuinely does get its own
+   storage; verified empirically, a common ancestor's field is duplicated per
+   branch, not shared — a bare unqualified reference to it further down the
+   diamond just silently picks one). Reach a specific branch's copy through a
+   routine instead (which does support qualified dispatch: `B.make_b`,
+   `C.make_c`). This used to fall through to `Any` unchecked
+   (backend-alignment C3a), so `Second.k` type-checked yet failed only later,
+   at lowering or interpretation, with a message naming neither the true
+   cause nor a fix. Rejected here instead, naming the supported form."
   [env {:keys [method]} {:keys [base-type type-map current-class target-type]}]
   (if-let [constant (lookup-class-constant env base-type method)]
     (resolve-generic-type (:field-type constant) type-map)
@@ -2878,7 +2892,20 @@
       (check-call-signature env method [] method-sig
                             (member-type-map env target-type type-map method-sig)
                             :arg-types [])
-      "Any")))
+      (if (and current-class
+               (not= current-class base-type)
+               (class-subtype? env current-class base-type)
+               (lookup-class-field-member env base-type method current-class))
+        (let [msg (str base-type "." method
+                       " is a class-qualified field access, which Nex does not support: "
+                       "only " base-type "." method
+                       "(...) — a routine call — can be qualified by an ancestor's class name. "
+                       "A bare `" method "` reaches one copy but does not let you pick which "
+                       "if it is inherited more than once (multiple inheritance duplicates a "
+                       "common ancestor's field per branch); wrap it in a routine on " base-type
+                       " to reach that branch's copy specifically, and call that instead.")]
+          (throw (ex-info msg {:error (type-error msg)})))
+        "Any"))))
 
 (defn- check-array-sort-call
   [env {:keys [args]} {:keys [target-type type-map]}]
@@ -6292,7 +6319,20 @@
               called-parents (->> statements
                                   (keep (fn [stmt]
                                           (when (= :call (:type stmt))
-                                            (:target stmt))))
+                                            (let [target (:target stmt)]
+                                              ;; `super.ctor(...)` is the other spelling of a
+                                              ;; parent-constructor call alongside `Parent.ctor(...)`;
+                                              ;; its :target is a {:type :super} node, not the parent's
+                                              ;; name, so it must be resolved the same way
+                                              ;; check-expr-super resolves it for real expression
+                                              ;; checking, or it never counts as initializing the
+                                              ;; parent even when it plainly does. check-class-sections!
+                                              ;; has already run (see check-class) and would have
+                                              ;; thrown on an ambiguous/parentless `super` here, so this
+                                              ;; class is guaranteed exactly one direct parent already.
+                                              (if (and (map? target) (= :super (:type target)))
+                                                (resolve-super-parent-class-name env name)
+                                                target)))))
                                   set)
               uninitialized-parents (sort (seq (set/difference parents-needing-init
                                                                called-parents)))]

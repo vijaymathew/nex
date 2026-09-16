@@ -141,6 +141,36 @@
 (def ^:private any-protocol-method-names
   #{"to_string" "equals" "clone" "cursor" "start" "item" "next" "at_end" "get" "length"})
 
+;; Same idea as `any-protocol-method-names`, generalized to every OTHER
+;; builtin-runtime-receiver-type (String, Array, Integer, ...): inside a
+;; `with "java"` block the typechecker (`check-general-target-call`) lets a
+;; method name it can't otherwise resolve on a builtin-typed receiver
+;; typecheck anyway, as `Any` — assuming it names a real reflective Java
+;; method on whatever the receiver actually is at runtime (`text.getBytes()`
+;; on a Nex `String`, which is a real `java.lang.String` underneath). But
+;; `lower-builtin-receiver-call` used to trust EVERY method name reaching it
+;; was one of the type's real builtin methods and derive a
+;; `builtin-method-<type>-<method>` runtime-helper var name for it
+;; unconditionally (`nex.compiler.jvm.emit/direct-derived-builtin-helper-
+;; name`) — for a name outside that fixed whitelist (`getBytes` is not a
+;; Nex String method; only `to_bytes` is) the derived var was never
+;; defined, and `RT.var` auto-vivifies an unbound one instead of failing to
+;; resolve, so the crash didn't surface until the generated class actually
+;; loaded and ran that instruction ("Attempting to call unbound fn").
+;; `bi/builtin-type-methods` is the same table the typechecker's synthetic
+;; builtin-class registration (`tc/register-builtin-methods`) builds each
+;; type's real method signatures from, so it is exactly the set of names
+;; `lower-builtin-receiver-call` can safely turn into that derived var name.
+;; A base-type with no direct entry there (`Cursor`, `Comparable` — routed
+;; through their own dispatch before this check would ever run) reports
+;; every method "known", so this only ever changes behavior for the types
+;; it actually has data for.
+(defn- known-builtin-method?
+  [base-type method]
+  (if-let [methods (get bi/builtin-type-methods (keyword base-type))]
+    (contains? methods method)
+    true))
+
 (def ^:private next-synthetic-closure-id (atom 0))
 
 (def ^:private direct-integer-bitwise-method->op
@@ -647,23 +677,38 @@
       "Task")))
 
 (defn- infer-type-binary
+  "Result type of a binary op, matching nex.typechecker/check-binary-op's own
+   inference (both must agree, since the typechecker already accepted the
+   program by the time this runs). In particular a numeric operand must be
+   resolved through resolve-type-alias before the is-numeric-type?/
+   numeric-result-type checks, the same way check-binary-op expands aliases
+   first — otherwise a `declare type Quantity = Integer where ...`-typed
+   operand reads as non-numeric here, the arithmetic falls through to
+   left-type unchanged, and a mixed Integer-alias/Real-alias expression (e.g.
+   Quantity * Percentage) infers as the Integer alias instead of promoting to
+   Real, leaving a genuine :double value under a :long IR type that the JVM
+   emitter can't coerce."
   [env expr]
   (let [op (:operator expr)]
     (cond
       (#{"-" "*" "/" "%"} op) (let [left-type (infer-type env (:left expr))
-                                    right-type (infer-type env (:right expr))]
-                                (if (and (tc/is-numeric-type? left-type)
-                                         (tc/is-numeric-type? right-type))
-                                  (tc/numeric-result-type left-type right-type)
+                                    right-type (infer-type env (:right expr))
+                                    left-num (resolve-type-alias left-type)
+                                    right-num (resolve-type-alias right-type)]
+                                (if (and (tc/is-numeric-type? left-num)
+                                         (tc/is-numeric-type? right-num))
+                                  (tc/numeric-result-type left-num right-num)
                                   left-type))
       (= "+" op) (let [left-type (infer-type env (:left expr))
-                       right-type (infer-type env (:right expr))]
+                       right-type (infer-type env (:right expr))
+                       left-num (resolve-type-alias left-type)
+                       right-num (resolve-type-alias right-type)]
                    (if (or (= "String" (base-type-name left-type))
                            (= "String" (base-type-name right-type)))
                      "String"
-                     (if (and (tc/is-numeric-type? left-type)
-                              (tc/is-numeric-type? right-type))
-                       (tc/numeric-result-type left-type right-type)
+                     (if (and (tc/is-numeric-type? left-num)
+                              (tc/is-numeric-type? right-num))
+                       (tc/numeric-result-type left-num right-num)
                        left-type)))
       (= "^" op) (tc/power-result-type (infer-type env (:left expr))
                                        (infer-type env (:right expr)))
@@ -6138,12 +6183,31 @@
       ;; imported Java type (`socket.getInetAddress().getHostAddress()`) —
       ;; java-object-valued? recognizes that case from the target
       ;; expression's own shape, no with-java? needed.
+      ;;
+      ;; The same "not really a Nex builtin method" gap `any-protocol-
+      ;; method-names` closes for `Any` also exists for every OTHER builtin-
+      ;; runtime-receiver-type: `text.getBytes()` on a Nex `String` inside
+      ;; `with "java"` typechecks fine (the typechecker is just as lenient
+      ;; there as it is for `Any`, see `check-general-target-call`'s
+      ;; `with-java?` branch) even though `getBytes` isn't a real Nex String
+      ;; method, and used to reach `lower-builtin-receiver-call` below,
+      ;; which derived a `builtin-method-string-getBytes` runtime-helper var
+      ;; name that was never defined — an unbound-Var crash at class-load
+      ;; time, not a compile error. Only inside `with "java"` (never merely
+      ;; because the target is `java-object-valued?`, which covers a
+      ;; different, already-real-Java-typed case): treat an unknown method
+      ;; on any builtin-typed receiver the same way as the `Any` case,
+      ;; routing it to reflection instead of a guaranteed-missing helper.
       (and (or (:with-java? env) (java-object-valued? env target-expr))
            (or (and (= "Any" (base-type-name target-type))
                     (not (contains? any-protocol-method-names (:method expr))))
                (and (not (builtin-runtime-receiver-type? env target-type))
                     (not (get (visible-class-map env) (base-type-name target-type)))
-                    (not (get (:compiled-classes env) (base-type-name target-type))))))
+                    (not (get (:compiled-classes env) (base-type-name target-type))))
+               (and (:with-java? env)
+                    (not= "Any" (base-type-name target-type))
+                    (builtin-runtime-receiver-type? env target-type)
+                    (not (known-builtin-method? (base-type-name target-type) (:method expr))))))
       (lower-java-instance-call env expr target-expr arg-irs)
 
       (builtin-runtime-receiver-type? env target-type)
@@ -6594,6 +6658,30 @@
                                          (:method stmt)
                                          (count (:args stmt))))
              {:owner (:this-type env) :own-class? true}
+
+             ;; TARGET-NAME.ctor(...) where TARGET-NAME is a real ancestor
+             ;; (the typechecker's check-explicit-class-constructor-call
+             ;; already required that — class-subtype?, not "immediate
+             ;; parent") but not one of THIS-TYPE's own immediate parents, so
+             ;; none of the three cases above matches. Lowering has no
+             ;; `_parent_X` field to step through except for an immediate
+             ;; parent, and no generic-argument translation for anything
+             ;; further up — reported here, before falling into the generic
+             ;; lower-expression path below, which cannot type a bare
+             ;; ancestor class name as an expression at all and dies with
+             ;; the unmarked, unhelpful \"Unable to infer expression type
+             ;; during lowering\" instead of naming the real gap.
+             (and (:this-type env)
+                  (string? (:target stmt))
+                  (class-constructor-def (get (visible-class-map env) (:target stmt))
+                                         (:method stmt)
+                                         (count (:args stmt))))
+             (throw (unsupported
+                     (str "calling `" (:target stmt) "." (:method stmt)
+                          "(...)`, a constructor on a non-immediate ancestor of "
+                          (:this-type env) ": the compiled backend only supports "
+                          "qualifying a constructor call by an immediate parent's name.")
+                     {:stmt stmt}))
 
              :else nil)]
     (let [ctor-def (class-constructor-def (get (visible-class-map env) owner)
