@@ -6659,6 +6659,30 @@
                                          (count (:args stmt))))
              {:owner (:this-type env) :own-class? true}
 
+             ;; TARGET-NAME.ctor(...) where TARGET-NAME is a real ancestor
+             ;; (the typechecker's check-explicit-class-constructor-call
+             ;; already required that — class-subtype?, not "immediate
+             ;; parent") but not one of THIS-TYPE's own immediate parents, so
+             ;; none of the three cases above matches. Lowering has no
+             ;; `_parent_X` field to step through except for an immediate
+             ;; parent, and no generic-argument translation for anything
+             ;; further up — reported here, before falling into the generic
+             ;; lower-expression path below, which cannot type a bare
+             ;; ancestor class name as an expression at all and dies with
+             ;; the unmarked, unhelpful \"Unable to infer expression type
+             ;; during lowering\" instead of naming the real gap.
+             (and (:this-type env)
+                  (string? (:target stmt))
+                  (class-constructor-def (get (visible-class-map env) (:target stmt))
+                                         (:method stmt)
+                                         (count (:args stmt))))
+             (throw (unsupported
+                     (str "calling `" (:target stmt) "." (:method stmt)
+                          "(...)`, a constructor on a non-immediate ancestor of "
+                          (:this-type env) ": the compiled backend only supports "
+                          "qualifying a constructor call by an immediate parent's name.")
+                     {:stmt stmt}))
+
              :else nil)]
     (let [ctor-def (class-constructor-def (get (visible-class-map env) owner)
                                           (:method stmt)
