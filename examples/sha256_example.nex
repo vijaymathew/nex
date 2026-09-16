@@ -1,0 +1,79 @@
+-- SHA-256 via Java Interop
+--
+-- Nex has no built-in cryptographic hash, so this reaches into the host
+-- platform with `with "java"` and calls java.security.MessageDigest
+-- directly -- see docs/design/chapter_4.md section 4.4.
+--
+-- Two things make the host boundary a little fiddly here, and both are
+-- worked around below rather than fought:
+--
+--   * MessageDigest.digest(byte[]) needs a real Java byte[], but a Nex
+--     Array (from String.to_bytes()) is not one -- passing it straight
+--     through throws a ClassCastException. A java.io.ByteArrayOutputStream
+--     bridges the two: write() takes a plain int per byte, and
+--     toByteArray() hands back a genuine byte[].
+--
+--   * java.math.BigInteger turns the resulting byte[] into a hex string
+--     in one call (`toString(16)`), which avoids indexing into a raw
+--     Java array (Nex's Array methods like `get`/`length` don't apply to
+--     one). The constructor's first argument (1) forces a positive
+--     value -- otherwise a digest whose first byte has the high bit set
+--     would be read as a negative number. BigInteger also drops leading
+--     zero bytes, so the result is padded back out to 64 hex digits.
+--
+-- Run:  nex sha256_example.nex
+
+import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
+import java.math.BigInteger
+
+function sha256_hex(text: String): String
+  do
+    let codes := text.to_bytes()
+
+    -- Host-specific work stays inside `with "java"`; the result is
+    -- written into a variable declared outside the block so ordinary
+    -- Nex String methods (pad_start below) can be used on it afterwards.
+    let digest_hex: String := ""
+    with "java" do
+      let buffer := create ByteArrayOutputStream
+      let i := 0
+      from i := 0 until i >= codes.length() do
+        buffer.write(codes.get(i))
+        i := i + 1
+      end
+
+      let md := MessageDigest.getInstance("SHA-256")
+      let bi := BigInteger.new(1, md.digest(buffer.toByteArray()))
+      digest_hex := bi.toString(16)
+    end
+
+    result := digest_hex.pad_start("0", 64)
+  ensure
+    is_hex_64: result.length() = 64
+  end
+
+function check(c: Console, text, expected: String) do
+  let actual: String := sha256_hex(text)
+  let mark: String := "ok"
+  if actual /= expected then
+    mark := "MISMATCH"
+  end
+  c.print_line("  sha256(\"" + text + "\") = " + actual + "   " + mark)
+end
+
+function main() do
+  let c: Console := create Console
+
+  c.print_line("SHA-256 (java.security.MessageDigest via with \"java\")")
+  check(c, "", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+  check(c, "abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+  check(c, "The quick brown fox jumps over the lazy dog",
+        "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")
+
+  -- "286" is included because its digest happens to start with a zero
+  -- byte (0x00...) -- the case pad_start above exists to handle.
+  check(c, "286", "00328ce57bbc14b33bd6695bc8eb32cdf2fb5f3a7d89ec14a42825e15d39df60")
+end
+
+main()

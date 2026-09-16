@@ -141,6 +141,36 @@
 (def ^:private any-protocol-method-names
   #{"to_string" "equals" "clone" "cursor" "start" "item" "next" "at_end" "get" "length"})
 
+;; Same idea as `any-protocol-method-names`, generalized to every OTHER
+;; builtin-runtime-receiver-type (String, Array, Integer, ...): inside a
+;; `with "java"` block the typechecker (`check-general-target-call`) lets a
+;; method name it can't otherwise resolve on a builtin-typed receiver
+;; typecheck anyway, as `Any` — assuming it names a real reflective Java
+;; method on whatever the receiver actually is at runtime (`text.getBytes()`
+;; on a Nex `String`, which is a real `java.lang.String` underneath). But
+;; `lower-builtin-receiver-call` used to trust EVERY method name reaching it
+;; was one of the type's real builtin methods and derive a
+;; `builtin-method-<type>-<method>` runtime-helper var name for it
+;; unconditionally (`nex.compiler.jvm.emit/direct-derived-builtin-helper-
+;; name`) — for a name outside that fixed whitelist (`getBytes` is not a
+;; Nex String method; only `to_bytes` is) the derived var was never
+;; defined, and `RT.var` auto-vivifies an unbound one instead of failing to
+;; resolve, so the crash didn't surface until the generated class actually
+;; loaded and ran that instruction ("Attempting to call unbound fn").
+;; `bi/builtin-type-methods` is the same table the typechecker's synthetic
+;; builtin-class registration (`tc/register-builtin-methods`) builds each
+;; type's real method signatures from, so it is exactly the set of names
+;; `lower-builtin-receiver-call` can safely turn into that derived var name.
+;; A base-type with no direct entry there (`Cursor`, `Comparable` — routed
+;; through their own dispatch before this check would ever run) reports
+;; every method "known", so this only ever changes behavior for the types
+;; it actually has data for.
+(defn- known-builtin-method?
+  [base-type method]
+  (if-let [methods (get bi/builtin-type-methods (keyword base-type))]
+    (contains? methods method)
+    true))
+
 (def ^:private next-synthetic-closure-id (atom 0))
 
 (def ^:private direct-integer-bitwise-method->op
@@ -6138,12 +6168,31 @@
       ;; imported Java type (`socket.getInetAddress().getHostAddress()`) —
       ;; java-object-valued? recognizes that case from the target
       ;; expression's own shape, no with-java? needed.
+      ;;
+      ;; The same "not really a Nex builtin method" gap `any-protocol-
+      ;; method-names` closes for `Any` also exists for every OTHER builtin-
+      ;; runtime-receiver-type: `text.getBytes()` on a Nex `String` inside
+      ;; `with "java"` typechecks fine (the typechecker is just as lenient
+      ;; there as it is for `Any`, see `check-general-target-call`'s
+      ;; `with-java?` branch) even though `getBytes` isn't a real Nex String
+      ;; method, and used to reach `lower-builtin-receiver-call` below,
+      ;; which derived a `builtin-method-string-getBytes` runtime-helper var
+      ;; name that was never defined — an unbound-Var crash at class-load
+      ;; time, not a compile error. Only inside `with "java"` (never merely
+      ;; because the target is `java-object-valued?`, which covers a
+      ;; different, already-real-Java-typed case): treat an unknown method
+      ;; on any builtin-typed receiver the same way as the `Any` case,
+      ;; routing it to reflection instead of a guaranteed-missing helper.
       (and (or (:with-java? env) (java-object-valued? env target-expr))
            (or (and (= "Any" (base-type-name target-type))
                     (not (contains? any-protocol-method-names (:method expr))))
                (and (not (builtin-runtime-receiver-type? env target-type))
                     (not (get (visible-class-map env) (base-type-name target-type)))
-                    (not (get (:compiled-classes env) (base-type-name target-type))))))
+                    (not (get (:compiled-classes env) (base-type-name target-type))))
+               (and (:with-java? env)
+                    (not= "Any" (base-type-name target-type))
+                    (builtin-runtime-receiver-type? env target-type)
+                    (not (known-builtin-method? (base-type-name target-type) (:method expr))))))
       (lower-java-instance-call env expr target-expr arg-irs)
 
       (builtin-runtime-receiver-type? env target-type)
