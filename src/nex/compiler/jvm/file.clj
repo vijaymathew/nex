@@ -457,12 +457,15 @@
 
 (defn- add-file-tree!
   ([^JarOutputStream jar-out seen root]
-   (add-file-tree! jar-out seen root nil))
+   (add-file-tree! jar-out seen root nil nil))
   ([^JarOutputStream jar-out seen root entry-prefix]
+   (add-file-tree! jar-out seen root entry-prefix nil))
+  ([^JarOutputStream jar-out seen root entry-prefix exclude-canonical-path]
    (let [root-file (io/file root)
          root-path (.toPath root-file)]
      (doseq [f (file-seq root-file)
-             :when (.isFile f)]
+             :when (and (.isFile f)
+                        (not= exclude-canonical-path (.getCanonicalPath f)))]
        (let [relative-name (-> (.relativize root-path (.toPath f))
                                str
                                (str/replace File/separator "/"))
@@ -519,21 +522,22 @@
                                "Main-Class: " (:main-class compile-result) "\n\n")
              manifest (Manifest. (ByteArrayInputStream. (.getBytes manifest-str)))
              jar-file (io/file out-dir (str jar-name ".jar"))
+             jar-canonical-path (.getCanonicalPath jar-file)
              seen (atom #{})]
          (.mkdirs out-dir)
          (with-open [jar-out (JarOutputStream. (java.io.FileOutputStream. jar-file) manifest)]
-           (add-file-tree! jar-out seen classes-dir)
-           (add-file-tree! jar-out seen compile-dir)
+           (add-file-tree! jar-out seen classes-dir nil jar-canonical-path)
+           (add-file-tree! jar-out seen compile-dir nil jar-canonical-path)
            (when (.exists (io/file "src"))
-             (add-file-tree! jar-out seen "src"))
+             (add-file-tree! jar-out seen "src" nil jar-canonical-path))
            (when (.exists (io/file "grammar"))
-             (add-file-tree! jar-out seen "grammar" "grammar"))
+             (add-file-tree! jar-out seen "grammar" "grammar" jar-canonical-path))
            (doseq [cp-entry (classpath-entries)
                    :when (.exists cp-entry)]
              (cond
                (.isDirectory cp-entry)
                (when-not (= (.getCanonicalPath cp-entry) (.getCanonicalPath (io/file "test")))
-                 (add-file-tree! jar-out seen cp-entry))
+                 (add-file-tree! jar-out seen cp-entry nil jar-canonical-path))
 
                (str/ends-with? (.getName cp-entry) ".jar")
                (add-jar-file! jar-out seen cp-entry)
