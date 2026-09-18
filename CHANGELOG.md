@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-18
+
+- **New: namespaces.** Multi-file Nex projects can now organize code into
+  namespaces/packages, with qualified names (`finance.Account`), aliasing,
+  and `intern ... as ...` across files, including nested interns and
+  duplicate-interned-function detection.
+
+- **New: `super` as a general expression**, not just a call prefix. Beyond
+  `super.method(...)`, `super` can now appear as an ordinary expression —
+  enabling `super.new(...)` with multiple arguments delegating to a parent
+  constructor, and qualified `super`/ancestor lookups deeper in a
+  hierarchy.
+
+- **Fixed: field-assignment is now consistently confined to the field's
+  declaring class, no matter which spelling reaches it.** `this.f := v`,
+  `super.f := v`, an explicit ancestor `B.f := v`, an arbitrary object
+  expression `e.f := v`, and the bare receiver-less `f := v` are all
+  elaborated by the same rule and all rejected with "Cannot assign to
+  field ... outside of class ..." unless the code performing the write
+  belongs to the field's own declaring class — closing a gap where some of
+  these spellings previously let a subclass reach through and mutate a
+  field only its declaring class was meant to touch.
+
+- **New: `Integer.to_string` accepts a base**, for non-decimal output.
+
+- Typechecker fixes: generic type-parameter inference and codegen gaps for
+  functions taking a `Function` parameter, subclass type-checking inside
+  generic functions, sealed-hierarchy exhaustiveness through a qualified
+  `inherit`, sibling closures sharing a mutated captured variable, self-
+  referential closures, mutual recursion via `let`-bound functions,
+  shadowed-closure rejection and recursive-closure inference, loop
+  typechecking, global-declaration ordering/watermarking, chained `?`
+  parsing and chained function/feature-call parsing, `Comparable`
+  conflicts, and REPL class redefinition — plus a number of error-message
+  accuracy fixes.
+
+- JVM backend fixes: nested `rescue` blocks, a `String.getBytes` bytecode
+  issue, a `Real` slot-sizing bug, and jar packaging.
+
+- Fixed `Set[T]`'s documented time complexities for its set operations.
+
 ## 0.4.0 - 2026-08-24
 
 - **Breaking: `Any` now requires an explicit `convert` to narrow into a
