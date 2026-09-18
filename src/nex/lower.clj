@@ -4620,6 +4620,33 @@
     (throw (ex-info "this is only valid in instance-method lowering"
                     {:expr expr}))))
 
+(defn- lower-expr-super
+  "Bare `super` used as a value (e.g. `result := super`), as opposed to
+   `super.method(...)`/`super.field := v`, which `lower-call-with-target` and
+   `lower-member-assign-stmt` intercept before an expression ever reaches
+   here. Mirrors `lower-super-call`'s composition-vs-real-inheritance split:
+   a Nex-to-Nex parent is a separate, composed object reached via the
+   `_parent_<Name>` field (same shape as `lower-nex-super-call`'s
+   `target-ir`), while a real imported Java superclass is the same object as
+   `this` (same shape as `lower-java-super-call`'s receiver)."
+  [env expr]
+  (if-not (:this-type env)
+    (throw (ex-info "super is only valid in instance-method lowering"
+                    {:expr expr}))
+    (let [parent-name (single-super-parent-name env)
+          parent-def (get (visible-class-map env) parent-name)
+          java-super-klass (when (:import parent-def)
+                             (let [^Class klass (resolve-imported-java-type env parent-name)]
+                               (when (and klass (not (.isInterface klass))) klass)))]
+      (if java-super-klass
+        (ir/this-node parent-name (exact-class-jvm-type env (:this-type env)))
+        (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                           (parent-field-name parent-name)
+                           (ir/this-node (:this-type env)
+                                         (exact-class-jvm-type env (:this-type env)))
+                           parent-name
+                           (exact-class-jvm-type env parent-name))))))
+
 (defn- lower-expr-binary
   [env expr]
   ;; An arithmetic operator whose left operand is a class that aliased it is
@@ -4829,6 +4856,7 @@
    :set-literal        lower-expr-set-literal
    :identifier         lower-expr-identifier
    :this               lower-expr-this
+   :super              lower-expr-super
    :binary             lower-expr-binary
    :unary              lower-expr-unary
    :if                 lower-expr-if

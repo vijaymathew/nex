@@ -679,6 +679,29 @@ end"))
         (is (not (str/includes? output "Error:")) output)
         (is (str/includes? output "hello from A"))))))
 
+(deftest compiled-bare-super-expression-test
+  (testing "compiled backend lowers bare `super` (not a call/field-write target) to the composed parent object"
+    (with-compiled-repl ctx
+      (with-out-str
+        (repl/eval-code ctx "class A
+  feature
+    greet(): String do
+      result := \"hello from A\"
+    end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "class B inherit A
+  feature
+    parent(): A do
+      result := super
+    end
+end"))
+      (with-out-str
+        (repl/eval-code ctx "let b := create B"))
+      (let [output (with-out-str (repl/eval-code ctx "b.parent.greet"))]
+        (is (not (str/includes? output "Error:")) output)
+        (is (str/includes? output "hello from A"))))))
+
 (deftest compiled-multiple-inheritance-dispatch-test
   (testing "compiled backend dispatches methods from both parents of a multiply-inheriting class"
     (with-compiled-repl ctx
