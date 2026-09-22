@@ -194,6 +194,55 @@ check_is_odd(99)")
                                 (e/eval-file (.getPath f) opts))))
         (finally (.delete f))))))
 
+(deftest ordinary-statement-referencing-a-closure-let-before-its-declaration-is-cleanly-rejected-test
+  (testing "an ORDINARY statement (not inside another closure's own body)
+            that calls a closure-let before that `:let` is reached must be
+            cleanly rejected — not accepted and then crash opaquely.
+            Regression test for a real bug found outside the test suite:
+            register-closure-let-signatures! pre-registers every direct
+            closure-literal `:let` in a block up front so SIBLING CLOSURE
+            BODIES can reference each other regardless of order (see this
+            file's own top-level tests above) — but it used to do this by
+            calling env-add-var directly on the block's own env, the exact
+            same env ordinary statements in that block are checked
+            against. That made the forward-registered name resolve from
+            ANY statement in the block, not just from within another
+            closure's own body — so `result := b(1.0)` running BEFORE
+            `let b := fn(...) ... end` (b does not exist yet at that point
+            in execution) type-checked cleanly, then crashed opaquely at
+            LOWERING time once nex.lower's own AST-only rewrite (which has
+            no such pre-registration) failed to resolve it: \"internal
+            error in the compiled backend: Unable to infer expression type
+            during lowering\". Fixed by moving the pre-registration into
+            its own env-level table (:pending-closure-signatures, never
+            merged into :vars) that only check-expr-anonymous-function
+            reads from, promoting it into a closure's own body-checking
+            env specifically — the one place \"see a sibling regardless of
+            order\" is actually meant to apply. An ordinary statement
+            checked directly against the block's own env no longer sees
+            it at all, so this now surfaces as the same clean, ordinary
+            \"Undefined function or method\" rejection a genuine forward
+            reference to any other not-yet-declared name already gets."
+    (let [f (java.io.File/createTempFile "closure_forward_ref_statement" ".nex")]
+      (try
+        (spit f "function outer(x: Real): Real
+do
+  let a := fn (g: Real): Real do
+    result := g + x
+  end
+
+  result := b(1.0)
+
+  let b := fn (g: Real): Real do
+    result := a(g)
+  end
+end
+print(outer(1.0))")
+        (doseq [opts [{} {:interpret? true}]]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Undefined function or method: b"
+                                (e/eval-file (.getPath f) opts))))
+        (finally (.delete f))))))
+
 (deftest untyped-mutually-recursive-closure-lets-called-from-top-level-test
   (testing "mutually recursive closures with NO `let`-level Function(...)
             annotation — just the closure literals' own inline
