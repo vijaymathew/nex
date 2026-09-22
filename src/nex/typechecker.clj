@@ -59,6 +59,18 @@
     ;; a second `let` of the same name in the *same* block is rejected while a
     ;; nested block may still shadow.
     :let-names (atom #{})
+    ;; A direct closure-literal `:let`'s provisional Function(...) signature,
+    ;; registered by register-closure-let-signatures! BEFORE that `:let` is
+    ;; actually reached in sequence — kept in its own table, never merged
+    ;; into :vars directly, so it is NOT visible to this env's own ordinary
+    ;; statements (which must still see an out-of-order reference as the
+    ;; plain undefined-variable error rule 4.16 sequential-let semantics
+    ;; gives it). check-expr-anonymous-function is the only reader: entering
+    ;; a nested closure's own body promotes every pending signature reachable
+    ;; from here into a fresh child env first, which is what actually lets
+    ;; one closure-let see a sibling declared later in the same block. See
+    ;; register-closure-let-signatures!'s own docstring.
+    :pending-closure-signatures (atom {})
     ;; Non-fatal diagnostics surfaced to the user (e.g. equals/hash mismatch).
     ;; Lives on the root env; children share it via env-add-warning.
     :warnings (atom [])
@@ -1337,6 +1349,7 @@
 (declare collect-class-info)
 (declare check-class)
 (declare check-method)
+(declare collect-pending-closure-signatures)
 (declare convert-guard-binding)
 (declare convert-guard-bindings)
 (declare attached-test-guards)
@@ -4166,6 +4179,22 @@
 (defn- check-expr-anonymous-function
   [env expr]
   (let [class-def (:class-def expr)
+        ;; A closure literal's own body must be able to see any sibling
+        ;; closure-let pre-registered by register-closure-let-signatures! in
+        ;; this block or any further-out one — regardless of declaration
+        ;; order — without leaking those names to the enclosing block's own
+        ;; ordinary statements (see that function's own docstring).
+        ;; Promoting them into a fresh child env here, rather than exposing
+        ;; them on the ordinary :vars chain directly, is what keeps that
+        ;; scoping: everything checked from here down (this closure's own
+        ;; body, and any closure nested further inside it) resolves through
+        ;; this rebound env; the enclosing block's own statements never do.
+        env (let [pending (collect-pending-closure-signatures env)]
+              (if (seq pending)
+                (let [scoped (make-type-env env)]
+                  (doseq [[n t] pending] (env-add-var scoped n t))
+                  scoped)
+                env))
         ;; Written inside an instance method, this literal's `this`/bare
         ;; field or method access means the *enclosing* class's, not the
         ;; synthetic AnonymousFunction_N's own (which has none of those
@@ -4667,19 +4696,42 @@
    block, exactly how ordinary top-level `function is_even(...) ... end` /
    `function is_odd(...) ... end` already resolve each other regardless of
    order (check-program registers every function's signature before
-   checking any body — this gives closures the same guarantee). Declaration
-   order is otherwise irrelevant here: this scans the whole list up front,
-   so a closure may just as well reference one declared BEFORE it, which
-   already worked without this (an already-real object by construction
-   time) — registering it again here is harmless, only ever redundant."
+   checking any body — this gives closures the same guarantee).
+
+   Written into ENV's own :pending-closure-signatures, NOT :vars — unlike
+   an earlier version of this function, which called env-add-var directly
+   and so made every one of these names resolvable from ANYWHERE in STMTS,
+   including an ordinary (non-closure) statement that runs BEFORE the
+   `:let` in question. That let a ordinary statement call a closure that
+   does not exist yet at that point in execution (`result := b(1.0)` before
+   `let b := fn(...) ... end`) sail through type-checking as if `b` were
+   already bound, then crash opaquely much later, at lowering time, once
+   nex.lower's own AST-only rewrite (which has no such registration at all)
+   failed to resolve it. :vars is where check-expr-anonymous-function reads
+   these back FROM — see its own comment — promoting them into a closure's
+   own body-checking env specifically, which is the one place \"reference a
+   sibling regardless of order\" is actually meant to apply."
   [env stmts]
   (let [shadowed (shadowed-closure-let-names stmts)]
     (doseq [stmt stmts]
       (when (and (map? stmt) (= :let (:type stmt)) (string? (:name stmt))
                  (not (contains? shadowed (:name stmt)))
                  (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
-        (env-add-var env (:name stmt)
-                     (or (:var-type stmt) (anonymous-function-provisional-signature (:value stmt))))))))
+        (swap! (:pending-closure-signatures env) assoc (:name stmt)
+               (or (:var-type stmt) (anonymous-function-provisional-signature (:value stmt))))))))
+
+(defn- collect-pending-closure-signatures
+  "Every pending closure-let signature (see register-closure-let-signatures!)
+   reachable from ENV, walking outward through :parent — a closure nested
+   inside another closure still needs to see an outer block's own
+   mutually-recursive siblings, not just its immediate one. Merged
+   outermost-first so an inner block's own entry wins any (already-rare,
+   already-excluded-by-shadowing) name collision."
+  [env]
+  (loop [e env, acc {}]
+    (if e
+      (recur (:parent e) (merge (into {} @(:pending-closure-signatures e)) acc))
+      acc)))
 
 (defn check-statements
   "Check STMTS in ENV in order, first pre-registering every direct
