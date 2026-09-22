@@ -3539,6 +3539,25 @@
     [(rewrite-expression-for-closures ctx local-types captures stmt)
      local-types]
 
+    ;; A bare `spawn do ... end` used as a STATEMENT (its Task value
+    ;; discarded, not bound via `let`) — same shape as :call just above.
+    ;; rewrite-expression-for-closures' own :spawn case (rewrite-spawn-
+    ;; for-closures) already handles a spawn reached as an EXPRESSION
+    ;; (`let t := spawn do ... end`), but nothing here delegated to it for
+    ;; the bare-statement form, so it fell all the way through to this
+    ;; function's own default (unrewritten passthrough) branch below: its
+    ;; body never went through capture rewriting at all, leaving its
+    ;; fn-expr's :captures/:class-def unset. Any outer variable the body
+    ;; referenced (e.g. `ch.send(i)` capturing `ch`) then reached lowering
+    ;; as an anonymous-function node nobody had prepared — lower-expr-
+    ;; anonymous-function found no compiled class for it and no captures
+    ;; to dispatch through the interpreter bridge either, crashing with
+    ;; "internal error in the compiled backend: Anonymous function class
+    ;; has not been compiled during lowering".
+    :spawn
+    [(rewrite-expression-for-closures ctx local-types captures stmt)
+     local-types]
+
     :convert
     (let [value' (rewrite-expression-for-closures ctx local-types captures (:value stmt))
           stmt' (assoc stmt :value value')]

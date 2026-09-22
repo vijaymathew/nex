@@ -314,15 +314,15 @@ ifStatement
     ;
 
 loopStatement
-    : FROM block invariantClause? variantClause? UNTIL expression DO block END
+    : FROM block invariantClause? variantClause? UNTIL expression DO block rescueClause? END
     ;
 
 repeatStatement
-    : REPEAT expression DO block END
+    : REPEAT expression DO block rescueClause? END
     ;
 
 acrossStatement
-    : ACROSS expression AS IDENTIFIER DO block END
+    : ACROSS expression AS IDENTIFIER DO block rescueClause? END
     ;
 
 withStatement
@@ -353,7 +353,7 @@ assertStatement
     ;
 
 spawnExpression
-    : SPAWN DO block END
+    : SPAWN DO block rescueClause? END
     ;
 
 variantClause

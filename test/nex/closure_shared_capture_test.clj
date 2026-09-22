@@ -250,6 +250,41 @@ do
 end
 print(compute())")))))
 
+(deftest bare-spawn-statement-capturing-an-outer-variable-does-not-crash-the-compiled-backend-test
+  (testing "a `spawn do ... end` used as a bare STATEMENT — its Task value
+            discarded, not bound via `let` the way every other spawn test
+            in this file writes it — still correctly captures and calls a
+            method on an outer variable. Regression test for a distinct
+            bug from the rest of this file (a capture-VISIBILITY gap, not
+            this file's shared-mutable-capture concern): nex.lower/
+            rewrite-statement-for-closures' own `case` dispatch had no
+            `:spawn` branch at all, unlike its `:call` branch, which
+            delegates a bare-call statement to the expression-level
+            rewrite. A bare spawn statement fell through to that
+            function's default (unrewritten passthrough) branch instead,
+            so its body never went through closure-capture rewriting at
+            all — no :captures computed, no :class-def synced. Lowering
+            then reached an anonymous-function node nobody had prepared —
+            no compiled class to link against and no :captures to dispatch
+            it through the interpreter bridge either — and crashed with
+            \"internal error in the compiled backend: Anonymous function
+            class has not been compiled during lowering\". Uses a blocking
+            `ch.receive` (not `.await` on a discarded Task, which this
+            program shape has no handle to) so the assertion has no race:
+            it blocks until the spawned body's own `ch.send(42)` runs."
+    (is (= ["42"]
+           (both "function produce(): Channel[Integer]
+do
+  let ch := create Channel[Integer]
+  spawn do
+    ch.send(42)
+    ch.close
+  end
+  result := ch
+end
+let ch := produce()
+print(ch.receive)")))))
+
 (deftest loop-control-variable-captured-by-a-spawn-does-not-crash-the-compiled-backend-test
   ;; `from let i := 0 until i = n do spawn do result := i end ... end` — a
   ;; `from`-loop's own control variable lives in the :loop node's :init,

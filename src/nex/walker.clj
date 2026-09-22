@@ -2104,6 +2104,46 @@
      :elseif elseif-clauses
      :else else-block}))
 
+;; A loop-level `rescue` (from/until, repeat, across all share this — they
+;; all desugar to the same {:type :loop} shape below) is pure syntactic
+;; sugar: no new AST node type, no new typechecker/interpreter/backend
+;; logic anywhere. Desugars into a synthetic boolean "stop flag" folded
+;; into `until`, plus a nested {:type :scoped-block} wrapping the user's
+;; own body statements — both constructs every layer already fully
+;; supports. Why this gives "terminate the whole loop unless retried",
+;; not just "continue to the next iteration": if the rescue clause
+;; completes WITHOUT calling `retry`, execution falls through to the
+;; appended `<flag> := true`, then normal scoped-block completion, then
+;; whatever sits after it in the loop's own :body (for repeat/across,
+;; their bookkeeping statement — bumping the counter/cursor one final
+;; time before exiting is harmless). The loop's `until` is re-evaluated
+;; at the top of the next pass and is now true via the flag, so the loop
+;; exits through the exact same path an ordinary until-true exit already
+;; takes. A `retry` inside the rescue re-runs just the wrapped body
+;; (never :init/:until/:invariant/:variant or repeat/across's own
+;; bookkeeping) via :scoped-block's own pre-existing retry machinery,
+;; unaffected by anything here.
+(defn- rescue-wrap-loop
+  "[INIT UNTIL BODY-STMTS] unchanged when RESCUE is nil. Otherwise wraps
+   BODY-STMTS (the loop's own raw, user-written body — for repeat/across,
+   this must be called BEFORE their own synthetic bookkeeping statement is
+   conjoined/prepended, so a retry can never skip or double-run it) into a
+   single rescue-bearing scoped-block, and threads a fresh stop flag through
+   INIT/UNTIL."
+  [init until body-stmts rescue]
+  (if-not rescue
+    [init until body-stmts]
+    (let [flag-name (str "__loop_rescue_stop_" (swap! next-fn-id inc) "__")]
+      [(conj (vec init) {:type :let :name flag-name
+                         :value {:type :boolean :value false}})
+       {:type :binary :operator "or" :left until
+        :right {:type :identifier :name flag-name}}
+       [{:type :scoped-block
+         :body (vec body-stmts)
+         :rescue (conj (vec rescue)
+                       {:type :assign :target flag-name
+                        :value {:type :boolean :value true}})}]])))
+
 (defn- handle-loop-statement
   [[_ _from-kw init-block & rest]]
   (let [;; Filter out keywords
@@ -2115,32 +2155,48 @@
         variant-clause (first (filter #(and (sequential? %)
                                             (= :variantClause (first %)))
                                       cleaned))
-        ;; Find until condition and body
+        ;; Find until condition, body, and rescue
         until-expr (first (filter #(and (sequential? %)
                                         (= :expression (first %)))
                                   cleaned))
         body-block (first (filter #(and (sequential? %)
                                         (= :block (first %)))
-                                  cleaned))]
+                                  cleaned))
+        rescue-clause (first (filter #(and (sequential? %)
+                                           (= :rescueClause (first %)))
+                                     cleaned))
+        [init' until' body'] (rescue-wrap-loop (transform-node init-block)
+                                                (transform-node until-expr)
+                                                (transform-node body-block)
+                                                (when rescue-clause (transform-node rescue-clause)))]
     {:type :loop
-     :init (transform-node init-block)
+     :init init'
      :invariant (when invariant-clause (transform-node invariant-clause))
      :variant (when variant-clause (transform-node variant-clause))
-     :until (transform-node until-expr)
-     :body (transform-node body-block)}))
+     :until until'
+     :body body'}))
 
 (defn- handle-repeat-statement
-  [[_ _repeat-kw count-expr _do-kw body-block _end-kw]]
-  (let [counter-name "__repeat_i__"
+  [[_ _repeat-kw count-expr & rest]]
+  (let [cleaned (remove #(#{"do" "end"} %) rest)
+        body-block (first (filter #(and (sequential? %) (= :block (first %))) cleaned))
+        rescue-clause (first (filter #(and (sequential? %) (= :rescueClause (first %))) cleaned))
+        counter-name "__repeat_i__"
         counter-id {:type :identifier :name counter-name}
         count-ast (transform-node count-expr)
-        body-stmts (transform-node body-block)]
+        body-stmts (transform-node body-block)
+        rescue (when rescue-clause (transform-node rescue-clause))
+        [init' until' body'] (rescue-wrap-loop
+                              [{:type :let :name counter-name :value {:type :integer :value 0 :text "0"}}]
+                              {:type :binary :operator "=" :left counter-id :right count-ast}
+                              body-stmts
+                              rescue)]
     {:type :loop
-     :init [{:type :let :name counter-name :value {:type :integer :value 0 :text "0"}}]
+     :init init'
      :invariant nil
      :variant nil
-     :until {:type :binary :operator "=" :left counter-id :right count-ast}
-     :body (conj (vec body-stmts)
+     :until until'
+     :body (conj (vec body')
                  {:type :assign
                   :target counter-name
                   :value {:type :binary
@@ -2149,34 +2205,43 @@
                           :right {:type :integer :value 1 :text "1"}}})}))
 
 (defn- handle-across-statement
-  [[_ _across-kw collection-expr _as-kw alias-name _do-kw body-block _end-kw]]
-  (let [cursor-name (str "__across_c_" (swap! next-fn-id inc) "__")
+  [[_ _across-kw collection-expr _as-kw alias-name & rest]]
+  (let [cleaned (remove #(#{"do" "end"} %) rest)
+        body-block (first (filter #(and (sequential? %) (= :block (first %))) cleaned))
+        rescue-clause (first (filter #(and (sequential? %) (= :rescueClause (first %))) cleaned))
+        cursor-name (str "__across_c_" (swap! next-fn-id inc) "__")
         cursor-id {:type :identifier :name cursor-name}
         collection-ast (transform-node collection-expr)
         alias (token-text alias-name)
-        body-stmts (transform-node body-block)]
+        body-stmts (transform-node body-block)
+        rescue (when rescue-clause (transform-node rescue-clause))
+        [init' until' body'] (rescue-wrap-loop
+                              [{:type :let
+                                :name cursor-name
+                                :synthetic true
+                                :value {:type :call
+                                        :target collection-ast
+                                        :method "cursor"
+                                        :args []
+                                        ;; `cursor` is this desugaring's own invention. The flag
+                                        ;; lets the typechecker report a failure in terms of the
+                                        ;; `across` the programmer wrote (see check-target-call).
+                                        :from-across true}}
+                               {:type :call
+                                :target cursor-name
+                                :method "start"
+                                :args []}]
+                              {:type :call
+                               :target cursor-name
+                               :method "at_end"
+                               :args []}
+                              body-stmts
+                              rescue)]
     {:type :loop
-     :init [{:type :let
-             :name cursor-name
-             :synthetic true
-             :value {:type :call
-                     :target collection-ast
-                     :method "cursor"
-                     :args []
-                     ;; `cursor` is this desugaring's own invention. The flag
-                     ;; lets the typechecker report a failure in terms of the
-                     ;; `across` the programmer wrote (see check-target-call).
-                     :from-across true}}
-            {:type :call
-             :target cursor-name
-             :method "start"
-             :args []}]
+     :init init'
      :invariant nil
      :variant nil
-     :until {:type :call
-             :target cursor-name
-             :method "at_end"
-             :args []}
+     :until until'
      :body (vec (concat
                  [{:type :let
                    :name alias
@@ -2185,7 +2250,7 @@
                            :target cursor-name
                            :method "item"
                            :args []}}]
-                 body-stmts
+                 body'
                  [{:type :call
                    :target cursor-name
                    :method "next"
@@ -2695,9 +2760,21 @@
    :target-type (transform-node type-expr)})
 
 (defn- handle-spawn-expression
-  [[_ _spawn-kw _do-kw block _end-kw]]
-  {:type :spawn
-   :body (transform-node block)})
+  [[_ _spawn-kw & rest]]
+  (let [cleaned (remove #(#{"do" "end"} %) rest)
+        block (first (filter #(and (sequential? %) (= :block (first %))) cleaned))
+        rescue-clause (first (filter #(and (sequential? %) (= :rescueClause (first %))) cleaned))
+        body (transform-node block)]
+    {:type :spawn
+     ;; Spawn's body is single-shot, not iterative — no stop-flag/until
+     ;; trick needed (unlike a loop's rescue above). A rescue clause just
+     ;; wraps the whole original body in a nested scoped-block, reusing
+     ;; :scoped-block's existing run-once/retry-re-runs-body/otherwise-
+     ;; falls-through semantics unchanged — exactly what a spawn's rescue
+     ;; should mean.
+     :body (if rescue-clause
+             [{:type :scoped-block :body body :rescue (transform-node rescue-clause)}]
+             body)}))
 
 (defn- handle-old-expression
   [[_ _old-kw expr]]
