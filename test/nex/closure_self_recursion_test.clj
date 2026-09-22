@@ -113,6 +113,70 @@ end
 print(fact(4))
 print(apply_twice(3, fn (fact: Integer): Integer do result := fact + 1 end))")))))
 
+(deftest self-recursive-closure-inside-a-same-arity-enclosing-function-test
+  (testing "a self-recursive closure nested inside a top-level FUNCTION
+            whose own arity happens to equal the closure's own arity must
+            still resolve its self-call correctly, not collide with the
+            enclosing function's own synthetic callN. Regression coverage:
+            every top-level function is ALSO its own synthetic
+            <name>_Function class (nex.lower/prepare-program-for-closures),
+            and rewrite-class-for-closures sets :this-type to that
+            wrapper's name for the whole function body — including any
+            closure literal nested inside it, so a closure nested there can
+            see the enclosing function's own fields/self the way one nested
+            in a class method does. rewrite-self-recursive-calls renames a
+            closure's bare self-call to the generic name `call<arity>`
+            BEFORE the ordinary closure-capture rewrite runs; when the
+            enclosing function has that SAME arity (both 1 here), its own
+            synthetic call1 collides by name+arity with the just-renamed
+            self-call, and rewrite-call-for-closures' this-type-method?
+            check wrongly matched it, rerouting the self-call through the
+            captured `this` identifier (__closure_this__) instead of
+            leaving it as the already-correct bare self-call — the
+            enclosing scope never captures that identifier, so it threw
+            \"Undefined variable: __closure_this__\" the first time the
+            recursion ran. Fixed by tagging the self-recursion rename
+            (:self-recursive-call?) and excluding it from that check."
+    (is (= ["3.0"]
+           (both "function outer(x: Real): Real
+do
+  let helper := fn (n: Integer): Integer do
+    if n <= 0 then
+      result := 0
+    else
+      result := helper(n - 1) + 1
+    end
+  end
+  result := x + helper(3).to_real
+end
+print(outer(0.0))")))))
+
+(deftest newtons-method-sqrt-with-same-arity-self-recursive-closure-test
+  (testing "the original failing program: a 1-param `sqrt` function whose
+            own 1-param helper closure (sqr_iter) self-recurses, alongside
+            two sibling closures (improve, good_enough) it calls by name —
+            the exact shape that produced \"Undefined variable:
+            __closure_this__\" before the fix above"
+    (is (= ["2.0000000929222947"]
+           (both "function sqrt(x: Real): Real
+do
+  let improve := fn (guess: Real): Real do
+    result := (guess + x / guess) / 2.0
+  end
+  let good_enough := fn (guess: Real): Boolean do
+    result := (x - guess * guess).abs / x < 0.0001
+  end
+  let sqr_iter := fn (guess: Real): Real do
+    if good_enough(guess) then
+      result := guess
+    else
+      result := sqr_iter(improve(guess))
+    end
+  end
+  result := sqr_iter(1.0)
+end
+print(sqrt(4.0))")))))
+
 (deftest non-recursive-closure-is-unaffected-test
   (testing "an ordinary closure that never calls itself is completely
             unaffected by this fix — regression coverage that the

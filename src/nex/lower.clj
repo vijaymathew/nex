@@ -3133,8 +3133,22 @@
       ;; the enclosing closure compiles as if it captured nothing, and
       ;; lowering the nested closure's construction inside it then can't
       ;; resolve the name at all.
+      ;;
+      ;; closure-this-capture-name is synthetic — it never appears in
+      ;; outer-var-types (it names `this`, not a declared variable), so
+      ;; capture-reference! is always a silent no-op for it. Left as the
+      ;; general case, a nested closure that captures the enclosing
+      ;; method's `this` would fail to propagate that capture outward:
+      ;; the enclosing closure wouldn't capture __closure_this__ either,
+      ;; and at runtime the nested closure's construction (inside the
+      ;; enclosing closure's interpreted body) can't resolve it —
+      ;; "Undefined variable: __closure_this__". capture-closure-this!
+      ;; performs the equivalent propagation for this name, gated on the
+      ;; enclosing scope's own :this-type/:inside-closure?.
         _ (doseq [{:keys [name]} capture-vec]
-            (capture-reference! captures local-types (:var-types ctx) name))
+            (if (= name closure-this-capture-name)
+              (capture-closure-this! captures ctx)
+              (capture-reference! captures local-types (:var-types ctx) name)))
         runtime-object? (seq capture-vec)
       ;; (:class-def expr) still holds the call<N> method's *original*
       ;; body — attach-capture-fields only adds capture fields, it never
@@ -3182,8 +3196,13 @@
         this-target? (and (map? target) (= :this (:type target))
                           (:inside-closure? ctx))
         is-field? (false? (:has-parens expr))
+        ;; An already-rewritten self-recursive call (rewrite-self-recursive-
+        ;; calls) is never an implicit-`this` reference, no matter what its
+        ;; generic callN name happens to collide with on the enclosing
+        ;; scope's own :this-type class — see that flag's own comment.
         implicit-this-member?
         (and bare-target?
+             (not (:self-recursive-call? expr))
              (not (contains? local-types method))
              (not (contains? (:var-types ctx) method))
              (or (this-type-method? ctx method (count (:args expr)))
@@ -3207,7 +3226,7 @@
                (contains? (:var-types ctx) method)
                (not (contains? local-types method)))
       (swap! captures assoc method (get (:var-types ctx) method)))
-    (assoc expr :target new-target :args args)))
+    (-> expr (assoc :target new-target :args args) (dissoc :self-recursive-call?))))
 
 (defn- rewrite-if-for-closures
   [ctx local-types captures expr]
@@ -3328,7 +3347,29 @@
     (and (map? node) (= :call (:type node)) (nil? (:target node)) (= self-name (:method node)))
     (assoc node
            :method (str "call" (count (:args node)))
-           :args (mapv #(rewrite-self-recursive-calls self-name %) (:args node)))
+           :args (mapv #(rewrite-self-recursive-calls self-name %) (:args node))
+           ;; Marks this call as an already-resolved self-recursion rename,
+           ;; not an ordinary bare call — rewrite-call-for-closures must NOT
+           ;; run its implicit-this-member? check against it. A closure
+           ;; nested inside a top-level *function* inherits that function's
+           ;; own :this-type (every top-level function is also its own
+           ;; synthetic <name>_Function class — see prepare-program-for-
+           ;; closures), purely so a closure can see the enclosing
+           ;; function's fields/self the same way one nested inside a class
+           ;; method does. But callN is a GENERIC name — the enclosing
+           ;; function's own callN (named after ITS OWN arity) can
+           ;; coincidentally match this closure's just-renamed callN (named
+           ;; after the CLOSURE's arity) whenever the two arities happen to
+           ;; agree, e.g. a 1-param closure self-recursing inside a 1-param
+           ;; function. Without this flag, this-type-method? then falsely
+           ;; matches that unrelated enclosing-scope method and reroutes the
+           ;; call through the captured `this` identifier instead of
+           ;; leaving it as the bare self-call it already correctly is —
+           ;; the enclosing scope never captures that identifier (nothing
+           ;; else forces it to), so it throws "Undefined variable:
+           ;; __closure_this__" at runtime the first time the self-call
+           ;; runs.
+           :self-recursive-call? true)
 
     (map? node)
     (into (empty node) (map (fn [[k v]] [k (rewrite-self-recursive-calls self-name v)])) node)
