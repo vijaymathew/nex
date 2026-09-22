@@ -3633,12 +3633,24 @@
               spawn-ctx (assoc ctx :current-env spawn-env)]
           (doseq [stmt body]
             (eval-node spawn-ctx stmt))
+          ;; "__result_assigned__" is always written via env-define (local
+          ;; to whatever env the assignment statement is CURRENTLY executing
+          ;; in — see eval-node :assign/:let), never env-set!, so it never
+          ;; propagates up from a nested env-creating construct (an `if`, an
+          ;; existing scoped-block, or now a spawn's own rescue arm) back to
+          ;; spawn-env the way "result" itself correctly does via env-set!'s
+          ;; parent-chain walk. Falling back to a direct "result" read when
+          ;; the flag is missing (mirroring method-result-value's own,
+          ;; already-correct fallback) avoids silently discarding a value
+          ;; that genuinely was assigned, just from inside such a construct.
           (let [result-flag (try
                               (env-lookup spawn-env "__result_assigned__")
                               (catch Exception _ ::not-found))]
             (if (= result-flag "result")
               (env-lookup spawn-env "result")
-              nil)))))
+              (let [res (try (env-lookup spawn-env "result")
+                              (catch Exception _ ::not-found))]
+                (when (not= res ::not-found) res)))))))
     concurrent-executor)))
 
 (defmethod eval-node :literal
