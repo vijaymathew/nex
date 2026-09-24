@@ -7178,6 +7178,38 @@
                      errors'))
             (vec errors)))))))
 
+(defn- order-by-constant-deps
+  "Stable dependency order for class-defs: a class whose constant values
+   mention another class's name, or a free function (via FN-NAME->CLASS, its
+   wrapper class), comes after it. collect-class-info checks constants
+   eagerly, so it needs those already registered. Cycles are broken
+   arbitrarily (first visit wins). Every input class is kept, including
+   several sharing one bare name."
+  [class-defs fn-name->class]
+  (let [bare #(or (:true-name %) (:name %))
+        by-bare (group-by bare class-defs)
+        constant-values (fn [cd]
+                          (for [section (:body cd)
+                                :when (= :feature-section (:type section))
+                                m (:members section)
+                                :when (and (= :field (:type m)) (:constant? m))]
+                            (:value m)))
+        deps (fn [cd]
+               (->> (mapcat #(tree-seq coll? seq %) (constant-values cd))
+                    (filter string?)
+                    (distinct)
+                    (mapcat (fn [x] (get by-bare (or (get fn-name->class x) x))))
+                    (remove #(identical? % cd))))
+        visited (volatile! #{})
+        out (volatile! [])]
+    (letfn [(visit [cd]
+              (when-not (contains? @visited cd)
+                (vswap! visited conj cd)
+                (doseq [d (deps cd)] (visit d))
+                (vswap! out conj cd)))]
+      (doseq [cd class-defs] (visit cd)))
+    @out))
+
 (defn check-program
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
@@ -7189,6 +7221,7 @@
            normalized-functions (normalize-function-defs classes functions)
            all-class-defs (vec (concat classes (function-class-defs normalized-functions)))
            visible-classes (class-defs-by-name-last-wins all-class-defs)
+           fn-name->class (into {} (map (juxt :name :class-name)) normalized-functions)
          ;; Every interned class-def, under its qualified identity (Phase 3,
          ;; docs/proposals/namespaces.md) — not just whichever one won the
          ;; bare-name collapse above. `:name` is swapped to the qualified
@@ -7256,6 +7289,50 @@
            (env-add-type-alias env name type-expr)
            (env-add-type-alias-generic-params env name generic-params))
 
+       ;; Register function variables (name -> generated class): the bare
+       ;; name, always (an ambiguous one just gets whichever fn-def visits
+       ;; last — harmless, since a bare call to it is rejected below before
+       ;; this registration is ever consulted, exactly how the analogous
+       ;; ambiguous-class registration a few lines up is "raw, so
+       ;; env-lookup-var finds *something* to be ambiguous about" rather
+       ;; than a real pick), and additionally the qualified name for every
+       ;; interned function — this is what makes `trade.ship(x)` resolvable
+       ;; at all: nex.walker/resolve-qualified-function-calls already
+       ;; rewrote it to an ordinary bare call naming "trade.ship" by the
+       ;; time this program reaches check-program, so it needs a real var
+       ;; registered under that exact key like any other free function.
+         (doseq [fn-def normalized-functions]
+           (let [arity (count (:params fn-def))]
+             (when (> arity 32)
+               (throw (ex-info (str "Function " (:name fn-def)
+                                    " must have at most 32 parameters")
+                               {:error (type-error
+                                        (str "Function " (:name fn-def)
+                                             " must have at most 32 parameters"))}))))
+           (env-add-var env (:name fn-def) (:class-name fn-def))
+           (when (:qualified-name fn-def)
+             (env-add-var env (:qualified-name fn-def) (:class-name fn-def))))
+
+       ;; (Registered before class collection: a class constant's value is
+       ;; checked eagerly in collect-class-info and may call a free function.)
+       ;; Warm-up: best-effort collection so class constants can see what they
+       ;; name. A class constant is type-checked eagerly inside
+       ;; collect-class-info and may call a free function or use another
+       ;; class (`xs = [mk(Direction.East)]`), but a class is registered
+       ;; under its qualified name in the first pass below and its bare name
+       ;; (the one source text uses) only in the second. Running both passes
+       ;; once first, dependencies ordered ahead and failures ignored, leaves
+       ;; every name registered by the time the real passes run; those
+       ;; re-collect everything and report any genuine error. Skipped when a
+       ;; bare name is ambiguous: registering it early would mask the error.
+         (doseq [defs (when (empty? ambiguous-classes)
+                        [qualified-class-defs visible-classes])
+                 class-def (order-by-constant-deps defs fn-name->class)]
+           (try
+             (with-source-file (:source-file class-def)
+               (fn [] (collect-class-info env class-def)))
+             (catch clojure.lang.ExceptionInfo _ nil)))
+
        ;; First pass: collect every interned class under its qualified
        ;; identity (see qualified-class-defs) — including one that will go on
        ;; to lose the bare-name slot below to an ambiguity or another interned
@@ -7268,7 +7345,7 @@
        ;; create finance/Account.make(...)`) needs that qualified registration
        ;; to already exist at the point its OWN constant is checked, not
        ;; merely by the time the whole program finishes elaborating.
-         (doseq [class-def qualified-class-defs]
+         (doseq [class-def (order-by-constant-deps qualified-class-defs fn-name->class)]
            (with-source-file (:source-file class-def)
              (fn [] (collect-class-info env class-def))))
 
@@ -7288,7 +7365,7 @@
        ;; misleading "Undefined class" — this raw registration is that, and
        ;; nothing more; the class's real processing already happened above,
        ;; under its qualified key, where no such collision exists.
-         (doseq [class-def visible-classes]
+         (doseq [class-def (order-by-constant-deps visible-classes fn-name->class)]
            (if (contains? ambiguous-classes (:name class-def))
              (env-add-class env (:name class-def) class-def)
              (with-source-file (:source-file class-def)
@@ -7315,30 +7392,6 @@
        ;; Matrix := ...`) resolves its methods on later inputs.
          (doseq [[var-name var-type] (:var-types opts)]
            (env-add-var env var-name (expand-type-aliases env var-type)))
-
-       ;; Register function variables (name -> generated class): the bare
-       ;; name, always (an ambiguous one just gets whichever fn-def visits
-       ;; last — harmless, since a bare call to it is rejected below before
-       ;; this registration is ever consulted, exactly how the analogous
-       ;; ambiguous-class registration a few lines up is "raw, so
-       ;; env-lookup-var finds *something* to be ambiguous about" rather
-       ;; than a real pick), and additionally the qualified name for every
-       ;; interned function — this is what makes `trade.ship(x)` resolvable
-       ;; at all: nex.walker/resolve-qualified-function-calls already
-       ;; rewrote it to an ordinary bare call naming "trade.ship" by the
-       ;; time this program reaches check-program, so it needs a real var
-       ;; registered under that exact key like any other free function.
-         (doseq [fn-def normalized-functions]
-           (let [arity (count (:params fn-def))]
-             (when (> arity 32)
-               (throw (ex-info (str "Function " (:name fn-def)
-                                    " must have at most 32 parameters")
-                               {:error (type-error
-                                        (str "Function " (:name fn-def)
-                                             " must have at most 32 parameters"))}))))
-           (env-add-var env (:name fn-def) (:class-name fn-def))
-           (when (:qualified-name fn-def)
-             (env-add-var env (:qualified-name fn-def) (:class-name fn-def))))
 
        ;; Register top-level `let` globals so class and function bodies can read
        ;; them (§7), and enforce the def-before-use watermark before those bodies

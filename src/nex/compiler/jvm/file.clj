@@ -393,7 +393,11 @@
                                      (emit/compile-user-class->bytes
                                       lowered-class
                                       {:classes-edn classes-edn
-                                       :imports-edn imports-edn}
+                                       :imports-edn imports-edn
+                                       :program-owner program-internal-name
+                                       :program-functions
+                                       (mapv #(select-keys % [:name :qualified-name :emitted-name])
+                                             (:functions unit))}
                                       {:known-supers known-supers})])
                                   (:classes unit)))]
        {:program-class (desc/binary-class-name program-internal-name)
