@@ -159,13 +159,15 @@ end
 -- prints #a #b #c
 ```
 
-Maps iterate as `[key, value]` pairs:
+Maps iterate as `Map_Entry[K, V]` values, read-only key/value pairs with typed `key` and `value` members:
 
 ```nex
-across {"name": "Alice", "age": "10"} as pair do
-  print(pair.get(0))
+across {"name": "Alice", "age": "10"} as entry do
+  print(entry.key + ": " + entry.value)
 end
 ```
+
+An entry prints as `"name": "Alice"`. For compatibility with earlier code, `entry.get(0)` and `entry.get(1)` still return the key and value, typed `Any`; prefer `key` and `value`.
 
 ## Functions
 

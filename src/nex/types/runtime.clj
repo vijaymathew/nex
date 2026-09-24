@@ -1042,6 +1042,8 @@
 (defn nex-atomic-boolean? [v] (and (map? v) (= (:nex-builtin-type v) :AtomicBoolean)))
 (defn nex-atomic-reference? [v] (and (map? v) (= (:nex-builtin-type v) :AtomicReference)))
 
+(defn nex-map-entry? [v] (and (map? v) (= (:nex-builtin-type v) :Map_Entry)))
+
 (defn nex-array-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :ArrayCursor)))
 (defn nex-string-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :StringCursor)))
 (defn nex-map-cursor? [v] (and (map? v) (= (:nex-builtin-type v) :MapCursor)))

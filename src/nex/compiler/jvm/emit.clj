@@ -136,7 +136,7 @@
 
 (defn user-class-spec
   ([class-spec] (user-class-spec class-spec {}))
-  ([class-spec {:keys [classes-edn imports-edn]}]
+  ([class-spec {:keys [classes-edn imports-edn program-owner program-functions]}]
    {:internal-name (:internal-name class-spec)
     :binary-name (desc/binary-class-name (:jvm-name class-spec))
     :source-file (:source-file class-spec)
@@ -243,7 +243,9 @@
                  :owner (:internal-name class-spec)
                  :constants (:constants class-spec)
                  :classes-edn classes-edn
-                 :imports-edn imports-edn}
+                 :imports-edn imports-edn
+                 :program-owner program-owner
+                 :program-functions program-functions}
                ;; Java's equality, delegating to Nex's. Set and Map are a
                ;; LinkedHashSet and a HashMap on this backend, so membership,
                ;; dedup and key lookup are decided by these two methods and
@@ -2895,7 +2897,8 @@
     (.visitEnd fv)))
 
 (defn- emit-class-initializer!
-  [^ClassWriter cw {:keys [name descriptor flags owner constants classes-edn imports-edn]}]
+  [^ClassWriter cw {:keys [name descriptor flags owner constants classes-edn imports-edn
+                          program-owner program-functions]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)
         ;; A scalar constant lowers to a `:const` (LDC) that never touches the
         ;; state slot. An object- or collection-valued constant dispatches a
@@ -2918,7 +2921,15 @@
                           [(fn [] (.visitVarInsn mv Opcodes/ALOAD 0))
                            (fn [] (emit-string-constant! mv classes-edn))
                            (fn [] (emit-string-constant! mv imports-edn))])
-      (.visitInsn mv Opcodes/POP))
+      (.visitInsn mv Opcodes/POP)
+      ;; The throwaway state has no free functions registered (the program's
+      ;; eval method does that for its own state), so a constant whose value
+      ;; calls one — `xs = [mk(1)]` — would find nothing. Register them here.
+      (when program-owner
+        (doseq [fn-node program-functions
+                key-name (distinct [(:name fn-node) (:qualified-name fn-node)])
+                :when key-name]
+          (emit-register-repl-fn! mv 0 program-owner key-name fn-node))))
     (doseq [{:keys [name jvm-type value]} constants]
       (emit-expr! mv value 0)
       (.visitFieldInsn mv

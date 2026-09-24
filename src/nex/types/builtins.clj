@@ -365,6 +365,11 @@
    :data (atom [])
    :comparator comparator})
 
+(defn make-map-entry
+  "A `Map_Entry[K, V]`: the immutable key/value pair a Map cursor yields."
+  [k v]
+  {:nex-builtin-type :Map_Entry :key k :value v})
+
 (defn make-atomic-integer
   [initial]
   ;; 64-bit, matching Nex Integer (Int64). Previously AtomicInteger, which
@@ -1012,6 +1017,26 @@
       :values (atom (vec (nex-set-seq s)))
       :index (atom 0)})})
 
+;; `get(0)`/`get(1)` keep the pre-Map_Entry pair spelling working.
+(def map-entry-type-methods
+  {"key"       ^{:signatures [{:params [] :return-type "K"}]}
+   (fn [e & _] (:key e))
+   "value"     ^{:signatures [{:params [] :return-type "V"}]}
+   (fn [e & _] (:value e))
+   "get"       ^{:signatures [{:params [{:name "index" :type "Integer"}] :return-type "Any"}]}
+   (fn [e index & _]
+     (case (long index)
+       0 (:key e)
+       1 (:value e)
+       (throw (ex-info "Map_Entry index out of range (0 or 1)" {:index index}))))
+   "to_string" ^{:signatures [{:params [] :return-type "String"}]}
+   (fn [e & rest]
+     (if-let [ctx (first rest)]
+       (format-value-with-ctx ctx e)
+       (nex-format-value e)))
+   "equals"    ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   (fn [e other & _] (nex-deep-equals? e other))})
+
 (def min-heap-type-methods
   {"insert"          ^{:signatures [{:params [{:name "value" :type "T"}] :return-type "Void"}]}
    (fn [heap value & [ctx]] (heap-insert! ctx heap value))
@@ -1314,7 +1339,7 @@
                  (if (< idx (count ks))
                    (let [k (nth ks idx)
                          v (nex-map-get (:source c) k)]
-                     (nex-array-from [k v]))
+                     (make-map-entry k v))
                    (throw (ex-info "Cursor is at end" {:index idx})))))
    "next"    (fn [c & _]
                (let [ks @(:keys c)
@@ -1357,6 +1382,7 @@
    :Map map-type-methods
    :Set set-type-methods
    :Min_Heap min-heap-type-methods
+   :Map_Entry map-entry-type-methods
    :Atomic_Integer atomic-integer-type-methods
    :Atomic_Integer64 atomic-integer64-type-methods
    :Atomic_Boolean atomic-boolean-type-methods
@@ -1403,7 +1429,8 @@
                          (contains? #{"sort" "contains" "index_of"} method-name))
                     (and (contains? #{:Array :Map :Set} type-name)
                          (= method-name "to_string"))
-                    (= type-name :Min_Heap))))
+                    (= type-name :Min_Heap)
+                    (and (= type-name :Map_Entry) (= method-name "to_string")))))
        (apply method-fn value (concat args [ctx]))
        (apply method-fn value args))
      (throw (ex-info (str "Method not found on type: " method-name)
@@ -1439,6 +1466,8 @@
     (nex-set? value) (rt/nex-set-str (partial format-value-with-ctx ctx) value)
     (nex-map? value) (rt/nex-map-str (partial format-value-with-ctx ctx) value)
     (nex-array? value) (rt/nex-array-str (partial format-value-with-ctx ctx) value)
+    (rt/nex-map-entry? value) (str (format-value-with-ctx ctx (:key value)) ": "
+                                   (format-value-with-ctx ctx (:value value)))
     :else (nex-format-value value)))
 
 (defn print-output-value

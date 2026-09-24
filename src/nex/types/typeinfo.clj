@@ -20,6 +20,7 @@
     (rt/nex-task? value) :Task
     (rt/nex-channel? value) :Channel
     (rt/nex-min-heap? value) :Min_Heap
+    (rt/nex-map-entry? value) :Map_Entry
     (rt/nex-atomic-integer? value) :Atomic_Integer
     (rt/nex-atomic-integer64? value) :Atomic_Integer64
     (rt/nex-atomic-boolean? value) :Atomic_Boolean

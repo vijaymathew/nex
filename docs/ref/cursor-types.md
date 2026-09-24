@@ -31,7 +31,7 @@ Created by: `map.cursor()`
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `start` | none | `Void` | Refresh key snapshot and reset index. |
-| `item` | none | `Array[Any]` | Return `[key, value]`; throws at end. |
+| `item` | none | `Map_Entry[K, V]` | Return the current entry (`key`, `value`); throws at end. |
 | `next` | none | `Void` | Advance index by one if not at end. |
 | `at_end` | none | `Boolean` | True when index is beyond key snapshot. |
 
@@ -48,8 +48,8 @@ end
 let m := {"name": "Ada", "lang": "Nex"}
 let mc := m.cursor()
 from mc.start() until mc.at_end() do
-  let pair := mc.item()
-  print(pair.get(0) + ": " + pair.get(1))
+  let entry := mc.item()
+  print(entry.key + ": " + entry.value)
   mc.next()
 end
 ```
