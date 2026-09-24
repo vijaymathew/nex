@@ -128,7 +128,7 @@
 
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Comparable" "Integer" "Real" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+    "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 
 ;; The only method names the compiled backend actually implements a

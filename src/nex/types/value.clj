@@ -27,6 +27,10 @@
     (rt/nex-map? value)
     (formatter-map value)
 
+    (rt/nex-map-entry? value)
+    (let [fmt #(nex-format-value nex-object? formatter-map formatter-array formatter-set %)]
+      (str (fmt (:key value)) ": " (fmt (:value value))))
+
     (and (map? value) (:nex-builtin-type value))
     (str "#<" (name (:nex-builtin-type value)) ">")
 
@@ -131,6 +135,10 @@
     (and (= (rt/nex-map-size a) (rt/nex-map-size b))
          (every? (fn [[k v]] (nex-map-entry-match? nex-object? k v b))
                  (rt/nex-map-entries a)))
+
+    (and (rt/nex-map-entry? a) (rt/nex-map-entry? b))
+    (and (nex-deep-equals? nex-object? (:key a) (:key b))
+         (nex-deep-equals? nex-object? (:value a) (:value b)))
 
     (and (rt/nex-set? a) (rt/nex-set? b))
     (and (= (rt/nex-set-size a) (rt/nex-set-size b))

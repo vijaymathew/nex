@@ -347,6 +347,7 @@
                     "Task" {:name "Task" :generic-params [{:name "T"}]}
                     "Channel" {:name "Channel" :generic-params [{:name "T"}]}
                     "Min_Heap" {:name "Min_Heap" :generic-params [{:name "T"}]}
+                    "Map_Entry" {:name "Map_Entry" :generic-params [{:name "K"} {:name "V"}]}
                     "Atomic_Reference" {:name "Atomic_Reference" :generic-params [{:name "T"}]}})
         class-lookup (fn [class-name] (get class-map class-name))]
     (mapv #(normalize-function-def class-lookup %) functions)))
@@ -461,7 +462,7 @@
 
 (def builtin-types
   #{"Integer" "Real" "Char" "Boolean" "String"
-    "Array" "Map" "Set" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+    "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
     "Cursor"})
 
@@ -1240,7 +1241,8 @@
       "Array" (or (first type-args) "Any")
       "Set" (or (first type-args) "Any")
       "String" "Char"
-      "Map" {:base-type "Array" :type-params ["Any"]}
+      "Map" {:base-type "Map_Entry"
+             :type-params [(or (first type-args) "Any") (or (second type-args) "Any")]}
       "Cursor" "Any"
       "Any")))
 
@@ -2613,6 +2615,20 @@
       "size" (when (= argc 0) {:params [] :return-type "Integer"})
       nil)))
 
+(defn- builtin-method-signature-map-entry
+  [method argc type-map]
+  (case method
+    "key" (when (= argc 0)
+            {:params [] :return-type (or (resolve-generic-type "K" type-map) "Any")})
+    "value" (when (= argc 0)
+              {:params [] :return-type (or (resolve-generic-type "V" type-map) "Any")})
+    "get" (when (= argc 1)
+            {:params [{:name "index" :type "Integer"}] :return-type "Any"})
+    "to_string" (when (= argc 0) {:params [] :return-type "String"})
+    "equals" (when (= argc 1)
+               {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
+    nil))
+
 (defn- builtin-method-signature-min-heap
   [method argc type-map]
   (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
@@ -2698,6 +2714,7 @@
    "Task" builtin-method-signature-task
    "Channel" builtin-method-signature-channel
    "Min_Heap" builtin-method-signature-min-heap
+   "Map_Entry" builtin-method-signature-map-entry
    "Atomic_Integer" builtin-method-signature-atomic-numeric
    "Atomic_Integer64" builtin-method-signature-atomic-numeric
    "Atomic_Boolean" builtin-method-signature-atomic-boolean
@@ -6640,6 +6657,12 @@
                    :return-type {:base-type "Set" :type-params ["T"]}})
   (register-builtin-type-signatures! env "Set"))
 
+(defn- register-map-entry-methods!
+  [env]
+  (env-add-class env "Map_Entry" {:name "Map_Entry"
+                                  :generic-params [{:name "K"} {:name "V"}]})
+  (register-builtin-type-signatures! env "Map_Entry"))
+
 (defn- register-min-heap-methods!
   [env]
   (env-add-class env "Min_Heap" {:name "Min_Heap"
@@ -6714,6 +6737,7 @@
   (register-map-methods! env)
   (register-set-methods! env)
   (register-min-heap-methods! env)
+  (register-map-entry-methods! env)
   (register-atomic-integer-like-methods! env "Atomic_Integer")
   (register-atomic-integer-like-methods! env "Atomic_Integer64")
   (register-atomic-boolean-methods! env)

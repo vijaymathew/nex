@@ -42,11 +42,7 @@ across sorted_keys as k do
 end
 
 across capitals as entry do
-  if convert entry.get(0) to country: String then
-    if convert entry.get(1) to capital: String then
-      print(country + " -> " + capital)
-    end
-  end
+  print(entry.key + " -> " + entry.value)
 end
 
 across capitals.keys as country do
@@ -64,11 +60,7 @@ function invert(m: Map[String, String]): Map[String, String]
 do
   result := {}
   across m as entry do
-    if convert entry.get(0) to key: String then
-      if convert entry.get(1) to value: String then
-        result.set(value, key)
-      end
-    end
+    result.set(entry.value, entry.key)
   end
 end
 let by_capital := invert(capitals)
@@ -95,14 +87,12 @@ do
   result := ""
   let started := false
   across freq as entry do
-    if convert entry.get(0) to key: String then
-      if not started then
-        result := key
-        started := true
-      else
-        if freq.get(key) > freq.get(result) then
-          result := key
-        end
+    if not started then
+      result := entry.key
+      started := true
+    else
+      if entry.value > freq.get(result) then
+        result := entry.key
       end
     end
   end

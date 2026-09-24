@@ -1959,6 +1959,12 @@
 (def-builtin-method-wrapper builtin-method-any-get "get")
 (def-builtin-method-wrapper builtin-method-any-length "length")
 
+(def-builtin-method-wrapper builtin-method-map_entry-key "key")
+(def-builtin-method-wrapper builtin-method-map_entry-value "value")
+(def-builtin-method-wrapper builtin-method-map_entry-get "get")
+(def-builtin-method-wrapper builtin-method-map_entry-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-map_entry-equals "equals")
+
 (def-builtin-method-wrapper builtin-method-comparable-compare "compare")
 
 (def-builtin-method-wrapper builtin-method-integer-to-string "to_string")

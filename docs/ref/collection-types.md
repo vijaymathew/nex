@@ -1,7 +1,8 @@
 # Collection Types
 
 This section covers the standard collection abstractions used throughout Nex code.
-`Array`, `Map`, `Set`, and `Min_Heap[T]` are built-in collection types.
+`Array`, `Map`, `Set`, and `Min_Heap[T]` are built-in collection types;
+`Map_Entry[K, V]` is the pair type a `Map` yields when iterated.
 `Stack[T]` is a common generic collection class pattern built on top of
 `Array[T]`.
 
@@ -101,6 +102,26 @@ create Array[String].filled(2, "x")
 
 \* "Deep" means the cost scales with the total nested size of keys/values, not just entry count.
 † `remove` and `cursor` are the two operations where the backends diverge: `remove` is `O(1)` average on the compiled backend but `O(n)` on the interpreter (see the note above); `cursor` creation is `O(n)` on both, since it snapshots every key up front rather than iterating lazily.
+
+## `Map_Entry[K, V]`
+
+A `Map_Entry[K, V]` is the read-only key/value pair produced when a `Map` is iterated with `across` or a `MapCursor`. It cannot be created directly and has no mutators.
+
+```nex
+across {"name": "Ada"} as entry do
+  print(entry.key + ": " + entry.value)
+end
+```
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `key` | none | `K` | The entry's key. |
+| `value` | none | `V` | The entry's value. |
+| `get` | `index: Integer` | `Any` | Pair-style access: `0` is the key, `1` is the value. Kept for older code; prefer `key` and `value`. |
+| `to_string` | none | `String` | Render as `key: value`, e.g. `"name": "Ada"`. |
+| `equals` | `other: Any` | `Boolean` | True when both key and value are deeply equal. |
 
 ## `Set`
 
