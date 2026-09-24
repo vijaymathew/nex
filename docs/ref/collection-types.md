@@ -6,6 +6,9 @@ This section covers the standard collection abstractions used throughout Nex cod
 `Stack[T]` is a common generic collection class pattern built on top of
 `Array[T]`.
 
+In the tables below, `T` is the element type of an `Array[T]` or `Set[T]`, and `K` and
+`V` are the key and value types of a `Map[K, V]`.
+
 All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
 `clone` methods operate recursively: `to_string` renders nested structure,
 `equals` performs deep structural equality, and `clone` performs a deep copy.
@@ -22,7 +25,7 @@ complexity except `Map.remove` and `Set.remove`: `O(1)` average on the compiled
 backend (backed by a real hash table), `O(n)` on the interpreter (which keeps a
 separate insertion-order list that removal must also filter).
 
-## `Array`
+## `Array[T]`
 
 ### Construction
 
@@ -43,18 +46,18 @@ create Array[String].filled(2, "x")
 
 | Method | Arguments | Returns | Description | Complexity |
 |---|---|---|---|---|
-| `get` | `index: Integer` | `Any` | Read element at `index`. | `O(1) / O(1)` |
-| `add` | `value: Any` | `Void` | Append value. | `O(1) amortized / O(1)` |
-| `add_at` | `index: Integer, value: Any` | `Void` | Insert value at index. | `O(n) / O(1)` |
+| `get` | `index: Integer` | `T` | Read element at `index`. | `O(1) / O(1)` |
+| `add` | `value: T` | `Void` | Append value. | `O(1) amortized / O(1)` |
+| `add_at` | `index: Integer, value: T` | `Void` | Insert value at index. | `O(n) / O(1)` |
 | `length` | none | `Integer` | Number of elements. | `O(1) / O(1)` |
 | `is_empty` | none | `Boolean` | True when array has no elements. | `O(1) / O(1)` |
-| `contains` | `elem: Any` | `Boolean` | Membership test. | `O(n) / O(1)` |
-| `index_of` | `elem: Any` | `Integer` | First index or `-1` if not found. | `O(n) / O(1)` |
+| `contains` | `elem: T` | `Boolean` | Membership test. | `O(n) / O(1)` |
+| `index_of` | `elem: T` | `Integer` | First index or `-1` if not found. | `O(n) / O(1)` |
 | `remove` | `index: Integer` | `Void` | Remove element at index. | `O(n) / O(1)` |
-| `reverse` | none | `Array[Any]` | Return reversed array. | `O(n) / O(n)` |
-| `set` | `index: Integer, value: Any` | `Void` | Replace element at index. | `O(1) / O(1)` |
-| `sort` | none | `Array[Any]` | Return a new array sorted by built-in order or `Comparable.compare`. | `O(n log n) / O(n)` |
-| `sort` | `compareFn: Function(a: Any, b: Any): Integer` | `Array[Any]` | Return a new array sorted using `compareFn(a, b) -> Integer`. | `O(n log n) / O(n)` |
+| `reverse` | none | `Array[T]` | Return reversed array. | `O(n) / O(n)` |
+| `set` | `index: Integer, value: T` | `Void` | Replace element at index. | `O(1) / O(1)` |
+| `sort` | none | `Array[T]` | Return a new array sorted by built-in order or `Comparable.compare`. | `O(n log n) / O(n)` |
+| `sort` | `compareFn: Function(a: T, b: T): Integer` | `Array[T]` | Return a new array sorted using `compareFn(a, b) -> Integer`. | `O(n log n) / O(n)` |
 | `slice` | `start: Integer, end: Integer` | `Array[T]` | Subrange `[start, end)`. Negative indices count from the end: `-1` is one before the last element. Out-of-bounds values are clamped. | `O(n) / O(n)` |
 | `take` | `n: Integer` | `Array[T]` | First `n` elements. Returns the whole array if `n` ≥ length, empty if `n` ≤ 0. | `O(n) / O(n)` |
 | `drop` | `n: Integer` | `Array[T]` | All elements after the first `n`. Returns empty if `n` ≥ length, the whole array if `n` ≤ 0. | `O(n) / O(n)` |
@@ -62,7 +65,7 @@ create Array[String].filled(2, "x")
 | `drop_last` | `n: Integer` | `Array[T]` | All elements except the last `n`. Returns empty if `n` ≥ length, the whole array if `n` ≤ 0. | `O(n) / O(n)` |
 | `concat` | `other: Array[T]` | `Array[T]` | Return a new array containing this array followed by `other`. | `O(n + m) / O(n + m)` |
 | `to_string` | none | `String` | Render the array and its nested values as text. | `O(n) / O(n)`, deep* |
-| `equals` | `other: Any` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
+| `equals` | `other: Array[T]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Array[T]` | Deep-copy the array and its nested values while preserving element type. | `O(n) / O(n)`, deep* |
 | `cursor` | none | `ArrayCursor` | Create iterator. | `O(1) / O(1)` to create |
 
@@ -73,7 +76,7 @@ create Array[String].filled(2, "x")
   comparator must return an `Integer`: negative when `a < b`, positive when
   `a > b`, `0` when equal.
 
-## `Map`
+## `Map[K, V]`
 
 ### Construction
 
@@ -85,18 +88,18 @@ create Array[String].filled(2, "x")
 
 | Method | Arguments | Returns | Description | Complexity |
 |---|---|---|---|---|
-| `get` | `key: Any` | `Any` | Read value for key (fails if key missing). | `O(1) avg / O(1)` |
-| `try_get` | `key: Any, default: Any` | `Any` | Read value or default if missing. | `O(1) avg / O(1)` |
-| `set` | `key: Any, value: Any` | `Void` | Add/replace key-value entry. | `O(1) avg / O(1)` |
-| `put` | `key: Any, value: Any` | `Void` | Alias for `set`. | `O(1) avg / O(1)` |
+| `get` | `key: K` | `V` | Read value for key (fails if key missing). | `O(1) avg / O(1)` |
+| `try_get` | `key: K, default: V` | `V` | Read value or default if missing. | `O(1) avg / O(1)` |
+| `set` | `key: K, value: V` | `Void` | Add/replace key-value entry. | `O(1) avg / O(1)` |
+| `put` | `key: K, value: V` | `Void` | Alias for `set`. | `O(1) avg / O(1)` |
 | `size` | none | `Integer` | Number of entries. | `O(1) / O(1)` |
 | `is_empty` | none | `Boolean` | True when map has no entries. | `O(1) / O(1)` |
-| `contains_key` | `key: Any` | `Boolean` | Key existence test. | `O(1) avg / O(1)` |
-| `keys` | none | `Array[Any]` | Array of keys. | `O(n) / O(n)` |
-| `values` | none | `Array[Any]` | Array of values. | `O(n) / O(n)` |
-| `remove` | `key: Any` | `Void` | Delete entry by key. | `O(1) avg / O(1)`†  |
+| `contains_key` | `key: K` | `Boolean` | Key existence test. | `O(1) avg / O(1)` |
+| `keys` | none | `Array[K]` | Array of keys. | `O(n) / O(n)` |
+| `values` | none | `Array[V]` | Array of values. | `O(n) / O(n)` |
+| `remove` | `key: K` | `Void` | Delete entry by key. | `O(1) avg / O(1)`†  |
 | `to_string` | none | `String` | Render the map and its nested values as text. | `O(n) / O(n)`, deep* |
-| `equals` | `other: Any` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
+| `equals` | `other: Map[K, V]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Map[K, V]` | Deep-copy the map and its nested keys and values while preserving key/value types. | `O(n) / O(n)`, deep* |
 | `cursor` | none | `MapCursor` | Create entry iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
 
@@ -123,7 +126,7 @@ end
 | `to_string` | none | `String` | Render as `key: value`, e.g. `"name": "Ada"`. |
 | `equals` | `other: Any` | `Boolean` | True when both key and value are deeply equal. |
 
-## `Set`
+## `Set[T]`
 
 ### Construction
 
@@ -149,7 +152,7 @@ Set literals use `#{...}`. The empty map literal remains `{}`.
 | `is_empty` | none | `Boolean` | True when the set has no elements. | `O(1) / O(1)` |
 | `to_array` | none | `Array[T]` | Copy the set's elements into a new array, in insertion order. | `O(n) / O(n)` |
 | `to_string` | none | `String` | Render the set and its nested values as text. | `O(n) / O(n)`, deep* |
-| `equals` | `other: Any` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
+| `equals` | `other: Set[T]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Set[T]` | Deep-copy the set and its nested values while preserving element type. | `O(n) / O(n)`, deep* |
 | `cursor` | none | `SetCursor` | Create iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
 
