@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-09-25
+
+- **New: `rescue` on loops and `spawn`.** The `from ... until`, `repeat`,
+  `across` and `spawn do ... end` forms now accept an optional trailing
+  `rescue` clause, with the same semantics as a method-level `rescue`: if
+  the body raises, the clause runs, and `retry` re-runs just the loop body
+  (not the loop's initialization, condition, or counter/cursor
+  bookkeeping). If the clause completes without `retry`, the loop
+  terminates. This is pure syntactic sugar over the existing scoped-block
+  rescue machinery, so it behaves identically on the interpreter and the
+  JVM backend.
+
+- **Changed: iterating a `Map` yields `Map_Entry[K, V]`** instead of an
+  untyped `Array[Any]` pair. This applies to `across` over a map and to
+  `MapCursor.item()`. A `Map_Entry` exposes `key`, `value`, `to_string`
+  and `equals`; `get(0)`/`get(1)` still work for pair-style access in
+  existing code, but `entry.key`/`entry.value` are preferred and are now
+  properly typed. Code that treated the item as an `Array` (for example
+  `.length` or other `Array` methods) must be updated.
+
+- **Fixed: constants can now reference user-defined functions.** A
+  constant whose initializer calls a top-level function (or mentions
+  another class) previously depended on declaration order and could fail
+  to typecheck; classes are now ordered by their constant-value
+  dependencies before checking.
+
+- **Fixed: nested closure capture.** Closures nested inside other closures
+  now correctly capture `this` and enclosing variables through every
+  level of nesting, and self-recursive and mutually recursive closures
+  compile correctly. Also improved a typechecker error message that
+  pointed at the wrong construct for these cases.
+
+- Documentation: added a `Map_Entry` reference section and updated the
+  `Map`/cursor signatures and the syntax reference.
+
 ## 0.5.0 - 2026-09-18
 
 - **New: namespaces.** Multi-file Nex projects can now organize code into
