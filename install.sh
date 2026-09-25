@@ -4,7 +4,7 @@ set -e
 # Nex Language Installation Script
 # Usage: ./install.sh [--install-deps] [--prefix DIR]
 
-VERSION="0.5.0"
+VERSION="0.5.1"
 TARGET="jvm"
 INSTALL_DEPS=false
 INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"
