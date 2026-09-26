@@ -291,7 +291,8 @@ end")
                    (repl/eval-code ctx "print(s.is_connected())")
                    (repl/eval-code ctx "print(s.to_string())"))]
       (is (not (.contains output "Cannot find intern file for net/Tcp_Socket")))
-      (is (.contains output "#<Tcp_Socket object>"))
+      ;; the value of the `let` (the first line) is shown through the class's to_string
+      (is (.startsWith output "Tcp_Socket(example.com:80, connected=false)\n"))
       (is (.contains output "false"))
       (is (.contains output "\"Tcp_Socket(example.com:80, connected=false)\"")))))
 
@@ -304,7 +305,7 @@ end")
                    (repl/eval-code ctx "print(s.is_listening())")
                    (repl/eval-code ctx "print(s.to_string())"))]
       (is (not (.contains output "Cannot find intern file for net/Server_Socket")))
-      (is (.contains output "#<Server_Socket object>"))
+      (is (.startsWith output "Server_Socket(port=0, listening=false)\n"))
       (is (.contains output "false"))
       (is (.contains output "\"Server_Socket(port=0, listening=false)\"")))))
 
@@ -327,7 +328,7 @@ end")
                    (repl/eval-code ctx "print(server.is_running())")
                    (repl/eval-code ctx "print(server.to_string())"))]
       (is (not (.contains output "Cannot find intern file for net/Http_Server")))
-      (is (.contains output "#<Http_Server object>"))
+      (is (.startsWith output "Http_Server(port=0, running=false)\n"))
       (is (.contains output "false"))
       (is (.contains output "\"Http_Server(port=0, running=false)\"")))))
 

@@ -3767,11 +3767,36 @@
   :add-output add-output
   :is-parent? is-parent?
   :user-to-string (fn [ctx value]
-                    (when (and ctx (nex-object? value))
-                      (let [class-def (lookup-class ctx (:class-name value))]
-                        (when (lookup-method-with-inheritance ctx class-def "to_string" 0)
-                          (let [result (eval-node ctx {:type :call
-                                                       :target {:type :literal :value value}
-                                                       :method "to_string"
-                                                       :args []})]
-                            (if (string? result) result (nex-format-value result)))))))})
+                    (or
+                     ;; A compiled object (an instance of a generated JVM class, which
+                     ;; the REPL can hand to the interpreter) renders through its own
+                     ;; compiled `to_string`, when it defines one.
+                     (when (and ctx
+                                value
+                                (not (or (nex-object? value) (string? value) (number? value)
+                                         (boolean? value) (char? value) (coll? value)
+                                         (map? value)))
+                                ((requiring-resolve 'nex.compiler.jvm.runtime/compiled-object-has-to-string?)
+                                 value))
+                       (let [result (runtime-resolve-call-user-method ctx value "to_string" [])]
+                         (if (string? result) result (nex-format-value result))))
+                     ;; A compiled object with no `to_string` keeps the placeholder an
+                     ;; interpreter object gets, not Clojure's raw #object[...] form.
+                     (when (and ctx
+                                value
+                                (not (or (nex-object? value) (string? value) (number? value)
+                                         (boolean? value) (char? value) (coll? value)
+                                         (map? value))))
+                       (when-let [class-name ((requiring-resolve 'nex.compiler.jvm.runtime/compiled-object-class-name)
+                                              value)]
+                         (str "#<" class-name " object>")))
+                     (when (and ctx (nex-object? value))
+                       ;; A synthetic object whose class is not registered (a REPL closure)
+                       ;; has no to_string to find; it keeps the placeholder.
+                       (when-let [class-def (lookup-class-if-exists ctx (:class-name value))]
+                         (when (lookup-method-with-inheritance ctx class-def "to_string" 0)
+                           (let [result (eval-node ctx {:type :call
+                                                        :target {:type :literal :value value}
+                                                        :method "to_string"
+                                                        :args []})]
+                             (if (string? result) result (nex-format-value result))))))))})

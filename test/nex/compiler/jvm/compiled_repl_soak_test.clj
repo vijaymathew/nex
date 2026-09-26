@@ -69,8 +69,10 @@
           (re-find #"^[A-Za-z_][A-Za-z0-9_]* #<.+ object>$" trimmed))
       "<object>"
 
-      (re-find #"^(Any|Integer|Real|Boolean|Char|String)\s+.+$" trimmed)
-      (second (re-find #"^(?:Any|Integer|Real|Boolean|Char|String)\s+(.+)$" trimmed))
+      ;; `Path` is the library class the sessions use: it defines to_string, so a
+      ;; result is shown through it, and only the compiled REPL adds the type prefix.
+      (re-find #"^(Any|Integer|Real|Boolean|Char|String|Path)\s+.+$" trimmed)
+      (second (re-find #"^(?:Any|Integer|Real|Boolean|Char|String|Path)\s+(.+)$" trimmed))
 
       :else
       trimmed)))

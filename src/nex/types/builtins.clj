@@ -1666,7 +1666,8 @@
     (nex-array? value) (rt/nex-array-str (partial format-value-with-ctx ctx) value)
     (rt/nex-map-entry? value) (str (format-value-with-ctx ctx (:key value)) ": "
                                    (format-value-with-ctx ctx (:value value)))
-    :else (nex-format-value value)))
+    ;; A compiled object the REPL handed to the interpreter: its own to_string.
+    :else (or (user-to-string ctx value) (nex-format-value value))))
 
 (defn print-output-value
   "Convert a value for built-in print/println output. Respects user-defined
@@ -2340,7 +2341,109 @@
      (when (not= (count args) 1)
        (throw (ex-info "binary_file_close expects exactly 1 argument"
                        {:function "binary_file_close"})))
-     (rt/binary-file-close (first args)))})
+     (rt/binary-file-close (first args)))
+   "byte_array_make"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_make expects exactly 1 argument"
+                       {:function "byte_array_make"})))
+     (rt/byte-array-make (nth args 0)))
+   "byte_array_from_array"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_from_array expects exactly 1 argument"
+                       {:function "byte_array_from_array"})))
+     (rt/byte-array-from-array (nth args 0)))
+   "byte_array_from_java"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_from_java expects exactly 1 argument"
+                       {:function "byte_array_from_java"})))
+     (rt/byte-array-from-java (nth args 0)))
+   "byte_array_length"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_length expects exactly 1 argument"
+                       {:function "byte_array_length"})))
+     (rt/byte-array-length (nth args 0)))
+   "byte_array_get"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_get expects exactly 2 arguments"
+                       {:function "byte_array_get"})))
+     (rt/byte-array-get (nth args 0), (nth args 1)))
+   "byte_array_set"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "byte_array_set expects exactly 3 arguments"
+                       {:function "byte_array_set"})))
+     (rt/byte-array-set! (nth args 0), (nth args 1), (nth args 2)))
+   "byte_array_slice"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "byte_array_slice expects exactly 3 arguments"
+                       {:function "byte_array_slice"})))
+     (rt/byte-array-slice (nth args 0), (nth args 1), (nth args 2)))
+   "byte_array_to_array"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_to_array expects exactly 1 argument"
+                       {:function "byte_array_to_array"})))
+     (rt/byte-array-to-array (nth args 0)))
+   "byte_array_equals"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_equals expects exactly 2 arguments"
+                       {:function "byte_array_equals"})))
+     (rt/byte-array-equals (nth args 0), (nth args 1)))
+   "byte_array_hash"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_hash expects exactly 1 argument"
+                       {:function "byte_array_hash"})))
+     (rt/byte-array-hash (nth args 0)))
+   "byte_array_fill"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_fill expects exactly 2 arguments"
+                       {:function "byte_array_fill"})))
+     (rt/byte-array-fill! (nth args 0), (nth args 1)))
+   "byte_array_concat"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_concat expects exactly 2 arguments"
+                       {:function "byte_array_concat"})))
+     (rt/byte-array-concat (nth args 0), (nth args 1)))
+   "byte_array_copy_into"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "byte_array_copy_into expects exactly 3 arguments"
+                       {:function "byte_array_copy_into"})))
+     (rt/byte-array-copy-into! (nth args 0), (nth args 1), (nth args 2)))
+   "byte_array_index_of"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_index_of expects exactly 2 arguments"
+                       {:function "byte_array_index_of"})))
+     (rt/byte-array-index-of (nth args 0), (nth args 1)))
+   "byte_array_compare"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_compare expects exactly 2 arguments"
+                       {:function "byte_array_compare"})))
+     (rt/byte-array-compare (nth args 0), (nth args 1)))
+   "byte_array_to_hex"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_to_hex expects exactly 1 argument"
+                       {:function "byte_array_to_hex"})))
+     (rt/byte-array-to-hex (nth args 0)))
+   "byte_array_to_utf8"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_to_utf8 expects exactly 1 argument"
+                       {:function "byte_array_to_utf8"})))
+     (rt/byte-array-to-utf8 (nth args 0)))})
 
 (def http-server-builtins
   {"http_server_create"

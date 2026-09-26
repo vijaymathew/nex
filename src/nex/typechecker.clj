@@ -1237,9 +1237,19 @@
         (is-numeric-type? t)
         (types-compatible? env t "Comparable"))))
 
+(declare user-cursor-item-type)
+
 (defn cursor-item-type
-  "Return the static element type yielded when iterating over target-type."
-  [target-type]
+  "Return the static element type yielded when iterating over target-type.
+   The two-argument form also understands a user class that defines
+   `cursor()`: the element type is then the `item` return type of the cursor
+   class it returns (`Byte_Array` yields `Byte`), rather than `Any`."
+  ([env target-type]
+   (let [t (cursor-item-type target-type)]
+     (if (= t "Any")
+       (or (user-cursor-item-type env target-type) "Any")
+       t)))
+  ([target-type]
   (let [t (attachable-type (normalize-type target-type))
         base (if (map? t) (:base-type t) t)
         type-args (when (map? t) (or (:type-params t) (:type-args t)))]
@@ -1250,7 +1260,31 @@
       "Map" {:base-type "Map_Entry"
              :type-params [(or (first type-args) "Any") (or (second type-args) "Any")]}
       "Cursor" "Any"
-      "Any")))
+      "Any"))))
+
+(defn- user-cursor-item-type
+  "The element type of `across` over a user class with a zero-argument `cursor`
+   method, taken from the `item` method of the cursor class it returns; nil when
+   the class has no such pair of methods.
+
+   Only a plain (string-typed), non-generic cursor class qualifies. A generic
+   one (`cursor(): Stack_Cursor[G]`) would yield an item type written in its own
+   type parameters, which nothing here substitutes, so those keep yielding Any
+   and the loop variable is narrowed with `convert`, as before."
+  [env target-type]
+  (let [t (attachable-type (normalize-type target-type))
+        base (if (map? t) (:base-type t) t)
+        base-of (fn [x] (let [x (attachable-type (normalize-type x))]
+                          (if (map? x) (:base-type x) x)))]
+    (when (and (string? base) (env-lookup-class env base))
+      (when-let [cursor-class (some-> (lookup-class-method env base "cursor" 0)
+                                      :return-type base-of)]
+        (when (and (string? cursor-class)
+                   (string? (:return-type (lookup-class-method env base "cursor" 0)))
+                   (empty? (:generic-params (env-lookup-class env cursor-class))))
+          (let [item-type (:return-type (lookup-class-method env cursor-class "item" 0))]
+            (when (string? item-type)
+              item-type)))))))
 
 (defn- collect-generic-names-from-type
   [type-expr]
@@ -3563,6 +3597,25 @@
    "binary_file_seek"        check-builtin-binary-file-seek
    "binary_file_close"       (builtin-checked-args "binary_file_close" 1 "Void")
 
+   ;; Byte_Array (lib/data/byte_array.nex): a real Java byte[] behind an opaque handle
+   "byte_array_make" (builtin-checked-args "byte_array_make" 1 "Any")
+   "byte_array_from_array" (builtin-checked-args "byte_array_from_array" 1 "Any")
+   "byte_array_from_java" (builtin-checked-args "byte_array_from_java" 1 "Any")
+   "byte_array_length" (builtin-checked-args "byte_array_length" 1 "Integer")
+   "byte_array_get" (builtin-checked-args "byte_array_get" 2 "Byte")
+   "byte_array_set" (builtin-checked-args "byte_array_set" 3 "Void")
+   "byte_array_slice" (builtin-checked-args "byte_array_slice" 3 "Any")
+   "byte_array_to_array" (builtin-checked-args "byte_array_to_array" 1 {:base-type "Array" :type-params ["Byte"]})
+   "byte_array_equals" (builtin-checked-args "byte_array_equals" 2 "Boolean")
+   "byte_array_hash" (builtin-checked-args "byte_array_hash" 1 "Integer")
+   "byte_array_fill" (builtin-checked-args "byte_array_fill" 2 "Void")
+   "byte_array_concat" (builtin-checked-args "byte_array_concat" 2 "Any")
+   "byte_array_copy_into" (builtin-checked-args "byte_array_copy_into" 3 "Void")
+   "byte_array_index_of" (builtin-checked-args "byte_array_index_of" 2 "Integer")
+   "byte_array_compare" (builtin-checked-args "byte_array_compare" 2 "Integer")
+   "byte_array_to_hex" (builtin-checked-args "byte_array_to_hex" 1 "String")
+   "byte_array_to_utf8" (builtin-checked-args "byte_array_to_utf8" 1 "String")
+
    ;; http client / json
    "http_get"  check-builtin-http-get
    "http_post" check-builtin-http-post
@@ -4869,7 +4922,7 @@
                (= :call (:type value))
                (= "cursor" (:method value))
                (empty? (:args value)))
-      (env-add-across-cursor env name (cursor-item-type (check-expression env (:target value)))))
+      (env-add-across-cursor env name (cursor-item-type env (check-expression env (:target value)))))
     (when (= name "result")
       (maybe-update-spawn-result! env inferred-type))))
 
