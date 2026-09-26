@@ -813,18 +813,157 @@
    :index (atom (.getFilePointer raf))
    :raf raf})
 
-(defn string-from-bytes
-  "Decode a Nex Array[Byte] as UTF-8 text. Malformed or unmappable input raises
-   rather than being replaced with U+FFFD, so a round trip through to_bytes is
-   exact and bad data is never silently altered."
-  [values]
+(defn utf8-decode-strict
+  "Decode a byte[] as UTF-8 text. Malformed or unmappable input raises rather
+   than being replaced with U+FFFD, so a round trip through to_bytes is exact
+   and bad data is never silently altered."
+  [^bytes bs]
   (let [decoder (doto (.newDecoder java.nio.charset.StandardCharsets/UTF_8)
                   (.onMalformedInput java.nio.charset.CodingErrorAction/REPORT)
                   (.onUnmappableCharacter java.nio.charset.CodingErrorAction/REPORT))]
     (try
-      (str (.decode decoder (java.nio.ByteBuffer/wrap ^bytes (byte-array->bytes values))))
+      (str (.decode decoder (java.nio.ByteBuffer/wrap bs)))
       (catch java.nio.charset.CharacterCodingException _
-        (throw (ex-info "String.from_bytes: bytes are not valid UTF-8" {}))))))
+        (throw (ex-info "bytes are not valid UTF-8" {}))))))
+
+(defn string-from-bytes
+  "Decode a Nex Array[Byte] as UTF-8 text (see utf8-decode-strict)."
+  [values]
+  (try
+    (utf8-decode-strict (byte-array->bytes values))
+    (catch clojure.lang.ExceptionInfo e
+      (if (= "bytes are not valid UTF-8" (ex-message e))
+        (throw (ex-info "String.from_bytes: bytes are not valid UTF-8" {}))
+        (throw e)))))
+
+(defn- byte-array-check-index
+  [^bytes a index]
+  (let [i (long index)]
+    (when-not (< -1 i (alength a))
+      (throw (ex-info (str "Byte_Array index out of range: " i " (length " (alength a) ")")
+                      {:index i :length (alength a)})))
+    i))
+
+(defn- require-byte-array
+  [what a]
+  (when-not (bytes? a)
+    (throw (ex-info (str what " requires a Java byte[]") {:value a})))
+  a)
+
+(defn byte-array-make
+  "A zero-filled byte[] of SIZE elements."
+  [size]
+  (let [n (long size)]
+    (when (neg? n)
+      (throw (ex-info (str "Byte_Array size must be non-negative, got " n) {:size n})))
+    (byte-array n)))
+
+(defn byte-array-from-array
+  "A byte[] holding a copy of a Nex Array[Byte]."
+  [values]
+  (byte-array->bytes values))
+
+(defn byte-array-from-java
+  "A copy of a Java byte[]."
+  [raw]
+  (aclone ^bytes (require-byte-array "Byte_Array.from_java" raw)))
+
+(defn byte-array-length [^bytes a] (long (alength a)))
+
+(defn byte-array-get
+  "The element at INDEX as an unsigned Nex Byte (the storage is Java's signed byte)."
+  [^bytes a index]
+  (->nex-byte (bit-and (long (aget a (byte-array-check-index a index))) 0xFF)))
+
+(defn byte-array-set!
+  "Store a Nex Byte at INDEX (its 8 bits are kept; Java's byte reads them as signed)."
+  [^bytes a index value]
+  (aset-byte a (byte-array-check-index a index) (unchecked-byte (long (sized->long value))))
+  nil)
+
+(defn byte-array-slice
+  "A copy of the elements in [START, STOP)."
+  [^bytes a start stop]
+  (let [s (long start) e (long stop) n (alength a)]
+    (when-not (<= 0 s e n)
+      (throw (ex-info (str "Byte_Array.slice range " s ".." e " is outside 0.." n)
+                      {:start s :stop e :length n})))
+    (java.util.Arrays/copyOfRange a (int s) (int e))))
+
+(defn byte-array-to-array
+  "The elements as a boxed Nex Array[Byte]."
+  [^bytes a]
+  (bytes->byte-array a))
+
+(defn byte-array-equals
+  "Whether OTHER is a byte[] with the same contents."
+  [^bytes a other]
+  (and (bytes? other) (java.util.Arrays/equals a ^bytes other)))
+
+(defn byte-array-hash [^bytes a] (long (java.util.Arrays/hashCode a)))
+
+(defn byte-array-fill!
+  "Set every element to VALUE (a Nex Byte)."
+  [^bytes a value]
+  (java.util.Arrays/fill a (unchecked-byte (long (sized->long value))))
+  nil)
+
+(defn byte-array-concat
+  "A new byte[] holding A's elements followed by B's."
+  [^bytes a b]
+  (let [^bytes b (require-byte-array "Byte_Array.concat" b)
+        out (java.util.Arrays/copyOf a (+ (alength a) (alength b)))]
+    (System/arraycopy b 0 out (alength a) (alength b))
+    out))
+
+(defn byte-array-copy-into!
+  "Copy all of A into TARGET starting at TARGET-OFFSET; raises unless it fits."
+  [^bytes a ^bytes target target-offset]
+  (let [off (long target-offset)]
+    (when-not (<= 0 off (- (alength target) (alength a)))
+      (throw (ex-info (str "Byte_Array.copy_into: " (alength a) " bytes at offset " off
+                           " do not fit in a target of length " (alength target))
+                      {:offset off :length (alength a) :target-length (alength target)})))
+    (System/arraycopy a 0 target (int off) (alength a))
+    nil))
+
+(defn byte-array-index-of
+  "The first index holding VALUE (a Nex Byte), or -1."
+  [^bytes a value]
+  (let [b (unchecked-byte (long (sized->long value)))
+        n (alength a)]
+    (loop [i 0]
+      (cond (>= i n) -1
+            (== (aget a i) b) (long i)
+            :else (recur (inc i))))))
+
+(defn byte-array-compare
+  "Lexicographic three-way comparison, treating each byte as unsigned; a proper
+   prefix orders before the longer array."
+  [^bytes a other]
+  (let [^bytes b (require-byte-array "Byte_Array.compare" other)
+        n (min (alength a) (alength b))]
+    (loop [i 0]
+      (if (< i n)
+        (let [x (bit-and (aget a i) 0xFF)
+              y (bit-and (aget b i) 0xFF)]
+          (cond (< x y) -1
+                (> x y) 1
+                :else (recur (inc i))))
+        (Long/signum (- (alength a) (alength b)))))))
+
+(defn byte-array-to-hex
+  "Two lowercase hex digits per byte."
+  [^bytes a]
+  (let [sb (StringBuilder. (* 2 (alength a)))]
+    (dotimes [i (alength a)]
+      (.append sb (format "%02x" (bit-and (aget a i) 0xFF))))
+    (str sb)))
+
+(defn byte-array-to-utf8
+  "Decode as UTF-8; malformed input raises (see string-from-bytes)."
+  [^bytes a]
+  (utf8-decode-strict a))
 
 (defn binary-file-open-read [path]
   (make-binary-file-handle :read

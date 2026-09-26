@@ -6,7 +6,7 @@ Unlike built-in runtime classes, these libraries may be platform-specific and mu
 
 ## Categories
 
-- [Data Libraries](data.md) - `data/Json` for JSON parsing and serialization
+- [Data Libraries](data.md) - `data/Json` for JSON parsing and serialization, `data/Sexpr`, and `data/Byte_Array` for packed byte buffers
 - [IO Libraries](io.md) - `io/Path`, `io/Directory`, `io/Text_File`, and `io/Binary_File` for filesystem and file I/O
 - [Text Libraries](text.md) - `text/Regex` for reusable regular-expression matching and replacement
 - [Time Libraries](time.md) - `time/Date_Time` and `time/Duration` for UTC timestamps and time spans

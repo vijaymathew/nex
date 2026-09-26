@@ -961,7 +961,7 @@
 (defn- direct-derived-builtin-helper-name
   [helper]
   (cond
-    (re-matches #"^(regex_|datetime_|path_|text_file_|binary_file_).*$" helper)
+    (re-matches #"^(regex_|datetime_|path_|text_file_|binary_file_|byte_array_).*$" helper)
     (str "builtin-" (str/replace helper "_" "-"))
 
     (str/starts-with? helper "builtin-method:")

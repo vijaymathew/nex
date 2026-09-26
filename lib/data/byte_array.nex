@@ -1,0 +1,183 @@
+-- Byte_Array: a fixed-size, mutable sequence of Bytes stored in a real Java
+-- byte[] (one byte per element), unlike Array[Byte], which is a list of boxed
+-- values. Import with `intern data/Byte_Array`.
+--
+--   let buf: Byte_Array := create Byte_Array.make(4)
+--   buf.set(0, 65u8)
+--   print(buf.get(0))                 -- 65
+--
+-- The storage is Java's signed byte, but the interface is unsigned: `get`
+-- returns a Byte (0..255) and `set` keeps the low 8 bits of its Byte argument.
+-- `slice` copies, so a Byte_Array never aliases another; `to_java` is the one
+-- deliberate exception and hands out the live array for use inside `with "java"`.
+
+class Byte_Array
+  note "A fixed-size, mutable sequence of Bytes backed by a Java byte[]."
+  inherit Comparable
+
+create
+  -- SIZE zero-filled bytes; raises if size is negative.
+  make(size: Integer) do
+    this.handle := byte_array_make(size)
+  end
+
+  -- A copy of an Array[Byte].
+  from_array(items: Array[Byte]) do
+    this.handle := byte_array_from_array(items)
+  end
+
+  -- A copy of the elements of SOURCE in [start, stop); `slice` is this.
+  from_slice(source: Byte_Array, start: Integer, stop: Integer) do
+    this.handle := byte_array_slice(source.handle, start, stop)
+  end
+
+  -- A new Byte_Array holding FIRST's bytes followed by SECOND's; `concat` is this.
+  from_concat(first: Byte_Array, second: Byte_Array) do
+    this.handle := byte_array_concat(first.handle, second.handle)
+  end
+
+  -- A copy of a Java byte[] (for example one returned by a call inside
+  -- `with "java"`); raises for anything else.
+  from_java(raw: Any) do
+    this.handle := byte_array_from_java(raw)
+  end
+
+feature
+  handle: Any
+
+  length(): Integer do
+    result := byte_array_length(handle)
+  end
+
+  -- The element at INDEX; raises when INDEX is outside 0..length-1.
+  get(index: Integer): Byte do
+    result := byte_array_get(handle, index)
+  end
+
+  -- Store VALUE at INDEX; raises when INDEX is outside 0..length-1.
+  set(index: Integer, value: Byte) do
+    byte_array_set(handle, index, value)
+  end
+
+  -- Set every element to VALUE.
+  fill(value: Byte) do
+    byte_array_fill(handle, value)
+  end
+
+  -- A copy of the whole Byte_Array.
+  copy(): Byte_Array do
+    result := create Byte_Array.from_slice(this, 0, length())
+  end
+
+  -- A new Byte_Array: these bytes followed by OTHER's.
+  concat(other: Byte_Array): Byte_Array do
+    result := create Byte_Array.from_concat(this, other)
+  end
+
+  -- Copy all of these bytes into TARGET starting at TARGET_OFFSET (overwriting
+  -- what is there); raises unless they fit.
+  copy_into(target: Byte_Array, target_offset: Integer) do
+    byte_array_copy_into(handle, target.handle, target_offset)
+  end
+
+  -- The first index holding VALUE, or -1.
+  index_of(value: Byte): Integer do
+    result := byte_array_index_of(handle, value)
+  end
+
+  contains(value: Byte): Boolean do
+    result := byte_array_index_of(handle, value) >= 0
+  end
+
+  -- A copy of the elements in [start, stop), like String.substring.
+  slice(start: Integer, stop: Integer): Byte_Array do
+    result := create Byte_Array.from_slice(this, start, stop)
+  end
+
+  -- A boxed Array[Byte] copy of the elements.
+  to_array(): Array[Byte] do
+    result := byte_array_to_array(handle)
+  end
+
+  -- The underlying Java byte[], shared rather than copied: writes through it
+  -- are visible here. Meant for `with "java"` blocks.
+  to_java(): Any do
+    result := handle
+  end
+
+  -- Two Byte_Arrays are equal when they hold the same bytes.
+  equals(other: Any): Boolean do
+    result := false
+    if convert other to o: Byte_Array then
+      result := byte_array_equals(handle, o.handle)
+    end
+  end
+
+  hash(): Integer do
+    result := byte_array_hash(handle)
+  end
+
+  -- Lexicographic order, each byte taken as unsigned; a proper prefix orders
+  -- before the longer array. Raises for anything but a Byte_Array. Because
+  -- Byte_Array is Comparable, < <= > >= work on values of this type.
+  compare(other: Any): Integer do
+    result := 0
+    if convert other to o: Byte_Array then
+      result := byte_array_compare(handle, o.handle)
+    else
+      raise "Byte_Array.compare requires a Byte_Array"
+    end
+  end
+
+  -- Two lowercase hex digits per byte, e.g. "c3a9".
+  to_hex(): String do
+    result := byte_array_to_hex(handle)
+  end
+
+  -- Decode the bytes as UTF-8; raises if they are not valid UTF-8.
+  to_utf8_string(): String do
+    result := byte_array_to_utf8(handle)
+  end
+
+  -- A cursor over the bytes, so `across` works: across buf as b do ... end
+  cursor(): Byte_Array_Cursor do
+    result := create Byte_Array_Cursor.make(this)
+  end
+
+  to_string(): String do
+    result := "Byte_Array(" + to_array().to_string() + ")"
+  end
+end
+
+class Byte_Array_Cursor
+  note "Iterates over the Bytes of a Byte_Array."
+  inherit Cursor
+
+create
+  make(source_bytes: Byte_Array) do
+    this.source := source_bytes
+    this.index := 0
+  end
+
+feature
+  source: Byte_Array
+  index: Integer
+
+  start() do
+    index := 0
+  end
+
+  item(): Byte do
+    result := source.get(index)
+  end
+
+  next() do
+    if index < source.length() then
+      index := index + 1
+    end
+  end
+
+  at_end(): Boolean do
+    result := index >= source.length()
+  end
+end
