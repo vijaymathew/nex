@@ -2642,6 +2642,17 @@
      ;; without precision loss (see eval-node :integer, NUMERIC_TOWER.md).
      :value-str (str v)}))
 
+(defn- handle-byte-literal
+  [[_ value]]
+  (let [text (subs value 0 (- (count value) 2))
+        v (try (parse-integer-literal text)
+               (catch NumberFormatException _ nil))]
+    (when-not (and v (<= 0 v 255))
+      (throw (ex-info (str "Byte literal out of range 0..255: " value)
+                      {:literal value})))
+    {:type :byte
+     :value v}))
+
 (defn- handle-real-literal
   [[_ value]]
   {:type :real
@@ -2879,6 +2890,7 @@
    :primaryExpr handle-primary-expr
    ;; Literals
    :integerLiteral handle-integer-literal
+   :byteLiteral handle-byte-literal
    :realLiteral handle-real-literal
    :booleanLiteral handle-boolean-literal
    :nilLiteral handle-nil-literal

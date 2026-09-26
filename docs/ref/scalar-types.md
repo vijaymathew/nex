@@ -130,11 +130,15 @@ print(n.to_string(16)) -- "71"
 `String.to_bytes()` and of binary file I/O (`Array[Byte]`).
 
 `Byte` is a distinct type, related to `Integer` the way `Integer` is related to `Real`:
-there is no implicit conversion in either direction, and there is no `Byte` literal.
+there is no implicit conversion in either direction.
 
-- **Making a `Byte`:** `n.to_byte()` on an `Integer` (raises unless `0 <= n <= 255`), or
-  by reading one out of an `Array[Byte]`. An integer literal is an `Integer` even where a
-  `Byte` is expected, so `let b: Byte := 65` is a type error; write `(65).to_byte()`.
+- **Byte literals:** an integer literal with a `u8` suffix is a `Byte`: `12u8`, `0xFFu8`,
+  `0b1010u8`, `0o17u8`, `1_0u8`. The value must be in `0..255`, and is checked when the
+  program is parsed. (The suffix is `u8`, not `b`, because `b` is a hex digit.) An
+  unsuffixed literal is always an `Integer`, so `let b: Byte := 65` is a type error;
+  write `65u8`. There are no negative byte literals: `-5u8` is the `Integer` `-5`.
+- **Making a `Byte` from a value:** `n.to_byte()` on an `Integer` (raises unless
+  `0 <= n <= 255`), or reading one out of an `Array[Byte]`.
 - **Getting an `Integer`:** `b.to_integer()`. Assigning a `Byte` to an `Integer` variable
   or passing it to an `Integer` parameter is a type error.
 - **Arithmetic** (`+ - * / % ^`, unary `-`) promotes to `Integer`, so the result of
@@ -182,6 +186,7 @@ there is no implicit conversion in either direction, and there is no `Byte` lite
 
 ```nex
 let bytes: Array[Byte] := "é".to_bytes()
+let magic: Array[Byte] := [0x89u8, 0x50u8, 0x4Eu8, 0x47u8]
 print(bytes)                       -- [195, 169]
 let b: Byte := bytes.get(0)
 print(b.to_hex())                  -- "c3"

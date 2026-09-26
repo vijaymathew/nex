@@ -46,6 +46,7 @@
     (map? expr)
     (case (:type expr)
       :integer (str (:value expr))
+      :byte (str (:value expr) "u8")
       :real (str (:value expr))
       :string (str "\"" (:value expr) "\"")
       :char (str "'" (:value expr) "'")

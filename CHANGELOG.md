@@ -7,7 +7,7 @@
   and `Binary_File` (`read`, `read_all`, `write`) and the `binary_file_*`
   builtins use `Array[Byte]` too. `Byte` is a distinct type with no implicit
   conversion to or from `Integer` (the same relationship `Integer` has with
-  `Real`) and no literal: make one with `n.to_byte()` (raises unless
+  `Real`): make one with a `u8` literal, `n.to_byte()` (raises unless
   `0 <= n <= 255`), read one from an `Array[Byte]`, and get an `Integer` back
   with `b.to_integer()`. Arithmetic on a `Byte` promotes to `Integer`;
   bitwise methods work on 8 bits and return a `Byte`. See
@@ -15,6 +15,10 @@
   `to_bytes()` or a binary read as `Array[Integer]` must use `Array[Byte]`
   (or drop the annotation), and `Binary_File.write` no longer accepts an
   integer-literal array such as `[65, 66]`; pass `"AB".to_bytes()`.
+- **New: `Byte` literals**, an integer literal with a `u8` suffix: `12u8`,
+  `0xFFu8`, `[65u8, 66u8]`. The value is range-checked (`0..255`) at parse time.
+  An unsuffixed literal is still an `Integer`, so `let b: Byte := 12` remains a
+  type error; write `12u8`.
 - **New: `create String.from_bytes(bytes)`** decodes an `Array[Byte]` as UTF-8,
   the inverse of `to_bytes()`. Invalid UTF-8 raises instead of being replaced.
   `create` now accepts the `String` keyword as a class name for this.

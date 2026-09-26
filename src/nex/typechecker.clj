@@ -1367,6 +1367,7 @@
   [env expr]
   (case (:type expr)
     :integer "Integer"
+    :byte "Byte"
     :real "Real"
     :string "String"
     :char "Char"
@@ -4364,6 +4365,7 @@
    to dodge an as-yet-Unbound forward declare. A `:type` with no entry here
    falls through to \"Any\", matching the case's original trailing default."
   {:integer            check-literal
+   :byte               check-literal
    :real               check-literal
    :string             check-literal
    :char               check-literal

@@ -532,6 +532,7 @@
         (java-host-class-root? ctx expr))
     (case (:type expr)
       :integer true
+      :byte true
       :real true
       :string true
       :char true

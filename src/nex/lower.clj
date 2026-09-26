@@ -115,7 +115,7 @@
        vec))
 
 (def ^:private expression-node-types
-  #{:integer :real :string :char :boolean :nil :identifier :binary :unary
+  #{:integer :byte :real :string :char :boolean :nil :identifier :binary :unary
     :call :if :when :this :array-literal :map-literal :set-literal
     :anonymous-function :spawn :create})
 
@@ -820,6 +820,7 @@
    with no entry here (or whose handler returns nil) falls through to the
    generic fallback in `infer-type`."
   {:integer            (constantly "Integer")
+   :byte               (constantly "Byte")
    :real               (constantly "Real")
    :string             (constantly "String")
    :boolean            (constantly "Boolean")
@@ -4917,6 +4918,7 @@
    function, since a map literal's values are dereferenced immediately (the
    same issue and fix as `infer-type-dispatch`'s `:call` entry)."
   {:integer            (fn [_env expr] (ir/const-node (:value expr) "Integer" (desc/nex-type->jvm-type "Integer")))
+   :byte               (fn [env expr] (ir/const-node (short (:value expr)) "Byte" (resolve-jvm-type env "Byte")))
    :real               (fn [_env expr] (ir/const-node (:value expr) "Real" :double))
    :string             (fn [_env expr] (ir/const-node (:value expr) "String" (ir/object-jvm-type "java/lang/String")))
    :char               (fn [_env expr] (ir/const-node (:value expr) "Char" :char))
@@ -7291,6 +7293,7 @@
   (case (:type arg)
     :string "String"
     :integer "Integer"
+    :byte "Byte"
     :real "Real"
     :boolean "Boolean"
     :char "Char"

@@ -3222,6 +3222,10 @@
   ;; as a `number`. `:value-str` round-trips the full 64-bit value into a BigInt.
   (->nex-integer (or (:value-str node) value)))
 
+(defmethod eval-node :byte
+  [_ctx {:keys [value]}]
+  (rt/->nex-byte value))
+
 (defmethod eval-node :real
   [_ctx {:keys [value]}]
   value)
