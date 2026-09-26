@@ -460,8 +460,13 @@
 ;; Built-in Types
 ;;
 
+(def sized-integer-types
+  "The fixed-width integer types. Arithmetic on any of them promotes to Integer,
+   and none converts to another (or to Integer) implicitly."
+  #{"Byte" "Integer16" "Integer32"})
+
 (def builtin-types
-  #{"Integer" "Byte" "Real" "Char" "Boolean" "String"
+  #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
     "Cursor"})
@@ -748,7 +753,7 @@
                (map? n) (:base-type n)
                :else nil)]
     (and (string? base)
-         (not (#{"Integer" "Byte" "Real" "Char" "Boolean"} base)))))
+         (not (#{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean"} base)))))
 
 (defn- auto-initializable-collection-type?
   "Whether type is a builtin collection type (Array/Map/Set) that always has
@@ -1220,7 +1225,7 @@
   [type]
   (let [t (normalize-type type)]
     (or (= t "Integer")
-        (= t "Byte")
+        (contains? sized-integer-types t)
         (= t "Real"))))
 
 (defn sortable-array-element-type?
@@ -1305,10 +1310,11 @@
          [{:name generic-name :constraint (get constraint-map generic-name)}])))))
 
 (defn integral-type?
-  "Check if a type is an integral numeric type. Byte counts: arithmetic on it
-   promotes to Integer, so `Byte / Byte` is integral division."
+  "Check if a type is an integral numeric type. The sized types count:
+   arithmetic on them promotes to Integer, so `Byte / Byte` is integral division."
   [type]
-  (contains? #{"Integer" "Byte"} (normalize-type type)))
+  (let [t (normalize-type type)]
+    (or (= t "Integer") (contains? sized-integer-types t))))
 
 (defn division-result-type
   "Infer the result type of division.
@@ -1320,8 +1326,9 @@
 
 (defn numeric-result-type
   "Infer a common numeric type for non-division arithmetic.
-   Real wins over the integral types; Byte operands promote to Integer, so the
-   result of arithmetic is never a Byte (narrow it back with `to_byte`)."
+   Real wins over the integral types; a sized operand (Byte, Integer16,
+   Integer32) promotes to Integer, so the result of arithmetic is never a sized
+   type (narrow it back with `to_byte` / `to_integer16` / `to_integer32`)."
   [left-type right-type]
   (let [left (normalize-type left-type)
         right (normalize-type right-type)]
@@ -1362,11 +1369,24 @@
 (declare build-generic-type-map)
 (declare lookup-class-field-member)
 
+(defn- check-sized-literal-range
+  "The type of a signed fixed-width literal. The walker admits 2^(bits-1) so that
+   `-32768i16` parses; a positive one is out of range here."
+  [{:keys [value]} type-name lo hi]
+  (when-not (<= lo value hi)
+    (throw (ex-info (str type-name " literal out of range")
+                    {:error (type-error (str type-name " literal " value " is outside "
+                                             lo ".." hi))})))
+  type-name)
+
 (defn check-literal
   "Check the type of a literal expression"
   [env expr]
   (case (:type expr)
     :integer "Integer"
+    :byte "Byte"
+    :int16 (check-sized-literal-range expr "Integer16" -32768 32767)
+    :int32 (check-sized-literal-range expr "Integer32" -2147483648 2147483647)
     :real "Real"
     :string "String"
     :char "Char"
@@ -2071,8 +2091,9 @@
         operand-type (check-expression env operand-node)]
     (case operator
       "-" (if (is-numeric-type? operand-type)
-            ;; -Byte promotes to Integer (a Byte is never negative).
-            (if (= (normalize-type operand-type) "Byte") "Integer" operand-type)
+            ;; -x on a sized type promotes to Integer (a negative literal such as
+            ;; `-5i16` is folded into the literal by the walker, so it never gets here).
+            (if (contains? sized-integer-types (normalize-type operand-type)) "Integer" operand-type)
             (throw (ex-info "Unary minus requires numeric operand"
                             {:error (type-error
                                      (str "Unary minus requires numeric operand, got "
@@ -2454,7 +2475,7 @@
   (let [value-type (check-expression env value)
         target-type (normalize-type target-type)
         base-name (fn [t] (if (map? t) (:base-type t) t))
-        numeric? #{"Integer" "Byte" "Real"}
+        numeric? (conj sized-integer-types "Integer" "Real")
         value-base (base-name value-type)
         target-base (base-name target-type)
         ;; convert never changes numeric representation: Integer, Byte and Real
@@ -2467,9 +2488,9 @@
                             {:error (type-error
                                      (str "convert cannot change numeric representation ("
                                           (display-type value-type) " to " (display-type target-type)
-                                          "); use Integer.to_byte() / Byte.to_integer() /"
-                                          " Integer.to_real() to change it, and Real.round()"
-                                          " yields an Integer"))})))
+                                          "); use the to_byte / to_integer16 / to_integer32 /"
+                                          " to_integer / to_real methods to change it, and"
+                                          " Real.round() yields an Integer"))})))
         compatible? (or (types-compatible? env value-type target-type)
                         (types-compatible? env target-type value-type)
                         (declared-generic-param? env value-type)
@@ -4364,6 +4385,9 @@
    to dodge an as-yet-Unbound forward declare. A `:type` with no entry here
    falls through to \"Any\", matching the case's original trailing default."
   {:integer            check-literal
+   :byte               check-literal
+   :int16              check-literal
+   :int32              check-literal
    :real               check-literal
    :string             check-literal
    :char               check-literal
@@ -6613,7 +6637,7 @@
 ;; Built-in scalar classes implement Comparable + Hashable
 (defn- register-scalar-classes!
   [env]
-  (doseq [scalar ["String" "Integer" "Byte" "Real" "Boolean" "Char"]]
+  (doseq [scalar ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"]]
     (env-add-class env scalar {:name scalar
                                :deferred? false
                                :generic-params nil
@@ -6632,7 +6656,9 @@
 
 (defn- register-byte-methods!
   [env]
-  (register-builtin-type-signatures! env "Byte"))
+  (register-builtin-type-signatures! env "Byte")
+  (register-builtin-type-signatures! env "Integer16")
+  (register-builtin-type-signatures! env "Integer32"))
 
 (defn- register-real-methods!
   [env]

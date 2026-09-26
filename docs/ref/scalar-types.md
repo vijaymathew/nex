@@ -1,6 +1,7 @@
 # Scalar Types
 
-Built-in scalar classes: `String`, `Integer`, `Byte`, `Real`, `Boolean`, `Char`.
+Built-in scalar classes: `String`, `Integer`, `Integer16`, `Integer32`, `Byte`, `Real`,
+`Boolean`, `Char`. `Integer64` is another spelling of `Integer`.
 
 All scalar classes are modeled as inheriting `Any` and implementing
 `Comparable` and `Hashable`.
@@ -77,6 +78,9 @@ print(text) -- "héllo"
 ## `Integer`
 
 `Integer` is a signed 64-bit integer (range `-2^63 .. 2^63-1`) on every backend.
+`Integer64` is an alias: it names exactly the same type, so the two are interchangeable
+everywhere (`let n: Integer64 := 5` and `let m: Integer := n` both typecheck). The
+fixed-width siblings are `Integer16`, `Integer32` and `Byte`, below.
 Arithmetic is *checked*: `+`, `-`, `*`, unary `-`, and `^` raise on overflow, and
 `/` and `%` raise on a zero divisor.
 
@@ -93,6 +97,8 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 | `max` | `other: Integer` | `Integer` | Larger of two values. |
 | `pick` | none | `Integer` | Random integer in `[0, self)`. |
 | `to_byte` | none | `Byte` | Convert to a `Byte`; raises unless the value is in `0..255`. |
+| `to_integer16` | none | `Integer16` | Convert to an `Integer16`; raises unless the value is in `-32768..32767`. |
+| `to_integer32` | none | `Integer32` | Convert to an `Integer32`; raises unless the value is in `-2147483648..2147483647`. |
 | `bitwise_left_shift` | `n: Integer` | `Integer` | Left-shift by `n` bit positions. |
 | `bitwise_right_shift` | `n: Integer` | `Integer` | Arithmetic right-shift by `n` bit positions. |
 | `bitwise_logical_right_shift` | `n: Integer` | `Integer` | Logical right-shift by `n` bit positions. |
@@ -130,11 +136,15 @@ print(n.to_string(16)) -- "71"
 `String.to_bytes()` and of binary file I/O (`Array[Byte]`).
 
 `Byte` is a distinct type, related to `Integer` the way `Integer` is related to `Real`:
-there is no implicit conversion in either direction, and there is no `Byte` literal.
+there is no implicit conversion in either direction.
 
-- **Making a `Byte`:** `n.to_byte()` on an `Integer` (raises unless `0 <= n <= 255`), or
-  by reading one out of an `Array[Byte]`. An integer literal is an `Integer` even where a
-  `Byte` is expected, so `let b: Byte := 65` is a type error; write `(65).to_byte()`.
+- **Byte literals:** an integer literal with a `u8` suffix is a `Byte`: `12u8`, `0xFFu8`,
+  `0b1010u8`, `0o17u8`, `1_0u8`. The value must be in `0..255`, and is checked when the
+  program is parsed. (The suffix is `u8`, not `b`, because `b` is a hex digit.) An
+  unsuffixed literal is always an `Integer`, so `let b: Byte := 65` is a type error;
+  write `65u8`. There are no negative byte literals: `-5u8` is the `Integer` `-5`.
+- **Making a `Byte` from a value:** `n.to_byte()` on an `Integer` (raises unless
+  `0 <= n <= 255`), or reading one out of an `Array[Byte]`.
 - **Getting an `Integer`:** `b.to_integer()`. Assigning a `Byte` to an `Integer` variable
   or passing it to an `Integer` parameter is a type error.
 - **Arithmetic** (`+ - * / % ^`, unary `-`) promotes to `Integer`, so the result of
@@ -161,6 +171,8 @@ there is no implicit conversion in either direction, and there is no `Byte` lite
 | `to_integer` | none | `Integer` | The value, `0..255`. |
 | `to_char` | none | `Char` | The character with this code point. |
 | `to_hex` | none | `String` | Two lowercase hex digits, e.g. `"0a"`. |
+| `to_integer16` | none | `Integer16` | Widen to an `Integer16`. |
+| `to_integer32` | none | `Integer32` | Widen to an `Integer32`. |
 | `min` | `other: Byte` | `Byte` | Smaller of two values. |
 | `max` | `other: Byte` | `Byte` | Larger of two values. |
 | `bitwise_left_shift` | `n: Integer` | `Byte` | Left-shift, dropping bits shifted out of the top. |
@@ -182,6 +194,7 @@ there is no implicit conversion in either direction, and there is no `Byte` lite
 
 ```nex
 let bytes: Array[Byte] := "é".to_bytes()
+let magic: Array[Byte] := [0x89u8, 0x50u8, 0x4Eu8, 0x47u8]
 print(bytes)                       -- [195, 169]
 let b: Byte := bytes.get(0)
 print(b.to_hex())                  -- "c3"
@@ -190,6 +203,87 @@ let total: Integer := b + bytes.get(1)
 print(total)                       -- 364
 let narrowed: Byte := (total - 200).to_byte()
 print(narrowed)                    -- 164
+```
+
+## `Integer16` and `Integer32`
+
+`Integer16` and `Integer32` are signed fixed-width integers: `-32768..32767` and
+`-2147483648..2147483647`. They are for binary formats, protocols and interop where a
+value has an exact width. Like `Byte`, each is a distinct type related to `Integer` the
+way `Integer` is related to `Real`.
+
+- **No implicit conversion.** None of `Integer`, `Integer16`, `Integer32` and `Byte`
+  converts to another without a call, in either direction. `let b: Integer32 := a` where
+  `a` is an `Integer16` is a type error; write `a.to_integer32()`.
+- **Literals.** An integer literal with an `i16` or `i32` suffix: `300i16`, `0xFFFFi32`,
+  `1_000i32`. A negative one is written with a leading `-` and is a single literal of
+  that type: `-5i16` is an `Integer16`, and `-32768i16` is valid. (Elsewhere `-x` on a
+  sized variable promotes to `Integer`, like any arithmetic.) An unsuffixed literal is
+  an `Integer`, so `let a: Integer16 := 5` is a type error; write `5i16`. A literal
+  outside the type's range is rejected.
+- **Conversions.** Narrowing is checked: `n.to_integer16()`, `n.to_integer32()` and
+  `n.to_byte()` raise unless the value fits. Widening (`Byte` to `Integer16`/`Integer32`,
+  `Integer16` to `Integer32`) also uses these methods and always succeeds. `x.to_integer()`
+  gives the `Integer`.
+- **Arithmetic** (`+ - * / % ^`, unary `-` on a variable) promotes to `Integer`, so the
+  result of `a + a` is an `Integer` and cannot overflow the narrow type; narrow it back
+  with `(a + a).to_integer16()`. Mixing with `Real` promotes to `Real`.
+- **Comparison** (`= /= < <= > >=`) is between two values of the same type. Comparing
+  across types needs a conversion first. `a.equals(x)` is true only when `x` has the same
+  type and value.
+- **`convert`** does not change representation, so `convert n to a: Integer16` on an
+  `Integer` is rejected. A value keeps its type inside an `Any`: `type_of` reports
+  `"Integer16"`, and `convert x to a: Integer16` succeeds only for one.
+- **Bitwise methods** work on, and wrap to, the type's own width, and return the same
+  type: `0i16.bitwise_not()` is `-1i16`, and `32767i16.bitwise_left_shift(1)` is `-2i16`.
+  Right shift copies the sign bit; `bitwise_logical_right_shift` shifts in zeros. Bit
+  indexes must be `0..15` (`Integer16`) or `0..31` (`Integer32`); shift counts must be
+  non-negative, and shifting by the width or more clears every bit. `abs` raises for the
+  minimum value, which has no positive counterpart. (`Integer`'s own bitwise methods
+  keep their 32-bit behaviour.)
+- **Java interop:** passed to a reflective Java call, an `Integer16` or `Integer32` goes
+  as an integer, so it can be used wherever an `Integer` can.
+
+Both types have the same methods. `T` below is the type itself.
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `to_string` | none | `String` | Base-10 text. |
+| `to_string` | `base: Integer` | `String` | Text in `base` (`2`, `8`, `10`, or `16`; any other value raises). A negative value is rendered with a leading `-` and its magnitude. |
+| `to_integer` | none | `Integer` | The value as an `Integer`. |
+| `to_byte` | none | `Byte` | Raises unless the value is in `0..255`. |
+| `to_integer16` | none | `Integer16` | Raises unless the value fits. |
+| `to_integer32` | none | `Integer32` | Raises unless the value fits. |
+| `abs` | none | `T` | Absolute value; raises for the minimum value. |
+| `min` | `other: T` | `T` | Smaller of two values. |
+| `max` | `other: T` | `T` | Larger of two values. |
+| `bitwise_left_shift` | `n: Integer` | `T` | Left-shift, dropping bits shifted out. |
+| `bitwise_right_shift` | `n: Integer` | `T` | Arithmetic right-shift (the sign bit is copied). |
+| `bitwise_logical_right_shift` | `n: Integer` | `T` | Right-shift, shifting in zeros. |
+| `bitwise_rotate_left` | `n: Integer` | `T` | Rotate bits left within the width. |
+| `bitwise_rotate_right` | `n: Integer` | `T` | Rotate bits right within the width. |
+| `bitwise_is_set` | `n: Integer` | `Boolean` | True if bit `n` is set. |
+| `bitwise_set` | `n: Integer` | `T` | Value with bit `n` set to `1`. |
+| `bitwise_unset` | `n: Integer` | `T` | Value with bit `n` cleared to `0`. |
+| `bitwise_and` | `x: T` | `T` | Bitwise AND. |
+| `bitwise_or` | `x: T` | `T` | Bitwise OR. |
+| `bitwise_xor` | `x: T` | `T` | Bitwise XOR. |
+| `bitwise_not` | none | `T` | Bitwise complement. |
+| `equals` | `other: Any` | `Boolean` | True only for the same type and value. |
+| `not_equals` | `other: Any` | `Boolean` | Inequality check. |
+| `compare` | `other: Any` | `Integer` | Ordering as integer result. |
+| `hash` | none | `Integer` | Hash code. |
+
+```nex
+let port: Integer16 := 8080i16
+let offset: Integer32 := -70000i32
+print(port.to_string(16))            -- "1f90"
+print(offset.abs())                  -- 70000
+print(port.bitwise_left_shift(4))    -- -1792 (129280 wrapped to 16 bits)
+let wide: Integer := port + offset   -- arithmetic promotes to Integer
+print(wide)                          -- -61920
+let back: Integer16 := (wide + 61920 + 100).to_integer16()
+print(back)                          -- 100
 ```
 
 ## `Real`

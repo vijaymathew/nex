@@ -491,7 +491,7 @@
       (register-class ctx (build-cursor-base-class))
       (register-class ctx (build-comparable-base-class))
       (register-class ctx (build-hashable-base-class))
-      (doseq [scalar ["String" "Integer" "Byte" "Real" "Boolean" "Char"]]
+      (doseq [scalar ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"]]
         (register-class ctx (build-builtin-scalar-class scalar)))
       ctx)))
 
@@ -1323,7 +1323,12 @@
 (defn apply-binary-op
   "Apply a binary operator to two values."
   [op left right]
-  (case op
+  ;; Arithmetic on a Byte / Integer16 / Integer32 promotes to Integer: unwrap the
+  ;; tag first. Comparison and equality keep the tag (they are same-type only).
+  (let [arith? (contains? #{"+" "-" "*" "/" "^" "%"} op)
+        left (if arith? (rt/sized->long left) left)
+        right (if arith? (rt/sized->long right) right)]
+   (case op
     ;; Arithmetic dispatches on representation: Integer op Integer stays Integer
     ;; (64-bit checked — Clojure long on the JVM, BigInt on JS); any Real operand
     ;; promotes both to Real. On JS, BigInt and number cannot be mixed in a raw
@@ -1385,7 +1390,7 @@
     "and" (and left right)
     "or" (or left right)
     (throw (ex-info (str "Unknown binary operator: " op)
-                    {:operator op}))))
+                    {:operator op})))))
 
 (def concat-string-value bi/concat-string-value)
 
@@ -1499,7 +1504,7 @@
   "Apply a unary operator to a value."
   [op value]
   (case op
-    "-" (- value)
+    "-" (- (rt/sized->long value))
     "not" (not value)
     (throw (ex-info (str "Unknown unary operator: " op)
                     {:operator op}))))
@@ -1527,6 +1532,8 @@
     (case field-type
       "Integer" (->nex-integer 0)
       "Byte" (rt/->nex-byte 0)
+      "Integer16" (rt/->nex-int16 0)
+      "Integer32" (rt/->nex-int32 0)
       "Real" 0.0
       "Char" \0
       "Boolean" false
@@ -3221,6 +3228,18 @@
   ;; and may be transferred to JS, where a literal above 2^53 would lose precision
   ;; as a `number`. `:value-str` round-trips the full 64-bit value into a BigInt.
   (->nex-integer (or (:value-str node) value)))
+
+(defmethod eval-node :byte
+  [_ctx {:keys [value]}]
+  (rt/->nex-byte value))
+
+(defmethod eval-node :int16
+  [_ctx {:keys [value]}]
+  (rt/->nex-int16 value))
+
+(defmethod eval-node :int32
+  [_ctx {:keys [value]}]
+  (rt/->nex-int32 value))
 
 (defmethod eval-node :real
   [_ctx {:keys [value]}]

@@ -45,6 +45,11 @@
     (rt/nex-integer? value)
     (str value)
 
+    ;; Integer16 / Integer32 wrappers (see rt/nex-int16?): their toString is the
+    ;; plain decimal value.
+    (or (rt/nex-int16? value) (rt/nex-int32? value))
+    (str value)
+
     ;; Real. On JS every remaining `number` is a Real; an integer-valued one
     ;; stringifies as "9", but the JVM renders the double as "9.0" — match it so
     ;; the two backends print identically.

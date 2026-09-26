@@ -89,10 +89,53 @@
     (is (some? (type-errors "function f(n: Integer): Integer do result := n end\nlet b: Byte := (1).to_byte()\nprint(f(b))")))
     (is (some? (type-errors "function f(b: Byte): Byte do result := b end\nprint(f(65))")))))
 
-(deftest byte-has-no-literal
-  (testing "an integer literal is an Integer even where a Byte is expected"
+(deftest plain-integer-literal-is-not-a-byte
+  (testing "an unsuffixed integer literal is an Integer even where a Byte is expected"
     (is (some? (type-errors "let b: Byte := 65")))
+    (is (some? (type-errors "let xs: Array[Byte] := [65, 66]")))
     (is (nil? (type-errors "let b: Byte := (65).to_byte()")))))
+
+(deftest byte-literal-typechecks
+  (testing "a u8-suffixed literal is a Byte"
+    (is (nil? (type-errors "let b: Byte := 65u8")))
+    (is (nil? (type-errors "let xs: Array[Byte] := [65u8, 0xFFu8, 0b11u8, 0o7u8, 1_0u8]")))
+    (is (some? (type-errors "let i: Integer := 65u8")))
+    (is (some? (type-errors "let b: Byte := 65u8\nlet c: Byte := b + 1u8"))
+        "arithmetic still promotes to Integer")))
+
+(deftest byte-literal-range-is-checked-at-parse-time
+  (doseq [src ["256u8" "0x100u8" "1000u8" "99999999999999999999u8"]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Byte literal out of range 0\.\.255"
+                          (p/ast (str "print(" src ")")))
+        src))
+  (is (some? (p/ast "print(255u8)")))
+  (is (some? (p/ast "print(0u8)"))))
+
+(deftest byte-literal-behaviour
+  (is (= ["12" "255" "250" "\"ABC\"" "13" "true" "256" "10" "-5" "#A" "\"twelve\""]
+         (both "let b: Byte := 12u8
+print(b)
+print(0xFFu8)
+print(0b101u8.bitwise_not())
+let bs: Array[Byte] := [65u8, 66u8, 67u8]
+print(create String.from_bytes(bs))
+print(b + 1)
+print(200u8 > b)
+print(255u8.to_integer() + 1)
+print(1_0u8)
+print(-5u8)
+print(0x41u8.to_char())
+case b of
+  12u8 then print(\"twelve\")
+  else print(\"other\")
+end"))))
+
+(deftest byte-literal-is-tagged-as-byte
+  (testing "a literal Byte dispatches as a Byte, not an Integer"
+    (is (= ["\"Byte\"" "60"]
+           (both "let a: Any := 195u8
+print(type_of(a))
+print(195u8.bitwise_not())")))))
 
 (deftest byte-arithmetic-promotes-to-integer
   (testing "arithmetic on a Byte yields an Integer, like Integer/Real mixing yields Real"

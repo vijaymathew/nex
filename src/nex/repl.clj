@@ -59,7 +59,7 @@
    "result"])
 
 (def nex-types
-  ["Integer" "Byte" "Real" "Char" "Boolean" "String"
+  ["Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
    "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
    "Task" "Channel" "Function" "Cursor" "Console" "Process"])
 
@@ -1083,7 +1083,7 @@
   #{"<" "<=" ">" ">="})
 
 (def builtin-sortable-types
-  #{"Integer" "Byte" "Real" "Char" "Boolean" "String"})
+  #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"})
 
 (defn- normalized-type-params
   [t]

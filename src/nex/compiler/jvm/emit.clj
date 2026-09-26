@@ -88,6 +88,8 @@
   []
   "([Ljava/lang/String;)V")
 
+(declare emit-runtime-invoke-1!)
+
 (defn- emit-short-const!
   "Push a boxed java.lang.Short for V (the compiled form of a Nex Byte)."
   [^MethodVisitor mv v]
@@ -502,6 +504,13 @@
         (and (= (ir/object-jvm-type "java/lang/Short") jvm-type)
              (= "Byte" nex-type))
         (emit-short-const! mv 0)
+
+        ;; Integer16 / Integer32 default to a wrapper holding 0.
+        (and (string? nex-type) (#{"Integer16" "Integer32"} nex-type))
+        (do
+          (.visitInsn mv Opcodes/LCONST_0)
+          (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Long" "valueOf" "(J)Ljava/lang/Long;" false)
+          (emit-runtime-invoke-1! mv (if (= "Integer16" nex-type) "make-int16" "make-int32")))
 
         :else
         (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type}))
@@ -1030,7 +1039,9 @@
    "op:pow-int"                              ["pow-int" [:b0 :b1]]
    "op:pow-long"                             ["pow-long" [:b0 :b1]]
    "op:pow-double"                           ["pow-double" [:b0 :b1]]
-   "op:byte->integer"                        ["byte->integer" [:b0]]
+   "op:sized->integer"                       ["sized->integer" [:b0]]
+   "make-int16"                              ["make-int16" [:b0]]
+   "make-int32"                              ["make-int32" [:b0]]
    "spawn-function-object"                   ["spawn-function-object" [:state :b0]]
    "function-value-for-name"                 ["function-value-for-name" [:state :b0]]
    "create-channel"                          ["create-channel" [:bvar]]

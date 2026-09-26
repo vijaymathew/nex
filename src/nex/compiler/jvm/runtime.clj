@@ -372,7 +372,7 @@
     []
     (mapv resolve-one-param-class (str/split joined #","))))
 
-(defn- coerce-arg-for-resolved-param
+(defn- coerce-arg-for-resolved-param*
   "ARG, as Nex represents it natively (a boxed Long for Integer, a boxed
    Double for Real, ...), converted to the exact wrapper/primitive class
    PARAM-CLASS declares. Reference-typed parameters need no conversion --
@@ -422,6 +422,17 @@
 
     :else
     arg))
+
+
+(defn- coerce-arg-for-resolved-param
+  "coerce-arg-for-resolved-param*, after unwrapping an Integer16 / Integer32
+   (a wrapper object, not a Number) to the plain long a Java numeric parameter
+   takes. A Byte is left alone: its exact-`byte` handling needs to see it."
+  [^Class param-class arg]
+  (coerce-arg-for-resolved-param* param-class
+                                  (if (or (rt/nex-int16? arg) (rt/nex-int32? arg))
+                                    (rt/sized->long arg)
+                                    arg)))
 
 (defn java-call-method-resolved
   [_state method-name receiver-class-name param-classes-joined target args]
@@ -1297,7 +1308,7 @@
                         (bootstrap/build-comparable-base-class)
                         (bootstrap/build-hashable-base-class)]
                        (map bootstrap/build-builtin-scalar-class
-                            ["String" "Integer" "Byte" "Real" "Boolean" "Char"])))))
+                            ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))))
 
 (defn- compiled-is-parent?
   [state class-name parent-name]
@@ -1536,10 +1547,13 @@
   [a b]
   (long (rt/nex-int-pow (long a) (long b))))
 
-(defn byte->integer
-  "Unwrap a Nex Byte (a boxed java.lang.Short) to the long arithmetic works on."
-  [b]
-  (long b))
+(defn sized->integer
+  "Unwrap a Nex Byte, Integer16 or Integer32 to the long arithmetic works on."
+  [x]
+  (long (rt/sized->long x)))
+
+(defn make-int16 [n] (rt/->nex-int16 n))
+(defn make-int32 [n] (rt/->nex-int32 n))
 
 (defn pow-double
   [a b]
@@ -2003,6 +2017,61 @@
 (def-builtin-method-wrapper builtin-method-integer-greater-than-or-equal "greater_than_or_equal")
 (def-builtin-method-wrapper builtin-method-integer-to-char "to_char")
 (def-builtin-method-wrapper builtin-method-integer-to-byte "to_byte")
+(def-builtin-method-wrapper builtin-method-integer-to-integer16 "to_integer16")
+(def-builtin-method-wrapper builtin-method-integer-to-integer32 "to_integer32")
+(def-builtin-method-wrapper builtin-method-byte-to-integer16 "to_integer16")
+(def-builtin-method-wrapper builtin-method-byte-to-integer32 "to_integer32")
+
+(def-builtin-method-wrapper builtin-method-integer16-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-integer16-to-integer "to_integer")
+(def-builtin-method-wrapper builtin-method-integer16-to-byte "to_byte")
+(def-builtin-method-wrapper builtin-method-integer16-to-integer16 "to_integer16")
+(def-builtin-method-wrapper builtin-method-integer16-to-integer32 "to_integer32")
+(def-builtin-method-wrapper builtin-method-integer16-abs "abs")
+(def-builtin-method-wrapper builtin-method-integer16-min "min")
+(def-builtin-method-wrapper builtin-method-integer16-max "max")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-left-shift "bitwise_left_shift")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-right-shift "bitwise_right_shift")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-logical-right-shift "bitwise_logical_right_shift")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-rotate-left "bitwise_rotate_left")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-rotate-right "bitwise_rotate_right")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-is-set "bitwise_is_set")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-set "bitwise_set")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-unset "bitwise_unset")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-and "bitwise_and")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-or "bitwise_or")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-xor "bitwise_xor")
+(def-builtin-method-wrapper builtin-method-integer16-bitwise-not "bitwise_not")
+(def-builtin-method-wrapper builtin-method-integer16-equals "equals")
+(def-builtin-method-wrapper builtin-method-integer16-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-integer16-compare "compare")
+(def-builtin-method-wrapper builtin-method-integer16-hash "hash")
+
+(def-builtin-method-wrapper builtin-method-integer32-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-integer32-to-integer "to_integer")
+(def-builtin-method-wrapper builtin-method-integer32-to-byte "to_byte")
+(def-builtin-method-wrapper builtin-method-integer32-to-integer16 "to_integer16")
+(def-builtin-method-wrapper builtin-method-integer32-to-integer32 "to_integer32")
+(def-builtin-method-wrapper builtin-method-integer32-abs "abs")
+(def-builtin-method-wrapper builtin-method-integer32-min "min")
+(def-builtin-method-wrapper builtin-method-integer32-max "max")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-left-shift "bitwise_left_shift")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-right-shift "bitwise_right_shift")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-logical-right-shift "bitwise_logical_right_shift")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-rotate-left "bitwise_rotate_left")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-rotate-right "bitwise_rotate_right")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-is-set "bitwise_is_set")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-set "bitwise_set")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-unset "bitwise_unset")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-and "bitwise_and")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-or "bitwise_or")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-xor "bitwise_xor")
+(def-builtin-method-wrapper builtin-method-integer32-bitwise-not "bitwise_not")
+(def-builtin-method-wrapper builtin-method-integer32-equals "equals")
+(def-builtin-method-wrapper builtin-method-integer32-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-integer32-compare "compare")
+(def-builtin-method-wrapper builtin-method-integer32-hash "hash")
+
 
 (def-builtin-method-wrapper builtin-method-byte-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-byte-to-integer "to_integer")
@@ -2680,8 +2749,14 @@
    "op:pow-double"
    (fn [_state args] (Math/pow (double (first args)) (double (second args))))
 
-   "op:byte->integer"
-   (fn [_state args] (byte->integer (first args)))
+   "op:sized->integer"
+   (fn [_state args] (sized->integer (first args)))
+
+   "make-int16"
+   (fn [_state args] (make-int16 (first args)))
+
+   "make-int32"
+   (fn [_state args] (make-int32 (first args)))
 
    ;; The Any protocol on a receiver whose static type declares no such method.
    ;; Kept apart from the "method:" helper below: that one routes to

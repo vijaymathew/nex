@@ -317,7 +317,10 @@
   (or (string? v)
       (number? v)
       (boolean? v)
-      (char? v)))
+      (char? v)
+      ;; Integer16 / Integer32 wrappers are Comparable (see rt/nex-int16?).
+      (rt/nex-int16? v)
+      (rt/nex-int32? v)))
 
 (defn nex-value-compare
   [ctx a b]
@@ -730,6 +733,10 @@
    (fn [n & _] (char (int n)))
    "to_byte"           ^{:signatures [{:params [] :return-type "Byte"}]}
    (fn [n & _] (rt/->nex-byte n))
+   "to_integer16"      ^{:signatures [{:params [] :return-type "Integer16"}]}
+   (fn [n & _] (rt/->nex-int16 n))
+   "to_integer32"      ^{:signatures [{:params [] :return-type "Integer32"}]}
+   (fn [n & _] (rt/->nex-int32 n))
    "compare"           (fn [n other & _] (nex-compare n other))
    "hash"              (fn [n & _] (hash n))})
 
@@ -771,6 +778,10 @@
    (fn [b & _] (char (byte-bits b)))
    "to_hex"            ^{:signatures [{:params [] :return-type "String"}]}
    (fn [b & _] (format "%02x" (byte-bits b)))
+   "to_integer16"      ^{:signatures [{:params [] :return-type "Integer16"}]}
+   (fn [b & _] (rt/->nex-int16 (byte-bits b)))
+   "to_integer32"      ^{:signatures [{:params [] :return-type "Integer32"}]}
+   (fn [b & _] (rt/->nex-int32 (byte-bits b)))
    "min"               ^{:signatures [{:params [{:name "other" :type "Byte"}] :return-type "Byte"}]}
    (fn [b other & _] (byte-result (min (byte-bits b) (byte-bits other))))
    "max"               ^{:signatures [{:params [{:name "other" :type "Byte"}] :return-type "Byte"}]}
@@ -814,6 +825,108 @@
    (fn [b other & _] (not (and (rt/nex-byte? other) (= (byte-bits b) (byte-bits other)))))
    "compare"           (fn [b other & _] (nex-compare (byte-bits b) (byte-bits other)))
    "hash"              (fn [b & _] (hash (byte-bits b)))})
+
+;; Integer16 / Integer32: signed fixed-width integers (see rt/nex-int16?). Like
+;; Byte, arithmetic operators on them promote to Integer, so these tables hold
+;; only conversions, bitwise operations (which work on, and wrap to, the type's
+;; own width) and comparison.
+(defn- sized-int-methods
+  "Method table for a signed BITS-wide integer type. TYPE-NAME is its Nex name,
+   WRAP builds a value of it from a long already known to be in range, and
+   IS-TYPE? recognizes one."
+  [type-name bits wrap is-type?]
+  (let [mask (dec (bit-shift-left 1 bits))
+        sign-bit (bit-shift-left 1 (dec bits))
+        ;; The signed value of the low BITS bits of x.
+        signed (fn [x] (let [u (bit-and (long x) mask)]
+                         (if (zero? (bit-and u sign-bit)) u (- u (bit-shift-left 1 bits)))))
+        val (fn [x] (long (rt/sized->long x)))
+        bits-of (fn [x] (bit-and (val x) mask))
+        result (fn [x] (wrap (signed x)))
+        shift-count (fn [n]
+                      (let [n (long n)]
+                        (when (neg? n)
+                          (throw (ex-info (str type-name " shift count must be non-negative, got " n)
+                                          {:count n})))
+                        (min n bits)))
+        bit-index (fn [n]
+                    (let [n (long n)]
+                      (when-not (<= 0 n (dec bits))
+                        (throw (ex-info (str type-name " bit index must be in range 0.." (dec bits) ", got " n)
+                                        {:index n})))
+                      n))
+        min-value (- sign-bit)
+        max-value (dec sign-bit)]
+    {"to_string"         ^{:signatures [{:params [] :return-type "String"}
+                                        {:params [{:name "base" :type "Integer"}] :return-type "String"}]}
+     (fn [x & [base]]
+       (if (some? base)
+         (if (contains? #{2 8 10 16} base)
+           (Long/toString (val x) (int base))
+           (throw (ex-info (str type-name ".to_string: base must be 2, 8, 10, or 16, got " base)
+                           {:base base})))
+         (str (val x))))
+     "to_integer"        ^{:signatures [{:params [] :return-type "Integer"}]}
+     (fn [x & _] (->nex-integer (val x)))
+     "to_byte"           ^{:signatures [{:params [] :return-type "Byte"}]}
+     (fn [x & _] (rt/->nex-byte (val x)))
+     "to_integer16"      ^{:signatures [{:params [] :return-type "Integer16"}]}
+     (fn [x & _] (rt/->nex-int16 (val x)))
+     "to_integer32"      ^{:signatures [{:params [] :return-type "Integer32"}]}
+     (fn [x & _] (rt/->nex-int32 (val x)))
+     "abs"               ^{:signatures [{:params [] :return-type type-name}]}
+     (fn [x & _]
+       (let [v (val x)]
+         (when (= v min-value)
+           (throw (ex-info (str type-name ".abs: " v " has no positive counterpart") {:value v})))
+         (wrap (Math/abs v))))
+     "min"               ^{:signatures [{:params [{:name "other" :type type-name}] :return-type type-name}]}
+     (fn [x other & _] (wrap (min (val x) (val other))))
+     "max"               ^{:signatures [{:params [{:name "other" :type type-name}] :return-type type-name}]}
+     (fn [x other & _] (wrap (max (val x) (val other))))
+     "bitwise_left_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type type-name}]}
+     (fn [x n & _] (result (bit-shift-left (bits-of x) (shift-count n))))
+     ;; Arithmetic: the sign bit is copied in.
+     "bitwise_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type type-name}]}
+     (fn [x n & _] (wrap (bit-shift-right (val x) (shift-count n))))
+     ;; Logical: zeros are shifted in.
+     "bitwise_logical_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type type-name}]}
+     (fn [x n & _] (result (bit-shift-right (bits-of x) (shift-count n))))
+     "bitwise_rotate_left" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type type-name}]}
+     (fn [x n & _]
+       (let [u (bits-of x) k (mod (long n) bits)]
+         (result (bit-or (bit-shift-left u k) (bit-shift-right u (- bits k))))))
+     "bitwise_rotate_right" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type type-name}]}
+     (fn [x n & _]
+       (let [u (bits-of x) k (mod (long n) bits)]
+         (result (bit-or (bit-shift-right u k) (bit-shift-left u (- bits k))))))
+     "bitwise_is_set"    ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Boolean"}]}
+     (fn [x n & _] (not (zero? (bit-and (bits-of x) (bit-shift-left 1 (bit-index n))))))
+     "bitwise_set"       ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type type-name}]}
+     (fn [x n & _] (result (bit-or (bits-of x) (bit-shift-left 1 (bit-index n)))))
+     "bitwise_unset"     ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type type-name}]}
+     (fn [x n & _] (result (bit-and (bits-of x) (bit-not (bit-shift-left 1 (bit-index n))))))
+     "bitwise_and"       ^{:signatures [{:params [{:name "x" :type type-name}] :return-type type-name}]}
+     (fn [x other & _] (result (bit-and (bits-of x) (bits-of other))))
+     "bitwise_or"        ^{:signatures [{:params [{:name "x" :type type-name}] :return-type type-name}]}
+     (fn [x other & _] (result (bit-or (bits-of x) (bits-of other))))
+     "bitwise_xor"       ^{:signatures [{:params [{:name "x" :type type-name}] :return-type type-name}]}
+     (fn [x other & _] (result (bit-xor (bits-of x) (bits-of other))))
+     "bitwise_not"       ^{:signatures [{:params [] :return-type type-name}]}
+     (fn [x & _] (result (bit-not (val x))))
+     ;; Equal only to its own type and value, like the operator `=`.
+     "equals"            ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+     (fn [x other & _] (and (is-type? other) (= (val x) (val other))))
+     "not_equals"        ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+     (fn [x other & _] (not (and (is-type? other) (= (val x) (val other)))))
+     "compare"           (fn [x other & _] (nex-compare (val x) (val other)))
+     "hash"              (fn [x & _] (hash (val x)))}))
+
+(def integer16-type-methods
+  (sized-int-methods "Integer16" 16 #(rt/->nex-int16 %) rt/nex-int16?))
+
+(def integer32-type-methods
+  (sized-int-methods "Integer32" 32 #(rt/->nex-int32 %) rt/nex-int32?))
 
 (def real-type-methods
   {"to_string"         ^{:signatures [{:params [] :return-type "String"}]}
@@ -1458,6 +1571,8 @@
    :String string-type-methods
    :Integer integer-type-methods
    :Byte byte-type-methods
+   :Integer16 integer16-type-methods
+   :Integer32 integer32-type-methods
    :Real real-type-methods
    :Char char-type-methods
    :Boolean boolean-type-methods
@@ -1702,7 +1817,7 @@
   [ctx v]
   (cond
     (nex-object? v) (java-proxy-for-object ctx v)
-    (rt/nex-byte? v) (rt/nex->java v)
+    (rt/nex-sized? v) (rt/nex->java v)
     :else v))
 
 (defn java-args

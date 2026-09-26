@@ -518,6 +518,9 @@ genericArg
 
 literal
     : integerLiteral
+    | byteLiteral
+    | int16Literal
+    | int32Literal
     | realLiteral
     | charLiteral
     | booleanLiteral
@@ -536,6 +539,18 @@ literal
 
 integerLiteral
     : INTEGER
+    ;
+
+byteLiteral
+    : BYTE
+    ;
+
+int16Literal
+    : INT16
+    ;
+
+int32Literal
+    : INT32
     ;
 
 realLiteral
@@ -694,6 +709,33 @@ REAL
  *  Sign handled in parser as unary minus.
  */
 INTEGER
+    : INTEGER_BODY
+    ;
+
+/*
+ * Byte: an integer literal with a `u8` suffix, e.g. `12u8`, `0xFFu8`. Its value
+ * is range-checked (0..255) by the walker. The suffix is `u8` rather than `b`
+ * because `b` is a hex digit (`0x1b`).
+ */
+BYTE
+    : INTEGER_BODY 'u8'
+    ;
+
+/*
+ * Integer16 / Integer32: an integer literal with an `i16` / `i32` suffix, e.g.
+ * `300i16`, `0xFFFFi32`. A negative one is written with a leading `-` (`-5i16`),
+ * which the walker folds into the literal. Range-checked by the walker and the
+ * typechecker.
+ */
+INT16
+    : INTEGER_BODY 'i16'
+    ;
+
+INT32
+    : INTEGER_BODY 'i32'
+    ;
+
+fragment INTEGER_BODY
     : '0' 'b' BIN_DIGITS
     | '0' 'o' OCT_DIGITS
     | '0' 'x' HEX_DIGITS
