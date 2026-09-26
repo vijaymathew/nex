@@ -1457,6 +1457,32 @@
    (and value
         (find-user-method value (lowered-instance-method-name "to_string" 0)))))
 
+(defn- compiled-closure-object?
+  "A compiled anonymous function. Its class is synthetic and cannot be rendered
+   through the interpreter, so closures keep the REPL's older `#<...>` display."
+  [value]
+  (and value (str/includes? (.getName (class value)) "AnonymousFunction")))
+
+(defn compiled-object-has-to-string?
+  "Whether VALUE is a compiled Nex object whose class defines `to_string`. Public
+   for the interpreter, which needs it to render a compiled object that reaches
+   it (the REPL mixes the two backends). Never true for a closure."
+  [value]
+  (and (not (compiled-closure-object? value))
+       (has-user-to-string? value)))
+
+(defn compiled-object-class-name
+  "The Nex class name of a compiled Nex object (an instance of a generated JVM
+   class), or nil for any other value. A generated class carries a `set_outer`
+   method and a per-cell numeric suffix (`Plain_0008`), which is stripped."
+  [value]
+  (when (and value
+             (not (compiled-closure-object? value))
+             (some #(= "set_outer" (.getName ^java.lang.reflect.Method %))
+                   (.getDeclaredMethods (class value))))
+    (let [simple (last (str/split (.getName (class value)) #"\."))]
+      (or (second (re-matches #"(.+)_\d{4}" simple)) simple))))
+
 (defn- format-value-with-state
   "Like format-value, but recurses into Array/Map/Set elements with state so a
    nested object's to_string override is honored (compiled or, via
@@ -1483,6 +1509,20 @@
 (defn- print-value
   [state value]
   (format-value-with-state state value))
+
+(defn format-display-value
+  "How the REPL shows a result that is a class instance, or a collection that
+   may hold some: through the class's own `to_string` (the same rendering
+   `print` gives), instead of the placeholder `#<Class object>` / Clojure's raw
+   `#object[...]`. Returns nil for every other value, so the REPL's ordinary
+   display applies to those unchanged."
+  [state value]
+  (when (and value
+             (not (compiled-closure-object? value))
+             (or (rt/nex-array? value) (rt/nex-map? value) (rt/nex-set? value)
+                 (interp/nex-object? value)
+                 (has-user-to-string? value)))
+    (format-value-with-state state value)))
 
 (defn any-to-string
   "The `to_string` that the Any protocol gives every value, for a receiver whose

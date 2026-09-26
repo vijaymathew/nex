@@ -2858,3 +2858,35 @@ end")
         (is (not (str/includes? odd-output "Error:")))
         (is (str/includes? even-output "true"))
         (is (str/includes? odd-output "false"))))))
+
+(deftest repl-displays-class-instances-through-to-string-test
+  (testing "a result that is a class instance shows through the class's to_string, like print does"
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            show (fn [code] (str/trim (with-out-str (repl/eval-code ctx code))))]
+        (show "class Named feature to_string(): String do result := \"I am Named\" end end")
+        (show "class Plain feature x: Integer end")
+        (show "intern data/Byte_Array")
+        (show "let bs := create Byte_Array.make(3)")
+        (show "bs.set(0, 100u8)")
+        (show "let n := create Named")
+        (show "let p := create Plain")
+        (testing "a bare variable, the case that used to print #object[...]"
+          (is (= "Byte_Array Byte_Array([100, 0, 0])" (show "bs")))
+          (is (= "Named I am Named" (show "n"))))
+        (testing "the value of a let and of a fresh expression"
+          (is (= "Named I am Named" (show "create Named")))
+          (is (= "Byte_Array Byte_Array([0, 0])" (show "create Byte_Array.make(2)"))))
+        (testing "inside collections"
+          (is (= "Array[Named] [I am Named, I am Named]" (show "[n, n]")))
+          (is (= "Map[String, Named] {\"k\": I am Named}" (show "{\"k\": n}"))))
+        (testing "a class with no to_string keeps the placeholder, not Clojure's #object[...]"
+          (is (= "Plain #<Plain object>" (show "p")))
+          (is (= "Array[Plain] [#<Plain object>, #<Plain object>]" (show "[p, p]"))))
+        (testing "other values are shown as before"
+          (is (= "Integer 5" (show "5")))
+          (is (= "String \"s\"" (show "\"s\"")))
+          (is (= "Array[Integer] [1, 2]" (show "[1, 2]"))))))))

@@ -1666,7 +1666,8 @@
     (nex-array? value) (rt/nex-array-str (partial format-value-with-ctx ctx) value)
     (rt/nex-map-entry? value) (str (format-value-with-ctx ctx (:key value)) ": "
                                    (format-value-with-ctx ctx (:value value)))
-    :else (nex-format-value value)))
+    ;; A compiled object the REPL handed to the interpreter: its own to_string.
+    :else (or (user-to-string ctx value) (nex-format-value value))))
 
 (defn print-output-value
   "Convert a value for built-in print/println output. Respects user-defined

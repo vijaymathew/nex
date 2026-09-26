@@ -5,6 +5,7 @@
             [nex.interpreter :as interp]
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as compiled-runtime]
+            [nex.types.builtins :as bi]
             [nex.debugger :as dbg]
             [nex.lower :as lower]
             [nex.typechecker :as tc]
@@ -1037,10 +1038,19 @@
             candidate))))))
 
 (defn format-value
-  [value]
-  (if-let [class-name (compiled-object-class-name value)]
-    (str "#<" class-name " object>")
-    (interp/nex-format-value value)))
+  "The text the REPL shows for a result. An instance of a class shows through
+   the class's `to_string` when it defines one (as `print` does); with no
+   `to_string` it shows `#<Class object>`. CTX, when given, lets interpreter
+   objects (and collections of them) do the same."
+  ([value] (format-value nil value))
+  ([ctx value]
+   (or (when (and value (= :compiled @*repl-backend*))
+         (compiled-runtime/format-display-value (:state @*compiled-repl-session*) value))
+       (if-let [class-name (compiled-object-class-name value)]
+         (str "#<" class-name " object>")
+         (if ctx
+           (bi/format-value-with-ctx ctx value)
+           (interp/nex-format-value value))))))
 
 (defn format-type
   "Format a type value for REPL display"
@@ -1665,8 +1675,8 @@
       (when (and (some? result) (empty? output) (not registered?))
         (if-let [type-str (when (seq calls)
                             (infer-result-type exec-ctx (last calls)))]
-          (println (str type-str " " (format-value result)))
-          (println (format-value result)))))
+          (println (str type-str " " (format-value exec-ctx result)))
+          (println (format-value exec-ctx result)))))
     (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
     exec-ctx))
 
@@ -1696,8 +1706,8 @@
       (when (some? result)
         (if-let [type-str (and (empty? output)
                                (infer-result-type exec-ctx (first (:statements ast))))]
-          (println (str type-str " " (format-value result)))
-          (println (format-value result))))
+          (println (str type-str " " (format-value exec-ctx result)))
+          (println (format-value exec-ctx result))))
       exec-ctx)
     (let [declaring? (ast-declares-class-or-function? ast)]
       (try
@@ -1777,8 +1787,8 @@
       ;; Always show false/0 results too.
       (when (and (some? result) (empty? output))
         (if type-str
-          (println (str type-str " " (format-value result)))
-          (println (format-value result)))))
+          (println (str type-str " " (format-value exec-ctx result)))
+          (println (format-value exec-ctx result)))))
     (sync-interpreter-back-into-compiled-session!
      exec-ctx
      {:type :program
@@ -1803,8 +1813,8 @@
     ;; Always show false/0 results too.
     (when (and (some? result) (empty? output))
       (if-let [type-str (infer-result-type exec-ctx ast)]
-        (println (str type-str " " (format-value result)))
-        (println (format-value result))))
+        (println (str type-str " " (format-value exec-ctx result)))
+        (println (format-value exec-ctx result))))
     (sync-interpreter-back-into-compiled-session!
      exec-ctx
      {:type :program

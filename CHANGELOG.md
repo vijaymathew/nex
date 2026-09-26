@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Changed: the REPL shows a class instance through its `to_string`.** A
+  result that is an instance of a class (or a collection of them) now renders
+  with the class's own `to_string`, the way `print` does, instead of
+  `#<Class object>` or, for a variable read back in a later cell, Clojure's raw
+  `#object[nex.repl.Foo_0002 ...]`. A class with no `to_string` shows
+  `#<Foo object>` in both cases.
+
 - **New: the `Byte` scalar type**, an unsigned 8-bit integer (`0..255`).
   `String.to_bytes()` now returns `Array[Byte]` instead of `Array[Integer]`,
   and `Binary_File` (`read`, `read_all`, `write`) and the `binary_file_*`
