@@ -344,6 +344,38 @@ print(r)
 print(r.get(1) = (7).to_byte())"))))
 
 ;; ---------------------------------------------------------------------------
+;; String.from_bytes
+;; ---------------------------------------------------------------------------
+
+(deftest string-from-bytes-round-trips
+  (is (= ["\"héllo, wörld ✓\"" "true" "0" "\"A\""]
+         (both "let text: String := \"héllo, wörld ✓\"
+let back: String := create String.from_bytes(text.to_bytes())
+print(back)
+print(back = text)
+print((create String.from_bytes([])).length())
+let one: Array[Byte] := []
+one.add((65).to_byte())
+print(create String.from_bytes(one))"))))
+
+(deftest string-from-bytes-rejects-invalid-utf8
+  (testing "malformed input raises instead of being replaced"
+    (is (raises-on-both? "let b: Array[Byte] := \"é\".to_bytes()
+b.remove(1)
+print(create String.from_bytes(b))" "not valid UTF-8"))
+    (is (raises-on-both? "let b: Array[Byte] := []
+b.add((255).to_byte())
+print(create String.from_bytes(b))" "not valid UTF-8"))))
+
+(deftest string-from-bytes-typechecks
+  (is (nil? (type-errors "let s: String := create String.from_bytes(\"a\".to_bytes())")))
+  (is (str/includes? (error-text "let xs: Array[Integer] := [65]\nprint(create String.from_bytes(xs))")
+                     "String.from_bytes expects Array[Byte], got Array[Integer]"))
+  (is (str/includes? (error-text "print(create String)") "String.from_bytes"))
+  (is (str/includes? (error-text "print(create String.make(\"a\"))") "Constructor not found: String.make"))
+  (is (some? (type-errors "print(create String.from_bytes(\"a\".to_bytes(), 1))"))))
+
+;; ---------------------------------------------------------------------------
 ;; Java interop
 ;; ---------------------------------------------------------------------------
 

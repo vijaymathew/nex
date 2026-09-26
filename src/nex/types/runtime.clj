@@ -752,6 +752,19 @@
    :index (atom (.getFilePointer raf))
    :raf raf})
 
+(defn string-from-bytes
+  "Decode a Nex Array[Byte] as UTF-8 text. Malformed or unmappable input raises
+   rather than being replaced with U+FFFD, so a round trip through to_bytes is
+   exact and bad data is never silently altered."
+  [values]
+  (let [decoder (doto (.newDecoder java.nio.charset.StandardCharsets/UTF_8)
+                  (.onMalformedInput java.nio.charset.CodingErrorAction/REPORT)
+                  (.onUnmappableCharacter java.nio.charset.CodingErrorAction/REPORT))]
+    (try
+      (str (.decode decoder (java.nio.ByteBuffer/wrap ^bytes (byte-array->bytes values))))
+      (catch java.nio.charset.CharacterCodingException _
+        (throw (ex-info "String.from_bytes: bytes are not valid UTF-8" {}))))))
+
 (defn binary-file-open-read [path]
   (make-binary-file-handle :read
                            (java.io.RandomAccessFile. path "r")))

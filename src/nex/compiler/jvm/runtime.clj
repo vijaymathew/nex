@@ -234,6 +234,10 @@
   []
   (rt/nex-array))
 
+(defn create-string-from-bytes
+  [bytes]
+  (rt/string-from-bytes bytes))
+
 (defn create-array-filled
   [size value]
   (when-not (integer? size)
@@ -2573,6 +2577,9 @@
 
    "create-array-filled"
    (fn [_state args] (create-array-filled (first args) (second args)))
+
+   "create-string-from-bytes"
+   (fn [_state args] (create-string-from-bytes (first args)))
 
    "create-min-heap-empty"
    (fn [_state _args] (create-min-heap-empty))

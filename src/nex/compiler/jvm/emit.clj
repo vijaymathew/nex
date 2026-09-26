@@ -1034,6 +1034,7 @@
    "spawn-function-object"                   ["spawn-function-object" [:state :b0]]
    "function-value-for-name"                 ["function-value-for-name" [:state :b0]]
    "create-channel"                          ["create-channel" [:bvar]]
+   "create-string-from-bytes"                ["create-string-from-bytes" [:b0]]
    "create-array"                            ["create-array" []]
    "create-array-filled"                     ["create-array-filled" [:bvar]]
    "create-min-heap-empty"                   ["create-min-heap-empty" []]

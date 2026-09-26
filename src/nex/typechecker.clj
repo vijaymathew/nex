@@ -4042,6 +4042,29 @@
     {:base-type "Channel" :type-args generic-args}
     "Channel"))
 
+(defn- check-create-string
+  "`create String.from_bytes(bytes)`: decode an Array[Byte] as UTF-8."
+  [env {:keys [constructor args]}]
+  (when-not (= constructor "from_bytes")
+    (throw (ex-info "Constructor not found: String"
+                    {:error (type-error
+                             (if constructor
+                               (str "Constructor not found: String." constructor)
+                               "create String needs a constructor: String.from_bytes(bytes)"))})))
+  (when-not (= 1 (count args))
+    (throw (ex-info "String.from_bytes expects 1 argument"
+                    {:error (type-error "String.from_bytes expects exactly 1 Array[Byte] argument")})))
+  (let [arg-type (check-expression env (first args))
+        bytes-type {:base-type "Array" :type-params ["Byte"]}]
+    (when (any-into-concrete-without-convert? env bytes-type arg-type)
+      (throw-any-narrowing-error! "the String.from_bytes argument" bytes-type))
+    (when-not (types-compatible? env arg-type bytes-type)
+      (throw (ex-info "String.from_bytes requires Array[Byte]"
+                      {:error (type-error
+                               (str "String.from_bytes expects Array[Byte], got "
+                                    (display-type arg-type)))}))))
+  "String")
+
 (def ^:private check-create-builtin-dispatch
   "class-name -> (fn [env expr] ...): the built-in-type half of
    `check-create`. A class name with no entry here falls through to
@@ -4055,7 +4078,8 @@
    "Atomic_Integer64" (check-create-single-arg-atomic "Atomic_Integer64" "Integer")
    "Atomic_Boolean"   (check-create-single-arg-atomic "Atomic_Boolean" "Boolean")
    "Atomic_Reference" check-create-atomic-reference
-   "Channel"          check-create-channel})
+   "Channel"          check-create-channel
+   "String"           check-create-string})
 
 (defn- check-create-user-class
   [env {:keys [class-name generic-args constructor args]}]

@@ -5145,6 +5145,16 @@
       (throw (unsupported "Unsupported Set constructor in compiled lowering"
                           {:expr expr :constructor (:constructor expr)})))))
 
+(defn- lower-create-string
+  [env expr]
+  (when-not (and (= "from_bytes" (:constructor expr)) (= 1 (count (:args expr))))
+    (throw (unsupported "Unsupported String constructor in compiled lowering"
+                        {:expr expr :constructor (:constructor expr)})))
+  (ir/call-runtime-node "create-string-from-bytes"
+                        [(lower-expression env (first (:args expr)))]
+                        "String"
+                        (resolve-jvm-type env "String")))
+
 (def ^:private lower-create-builtin-dispatch
   "class-name -> (fn [env expr] ...): the built-in-type half of
    `lower-create-expr`. A class name with no entry here falls through to
@@ -5154,6 +5164,7 @@
    "Process"          lower-create-process
    "Channel"          lower-create-channel
    "Array"            lower-create-array
+   "String"           lower-create-string
    "Min_Heap"         lower-create-min-heap
    "Atomic_Integer"   (lower-create-single-arg-atomic "Atomic_Integer" "create-atomic-integer")
    "Atomic_Integer64" (lower-create-single-arg-atomic "Atomic_Integer64" "create-atomic-integer64")

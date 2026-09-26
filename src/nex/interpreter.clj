@@ -3465,6 +3465,17 @@
       :else (throw (ex-info (str "Constructor not found: Set." constructor)
                             {:class-name "Set" :constructor constructor})))))
 
+(defn- create-string-builtin
+  [ctx constructor args]
+  (let [arg-values (mapv #(eval-node ctx %) args)]
+    (when-not (= constructor "from_bytes")
+      (throw (ex-info (str "Constructor not found: String." constructor)
+                      {:class-name "String" :constructor constructor})))
+    (when-not (= 1 (count arg-values))
+      (throw (ex-info "String.from_bytes expects 1 argument"
+                      {:class-name "String" :constructor constructor})))
+    (rt/string-from-bytes (first arg-values))))
+
 (def ^:private create-builtin-dispatch
   "class-name -> (fn [ctx constructor args] ...): the built-in-type half of
    `eval-node :create`. A class name with no entry here is a user-defined
@@ -3479,6 +3490,7 @@
    "Atomic_Boolean"   (create-single-arg-atomic "Atomic_Boolean" make-atomic-boolean)
    "Atomic_Reference" (create-single-arg-atomic "Atomic_Reference" make-atomic-reference)
    "Channel"          create-channel-builtin
+   "String"           create-string-builtin
    "Set"              create-set-builtin})
 
 (defn- resolve-effective-class-name

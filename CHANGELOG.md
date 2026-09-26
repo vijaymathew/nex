@@ -15,6 +15,9 @@
   `to_bytes()` or a binary read as `Array[Integer]` must use `Array[Byte]`
   (or drop the annotation), and `Binary_File.write` no longer accepts an
   integer-literal array such as `[65, 66]`; pass `"AB".to_bytes()`.
+- **New: `create String.from_bytes(bytes)`** decodes an `Array[Byte]` as UTF-8,
+  the inverse of `to_bytes()`. Invalid UTF-8 raises instead of being replaced.
+  `create` now accepts the `String` keyword as a class name for this.
 - **Fixed:** `binary_file_write` rejected bytes above 127 (`200` raised
   "Value out of range for byte").
 

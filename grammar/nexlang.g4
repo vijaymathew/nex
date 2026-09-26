@@ -502,8 +502,10 @@ oldExpression
     : OLD primary
     ;
 
+// `String` is a keyword token (STRING_TYPE), not an IDENTIFIER, so it is named
+// explicitly for the `create String.from_bytes(bytes)` factory.
 createExpression
-    : CREATE qualifiedName genericArgs? ('.' IDENTIFIER ('(' argumentList? ')')?)?
+    : CREATE (qualifiedName | STRING_TYPE) genericArgs? ('.' IDENTIFIER ('(' argumentList? ')')?)?
     ;
 
 genericArgs

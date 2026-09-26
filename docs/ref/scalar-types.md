@@ -63,6 +63,17 @@ let bytes: Array[Byte] := "cat".to_bytes()
 print(bytes) -- [99, 97, 116]
 ```
 
+`create String.from_bytes(bytes)` is the inverse: it decodes an `Array[Byte]` as UTF-8
+and returns the `String`. It raises if the bytes are not valid UTF-8, rather than
+substituting replacement characters, so `create String.from_bytes(s.to_bytes())` always
+gives back `s` exactly.
+
+```nex
+let bytes: Array[Byte] := "héllo".to_bytes()
+let text: String := create String.from_bytes(bytes)
+print(text) -- "héllo"
+```
+
 ## `Integer`
 
 `Integer` is a signed 64-bit integer (range `-2^63 .. 2^63-1`) on every backend.
