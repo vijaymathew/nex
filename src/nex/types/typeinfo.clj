@@ -8,6 +8,9 @@
     ;; Integer is a long on the JVM and a BigInt on JS; check it before Real so
     ;; that on JS every remaining `number` classifies as Real (Integers are
     ;; BigInt now, so an integer-valued `number` is a Real value).
+    ;; Byte is a java.lang.Short and `integer?` is true for it, so it must be
+    ;; classified before Integer.
+    (rt/nex-byte? value) :Byte
     (rt/nex-integer? value) :Integer
     (or (double? value) (float? value) (ratio? value)) :Real
     (rt/nex-char? value) :Char

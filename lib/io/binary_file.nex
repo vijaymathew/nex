@@ -23,11 +23,11 @@ feature
   path: Path
   handle: Any
 
-  read_all(): Array[Integer] do
+  read_all(): Array[Byte] do
     result := binary_file_read_all(handle)
   end
 
-  read(count: Integer): Array[Integer] do
+  read(count: Integer): Array[Byte] do
     result := binary_file_read(handle, count)
   end
 
@@ -39,7 +39,7 @@ feature
     binary_file_seek(handle, offset)
   end
 
-  write(bytes: Array[Integer]) do
+  write(bytes: Array[Byte]) do
     binary_file_write(handle, bytes)
   end
 

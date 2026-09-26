@@ -40,6 +40,7 @@ let y := x + 5
 Built-in scalar types include:
 
 - `Integer`
+- `Byte` (an unsigned 8-bit value, `0..255`; see the scalar types reference)
 - `Real`
 - `Char`
 - `Boolean`

@@ -3,7 +3,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [nex.parser :as p]
-            [nex.interpreter :as interp]))
+            [nex.interpreter :as interp]
+            [nex.types.runtime :as rt]))
 
 (deftest simple-create-parsing-test
   (testing "Parse simple create expression"
@@ -186,12 +187,13 @@ end"
       (is (= \a (interp/call-builtin-method ctx "cat" "cat" "char_at" [1]))))))
 
 (deftest string-to-bytes-runtime-test
-  (testing "String.to_bytes returns UTF-8 bytes as Array[Integer]"
+  (testing "String.to_bytes returns UTF-8 bytes as Array[Byte]"
     (let [ctx (interp/make-context)
           ascii (interp/call-builtin-method ctx "cat" "cat" "to_bytes" [])
           unicode (interp/call-builtin-method ctx "é" "é" "to_bytes" [])]
       (is (= [99 97 116] (vec ascii)))
-      (is (= [195 169] (vec unicode))))))
+      (is (= [195 169] (vec unicode)))
+      (is (every? rt/nex-byte? (concat ascii unicode))))))
 
 (deftest min-heap-runtime-test
   (testing "Min_Heap supports natural ordering, comparator ordering, and safe empty reads"

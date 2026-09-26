@@ -1,6 +1,6 @@
 # Scalar Types
 
-Built-in scalar classes: `String`, `Integer`, `Real`, `Boolean`, `Char`.
+Built-in scalar classes: `String`, `Integer`, `Byte`, `Real`, `Boolean`, `Char`.
 
 All scalar classes are modeled as inheriting `Any` and implementing
 `Comparable` and `Hashable`.
@@ -29,7 +29,7 @@ which is convenient for regular-expression patterns and paths: `'\d+'`, `'C:\dir
 | `replace` | `old: String, new: String` | `String` | Replace all occurrences of `old`. |
 | `char_at` | `idx: Integer` | `Char` | Character at index. |
 | `chars` | none | `Array[Char]` | New array of characters in string order. |
-| `to_bytes` | none | `Array[Integer]` | UTF-8 bytes of the string. |
+| `to_bytes` | none | `Array[Byte]` | UTF-8 bytes of the string. |
 | `split` | `delim: String` | `Array[String]` | Split into an array. |
 | `plus` | `other: Any` | `String` | Concatenate with `other`. |
 | `equals` | `other: Any` | `Boolean` | Equality check. |
@@ -56,10 +56,10 @@ print(xs.length) -- 3
 print(xs.get(1)) -- #a
 ```
 
-`to_bytes()` uses UTF-8 encoding and returns an `Array[Integer]` with byte values in `0..255`.
+`to_bytes()` uses UTF-8 encoding and returns an `Array[Byte]` with byte values in `0..255`.
 
 ```nex
-let bytes: Array[Integer] := "cat".to_bytes()
+let bytes: Array[Byte] := "cat".to_bytes()
 print(bytes) -- [99, 97, 116]
 ```
 
@@ -81,6 +81,7 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 | `min` | `other: Integer` | `Integer` | Smaller of two values. |
 | `max` | `other: Integer` | `Integer` | Larger of two values. |
 | `pick` | none | `Integer` | Random integer in `[0, self)`. |
+| `to_byte` | none | `Byte` | Convert to a `Byte`; raises unless the value is in `0..255`. |
 | `bitwise_left_shift` | `n: Integer` | `Integer` | Left-shift by `n` bit positions. |
 | `bitwise_right_shift` | `n: Integer` | `Integer` | Arithmetic right-shift by `n` bit positions. |
 | `bitwise_logical_right_shift` | `n: Integer` | `Integer` | Logical right-shift by `n` bit positions. |
@@ -110,6 +111,74 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 let n := 113
 print(n.to_string(2))  -- "1110001"
 print(n.to_string(16)) -- "71"
+```
+
+## `Byte`
+
+`Byte` is an unsigned 8-bit integer (range `0..255`). It is the element type of
+`String.to_bytes()` and of binary file I/O (`Array[Byte]`).
+
+`Byte` is a distinct type, related to `Integer` the way `Integer` is related to `Real`:
+there is no implicit conversion in either direction, and there is no `Byte` literal.
+
+- **Making a `Byte`:** `n.to_byte()` on an `Integer` (raises unless `0 <= n <= 255`), or
+  by reading one out of an `Array[Byte]`. An integer literal is an `Integer` even where a
+  `Byte` is expected, so `let b: Byte := 65` is a type error; write `(65).to_byte()`.
+- **Getting an `Integer`:** `b.to_integer()`. Assigning a `Byte` to an `Integer` variable
+  or passing it to an `Integer` parameter is a type error.
+- **Arithmetic** (`+ - * / % ^`, unary `-`) promotes to `Integer`, so the result of
+  `b + b` is an `Integer` and cannot overflow a `Byte`; narrow it back with
+  `(b + b).to_byte()`. Mixing with `Real` promotes to `Real`.
+- **Comparison** (`= /= < <= > >=`) is between two `Byte`s. Comparing a `Byte` with an
+  `Integer` needs `b.to_integer()` first, just as comparing an `Integer` with a `Real`
+  needs a conversion. `b.equals(x)` is true only when `x` is a `Byte` of the same value.
+- **`convert`** does not change representation, so `convert n to b: Byte` on an
+  `Integer` is rejected; use `to_byte()`. A `Byte` held in an `Any` keeps its type:
+  `type_of` reports `"Byte"` and `convert a to b: Byte` succeeds.
+- **Bitwise methods** work on 8 bits and return a `Byte`, unlike `Integer`'s 32-bit
+  bitwise operations: `(195).to_byte().bitwise_not()` is `60`. Bit indexes for
+  `bitwise_is_set`, `bitwise_set` and `bitwise_unset` must be in `0..7`; shift counts
+  must be non-negative, and shifting by 8 or more clears every bit.
+- **Java interop:** a `Byte` passed to a Java `int` or `long` parameter is passed as an
+  integer. Passed to a Java `byte` parameter, it is the same 8 bits read as signed, so
+  `200` arrives as `-56`.
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `to_string` | none | `String` | Base-10 text. |
+| `to_string` | `base: Integer` | `String` | Text in `base` (`2`, `8`, `10`, or `16`; any other value raises). |
+| `to_integer` | none | `Integer` | The value, `0..255`. |
+| `to_char` | none | `Char` | The character with this code point. |
+| `to_hex` | none | `String` | Two lowercase hex digits, e.g. `"0a"`. |
+| `min` | `other: Byte` | `Byte` | Smaller of two values. |
+| `max` | `other: Byte` | `Byte` | Larger of two values. |
+| `bitwise_left_shift` | `n: Integer` | `Byte` | Left-shift, dropping bits shifted out of the top. |
+| `bitwise_right_shift` | `n: Integer` | `Byte` | Right-shift. |
+| `bitwise_logical_right_shift` | `n: Integer` | `Byte` | Same as `bitwise_right_shift`; a `Byte` is never negative. |
+| `bitwise_rotate_left` | `n: Integer` | `Byte` | Rotate bits left within 8 bits. |
+| `bitwise_rotate_right` | `n: Integer` | `Byte` | Rotate bits right within 8 bits. |
+| `bitwise_is_set` | `n: Integer` | `Boolean` | True if bit `n` (`0..7`) is set. |
+| `bitwise_set` | `n: Integer` | `Byte` | Value with bit `n` set to `1`. |
+| `bitwise_unset` | `n: Integer` | `Byte` | Value with bit `n` cleared to `0`. |
+| `bitwise_and` | `x: Byte` | `Byte` | Bitwise AND. |
+| `bitwise_or` | `x: Byte` | `Byte` | Bitwise OR. |
+| `bitwise_xor` | `x: Byte` | `Byte` | Bitwise XOR. |
+| `bitwise_not` | none | `Byte` | Complement within 8 bits (`255 - self`). |
+| `equals` | `other: Any` | `Boolean` | True only for a `Byte` of the same value. |
+| `not_equals` | `other: Any` | `Boolean` | Inequality check. |
+| `compare` | `other: Any` | `Integer` | Ordering as integer result. |
+| `hash` | none | `Integer` | Hash code. |
+
+```nex
+let bytes: Array[Byte] := "é".to_bytes()
+print(bytes)                       -- [195, 169]
+let b: Byte := bytes.get(0)
+print(b.to_hex())                  -- "c3"
+print(b.bitwise_not())             -- 60
+let total: Integer := b + bytes.get(1)
+print(total)                       -- 364
+let narrowed: Byte := (total - 200).to_byte()
+print(narrowed)                    -- 164
 ```
 
 ## `Real`

@@ -97,7 +97,7 @@
                                        (bootstrap/build-comparable-base-class)
                                        (bootstrap/build-hashable-base-class)]
                                       (map bootstrap/build-builtin-scalar-class
-                                           ["String" "Integer" "Real" "Boolean" "Char"])))
+                                           ["String" "Integer" "Byte" "Real" "Boolean" "Char"])))
         env (tc/make-type-env)]
     (tc/register-builtin-methods env)
     (vals (merge interp-builtins @(:classes env)))))
@@ -127,7 +127,7 @@
   (set (keys (get bi/builtin-type-methods type-name))))
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Any" "Comparable" "Integer" "Real" "Char" "Boolean" "String"
+  #{"Any" "Comparable" "Integer" "Byte" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 
@@ -718,7 +718,9 @@
 (defn- infer-type-unary
   [env expr]
   (case (:operator expr)
-    "-" (infer-type env (:expr expr))
+    ;; -Byte promotes to Integer, matching check-unary-op.
+    "-" (let [t (infer-type env (:expr expr))]
+          (if (= "Byte" (base-type-name (resolve-type-alias t))) "Integer" t))
     "not" "Boolean"
     nil))
 
@@ -1088,8 +1090,8 @@
    "binary_file_open_read" "Any"
    "binary_file_open_write" "Any"
    "binary_file_open_append" "Any"
-   "binary_file_read_all" {:base-type "Array" :type-params ["Integer"]}
-   "binary_file_read" {:base-type "Array" :type-params ["Integer"]}
+   "binary_file_read_all" {:base-type "Array" :type-params ["Byte"]}
+   "binary_file_read" {:base-type "Array" :type-params ["Byte"]}
    "binary_file_write" "Void"
    "binary_file_position" "Integer"
    "binary_file_seek" "Void"
@@ -4707,6 +4709,15 @@
                            parent-name
                            (exact-class-jvm-type env parent-name))))))
 
+(defn- unwrap-byte-ir
+  "A Byte is a boxed java.lang.Short on the compiled backend; arithmetic and
+   comparison work on a long, so unwrap a Byte-typed operand first. Any other
+   IR passes through untouched."
+  [ir]
+  (if (= "Byte" (base-type-name (resolve-type-alias (:nex-type ir))))
+    (ir/call-runtime-node "op:byte->integer" [ir] "Integer" :long)
+    ir))
+
 (defn- lower-expr-binary
   [env expr]
   ;; An arithmetic operator whose left operand is a class that aliased it is
@@ -4732,8 +4743,8 @@
                   [_right-env right-ir] (lower-boolean-condition env (:right expr))]
               [left-ir right-ir])
 
-            [(lower-expression env (:left expr))
-             (lower-expression env (:right expr))])
+            [(unwrap-byte-ir (lower-expression env (:left expr)))
+             (unwrap-byte-ir (lower-expression env (:right expr)))])
           inferred-type (infer-type env expr)
           nex-type (if (= "Any" inferred-type)
                      (cond
@@ -4799,7 +4810,7 @@
 
 (defn- lower-expr-unary
   [env expr]
-  (let [operand-ir (lower-expression env (:expr expr))
+  (let [operand-ir (unwrap-byte-ir (lower-expression env (:expr expr)))
         nex-type (infer-type env expr)
         jvm-type (resolve-jvm-type env nex-type)]
     (ir/unary-node (get {"-" :neg
@@ -5434,7 +5445,7 @@
   [arg-nex-type ^Class param-class]
   (let [base (base-type-name arg-nex-type)]
     (cond
-      (#{"Integer" "Real"} base) (java-numeric-param-class? param-class)
+      (#{"Integer" "Byte" "Real"} base) (java-numeric-param-class? param-class)
       (= "Boolean" base) (contains? #{Boolean/TYPE Boolean} param-class)
       (= "Char" base) (contains? #{Character/TYPE Character} param-class)
       (= "String" base) (= String param-class)
@@ -5679,6 +5690,7 @@
   ^Class [base]
   (case base
     "Integer" Long
+    "Byte" Short
     "Real" Double
     "Boolean" Boolean
     "Char" Character
@@ -7076,6 +7088,11 @@
           init-expr (cond
                       (some? scalar-default)
                       (ir/const-node scalar-default nex-type jvm-type)
+
+                      ;; Byte is a boxed Short, so it has no primitive default. A
+                      ;; detachable ?Byte defaults to nil like any other ?T.
+                      (and (not detachable?) (= "Byte" (base-type-name nex-type)))
+                      (ir/const-node (short 0) nex-type jvm-type)
 
                       (and (not detachable?) (= base-type "Array"))
                       (ir/array-literal-node [] nex-type jvm-type)

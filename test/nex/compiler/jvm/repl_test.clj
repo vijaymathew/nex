@@ -2233,7 +2233,7 @@ print(xs.get(1))"))]
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx0 (repl/init-repl-context)
             output (with-out-str
-                     (repl/eval-code ctx0 "let xs: Array[Integer] := \"cat\".to_bytes()
+                     (repl/eval-code ctx0 "let xs: Array[Byte] := \"cat\".to_bytes()
 print(xs)
 print(xs.length)
 print(xs.get(1))"))]
