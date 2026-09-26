@@ -826,6 +826,72 @@
       (catch java.nio.charset.CharacterCodingException _
         (throw (ex-info "String.from_bytes: bytes are not valid UTF-8" {}))))))
 
+(defn- byte-array-check-index
+  [^bytes a index]
+  (let [i (long index)]
+    (when-not (< -1 i (alength a))
+      (throw (ex-info (str "Byte_Array index out of range: " i " (length " (alength a) ")")
+                      {:index i :length (alength a)})))
+    i))
+
+(defn- require-byte-array
+  [what a]
+  (when-not (bytes? a)
+    (throw (ex-info (str what " requires a Java byte[]") {:value a})))
+  a)
+
+(defn byte-array-make
+  "A zero-filled byte[] of SIZE elements."
+  [size]
+  (let [n (long size)]
+    (when (neg? n)
+      (throw (ex-info (str "Byte_Array size must be non-negative, got " n) {:size n})))
+    (byte-array n)))
+
+(defn byte-array-from-array
+  "A byte[] holding a copy of a Nex Array[Byte]."
+  [values]
+  (byte-array->bytes values))
+
+(defn byte-array-from-java
+  "A copy of a Java byte[]."
+  [raw]
+  (aclone ^bytes (require-byte-array "Byte_Array.from_java" raw)))
+
+(defn byte-array-length [^bytes a] (long (alength a)))
+
+(defn byte-array-get
+  "The element at INDEX as an unsigned Nex Byte (the storage is Java's signed byte)."
+  [^bytes a index]
+  (->nex-byte (bit-and (long (aget a (byte-array-check-index a index))) 0xFF)))
+
+(defn byte-array-set!
+  "Store a Nex Byte at INDEX (its 8 bits are kept; Java's byte reads them as signed)."
+  [^bytes a index value]
+  (aset-byte a (byte-array-check-index a index) (unchecked-byte (long (sized->long value))))
+  nil)
+
+(defn byte-array-slice
+  "A copy of the elements in [START, STOP)."
+  [^bytes a start stop]
+  (let [s (long start) e (long stop) n (alength a)]
+    (when-not (<= 0 s e n)
+      (throw (ex-info (str "Byte_Array.slice range " s ".." e " is outside 0.." n)
+                      {:start s :stop e :length n})))
+    (java.util.Arrays/copyOfRange a (int s) (int e))))
+
+(defn byte-array-to-array
+  "The elements as a boxed Nex Array[Byte]."
+  [^bytes a]
+  (bytes->byte-array a))
+
+(defn byte-array-equals
+  "Whether OTHER is a byte[] with the same contents."
+  [^bytes a other]
+  (and (bytes? other) (java.util.Arrays/equals a ^bytes other)))
+
+(defn byte-array-hash [^bytes a] (long (java.util.Arrays/hashCode a)))
+
 (defn binary-file-open-read [path]
   (make-binary-file-handle :read
                            (java.io.RandomAccessFile. path "r")))

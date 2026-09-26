@@ -1,0 +1,87 @@
+-- Byte_Array: a fixed-size, mutable sequence of Bytes stored in a real Java
+-- byte[] (one byte per element), unlike Array[Byte], which is a list of boxed
+-- values. Import with `intern data/Byte_Array`.
+--
+--   let buf: Byte_Array := create Byte_Array.make(4)
+--   buf.set(0, 65u8)
+--   print(buf.get(0))                 -- 65
+--
+-- The storage is Java's signed byte, but the interface is unsigned: `get`
+-- returns a Byte (0..255) and `set` keeps the low 8 bits of its Byte argument.
+-- `slice` copies, so a Byte_Array never aliases another; `to_java` is the one
+-- deliberate exception and hands out the live array for use inside `with "java"`.
+
+class Byte_Array
+  note "A fixed-size, mutable sequence of Bytes backed by a Java byte[]."
+
+create
+  -- SIZE zero-filled bytes; raises if size is negative.
+  make(size: Integer) do
+    this.handle := byte_array_make(size)
+  end
+
+  -- A copy of an Array[Byte].
+  from_array(items: Array[Byte]) do
+    this.handle := byte_array_from_array(items)
+  end
+
+  -- A copy of the elements of SOURCE in [start, stop); `slice` is this.
+  from_slice(source: Byte_Array, start: Integer, stop: Integer) do
+    this.handle := byte_array_slice(source.handle, start, stop)
+  end
+
+  -- A copy of a Java byte[] (for example one returned by a call inside
+  -- `with "java"`); raises for anything else.
+  from_java(raw: Any) do
+    this.handle := byte_array_from_java(raw)
+  end
+
+feature
+  handle: Any
+
+  length(): Integer do
+    result := byte_array_length(handle)
+  end
+
+  -- The element at INDEX; raises when INDEX is outside 0..length-1.
+  get(index: Integer): Byte do
+    result := byte_array_get(handle, index)
+  end
+
+  -- Store VALUE at INDEX; raises when INDEX is outside 0..length-1.
+  set(index: Integer, value: Byte) do
+    byte_array_set(handle, index, value)
+  end
+
+  -- A copy of the elements in [start, stop), like String.substring.
+  slice(start: Integer, stop: Integer): Byte_Array do
+    result := create Byte_Array.from_slice(this, start, stop)
+  end
+
+  -- A boxed Array[Byte] copy of the elements.
+  to_array(): Array[Byte] do
+    result := byte_array_to_array(handle)
+  end
+
+  -- The underlying Java byte[], shared rather than copied: writes through it
+  -- are visible here. Meant for `with "java"` blocks.
+  to_java(): Any do
+    result := handle
+  end
+
+  -- Two Byte_Arrays are equal when they hold the same bytes.
+  equals(other: Any): Boolean do
+    result := false
+    if convert other to o: Byte_Array then
+      result := byte_array_equals(handle, o.handle)
+    end
+  end
+
+  hash(): Integer do
+    result := byte_array_hash(handle)
+  end
+
+  to_string(): String do
+    result := "Byte_Array(" + to_array().to_string() + ")"
+  end
+end

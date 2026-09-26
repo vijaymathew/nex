@@ -1099,6 +1099,16 @@
    "binary_file_position" "Integer"
    "binary_file_seek" "Void"
    "binary_file_close" "Void"
+   "byte_array_make" "Any"
+   "byte_array_from_array" "Any"
+   "byte_array_from_java" "Any"
+   "byte_array_length" "Integer"
+   "byte_array_get" "Byte"
+   "byte_array_set" "Void"
+   "byte_array_slice" "Any"
+   "byte_array_to_array" {:base-type "Array" :type-params ["Byte"]}
+   "byte_array_equals" "Boolean"
+   "byte_array_hash" "Integer"
    ;; http client / json
    "json_parse" "Any"
    "json_stringify" "String"

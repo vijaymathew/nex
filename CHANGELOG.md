@@ -15,6 +15,13 @@
   `to_bytes()` or a binary read as `Array[Integer]` must use `Array[Byte]`
   (or drop the annotation), and `Binary_File.write` no longer accepts an
   integer-literal array such as `[65, 66]`; pass `"AB".to_bytes()`.
+- **New: `data/Byte_Array`**, a fixed-size mutable byte sequence stored in a
+  real Java `byte[]` (`intern data/Byte_Array`). `make`, `from_array`,
+  `from_slice`, `from_java`, `length`, `get`, `set`, `slice`, `to_array`,
+  `equals`/`hash` by contents, and `to_java`, which hands the live `byte[]` to
+  `with "java"` code (no `ByteArrayOutputStream` bridge needed for APIs like
+  `MessageDigest.digest`). The interface is unsigned (`Byte`, `0..255`) over
+  Java's signed storage.
 - **New: `Integer16` and `Integer32`**, signed fixed-width integers
   (`-32768..32767` and `-2^31..2^31-1`), modelled on `Byte`: distinct types
   with no implicit conversion to or from `Integer` or each other, `i16` / `i32`

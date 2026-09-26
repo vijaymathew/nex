@@ -3563,6 +3563,18 @@
    "binary_file_seek"        check-builtin-binary-file-seek
    "binary_file_close"       (builtin-checked-args "binary_file_close" 1 "Void")
 
+   ;; Byte_Array (lib/data/byte_array.nex): a real Java byte[] behind an opaque handle
+   "byte_array_make" (builtin-checked-args "byte_array_make" 1 "Any")
+   "byte_array_from_array" (builtin-checked-args "byte_array_from_array" 1 "Any")
+   "byte_array_from_java" (builtin-checked-args "byte_array_from_java" 1 "Any")
+   "byte_array_length" (builtin-checked-args "byte_array_length" 1 "Integer")
+   "byte_array_get" (builtin-checked-args "byte_array_get" 2 "Byte")
+   "byte_array_set" (builtin-checked-args "byte_array_set" 3 "Void")
+   "byte_array_slice" (builtin-checked-args "byte_array_slice" 3 "Any")
+   "byte_array_to_array" (builtin-checked-args "byte_array_to_array" 1 {:base-type "Array" :type-params ["Byte"]})
+   "byte_array_equals" (builtin-checked-args "byte_array_equals" 2 "Boolean")
+   "byte_array_hash" (builtin-checked-args "byte_array_hash" 1 "Integer")
+
    ;; http client / json
    "http_get"  check-builtin-http-get
    "http_post" check-builtin-http-post

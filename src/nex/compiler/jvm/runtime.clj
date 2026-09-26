@@ -1976,6 +1976,46 @@
   [handle]
   (rt/binary-file-close handle))
 
+(defn builtin-byte-array-make
+  [a]
+  (rt/byte-array-make a))
+
+(defn builtin-byte-array-from-array
+  [a]
+  (rt/byte-array-from-array a))
+
+(defn builtin-byte-array-from-java
+  [a]
+  (rt/byte-array-from-java a))
+
+(defn builtin-byte-array-length
+  [a]
+  (rt/byte-array-length a))
+
+(defn builtin-byte-array-get
+  [a b]
+  (rt/byte-array-get a b))
+
+(defn builtin-byte-array-set
+  [a b c]
+  (rt/byte-array-set! a b c))
+
+(defn builtin-byte-array-slice
+  [a b c]
+  (rt/byte-array-slice a b c))
+
+(defn builtin-byte-array-to-array
+  [a]
+  (rt/byte-array-to-array a))
+
+(defn builtin-byte-array-equals
+  [a b]
+  (rt/byte-array-equals a b))
+
+(defn builtin-byte-array-hash
+  [a]
+  (rt/byte-array-hash a))
+
 (def-builtin-method-wrapper builtin-method-any-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-any-equals "equals")
 (def-builtin-method-wrapper builtin-method-any-clone "clone")
