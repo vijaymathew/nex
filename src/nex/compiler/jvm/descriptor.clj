@@ -43,6 +43,10 @@
       ;; Integer is 64-bit (Int64), matching the interpreter and the numeric-tower
       ;; model (NUMERIC_TOWER.md).
       "Integer" :long
+      ;; A Byte is a boxed java.lang.Short (0..255) — an object type, not a
+      ;; primitive, so its runtime tag survives collections and `Any`. Arithmetic
+      ;; on it unwraps to a long first (see lower-expr-binary).
+      "Byte" (ir/object-jvm-type "java/lang/Short")
       "Real" :double
       "Boolean" :boolean
       "Char" :char

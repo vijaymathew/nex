@@ -390,6 +390,40 @@
   [v]
   (if (string? v) (Long/parseLong v) (long v)))
 
+(defn nex-byte?
+  "True when v is a Nex Byte. A Byte is a boxed java.lang.Short holding 0..255:
+   Short is otherwise unused by Nex, so the box type is a runtime tag that lets
+   a value be told apart from an Integer (a Long) while still behaving as an
+   integer in host arithmetic and comparison. (java.lang.Byte is signed and would
+   need masking everywhere.)"
+  [v]
+  (instance? Short v))
+
+(defn ->nex-byte
+  "Coerce an integer in 0..255 to a Nex Byte; raises when out of range."
+  [v]
+  (let [n (long v)]
+    (when-not (<= 0 n 255)
+      (throw (ex-info (str "Byte value must be in range 0..255, got " n) {:value n})))
+    (short n)))
+
+(defn java->nex
+  "Normalize a value coming back from a Java call. A Java `short` is a
+   java.lang.Short, which Nex reserves as the tag for Byte (see nex-byte?); the
+   typechecker types a Java short as Integer, so hand it back as the Long an
+   Integer is."
+  [v]
+  (if (instance? Short v) (long v) v))
+
+(defn nex->java
+  "Normalize an argument crossing into a reflective Java call. A Nex Byte is a
+   java.lang.Short, which clojure.lang.Reflector will not match to an `int` or
+   `long` parameter; pass it as the Long an Integer is, so a Byte can go
+   wherever an Integer can. (The compile-time-resolved call path coerces to the
+   exact parameter type itself, including Java's signed `byte`.)"
+  [v]
+  (if (instance? Short v) (long v) v))
+
 (defn nex-int->number
   "Convert a Nex Integer to a plain host number — for JS array indices, char
    codepoints, and other positions that require a 32/53-bit number."
@@ -470,7 +504,9 @@
   "Numeric equality with the JVM's kind-sensitive rule: 5 and 5.0 are not equal."
   [x y]
   (cond
-    (and (nex-integer? x) (nex-integer? y)) (= x y)
+    ;; A Byte is never equal to an Integer of the same value: they are distinct
+    ;; types, and `=` rejects mixing them statically (Byte.equals says the same).
+    (and (nex-integer? x) (nex-integer? y)) (and (= (nex-byte? x) (nex-byte? y)) (= x y))
     (and (number? x) (number? y)) (== x y)
     :else false))
 
@@ -697,14 +733,16 @@
     (when-let [w (:writer handle)] (.close ^java.io.BufferedWriter w)))
   nil)
 
-(defn- bytes->int-array [^bytes bs]
-  (nex-array-from (mapv #(bit-and (int %) 0xFF) bs)))
+(defn bytes->byte-array
+  "A host byte[] as a Nex Array[Byte] (each element unsigned, 0..255)."
+  [^bytes bs]
+  (nex-array-from (mapv #(->nex-byte (bit-and (int %) 0xFF)) bs)))
 
-(defn- int-array->bytes [values]
+(defn- byte-array->bytes [values]
   (byte-array (map (fn [v]
                      (when (or (neg? v) (> v 255))
                        (throw (ex-info "Binary byte values must be in range 0..255" {:value v})))
-                     (byte v))
+                     (unchecked-byte v))
                    values)))
 
 (defn- make-binary-file-handle
@@ -713,6 +751,19 @@
    :mode mode
    :index (atom (.getFilePointer raf))
    :raf raf})
+
+(defn string-from-bytes
+  "Decode a Nex Array[Byte] as UTF-8 text. Malformed or unmappable input raises
+   rather than being replaced with U+FFFD, so a round trip through to_bytes is
+   exact and bad data is never silently altered."
+  [values]
+  (let [decoder (doto (.newDecoder java.nio.charset.StandardCharsets/UTF_8)
+                  (.onMalformedInput java.nio.charset.CodingErrorAction/REPORT)
+                  (.onUnmappableCharacter java.nio.charset.CodingErrorAction/REPORT))]
+    (try
+      (str (.decode decoder (java.nio.ByteBuffer/wrap ^bytes (byte-array->bytes values))))
+      (catch java.nio.charset.CharacterCodingException _
+        (throw (ex-info "String.from_bytes: bytes are not valid UTF-8" {}))))))
 
 (defn binary-file-open-read [path]
   (make-binary-file-handle :read
@@ -738,7 +789,7 @@
     (.seek raf 0)
     (.readFully raf data)
     (.seek raf pos)
-    (bytes->int-array data)))
+    (bytes->byte-array data)))
 
 (defn binary-file-read [handle count]
   (let [^java.io.RandomAccessFile raf (:raf handle)
@@ -750,12 +801,12 @@
     (when (pos? bytes-to-read)
       (.readFully raf out))
     (reset! (:index handle) (+ idx bytes-to-read))
-    (bytes->int-array out)))
+    (bytes->byte-array out)))
 
 (defn binary-file-write [handle values]
   (let [^java.io.RandomAccessFile raf (:raf handle)
         idx @(:index handle)
-        data ^bytes (int-array->bytes values)]
+        data ^bytes (byte-array->bytes values)]
     (.seek raf idx)
     (.write raf data)
     (reset! (:index handle) (+ idx (alength data))))

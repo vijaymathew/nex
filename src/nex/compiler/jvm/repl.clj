@@ -135,7 +135,7 @@
 (declare class-def-in-ctx)
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Any" "Comparable" "Integer" "Real" "Char" "Boolean" "String"
+  #{"Any" "Comparable" "Integer" "Byte" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 

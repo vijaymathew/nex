@@ -461,7 +461,7 @@
 ;;
 
 (def builtin-types
-  #{"Integer" "Real" "Char" "Boolean" "String"
+  #{"Integer" "Byte" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
     "Cursor"})
@@ -748,7 +748,7 @@
                (map? n) (:base-type n)
                :else nil)]
     (and (string? base)
-         (not (#{"Integer" "Real" "Char" "Boolean"} base)))))
+         (not (#{"Integer" "Byte" "Real" "Char" "Boolean"} base)))))
 
 (defn- auto-initializable-collection-type?
   "Whether type is a builtin collection type (Array/Map/Set) that always has
@@ -1220,6 +1220,7 @@
   [type]
   (let [t (normalize-type type)]
     (or (= t "Integer")
+        (= t "Byte")
         (= t "Real"))))
 
 (defn sortable-array-element-type?
@@ -1304,9 +1305,10 @@
          [{:name generic-name :constraint (get constraint-map generic-name)}])))))
 
 (defn integral-type?
-  "Check if a type is an integral numeric type."
+  "Check if a type is an integral numeric type. Byte counts: arithmetic on it
+   promotes to Integer, so `Byte / Byte` is integral division."
   [type]
-  (= (normalize-type type) "Integer"))
+  (contains? #{"Integer" "Byte"} (normalize-type type)))
 
 (defn division-result-type
   "Infer the result type of division.
@@ -1318,7 +1320,8 @@
 
 (defn numeric-result-type
   "Infer a common numeric type for non-division arithmetic.
-   Real wins over the integral types."
+   Real wins over the integral types; Byte operands promote to Integer, so the
+   result of arithmetic is never a Byte (narrow it back with `to_byte`)."
   [left-type right-type]
   (let [left (normalize-type left-type)
         right (normalize-type right-type)]
@@ -2068,7 +2071,8 @@
         operand-type (check-expression env operand-node)]
     (case operator
       "-" (if (is-numeric-type? operand-type)
-            operand-type
+            ;; -Byte promotes to Integer (a Byte is never negative).
+            (if (= (normalize-type operand-type) "Byte") "Integer" operand-type)
             (throw (ex-info "Unary minus requires numeric operand"
                             {:error (type-error
                                      (str "Unary minus requires numeric operand, got "
@@ -2450,11 +2454,11 @@
   (let [value-type (check-expression env value)
         target-type (normalize-type target-type)
         base-name (fn [t] (if (map? t) (:base-type t) t))
-        numeric? #{"Integer" "Real"}
+        numeric? #{"Integer" "Byte" "Real"}
         value-base (base-name value-type)
         target-base (base-name target-type)
-        ;; convert never changes numeric representation: Integer and Real are
-        ;; unrelated classes (spec §4.3), so a statically numeric-to-numeric
+        ;; convert never changes numeric representation: Integer, Byte and Real
+        ;; are unrelated classes (spec §4.3), so a statically numeric-to-numeric
         ;; convert would always yield false at runtime. Reject it here.
         _ (when (and (numeric? value-base)
                      (numeric? target-base)
@@ -2463,8 +2467,9 @@
                             {:error (type-error
                                      (str "convert cannot change numeric representation ("
                                           (display-type value-type) " to " (display-type target-type)
-                                          "); an Integer widens implicitly where a Real is"
-                                          " expected, and Real.round() yields an Integer"))})))
+                                          "); use Integer.to_byte() / Byte.to_integer() /"
+                                          " Integer.to_real() to change it, and Real.round()"
+                                          " yields an Integer"))})))
         compatible? (or (types-compatible? env value-type target-type)
                         (types-compatible? env target-type value-type)
                         (declared-generic-param? env value-type)
@@ -3404,7 +3409,7 @@
                       {:error (type-error
                                (str "binary_file_read second argument must be Integer, got "
                                     (display-type count-type)))}))))
-  {:base-type "Array" :type-params ["Integer"]})
+  {:base-type "Array" :type-params ["Byte"]})
 
 (defn- check-builtin-binary-file-write [env args]
   (assert-builtin-arity! "binary_file_write" 2 args)
@@ -3412,10 +3417,10 @@
   (let [bytes-type (normalize-type (check-expression env (second args)))]
     (when-not (and (map? bytes-type)
                    (= (:base-type bytes-type) "Array")
-                   (= (first (or (:type-params bytes-type) (:type-args bytes-type))) "Integer"))
-      (throw (ex-info "binary_file_write second argument must be Array[Integer]"
+                   (= (first (or (:type-params bytes-type) (:type-args bytes-type))) "Byte"))
+      (throw (ex-info "binary_file_write second argument must be Array[Byte]"
                       {:error (type-error
-                               (str "binary_file_write second argument must be Array[Integer], got "
+                               (str "binary_file_write second argument must be Array[Byte], got "
                                     (display-type bytes-type)))}))))
   "Void")
 
@@ -3530,7 +3535,7 @@
    "binary_file_open_write"  (builtin-single-arg "binary_file_open_write" "String" "Any")
    "binary_file_open_append" (builtin-single-arg "binary_file_open_append" "String" "Any")
    "binary_file_read_all"    (builtin-checked-args "binary_file_read_all" 1
-                                                   {:base-type "Array" :type-params ["Integer"]})
+                                                   {:base-type "Array" :type-params ["Byte"]})
    "binary_file_read"        check-builtin-binary-file-read
    "binary_file_write"       check-builtin-binary-file-write
    "binary_file_position"    (builtin-checked-args "binary_file_position" 1 "Integer")
@@ -4037,6 +4042,29 @@
     {:base-type "Channel" :type-args generic-args}
     "Channel"))
 
+(defn- check-create-string
+  "`create String.from_bytes(bytes)`: decode an Array[Byte] as UTF-8."
+  [env {:keys [constructor args]}]
+  (when-not (= constructor "from_bytes")
+    (throw (ex-info "Constructor not found: String"
+                    {:error (type-error
+                             (if constructor
+                               (str "Constructor not found: String." constructor)
+                               "create String needs a constructor: String.from_bytes(bytes)"))})))
+  (when-not (= 1 (count args))
+    (throw (ex-info "String.from_bytes expects 1 argument"
+                    {:error (type-error "String.from_bytes expects exactly 1 Array[Byte] argument")})))
+  (let [arg-type (check-expression env (first args))
+        bytes-type {:base-type "Array" :type-params ["Byte"]}]
+    (when (any-into-concrete-without-convert? env bytes-type arg-type)
+      (throw-any-narrowing-error! "the String.from_bytes argument" bytes-type))
+    (when-not (types-compatible? env arg-type bytes-type)
+      (throw (ex-info "String.from_bytes requires Array[Byte]"
+                      {:error (type-error
+                               (str "String.from_bytes expects Array[Byte], got "
+                                    (display-type arg-type)))}))))
+  "String")
+
 (def ^:private check-create-builtin-dispatch
   "class-name -> (fn [env expr] ...): the built-in-type half of
    `check-create`. A class name with no entry here falls through to
@@ -4050,7 +4078,8 @@
    "Atomic_Integer64" (check-create-single-arg-atomic "Atomic_Integer64" "Integer")
    "Atomic_Boolean"   (check-create-single-arg-atomic "Atomic_Boolean" "Boolean")
    "Atomic_Reference" check-create-atomic-reference
-   "Channel"          check-create-channel})
+   "Channel"          check-create-channel
+   "String"           check-create-string})
 
 (defn- check-create-user-class
   [env {:keys [class-name generic-args constructor args]}]
@@ -6584,7 +6613,7 @@
 ;; Built-in scalar classes implement Comparable + Hashable
 (defn- register-scalar-classes!
   [env]
-  (doseq [scalar ["String" "Integer" "Real" "Boolean" "Char"]]
+  (doseq [scalar ["String" "Integer" "Byte" "Real" "Boolean" "Char"]]
     (env-add-class env scalar {:name scalar
                                :deferred? false
                                :generic-params nil
@@ -6600,6 +6629,10 @@
 (defn- register-integer-methods!
   [env]
   (register-builtin-type-signatures! env "Integer"))
+
+(defn- register-byte-methods!
+  [env]
+  (register-builtin-type-signatures! env "Byte"))
 
 (defn- register-real-methods!
   [env]
@@ -6727,6 +6760,7 @@
   (register-hashable-protocol! env)
   (register-scalar-classes! env)
   (register-integer-methods! env)
+  (register-byte-methods! env)
   (register-real-methods! env)
   (register-char-methods! env)
   (register-string-methods! env)

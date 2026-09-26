@@ -234,6 +234,10 @@
   []
   (rt/nex-array))
 
+(defn create-string-from-bytes
+  [bytes]
+  (rt/string-from-bytes bytes))
+
 (defn create-array-filled
   [size value]
   (when-not (integer? size)
@@ -292,12 +296,12 @@
   ;; than rebuilding an interpreter context just to read the imports. This also
   ;; resolves fully-qualified and java.lang.* names, not only imported ones.
   (let [^Class klass (resolve-java-host-class state class-name)]
-    (clojure.lang.Reflector/invokeConstructor klass (to-array args))))
+    (clojure.lang.Reflector/invokeConstructor klass (to-array (map rt/nex->java args)))))
 
 (defn java-call-static
   [state class-name method-name args]
   (let [^Class klass (resolve-java-host-class state class-name)]
-    (clojure.lang.Reflector/invokeStaticMethod klass method-name (to-array args))))
+    (rt/java->nex (clojure.lang.Reflector/invokeStaticMethod klass method-name (to-array (map rt/nex->java args))))))
 
 (defn java-call-method
   [state method-name target args]
@@ -310,7 +314,7 @@
                          (throw (ex-info (str "Undefined Java static field: " field-name)
                                          {:field field-name
                                           :class (.getName klass)})))]
-    (.get field nil)))
+    (rt/java->nex (.get field nil))))
 
 (defn java-get-field
   [field-name target]
@@ -318,7 +322,7 @@
                          (throw (ex-info (str "Undefined Java field: " field-name)
                                          {:field field-name
                                           :class (.getName (.getClass target))})))]
-    (.get field target)))
+    (rt/java->nex (.get field target))))
 
 (defn java-set-field!
   [field-name target value]
@@ -397,10 +401,15 @@
 
     (or (= param-class Byte/TYPE) (= param-class Byte))
     (let [l (long arg)]
-      (when (or (> l Byte/MAX_VALUE) (< l Byte/MIN_VALUE))
-        (throw (ex-info (str "Value " l " does not fit in a Java byte parameter")
-                        {:value l :target-type "byte"})))
-      (byte l))
+      (if (rt/nex-byte? arg)
+        ;; A Nex Byte is unsigned (0..255); Java's byte is the same 8 bits read
+        ;; as signed, so 200 crosses over as -56 rather than being rejected.
+        (unchecked-byte l)
+        (do
+          (when (or (> l Byte/MAX_VALUE) (< l Byte/MIN_VALUE))
+            (throw (ex-info (str "Value " l " does not fit in a Java byte parameter")
+                            {:value l :target-type "byte"})))
+          (byte l))))
 
     (or (= param-class Long/TYPE) (= param-class Long))
     (long arg)
@@ -421,7 +430,7 @@
         ^java.lang.reflect.Method m (.getMethod owner ^String method-name
                                                 (into-array Class param-classes))
         coerced (mapv coerce-arg-for-resolved-param param-classes args)]
-    (.invoke m target (to-array coerced))))
+    (rt/java->nex (.invoke m target (to-array coerced)))))
 
 (defn java-call-static-resolved
   [_state class-name method-name param-classes-joined args]
@@ -430,7 +439,7 @@
         ^java.lang.reflect.Method m (.getMethod owner ^String method-name
                                                 (into-array Class param-classes))
         coerced (mapv coerce-arg-for-resolved-param param-classes args)]
-    (.invoke m nil (to-array coerced))))
+    (rt/java->nex (.invoke m nil (to-array coerced)))))
 
 (defn java-create-object-resolved
   [_state class-name param-classes-joined args]
@@ -486,7 +495,7 @@
                                                                    fixed-classes component-class)))
         coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
         varargs-array (build-varargs-array component-class (drop fixed-count args))]
-    (.invoke m target (to-array (conj (vec coerced-fixed) varargs-array)))))
+    (rt/java->nex (.invoke m target (to-array (conj (vec coerced-fixed) varargs-array))))))
 
 (defn java-call-static-resolved-varargs
   [_state class-name method-name fixed-classes-joined component-class-name args]
@@ -499,7 +508,7 @@
                                                                    fixed-classes component-class)))
         coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
         varargs-array (build-varargs-array component-class (drop fixed-count args))]
-    (.invoke m nil (to-array (conj (vec coerced-fixed) varargs-array)))))
+    (rt/java->nex (.invoke m nil (to-array (conj (vec coerced-fixed) varargs-array))))))
 
 (defn java-create-object-resolved-varargs
   [_state class-name fixed-classes-joined component-class-name args]
@@ -1288,7 +1297,7 @@
                         (bootstrap/build-comparable-base-class)
                         (bootstrap/build-hashable-base-class)]
                        (map bootstrap/build-builtin-scalar-class
-                            ["String" "Integer" "Real" "Boolean" "Char"])))))
+                            ["String" "Integer" "Byte" "Real" "Boolean" "Char"])))))
 
 (defn- compiled-is-parent?
   [state class-name parent-name]
@@ -1526,6 +1535,11 @@
 (defn pow-long
   [a b]
   (long (rt/nex-int-pow (long a) (long b))))
+
+(defn byte->integer
+  "Unwrap a Nex Byte (a boxed java.lang.Short) to the long arithmetic works on."
+  [b]
+  (long b))
 
 (defn pow-double
   [a b]
@@ -1988,6 +2002,30 @@
 (def-builtin-method-wrapper builtin-method-integer-greater-than "greater_than")
 (def-builtin-method-wrapper builtin-method-integer-greater-than-or-equal "greater_than_or_equal")
 (def-builtin-method-wrapper builtin-method-integer-to-char "to_char")
+(def-builtin-method-wrapper builtin-method-integer-to-byte "to_byte")
+
+(def-builtin-method-wrapper builtin-method-byte-to-string "to_string")
+(def-builtin-method-wrapper builtin-method-byte-to-integer "to_integer")
+(def-builtin-method-wrapper builtin-method-byte-to-char "to_char")
+(def-builtin-method-wrapper builtin-method-byte-to-hex "to_hex")
+(def-builtin-method-wrapper builtin-method-byte-min "min")
+(def-builtin-method-wrapper builtin-method-byte-max "max")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-left-shift "bitwise_left_shift")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-right-shift "bitwise_right_shift")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-logical-right-shift "bitwise_logical_right_shift")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-rotate-left "bitwise_rotate_left")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-rotate-right "bitwise_rotate_right")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-is-set "bitwise_is_set")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-set "bitwise_set")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-unset "bitwise_unset")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-and "bitwise_and")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-or "bitwise_or")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-xor "bitwise_xor")
+(def-builtin-method-wrapper builtin-method-byte-bitwise-not "bitwise_not")
+(def-builtin-method-wrapper builtin-method-byte-equals "equals")
+(def-builtin-method-wrapper builtin-method-byte-not-equals "not_equals")
+(def-builtin-method-wrapper builtin-method-byte-compare "compare")
+(def-builtin-method-wrapper builtin-method-byte-hash "hash")
 
 (def-builtin-method-wrapper builtin-method-real-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-real-to-integer "to_integer")
@@ -2540,6 +2578,9 @@
    "create-array-filled"
    (fn [_state args] (create-array-filled (first args) (second args)))
 
+   "create-string-from-bytes"
+   (fn [_state args] (create-string-from-bytes (first args)))
+
    "create-min-heap-empty"
    (fn [_state _args] (create-min-heap-empty))
 
@@ -2638,6 +2679,9 @@
 
    "op:pow-double"
    (fn [_state args] (Math/pow (double (first args)) (double (second args))))
+
+   "op:byte->integer"
+   (fn [_state args] (byte->integer (first args)))
 
    ;; The Any protocol on a receiver whose static type declares no such method.
    ;; Kept apart from the "method:" helper below: that one routes to

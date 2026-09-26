@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **New: the `Byte` scalar type**, an unsigned 8-bit integer (`0..255`).
+  `String.to_bytes()` now returns `Array[Byte]` instead of `Array[Integer]`,
+  and `Binary_File` (`read`, `read_all`, `write`) and the `binary_file_*`
+  builtins use `Array[Byte]` too. `Byte` is a distinct type with no implicit
+  conversion to or from `Integer` (the same relationship `Integer` has with
+  `Real`) and no literal: make one with `n.to_byte()` (raises unless
+  `0 <= n <= 255`), read one from an `Array[Byte]`, and get an `Integer` back
+  with `b.to_integer()`. Arithmetic on a `Byte` promotes to `Integer`;
+  bitwise methods work on 8 bits and return a `Byte`. See
+  `docs/ref/scalar-types.md`. **Migration:** code that annotated the result of
+  `to_bytes()` or a binary read as `Array[Integer]` must use `Array[Byte]`
+  (or drop the annotation), and `Binary_File.write` no longer accepts an
+  integer-literal array such as `[65, 66]`; pass `"AB".to_bytes()`.
+- **New: `create String.from_bytes(bytes)`** decodes an `Array[Byte]` as UTF-8,
+  the inverse of `to_bytes()`. Invalid UTF-8 raises instead of being replaced.
+  `create` now accepts the `String` keyword as a class name for this.
+- **Fixed:** `binary_file_write` rejected bytes above 127 (`200` raised
+  "Value out of range for byte").
+
 ## 0.5.1 - 2026-09-25
 
 - **New: `rescue` on loops and `spawn`.** The `from ... until`, `repeat`,

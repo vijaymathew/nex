@@ -491,7 +491,7 @@
       (register-class ctx (build-cursor-base-class))
       (register-class ctx (build-comparable-base-class))
       (register-class ctx (build-hashable-base-class))
-      (doseq [scalar ["String" "Integer" "Real" "Boolean" "Char"]]
+      (doseq [scalar ["String" "Integer" "Byte" "Real" "Boolean" "Char"]]
         (register-class ctx (build-builtin-scalar-class scalar)))
       ctx)))
 
@@ -1526,6 +1526,7 @@
     (string? field-type)
     (case field-type
       "Integer" (->nex-integer 0)
+      "Byte" (rt/->nex-byte 0)
       "Real" 0.0
       "Char" \0
       "Boolean" false
@@ -2317,9 +2318,10 @@
               ;; Reflector special-cases the literal name "new" as
               ;; constructor invocation — so arguments need the same
               ;; Java-interface Proxy-wrapping java-create-object applies.
-      (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values)))
+      (rt/java->nex
+       (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values))))
       (let [^java.lang.reflect.Field field (.getField klass method)]
-        (.get field nil)))))
+        (rt/java->nex (.get field nil))))))
 
 (defn- read-back-method-fields
   "Collect the object's fields back out of METHOD-ENV after the body ran. A
@@ -3463,6 +3465,17 @@
       :else (throw (ex-info (str "Constructor not found: Set." constructor)
                             {:class-name "Set" :constructor constructor})))))
 
+(defn- create-string-builtin
+  [ctx constructor args]
+  (let [arg-values (mapv #(eval-node ctx %) args)]
+    (when-not (= constructor "from_bytes")
+      (throw (ex-info (str "Constructor not found: String." constructor)
+                      {:class-name "String" :constructor constructor})))
+    (when-not (= 1 (count arg-values))
+      (throw (ex-info "String.from_bytes expects 1 argument"
+                      {:class-name "String" :constructor constructor})))
+    (rt/string-from-bytes (first arg-values))))
+
 (def ^:private create-builtin-dispatch
   "class-name -> (fn [ctx constructor args] ...): the built-in-type half of
    `eval-node :create`. A class name with no entry here is a user-defined
@@ -3477,6 +3490,7 @@
    "Atomic_Boolean"   (create-single-arg-atomic "Atomic_Boolean" make-atomic-boolean)
    "Atomic_Reference" (create-single-arg-atomic "Atomic_Reference" make-atomic-reference)
    "Channel"          create-channel-builtin
+   "String"           create-string-builtin
    "Set"              create-set-builtin})
 
 (defn- resolve-effective-class-name

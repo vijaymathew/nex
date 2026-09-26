@@ -213,7 +213,9 @@ reader.close()
 
 `Binary_File` is the byte-oriented file wrapper.
 
-Bytes are represented as `Array[Integer]`, with each element required to be in `0..255`.
+Bytes are represented as `Array[Byte]`; a `Byte` is an unsigned value in `0..255`.
+`String.to_bytes()` produces one, and there is no `Byte` literal, so build bytes with
+`to_bytes()` or `Integer.to_byte()`.
 The file maintains an explicit cursor. `seek(offset)` sets the absolute byte position,
 and `position()` returns the current cursor offset.
 
@@ -224,11 +226,11 @@ create
   open_write(path: Path)
   open_append(path: Path)
 feature
-  read_all(): Array[Integer]
-  read(count: Integer): Array[Integer]
+  read_all(): Array[Byte]
+  read(count: Integer): Array[Byte]
   position(): Integer
   seek(offset: Integer)
-  write(bytes: Array[Integer])
+  write(bytes: Array[Byte])
   close()
   to_string(): String
 end
@@ -242,9 +244,9 @@ intern io/Binary_File
 
 let path: Path := create Path.make("data.bin")
 let writer: Binary_File := create Binary_File.open_write(path)
-writer.write([65, 66, 67])
+writer.write("ABC".to_bytes())
 writer.seek(1)
-writer.write([90])
+writer.write("Z".to_bytes())
 writer.close()
 
 let reader: Binary_File := create Binary_File.open_read(path)

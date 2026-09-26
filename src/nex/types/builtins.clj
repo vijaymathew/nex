@@ -596,11 +596,9 @@
      (nex-array-from
       (mapv #(get s %) (range (count s)))))
    "to_bytes"    ^{:signatures [{:params []
-                                 :return-type {:base-type "Array" :type-params ["Integer"]}}]}
+                                 :return-type {:base-type "Array" :type-params ["Byte"]}}]}
    (fn [s & _]
-     (nex-array-from
-      (mapv #(->nex-integer (bit-and (int %) 0xFF))
-            (.getBytes ^String s StandardCharsets/UTF_8))))
+     (rt/bytes->byte-array (.getBytes ^String s StandardCharsets/UTF_8)))
    "split"       ^{:signatures [{:params [{:name "delimiter" :type "String"}]
                                  :return-type {:base-type "Array" :type-params ["String"]}}]}
    (fn [s delim & _] (nex-array-from (str/split s (re-pattern delim))))
@@ -730,8 +728,92 @@
    (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
    "to_char"           ^{:signatures [{:params [] :return-type "Char"}]}
    (fn [n & _] (char (int n)))
+   "to_byte"           ^{:signatures [{:params [] :return-type "Byte"}]}
+   (fn [n & _] (rt/->nex-byte n))
    "compare"           (fn [n other & _] (nex-compare n other))
    "hash"              (fn [n & _] (hash n))})
+
+;; Byte is an unsigned 8-bit value (0..255) boxed as a java.lang.Short (see
+;; rt/nex-byte?). Bitwise methods work on 8 bits and return a Byte, unlike
+;; Integer's 32-bit bitwise semantics. Arithmetic operators are not methods
+;; here: `+ - * / % ^` on a Byte promote to Integer, like Integer/Real mixing.
+(defn- byte-bits [b] (bit-and (long b) 0xFF))
+
+(defn- byte-shift-count [n]
+  (let [n (long n)]
+    (when (neg? n)
+      (throw (ex-info (str "Byte shift count must be non-negative, got " n) {:count n})))
+    ;; Anything >= 8 already shifts every bit out; clamping also keeps the host's
+    ;; own shift (which masks the count mod 64) from wrapping a huge count.
+    (min n 8)))
+
+(defn- byte-bit-index [n]
+  (let [n (long n)]
+    (when-not (<= 0 n 7)
+      (throw (ex-info (str "Byte bit index must be in range 0..7, got " n) {:index n})))
+    n))
+
+(defn- byte-result [n] (rt/->nex-byte (bit-and (long n) 0xFF)))
+
+(def byte-type-methods
+  {"to_string"         ^{:signatures [{:params [] :return-type "String"}
+                                      {:params [{:name "base" :type "Integer"}] :return-type "String"}]}
+   (fn [b & [base]]
+     (if (some? base)
+       (if (contains? #{2 8 10 16} base)
+         (Long/toString (byte-bits b) (int base))
+         (throw (ex-info (str "Byte.to_string: base must be 2, 8, 10, or 16, got " base)
+                         {:base base})))
+       (str (byte-bits b))))
+   "to_integer"        ^{:signatures [{:params [] :return-type "Integer"}]}
+   (fn [b & _] (->nex-integer (byte-bits b)))
+   "to_char"           ^{:signatures [{:params [] :return-type "Char"}]}
+   (fn [b & _] (char (byte-bits b)))
+   "to_hex"            ^{:signatures [{:params [] :return-type "String"}]}
+   (fn [b & _] (format "%02x" (byte-bits b)))
+   "min"               ^{:signatures [{:params [{:name "other" :type "Byte"}] :return-type "Byte"}]}
+   (fn [b other & _] (byte-result (min (byte-bits b) (byte-bits other))))
+   "max"               ^{:signatures [{:params [{:name "other" :type "Byte"}] :return-type "Byte"}]}
+   (fn [b other & _] (byte-result (max (byte-bits b) (byte-bits other))))
+   "bitwise_left_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Byte"}]}
+   (fn [b n & _] (byte-result (bit-shift-left (byte-bits b) (byte-shift-count n))))
+   ;; A Byte is never negative, so the arithmetic and logical right shifts agree.
+   "bitwise_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Byte"}]}
+   (fn [b n & _] (byte-result (bit-shift-right (byte-bits b) (byte-shift-count n))))
+   "bitwise_logical_right_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Byte"}]}
+   (fn [b n & _] (byte-result (bit-shift-right (byte-bits b) (byte-shift-count n))))
+   "bitwise_rotate_left" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Byte"}]}
+   (fn [b n & _]
+     (let [v (byte-bits b)
+           k (mod (long n) 8)]
+       (byte-result (bit-or (bit-shift-left v k) (bit-shift-right v (- 8 k))))))
+   "bitwise_rotate_right" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Byte"}]}
+   (fn [b n & _]
+     (let [v (byte-bits b)
+           k (mod (long n) 8)]
+       (byte-result (bit-or (bit-shift-right v k) (bit-shift-left v (- 8 k))))))
+   "bitwise_is_set"    ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Boolean"}]}
+   (fn [b n & _] (not (zero? (bit-and (byte-bits b) (bit-shift-left 1 (byte-bit-index n))))))
+   "bitwise_set"       ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Byte"}]}
+   (fn [b n & _] (byte-result (bit-or (byte-bits b) (bit-shift-left 1 (byte-bit-index n)))))
+   "bitwise_unset"     ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Byte"}]}
+   (fn [b n & _] (byte-result (bit-and (byte-bits b) (bit-not (bit-shift-left 1 (byte-bit-index n))))))
+   "bitwise_and"       ^{:signatures [{:params [{:name "x" :type "Byte"}] :return-type "Byte"}]}
+   (fn [b other & _] (byte-result (bit-and (byte-bits b) (byte-bits other))))
+   "bitwise_or"        ^{:signatures [{:params [{:name "x" :type "Byte"}] :return-type "Byte"}]}
+   (fn [b other & _] (byte-result (bit-or (byte-bits b) (byte-bits other))))
+   "bitwise_xor"       ^{:signatures [{:params [{:name "x" :type "Byte"}] :return-type "Byte"}]}
+   (fn [b other & _] (byte-result (bit-xor (byte-bits b) (byte-bits other))))
+   "bitwise_not"       ^{:signatures [{:params [] :return-type "Byte"}]}
+   (fn [b & _] (byte-result (- 255 (byte-bits b))))
+   ;; A Byte equals only another Byte of the same value; an Integer 65 is not
+   ;; the Byte 65, matching the operator `=`, which rejects mixing the two.
+   "equals"            ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   (fn [b other & _] (and (rt/nex-byte? other) (= (byte-bits b) (byte-bits other))))
+   "not_equals"        ^{:signatures [{:params [{:name "other" :type "Any"}] :return-type "Boolean"}]}
+   (fn [b other & _] (not (and (rt/nex-byte? other) (= (byte-bits b) (byte-bits other)))))
+   "compare"           (fn [b other & _] (nex-compare (byte-bits b) (byte-bits other)))
+   "hash"              (fn [b & _] (hash (byte-bits b)))})
 
 (def real-type-methods
   {"to_string"         ^{:signatures [{:params [] :return-type "String"}]}
@@ -1375,6 +1457,7 @@
   {:Any any-type-methods
    :String string-type-methods
    :Integer integer-type-methods
+   :Byte byte-type-methods
    :Real real-type-methods
    :Char char-type-methods
    :Boolean boolean-type-methods
@@ -1617,9 +1700,10 @@
    a Java interface crosses the boundary as a real Proxy for it; everything
    else passes through unchanged."
   [ctx v]
-  (if (nex-object? v)
-    (java-proxy-for-object ctx v)
-    v))
+  (cond
+    (nex-object? v) (java-proxy-for-object ctx v)
+    (rt/nex-byte? v) (rt/nex->java v)
+    :else v))
 
 (defn java-args
   "java-arg over a whole argument list — for every interpreter call site that
@@ -1640,7 +1724,8 @@
 (defn java-call-method
   "Call a Java method via reflection."
   [ctx target method-name arg-values]
-  (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array (java-args ctx arg-values))))
+  (rt/java->nex
+   (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array (java-args ctx arg-values)))))
 
 (def core-builtins
   {"print"

@@ -88,6 +88,12 @@
   []
   "([Ljava/lang/String;)V")
 
+(defn- emit-short-const!
+  "Push a boxed java.lang.Short for V (the compiled form of a Nex Byte)."
+  [^MethodVisitor mv v]
+  (.visitIntInsn mv Opcodes/SIPUSH (int v))
+  (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Short" "valueOf" "(S)Ljava/lang/Short;" false))
+
 (defn- class-default-value
   [jvm-type]
   (cond
@@ -493,6 +499,10 @@
              (= "String" nex-type))
         (.visitLdcInsn mv "")
 
+        (and (= (ir/object-jvm-type "java/lang/Short") jvm-type)
+             (= "Byte" nex-type))
+        (emit-short-const! mv 0)
+
         :else
         (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type}))
       (.visitFieldInsn mv
@@ -637,6 +647,10 @@
 
     (= (ir/object-jvm-type "java/lang/String") jvm-type)
     (.visitLdcInsn mv ^String value)
+
+    ;; A Nex Byte constant (a java.lang.Short holding 0..255).
+    (and (instance? Short value) (= (ir/object-jvm-type "java/lang/Short") jvm-type))
+    (emit-short-const! mv value)
 
     :else
     (throw (ex-info "Unsupported constant emission"
@@ -1016,9 +1030,11 @@
    "op:pow-int"                              ["pow-int" [:b0 :b1]]
    "op:pow-long"                             ["pow-long" [:b0 :b1]]
    "op:pow-double"                           ["pow-double" [:b0 :b1]]
+   "op:byte->integer"                        ["byte->integer" [:b0]]
    "spawn-function-object"                   ["spawn-function-object" [:state :b0]]
    "function-value-for-name"                 ["function-value-for-name" [:state :b0]]
    "create-channel"                          ["create-channel" [:bvar]]
+   "create-string-from-bytes"                ["create-string-from-bytes" [:b0]]
    "create-array"                            ["create-array" []]
    "create-array-filled"                     ["create-array-filled" [:bvar]]
    "create-min-heap-empty"                   ["create-min-heap-empty" []]
