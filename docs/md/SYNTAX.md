@@ -48,6 +48,40 @@ let color: Integer := 0xFF_AA_33
 
 Use lowercase prefixes `0b`, `0o`, and `0x`. `_` may be used as a digit separator.
 
+`Integer` is a 64-bit integer; `Integer64` is another spelling of the same type.
+
+### Bytes and fixed-width integers
+
+`Byte`, `Integer16` and `Integer32` are integers of an exact width, for binary data
+and protocols. Each is its own type, written with a suffix on an integer literal:
+
+```nex
+let b: Byte := 200u8            -- unsigned, 0..255
+let port: Integer16 := 8080i16  -- signed, -32768..32767
+let id: Integer32 := -70000i32  -- signed, -2147483648..2147483647
+let mask: Byte := 0xFFu8        -- bases and `_` work as usual
+```
+
+An unsuffixed literal is always an `Integer`, so `let b: Byte := 200` is a type error.
+A leading `-` is part of a signed literal: `-5i16` is an `Integer16`.
+
+None of `Integer`, `Integer16`, `Integer32` and `Byte` converts to another on its own.
+Convert with a method; narrowing raises if the value does not fit:
+
+```nex
+let n: Integer := 300
+let s: Integer16 := n.to_integer16()   -- ok
+let b: Byte := n.to_byte()             -- raises: 300 is not in 0..255
+let back: Integer := s.to_integer()
+```
+
+Arithmetic on any of them gives an `Integer`, so it cannot overflow the narrow type;
+narrow the result again if you need to: `(s + s).to_integer16()`. Comparison and `=`
+are between two values of the same type.
+
+`Byte` is also the element type of `"text".to_bytes()`, and `create String.from_bytes(bytes)`
+turns an `Array[Byte]` back into a `String`. Their methods are in the scalar types reference.
+
 ## Comparing Things
 
 ```nex
@@ -280,6 +314,21 @@ let colors: Array [String] := ["red", "green", "blue"]
 print(colors.get(0))            -- "red"
 colors.add("yellow")            -- add to the end
 print(colors.length)            -- 4
+```
+
+### Bytes: `Byte_Array`
+
+An `Array[Byte]` is a list of boxed values. For binary data, `intern data/Byte_Array` gives a
+fixed-size buffer stored as a real Java `byte[]`:
+
+```nex
+intern data/Byte_Array
+
+let buf: Byte_Array := create Byte_Array.make(4)
+buf.set(0, 200u8)
+print(buf.get(0))                 -- 200
+print(buf.slice(0, 2))            -- Byte_Array([200, 0])
+across buf as b do print(b) end   -- b is a Byte
 ```
 
 ## Maps
@@ -1018,6 +1067,9 @@ convert <value> to <name>:<Type>
 - On failure, `<name>` is bound to `nil`.
 - Conversion follows Java-style related-type rules:
   `<Type>` must be a supertype or subtype of the runtime type of `<value>`.
+- `convert` never changes a number's representation, so converting between `Integer`, `Byte`,
+  `Integer16`, `Integer32` and `Real` is rejected. Use `to_byte()`, `to_integer16()`,
+  `to_integer32()`, `to_integer()` or `to_real()`.
 
 ```nex
 do

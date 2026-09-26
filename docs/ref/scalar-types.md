@@ -238,7 +238,8 @@ way `Integer` is related to `Real`.
   type: `0i16.bitwise_not()` is `-1i16`, and `32767i16.bitwise_left_shift(1)` is `-2i16`.
   Right shift copies the sign bit; `bitwise_logical_right_shift` shifts in zeros. Bit
   indexes must be `0..15` (`Integer16`) or `0..31` (`Integer32`); shift counts must be
-  non-negative, and shifting by the width or more clears every bit. `abs` raises for the
+  non-negative, and shifting by the width or more clears every bit (except an arithmetic
+  right shift of a negative value, which gives `-1`). `abs` raises for the
   minimum value, which has no positive counterpart. (`Integer`'s own bitwise methods
   keep their 32-bit behaviour.)
 - **Java interop:** passed to a reflective Java call, an `Integer16` or `Integer32` goes
