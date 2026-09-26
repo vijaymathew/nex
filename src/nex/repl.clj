@@ -266,6 +266,14 @@
             (recur (rest tokens) stack count)))
         count))))
 
+(defn- keyword-count
+  "How many times the keyword KW occurs in TEXT as a keyword. One right after a
+   `.` is a member name (`Byte_Array.from(...)`), not the start or end of a
+   block, so it must not make the REPL wait for a matching `end`."
+  [text kw]
+  (count (re-seq (re-pattern (str "(?<![.\\w])" kw "\\b"))
+                 (str/replace text #"\.\s+" "."))))
+
 (defn continue-reading?
   "Check if we need to continue reading (unclosed block)"
   [lines]
@@ -287,18 +295,18 @@
                 text)
         open-delimiters? (some pos? (vals delimiter-balance))
         ;; Count keyword pairs that need to be closed
-        class-count (count (re-seq #"\bclass\b" text))
-        feature-count (count (re-seq #"\bfeature\b" text))
-        do-count (count (re-seq #"\bdo\b" text))
-        from-count (count (re-seq #"\bfrom\b" text))
-        repeat-count (count (re-seq #"\brepeat\b" text))
-        across-count (count (re-seq #"\bacross\b" text))
-        if-count (count (re-seq #"\bif\b" text))
+        class-count (keyword-count text "class")
+        feature-count (keyword-count text "feature")
+        do-count (keyword-count text "do")
+        from-count (keyword-count text "from")
+        repeat-count (keyword-count text "repeat")
+        across-count (keyword-count text "across")
+        if-count (keyword-count text "if")
         when-count (count-when-expressions text)
-        case-count (count (re-seq #"\bcase\b" text))
-        match-count (count (re-seq #"\bmatch\b" text))
-        select-count (count (re-seq #"\bselect\b" text))
-        end-count (count (re-seq #"\bend\b" text))
+        case-count (keyword-count text "case")
+        match-count (keyword-count text "match")
+        select-count (keyword-count text "select")
+        end-count (keyword-count text "end")
         ;; In loops, 'do' is part of 'from...until...do...end', 'repeat...do...end', or 'across...do...end'
         ;; So subtract from-count, repeat-count, and across-count from do-count to avoid double-counting
         standalone-do-count (max 0 (- do-count from-count repeat-count across-count))

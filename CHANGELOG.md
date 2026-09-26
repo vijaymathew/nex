@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fixed: the REPL waited for more input after `x.from(...)`.** Its
+  multi-line detection counted every `from` (and other block keywords) as an
+  opened block, including one used as a member name after a `.`, so a typo such
+  as `create Byte_Array.from([1u8])` showed the `...` prompt instead of
+  reporting the syntax error. A keyword right after a `.` no longer counts.
+
 - **Changed: the REPL shows a class instance through its `to_string`.** A
   result that is an instance of a class (or a collection of them) now renders
   with the class's own `to_string`, the way `print` does, instead of
