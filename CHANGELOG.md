@@ -2,66 +2,72 @@
 
 ## Unreleased
 
-- **Fixed: the REPL waited for more input after `x.from(...)`.** Its
-  multi-line detection counted every `from` (and other block keywords) as an
-  opened block, including one used as a member name after a `.`, so a typo such
-  as `create Byte_Array.from([1u8])` showed the `...` prompt instead of
-  reporting the syntax error. A keyword right after a `.` no longer counts.
+## 0.5.2 - 2026-09-26
 
-- **Changed: the REPL shows a class instance through its `to_string`.** A
-  result that is an instance of a class (or a collection of them) now renders
-  with the class's own `to_string`, the way `print` does, instead of
-  `#<Class object>` or, for a variable read back in a later cell, Clojure's raw
-  `#object[nex.repl.Foo_0002 ...]`. A class with no `to_string` shows
-  `#<Foo object>` in both cases.
+- **New: fixed-width integer types.** `Byte` (unsigned, `0..255`),
+  `Integer16` (`-32768..32767`) and `Integer32` (`-2^31..2^31-1`), for binary
+  formats, protocols and interop. Each is a distinct type with no implicit
+  conversion to or from `Integer` or one another (the relationship `Integer`
+  already has with `Real`):
+  - Literals take a suffix: `200u8`, `8080i16`, `-70000i32` (bases and `_` work
+    as usual; a leading `-` is part of an `i16`/`i32` literal, so `-5i16` is an
+    `Integer16`). An unsuffixed literal is still an `Integer`, so
+    `let b: Byte := 200` is a type error; write `200u8`.
+  - Convert explicitly with `to_byte()`, `to_integer16()`, `to_integer32()` and
+    `to_integer()`; narrowing raises unless the value fits.
+  - Arithmetic on them promotes to `Integer`, so it cannot overflow the narrow
+    type; comparison and `=` are between two values of the same type.
+  - Bitwise methods work on, and wrap to, the type's own width and return the
+    same type.
+  - A value keeps its type inside `Any`, so `type_of`, `type_is` and `convert`
+    see `Byte`, `Integer16` or `Integer32`.
 
-- **New: the `Byte` scalar type**, an unsigned 8-bit integer (`0..255`).
-  `String.to_bytes()` now returns `Array[Byte]` instead of `Array[Integer]`,
-  and `Binary_File` (`read`, `read_all`, `write`) and the `binary_file_*`
-  builtins use `Array[Byte]` too. `Byte` is a distinct type with no implicit
-  conversion to or from `Integer` (the same relationship `Integer` has with
-  `Real`): make one with a `u8` literal, `n.to_byte()` (raises unless
-  `0 <= n <= 255`), read one from an `Array[Byte]`, and get an `Integer` back
-  with `b.to_integer()`. Arithmetic on a `Byte` promotes to `Integer`;
-  bitwise methods work on 8 bits and return a `Byte`. See
-  `docs/ref/scalar-types.md`. **Migration:** code that annotated the result of
-  `to_bytes()` or a binary read as `Array[Integer]` must use `Array[Byte]`
-  (or drop the annotation), and `Binary_File.write` no longer accepts an
-  integer-literal array such as `[65, 66]`; pass `"AB".to_bytes()`.
+  See `docs/ref/scalar-types.md`.
+- **New: `Integer64`**, an alias for `Integer` (which is already 64-bit), so
+  the family reads `Integer16` / `Integer32` / `Integer64`.
+- **New: `create String.from_bytes(bytes)`** decodes an `Array[Byte]` as UTF-8,
+  the inverse of `to_bytes()`. Invalid UTF-8 raises instead of being replaced.
+  `create` now accepts the `String` keyword as a class name for this.
 - **New: `data/Byte_Array`**, a fixed-size mutable byte sequence stored in a
-  real Java `byte[]` (`intern data/Byte_Array`). `make`, `from_array`,
-  `from_slice`, `from_java`, `length`, `get`, `set`, `slice`, `to_array`,
-  `fill`, `copy`, `concat`, `copy_into`, `index_of`, `contains`, `compare`
-  (lexicographic, unsigned; the class is `Comparable`, so `<` and `sort` work),
+  real Java `byte[]` (`intern data/Byte_Array`): `make`, `from_array`,
+  `from_slice`, `from_concat`, `from_java`, `length`, `get`, `set`, `fill`,
+  `copy`, `concat`, `copy_into`, `slice`, `index_of`, `contains`, `to_array`,
   `to_hex`, `to_utf8_string`, `cursor` (so `across` works, yielding `Byte`s),
-  `equals`/`hash` by contents, and `to_java`, which hands the live `byte[]` to
-  `with "java"` code (no `ByteArrayOutputStream` bridge needed for APIs like
-  `MessageDigest.digest`). The interface is unsigned (`Byte`, `0..255`) over
-  Java's signed storage.
+  `equals`/`hash` by contents, `compare` (lexicographic and unsigned; the class
+  is `Comparable`, so `<` and `sort` work), and `to_java`, which hands the live
+  `byte[]` to `with "java"` code (no `ByteArrayOutputStream` bridge is needed
+  for APIs like `MessageDigest.digest`). The interface is unsigned (`Byte`,
+  `0..255`) over Java's signed storage.
+- **Changed: `String.to_bytes()` returns `Array[Byte]`** instead of
+  `Array[Integer]`, and `Binary_File` (`read`, `read_all`, `write`) and the
+  `binary_file_*` builtins use `Array[Byte]` too. **Migration:** code that
+  annotated the result of `to_bytes()` or a binary read as `Array[Integer]`
+  must use `Array[Byte]` (or drop the annotation), and `Binary_File.write` no
+  longer accepts an integer-literal array such as `[65, 66]`; pass
+  `"AB".to_bytes()` or `[65u8, 66u8]`. Also, `Byte`, `Integer16`, `Integer32`
+  and `Integer64` are now names in the standard environment: a program that
+  declares its own class with one of those names will clash with them.
 - **Changed: `across` over a class that defines `cursor()`** now types its
   items from the `item` method of the cursor class it returns, instead of
   `Any`, when that cursor class is a plain (non-generic) class whose `item`
   has a concrete return type. Generic cursors (`cursor(): Stack_Cursor[G]`) and
   cursors returned as `Cursor` still yield `Any`. Code that narrowed such an
   item with `convert` keeps working.
-- **New: `Integer16` and `Integer32`**, signed fixed-width integers
-  (`-32768..32767` and `-2^31..2^31-1`), modelled on `Byte`: distinct types
-  with no implicit conversion to or from `Integer` or each other, `i16` / `i32`
-  literal suffixes (`300i16`, `-5i32`; a leading `-` is folded into the
-  literal), checked narrowing through `to_integer16()` / `to_integer32()` /
-  `to_byte()`, arithmetic that promotes to `Integer`, and bitwise methods that
-  work on, and wrap to, the type's own width. See `docs/ref/scalar-types.md`.
-- **New: `Integer64`**, an alias for `Integer` (which is already 64-bit), so
-  the family reads `Integer16` / `Integer32` / `Integer64`.
-- **New: `Byte` literals**, an integer literal with a `u8` suffix: `12u8`,
-  `0xFFu8`, `[65u8, 66u8]`. The value is range-checked (`0..255`) at parse time.
-  An unsuffixed literal is still an `Integer`, so `let b: Byte := 12` remains a
-  type error; write `12u8`.
-- **New: `create String.from_bytes(bytes)`** decodes an `Array[Byte]` as UTF-8,
-  the inverse of `to_bytes()`. Invalid UTF-8 raises instead of being replaced.
-  `create` now accepts the `String` keyword as a class name for this.
+- **Changed: the REPL shows a class instance through its `to_string`.** A
+  result that is an instance of a class (or a collection of them) now renders
+  with the class's own `to_string`, the way `print` does, instead of
+  `#<Class object>` or, for a variable read back in a later cell, Clojure's raw
+  `#object[nex.repl.Foo_0002 ...]`. A class with no `to_string` shows
+  `#<Foo object>` in both cases.
+- **Fixed: the REPL waited for more input after `x.from(...)`.** Its
+  multi-line detection counted every `from` (and other block keywords) as an
+  opened block, including one used as a member name after a `.`, so a typo such
+  as `create Byte_Array.from([1u8])` showed the `...` prompt instead of
+  reporting the syntax error. A keyword right after a `.` no longer counts.
 - **Fixed:** `binary_file_write` rejected bytes above 127 (`200` raised
   "Value out of range for byte").
+- Documentation: the syntax reference, the language reference, the book and
+  the Definition of Nex describe the new types, literals and `Byte_Array`.
 
 ## 0.5.1 - 2026-09-25
 
