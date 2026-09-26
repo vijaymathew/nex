@@ -11,6 +11,8 @@
     ;; Byte is a java.lang.Short and `integer?` is true for it, so it must be
     ;; classified before Integer.
     (rt/nex-byte? value) :Byte
+    (rt/nex-int16? value) :Integer16
+    (rt/nex-int32? value) :Integer32
     (rt/nex-integer? value) :Integer
     (or (double? value) (float? value) (ratio? value)) :Real
     (rt/nex-char? value) :Char

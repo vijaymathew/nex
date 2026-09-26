@@ -187,12 +187,23 @@
     (:name acc)
     acc))
 
+(defn- negate-sized-literal
+  "-5i16 is one Integer16 literal, not a negation of one (arithmetic on a sized
+   type promotes to Integer). Returns the negated literal, or nil for any other
+   node."
+  [node]
+  (when (#{:int16 :int32} (:type node))
+    (update node :value -)))
+
 (defn- negate-numeric-call-chain
   "When a unary minus wraps a method call chain rooted at a numeric literal,
   restructures so the literal is negated and the call chain is preserved.
   Returns nil if the base is not a numeric literal (don't restructure)."
   [node]
   (cond
+    (#{:int16 :int32} (:type node))
+    (negate-sized-literal node)
+
     (#{:integer :real} (:type node))
     (let [negated (update node :value -)]
       ;; Keep the transfer-safe :value-str (added for integer literals) in sync
@@ -1541,9 +1552,16 @@
        (remove #(= "/" %))
        (str/join ".")))
 
+(defn- canonical-type-name
+  "`Integer64` is another spelling of `Integer` (which is already 64-bit); every
+   type reference is rewritten to `Integer` here, so nothing downstream needs to
+   know the alias exists."
+  [name]
+  (if (= name "Integer64") "Integer" name))
+
 (defn- handle-type-name
   [[_ name]]
-  (qualified-name-text name))
+  (canonical-type-name (qualified-name-text name)))
 
 (defn- handle-inherit-entry
   [[_ parent-name & rest]]
@@ -1761,7 +1779,7 @@
   [[_ arg]]
   (if (sequential? arg)
     (transform-node arg)     ;; parameterized type like List[Integer]
-    (token-text arg)))
+    (canonical-type-name (token-text arg))))
 
 ;; simple identifier like Integer
 (defn- handle-type
@@ -1785,9 +1803,9 @@
                                               (= :typeArgs (first %)))
                                         rest))]
       (if type-args-node
-        {:base-type (qualified-name-text type-name)
+        {:base-type (canonical-type-name (qualified-name-text type-name))
          :type-args (transform-node type-args-node)}
-        (qualified-name-text type-name)))))
+        (canonical-type-name (qualified-name-text type-name))))))
 
 (defn- handle-function-type
   [[_ & tokens]]
@@ -2457,8 +2475,9 @@
   (cond
     (= first-child "-")
     (let [transformed (transform-node (first rest-children))]
-      (if-let [restructured (and (= :call (:type transformed))
-                                 (negate-numeric-call-chain transformed))]
+      (if-let [restructured (or (negate-sized-literal transformed)
+                                (and (= :call (:type transformed))
+                                     (negate-numeric-call-chain transformed)))]
         restructured
         {:type :unary
          :operator "-"
@@ -2480,8 +2499,9 @@
 (defn- handle-unary-minus
   [[_ _minus expr]]
   (let [transformed (transform-node expr)]
-    (if-let [restructured (and (= :call (:type transformed))
-                               (negate-numeric-call-chain transformed))]
+    (if-let [restructured (or (negate-sized-literal transformed)
+                              (and (= :call (:type transformed))
+                                   (negate-numeric-call-chain transformed)))]
       restructured
       {:type :unary
        :operator "-"
@@ -2652,6 +2672,23 @@
                       {:literal value})))
     {:type :byte
      :value v}))
+
+(defn- handle-sized-int-literal
+  "A signed fixed-width literal such as 300i16. The walker accepts up to 2^(bits-1)
+   so that `-32768i16` can be written: the negation fold in handle-unary makes it
+   in range, and the typechecker rejects a positive 32768i16."
+  [value node-type bits]
+  (let [text (subs value 0 (- (count value) 3))
+        limit (bit-shift-left 1 (dec bits))
+        v (try (parse-integer-literal text)
+               (catch NumberFormatException _ nil))]
+    (when-not (and v (<= 0 v limit))
+      (throw (ex-info (str "Integer" bits " literal out of range: " value)
+                      {:literal value})))
+    {:type node-type :value v}))
+
+(defn- handle-int16-literal [[_ value]] (handle-sized-int-literal value :int16 16))
+(defn- handle-int32-literal [[_ value]] (handle-sized-int-literal value :int32 32))
 
 (defn- handle-real-literal
   [[_ value]]
@@ -2891,6 +2928,8 @@
    ;; Literals
    :integerLiteral handle-integer-literal
    :byteLiteral handle-byte-literal
+   :int16Literal handle-int16-literal
+   :int32Literal handle-int32-literal
    :realLiteral handle-real-literal
    :booleanLiteral handle-boolean-literal
    :nilLiteral handle-nil-literal

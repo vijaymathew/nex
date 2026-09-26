@@ -97,7 +97,7 @@
                                        (bootstrap/build-comparable-base-class)
                                        (bootstrap/build-hashable-base-class)]
                                       (map bootstrap/build-builtin-scalar-class
-                                           ["String" "Integer" "Byte" "Real" "Boolean" "Char"])))
+                                           ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))
         env (tc/make-type-env)]
     (tc/register-builtin-methods env)
     (vals (merge interp-builtins @(:classes env)))))
@@ -115,7 +115,7 @@
        vec))
 
 (def ^:private expression-node-types
-  #{:integer :byte :real :string :char :boolean :nil :identifier :binary :unary
+  #{:integer :byte :int16 :int32 :real :string :char :boolean :nil :identifier :binary :unary
     :call :if :when :this :array-literal :map-literal :set-literal
     :anonymous-function :spawn :create})
 
@@ -127,7 +127,7 @@
   (set (keys (get bi/builtin-type-methods type-name))))
 
 (def ^:private builtin-runtime-receiver-types
-  #{"Any" "Comparable" "Integer" "Byte" "Real" "Char" "Boolean" "String"
+  #{"Any" "Comparable" "Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Cursor" "Task" "Channel" "Console" "Process"})
 
@@ -718,9 +718,9 @@
 (defn- infer-type-unary
   [env expr]
   (case (:operator expr)
-    ;; -Byte promotes to Integer, matching check-unary-op.
+    ;; -x on a sized type promotes to Integer, matching check-unary-op.
     "-" (let [t (infer-type env (:expr expr))]
-          (if (= "Byte" (base-type-name (resolve-type-alias t))) "Integer" t))
+          (if (contains? tc/sized-integer-types (base-type-name (resolve-type-alias t))) "Integer" t))
     "not" "Boolean"
     nil))
 
@@ -821,6 +821,8 @@
    generic fallback in `infer-type`."
   {:integer            (constantly "Integer")
    :byte               (constantly "Byte")
+   :int16              (constantly "Integer16")
+   :int32              (constantly "Integer32")
    :real               (constantly "Real")
    :string             (constantly "String")
    :boolean            (constantly "Boolean")
@@ -4710,13 +4712,13 @@
                            parent-name
                            (exact-class-jvm-type env parent-name))))))
 
-(defn- unwrap-byte-ir
-  "A Byte is a boxed java.lang.Short on the compiled backend; arithmetic and
-   comparison work on a long, so unwrap a Byte-typed operand first. Any other
-   IR passes through untouched."
+(defn- unwrap-sized-ir
+  "A Byte, Integer16 or Integer32 is a boxed object on the compiled backend
+   (a Short, or a wrapper); arithmetic and comparison work on a long, so unwrap
+   a sized-typed operand first. Any other IR passes through untouched."
   [ir]
-  (if (= "Byte" (base-type-name (resolve-type-alias (:nex-type ir))))
-    (ir/call-runtime-node "op:byte->integer" [ir] "Integer" :long)
+  (if (contains? tc/sized-integer-types (base-type-name (resolve-type-alias (:nex-type ir))))
+    (ir/call-runtime-node "op:sized->integer" [ir] "Integer" :long)
     ir))
 
 (defn- lower-expr-binary
@@ -4744,8 +4746,8 @@
                   [_right-env right-ir] (lower-boolean-condition env (:right expr))]
               [left-ir right-ir])
 
-            [(unwrap-byte-ir (lower-expression env (:left expr)))
-             (unwrap-byte-ir (lower-expression env (:right expr)))])
+            [(unwrap-sized-ir (lower-expression env (:left expr)))
+             (unwrap-sized-ir (lower-expression env (:right expr)))])
           inferred-type (infer-type env expr)
           nex-type (if (= "Any" inferred-type)
                      (cond
@@ -4811,7 +4813,7 @@
 
 (defn- lower-expr-unary
   [env expr]
-  (let [operand-ir (unwrap-byte-ir (lower-expression env (:expr expr)))
+  (let [operand-ir (unwrap-sized-ir (lower-expression env (:expr expr)))
         nex-type (infer-type env expr)
         jvm-type (resolve-jvm-type env nex-type)]
     (ir/unary-node (get {"-" :neg
@@ -4919,6 +4921,12 @@
    same issue and fix as `infer-type-dispatch`'s `:call` entry)."
   {:integer            (fn [_env expr] (ir/const-node (:value expr) "Integer" (desc/nex-type->jvm-type "Integer")))
    :byte               (fn [env expr] (ir/const-node (short (:value expr)) "Byte" (resolve-jvm-type env "Byte")))
+   :int16              (fn [env expr] (ir/call-runtime-node "make-int16"
+                                                            [(ir/const-node (:value expr) "Integer" :long)]
+                                                            "Integer16" (resolve-jvm-type env "Integer16")))
+   :int32              (fn [env expr] (ir/call-runtime-node "make-int32"
+                                                            [(ir/const-node (:value expr) "Integer" :long)]
+                                                            "Integer32" (resolve-jvm-type env "Integer32")))
    :real               (fn [_env expr] (ir/const-node (:value expr) "Real" :double))
    :string             (fn [_env expr] (ir/const-node (:value expr) "String" (ir/object-jvm-type "java/lang/String")))
    :char               (fn [_env expr] (ir/const-node (:value expr) "Char" :char))
@@ -5458,7 +5466,7 @@
   [arg-nex-type ^Class param-class]
   (let [base (base-type-name arg-nex-type)]
     (cond
-      (#{"Integer" "Byte" "Real"} base) (java-numeric-param-class? param-class)
+      (#{"Integer" "Byte" "Integer16" "Integer32" "Real"} base) (java-numeric-param-class? param-class)
       (= "Boolean" base) (contains? #{Boolean/TYPE Boolean} param-class)
       (= "Char" base) (contains? #{Character/TYPE Character} param-class)
       (= "String" base) (= String param-class)
@@ -7107,6 +7115,13 @@
                       (and (not detachable?) (= "Byte" (base-type-name nex-type)))
                       (ir/const-node (short 0) nex-type jvm-type)
 
+                      ;; Integer16 / Integer32 default to a wrapper holding 0.
+                      (and (not detachable?) (= "Integer16" (base-type-name nex-type)))
+                      (ir/call-runtime-node "make-int16" [(ir/const-node 0 "Integer" :long)] nex-type jvm-type)
+
+                      (and (not detachable?) (= "Integer32" (base-type-name nex-type)))
+                      (ir/call-runtime-node "make-int32" [(ir/const-node 0 "Integer" :long)] nex-type jvm-type)
+
                       (and (not detachable?) (= base-type "Array"))
                       (ir/array-literal-node [] nex-type jvm-type)
 
@@ -7294,6 +7309,8 @@
     :string "String"
     :integer "Integer"
     :byte "Byte"
+    :int16 "Integer16"
+    :int32 "Integer32"
     :real "Real"
     :boolean "Boolean"
     :char "Char"

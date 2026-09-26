@@ -415,14 +415,73 @@
   [v]
   (if (instance? Short v) (long v) v))
 
+;; Integer16 and Integer32 are signed fixed-width integers. Unlike Byte (a
+;; java.lang.Short, see nex-byte?) they cannot borrow a host boxed class as their
+;; runtime tag: java.lang.Integer is what Clojure interop returns for every plain
+;; `int` (string lengths, `count`, hash codes), so it would misclassify ordinary
+;; Integers. They are small wrapper types instead. A wrapper is deliberately not a
+;; java.lang.Number, so a numeric path that forgets to unwrap it fails loudly
+;; rather than miscomputing; `sized->long` is the one unwrap.
+(deftype NexInt16 [^long v]
+  Object
+  (toString [_] (Long/toString v))
+  (equals [_ o] (and (instance? NexInt16 o) (== v (.v ^NexInt16 o))))
+  (hashCode [_] (Long/hashCode v))
+  Comparable
+  (compareTo [_ o] (Long/compare v (.v ^NexInt16 o))))
+
+(deftype NexInt32 [^long v]
+  Object
+  (toString [_] (Long/toString v))
+  (equals [_ o] (and (instance? NexInt32 o) (== v (.v ^NexInt32 o))))
+  (hashCode [_] (Long/hashCode v))
+  Comparable
+  (compareTo [_ o] (Long/compare v (.v ^NexInt32 o))))
+
+(defn nex-int16? [v] (instance? NexInt16 v))
+(defn nex-int32? [v] (instance? NexInt32 v))
+
+(defn ->nex-int16
+  "Coerce an integer in -32768..32767 to a Nex Integer16; raises when out of range."
+  [v]
+  (let [n (long v)]
+    (when-not (<= -32768 n 32767)
+      (throw (ex-info (str "Integer16 value must be in range -32768..32767, got " n) {:value n})))
+    (NexInt16. n)))
+
+(defn ->nex-int32
+  "Coerce an integer in -2^31..2^31-1 to a Nex Integer32; raises when out of range."
+  [v]
+  (let [n (long v)]
+    (when-not (<= -2147483648 n 2147483647)
+      (throw (ex-info (str "Integer32 value must be in range -2147483648..2147483647, got " n)
+                      {:value n})))
+    (NexInt32. n)))
+
+(defn nex-sized?
+  "True for a Byte, Integer16 or Integer32 — the fixed-width integer types."
+  [v]
+  (or (instance? Short v) (instance? NexInt16 v) (instance? NexInt32 v)))
+
+(defn sized->long
+  "The plain long value of a Byte, Integer16 or Integer32; any other value is
+   returned unchanged. The one place arithmetic and comparison unwrap a tag."
+  [v]
+  (cond
+    (instance? NexInt16 v) (.v ^NexInt16 v)
+    (instance? NexInt32 v) (.v ^NexInt32 v)
+    (instance? Short v) (long v)
+    :else v))
+
 (defn nex->java
   "Normalize an argument crossing into a reflective Java call. A Nex Byte is a
-   java.lang.Short, which clojure.lang.Reflector will not match to an `int` or
-   `long` parameter; pass it as the Long an Integer is, so a Byte can go
-   wherever an Integer can. (The compile-time-resolved call path coerces to the
-   exact parameter type itself, including Java's signed `byte`.)"
+   java.lang.Short and an Integer16 / Integer32 a wrapper object; clojure.lang.
+   Reflector matches neither to an `int` or `long` parameter, so pass the plain
+   Long an Integer is, and a sized value can go wherever an Integer can. (The
+   compile-time-resolved call path coerces to the exact parameter type itself,
+   including Java's signed `byte`.)"
   [v]
-  (if (instance? Short v) (long v) v))
+  (if (nex-sized? v) (sized->long v) v))
 
 (defn nex-int->number
   "Convert a Nex Integer to a plain host number — for JS array indices, char
@@ -504,6 +563,8 @@
   "Numeric equality with the JVM's kind-sensitive rule: 5 and 5.0 are not equal."
   [x y]
   (cond
+    ;; A wrapper type is not a Number: it equals only its own type and value.
+    (or (nex-int16? x) (nex-int16? y) (nex-int32? x) (nex-int32? y)) (= x y)
     ;; A Byte is never equal to an Integer of the same value: they are distinct
     ;; types, and `=` rejects mixing them statically (Byte.equals says the same).
     (and (nex-integer? x) (nex-integer? y)) (and (= (nex-byte? x) (nex-byte? y)) (= x y))

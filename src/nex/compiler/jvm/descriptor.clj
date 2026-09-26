@@ -47,6 +47,10 @@
       ;; primitive, so its runtime tag survives collections and `Any`. Arithmetic
       ;; on it unwraps to a long first (see lower-expr-binary).
       "Byte" (ir/object-jvm-type "java/lang/Short")
+      ;; Integer16 / Integer32 are wrapper objects (rt/nex-int16?); the compiled
+      ;; backend carries them as plain Objects and unwraps for arithmetic.
+      "Integer16" (ir/object-jvm-type "java/lang/Object")
+      "Integer32" (ir/object-jvm-type "java/lang/Object")
       "Real" :double
       "Boolean" :boolean
       "Char" :char

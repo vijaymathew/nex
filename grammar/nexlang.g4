@@ -519,6 +519,8 @@ genericArg
 literal
     : integerLiteral
     | byteLiteral
+    | int16Literal
+    | int32Literal
     | realLiteral
     | charLiteral
     | booleanLiteral
@@ -541,6 +543,14 @@ integerLiteral
 
 byteLiteral
     : BYTE
+    ;
+
+int16Literal
+    : INT16
+    ;
+
+int32Literal
+    : INT32
     ;
 
 realLiteral
@@ -709,6 +719,20 @@ INTEGER
  */
 BYTE
     : INTEGER_BODY 'u8'
+    ;
+
+/*
+ * Integer16 / Integer32: an integer literal with an `i16` / `i32` suffix, e.g.
+ * `300i16`, `0xFFFFi32`. A negative one is written with a leading `-` (`-5i16`),
+ * which the walker folds into the literal. Range-checked by the walker and the
+ * typechecker.
+ */
+INT16
+    : INTEGER_BODY 'i16'
+    ;
+
+INT32
+    : INTEGER_BODY 'i32'
     ;
 
 fragment INTEGER_BODY

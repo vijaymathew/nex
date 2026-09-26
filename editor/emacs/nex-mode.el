@@ -132,7 +132,7 @@
   "Nex language keywords.")
 
 (defconst nex-types
-  '("Integer" "Integer64" "Byte" "Real" "Decimal" "Char" "Boolean" "String"
+  '("Integer" "Integer64" "Integer16" "Integer32" "Byte" "Real" "Decimal" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Task" "Channel" "Any" "Void" "Function" "Cursor")
   "Nex built-in types.")
 

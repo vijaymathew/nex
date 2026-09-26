@@ -15,6 +15,15 @@
   `to_bytes()` or a binary read as `Array[Integer]` must use `Array[Byte]`
   (or drop the annotation), and `Binary_File.write` no longer accepts an
   integer-literal array such as `[65, 66]`; pass `"AB".to_bytes()`.
+- **New: `Integer16` and `Integer32`**, signed fixed-width integers
+  (`-32768..32767` and `-2^31..2^31-1`), modelled on `Byte`: distinct types
+  with no implicit conversion to or from `Integer` or each other, `i16` / `i32`
+  literal suffixes (`300i16`, `-5i32`; a leading `-` is folded into the
+  literal), checked narrowing through `to_integer16()` / `to_integer32()` /
+  `to_byte()`, arithmetic that promotes to `Integer`, and bitwise methods that
+  work on, and wrap to, the type's own width. See `docs/ref/scalar-types.md`.
+- **New: `Integer64`**, an alias for `Integer` (which is already 64-bit), so
+  the family reads `Integer16` / `Integer32` / `Integer64`.
 - **New: `Byte` literals**, an integer literal with a `u8` suffix: `12u8`,
   `0xFFu8`, `[65u8, 66u8]`. The value is range-checked (`0..255`) at parse time.
   An unsuffixed literal is still an `Integer`, so `let b: Byte := 12` remains a
