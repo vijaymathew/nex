@@ -2016,6 +2016,34 @@
   [a]
   (rt/byte-array-hash a))
 
+(defn builtin-byte-array-fill
+  [a b]
+  (rt/byte-array-fill! a b))
+
+(defn builtin-byte-array-concat
+  [a b]
+  (rt/byte-array-concat a b))
+
+(defn builtin-byte-array-copy-into
+  [a b c]
+  (rt/byte-array-copy-into! a b c))
+
+(defn builtin-byte-array-index-of
+  [a b]
+  (rt/byte-array-index-of a b))
+
+(defn builtin-byte-array-compare
+  [a b]
+  (rt/byte-array-compare a b))
+
+(defn builtin-byte-array-to-hex
+  [a]
+  (rt/byte-array-to-hex a))
+
+(defn builtin-byte-array-to-utf8
+  [a]
+  (rt/byte-array-to-utf8 a))
+
 (def-builtin-method-wrapper builtin-method-any-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-any-equals "equals")
 (def-builtin-method-wrapper builtin-method-any-clone "clone")

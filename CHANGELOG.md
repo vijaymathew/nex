@@ -18,10 +18,19 @@
 - **New: `data/Byte_Array`**, a fixed-size mutable byte sequence stored in a
   real Java `byte[]` (`intern data/Byte_Array`). `make`, `from_array`,
   `from_slice`, `from_java`, `length`, `get`, `set`, `slice`, `to_array`,
+  `fill`, `copy`, `concat`, `copy_into`, `index_of`, `contains`, `compare`
+  (lexicographic, unsigned; the class is `Comparable`, so `<` and `sort` work),
+  `to_hex`, `to_utf8_string`, `cursor` (so `across` works, yielding `Byte`s),
   `equals`/`hash` by contents, and `to_java`, which hands the live `byte[]` to
   `with "java"` code (no `ByteArrayOutputStream` bridge needed for APIs like
   `MessageDigest.digest`). The interface is unsigned (`Byte`, `0..255`) over
   Java's signed storage.
+- **Changed: `across` over a class that defines `cursor()`** now types its
+  items from the `item` method of the cursor class it returns, instead of
+  `Any`, when that cursor class is a plain (non-generic) class whose `item`
+  has a concrete return type. Generic cursors (`cursor(): Stack_Cursor[G]`) and
+  cursors returned as `Cursor` still yield `Any`. Code that narrowed such an
+  item with `convert` keeps working.
 - **New: `Integer16` and `Integer32`**, signed fixed-width integers
   (`-32768..32767` and `-2^31..2^31-1`), modelled on `Byte`: distinct types
   with no implicit conversion to or from `Integer` or each other, `i16` / `i32`

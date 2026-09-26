@@ -153,6 +153,7 @@ intern data/Byte_Array
 | `make` | `size: Integer` | `size` zero-filled bytes; raises if `size` is negative. |
 | `from_array` | `items: Array[Byte]` | A copy of an `Array[Byte]`. |
 | `from_slice` | `source: Byte_Array, start: Integer, stop: Integer` | A copy of `source[start, stop)`; what `slice` uses. |
+| `from_concat` | `first: Byte_Array, second: Byte_Array` | A new array: `first`'s bytes then `second`'s; what `concat` uses. |
 | `from_java` | `raw: Any` | A copy of a Java `byte[]`; raises for anything else. |
 
 ### Methods
@@ -162,11 +163,21 @@ intern data/Byte_Array
 | `length` | none | `Integer` | Number of elements. |
 | `get` | `index: Integer` | `Byte` | The element at `index`; raises if it is outside `0..length-1`. |
 | `set` | `index: Integer, value: Byte` | `Void` | Store `value` at `index`; raises if it is out of range. |
+| `fill` | `value: Byte` | `Void` | Set every element to `value`. |
+| `copy` | none | `Byte_Array` | A copy of the whole array. |
+| `concat` | `other: Byte_Array` | `Byte_Array` | A new array: these bytes followed by `other`'s. |
+| `copy_into` | `target: Byte_Array, target_offset: Integer` | `Void` | Copy all of these bytes into `target` starting at `target_offset`, overwriting what is there; raises unless they fit. |
 | `slice` | `start: Integer, stop: Integer` | `Byte_Array` | A copy of the elements in `[start, stop)`; raises unless `0 <= start <= stop <= length`. |
+| `index_of` | `value: Byte` | `Integer` | The first index holding `value`, or `-1`. |
+| `contains` | `value: Byte` | `Boolean` | True if `value` occurs. |
 | `to_array` | none | `Array[Byte]` | A boxed copy of the elements. |
 | `to_java` | none | `Any` | The underlying Java `byte[]`, **shared, not copied**. |
 | `equals` | `other: Any` | `Boolean` | True for a `Byte_Array` with the same bytes. `=` uses this. |
 | `hash` | none | `Integer` | Hash of the contents. |
+| `compare` | `other: Any` | `Integer` | Lexicographic order with each byte taken as unsigned; a proper prefix orders first. Raises unless `other` is a `Byte_Array`. |
+| `to_hex` | none | `String` | Two lowercase hex digits per byte, e.g. `"c3a9"`. |
+| `to_utf8_string` | none | `String` | Decode as UTF-8; raises if the bytes are not valid UTF-8. |
+| `cursor` | none | `Byte_Array_Cursor` | A cursor over the bytes; this is what `across` uses. |
 | `to_string` | none | `String` | `Byte_Array([1, 2, 3])`. |
 
 ### Notes
@@ -175,6 +186,11 @@ intern data/Byte_Array
   in `0..255` and `set` keeps the low 8 bits of its `Byte`. So `set(0, 200u8)` then `get(0)`
   gives `200`, while a Java caller sees `-56`.
 - The size is fixed; there is no `add`. Use `Array[Byte]` when the length changes.
+- `Byte_Array` is `Comparable`, so `<`, `<=`, `>`, `>=` work between two of them and an
+  `Array[Byte_Array]` can be sorted.
+- `across buf as b do ... end` iterates the bytes, and `b` is a `Byte` (not `Any`).
+  `Byte_Array_Cursor` is the cursor class (`start`, `item`, `next`, `at_end`) that `cursor()`
+  returns; use it directly for a manual `from c.start() until c.at_end() do ... end` loop.
 - Everything copies except `to_java`, so two `Byte_Array`s never alias each other by accident.
   Writes through the array `to_java` returns are visible in the `Byte_Array`.
 

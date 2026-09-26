@@ -2400,7 +2400,49 @@
      (when (not= (count args) 1)
        (throw (ex-info "byte_array_hash expects exactly 1 argument"
                        {:function "byte_array_hash"})))
-     (rt/byte-array-hash (nth args 0)))})
+     (rt/byte-array-hash (nth args 0)))
+   "byte_array_fill"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_fill expects exactly 2 arguments"
+                       {:function "byte_array_fill"})))
+     (rt/byte-array-fill! (nth args 0), (nth args 1)))
+   "byte_array_concat"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_concat expects exactly 2 arguments"
+                       {:function "byte_array_concat"})))
+     (rt/byte-array-concat (nth args 0), (nth args 1)))
+   "byte_array_copy_into"
+   (fn [_ctx & args]
+     (when (not= (count args) 3)
+       (throw (ex-info "byte_array_copy_into expects exactly 3 arguments"
+                       {:function "byte_array_copy_into"})))
+     (rt/byte-array-copy-into! (nth args 0), (nth args 1), (nth args 2)))
+   "byte_array_index_of"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_index_of expects exactly 2 arguments"
+                       {:function "byte_array_index_of"})))
+     (rt/byte-array-index-of (nth args 0), (nth args 1)))
+   "byte_array_compare"
+   (fn [_ctx & args]
+     (when (not= (count args) 2)
+       (throw (ex-info "byte_array_compare expects exactly 2 arguments"
+                       {:function "byte_array_compare"})))
+     (rt/byte-array-compare (nth args 0), (nth args 1)))
+   "byte_array_to_hex"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_to_hex expects exactly 1 argument"
+                       {:function "byte_array_to_hex"})))
+     (rt/byte-array-to-hex (nth args 0)))
+   "byte_array_to_utf8"
+   (fn [_ctx & args]
+     (when (not= (count args) 1)
+       (throw (ex-info "byte_array_to_utf8 expects exactly 1 argument"
+                       {:function "byte_array_to_utf8"})))
+     (rt/byte-array-to-utf8 (nth args 0)))})
 
 (def http-server-builtins
   {"http_server_create"

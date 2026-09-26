@@ -1109,6 +1109,13 @@
    "byte_array_to_array" {:base-type "Array" :type-params ["Byte"]}
    "byte_array_equals" "Boolean"
    "byte_array_hash" "Integer"
+   "byte_array_fill" "Void"
+   "byte_array_concat" "Any"
+   "byte_array_copy_into" "Void"
+   "byte_array_index_of" "Integer"
+   "byte_array_compare" "Integer"
+   "byte_array_to_hex" "String"
+   "byte_array_to_utf8" "String"
    ;; http client / json
    "json_parse" "Any"
    "json_stringify" "String"
@@ -6500,6 +6507,27 @@
           (lower-call-without-target env expr arg-irs)
           (lower-call-with-target env expr target-expr class-target-name arg-irs))))))
 
+(defn- across-item-type
+  "The element type `across` yields over TARGET-TYPE: the builtin collections'
+   own, else — for a user class with a zero-argument `cursor` method — the
+   `item` return type of the cursor class it returns (mirrors the two-argument
+   tc/cursor-item-type), else Any."
+  [env target-type]
+  (let [t (tc/cursor-item-type target-type)]
+    (if (not= "Any" t)
+      t
+      (let [class-map (visible-class-map env)
+            class-def (get class-map (base-type-name (tc/attachable-type target-type)))
+            cursor-def (when class-def (accessible-method-def env class-def "cursor" 0))
+            cursor-type (some-> cursor-def function-return-type)
+            ;; Only a plain, non-generic cursor class qualifies (see
+            ;; tc/user-cursor-item-type).
+            cursor-class-def (when (string? cursor-type) (get class-map cursor-type))
+            item-def (when (and cursor-class-def (empty? (:generic-params cursor-class-def)))
+                       (accessible-method-def env cursor-class-def "item" 0))
+            item-type (some-> item-def function-return-type)]
+        (if (string? item-type) item-type "Any")))))
+
 (defn- lower-stmt-let
   [env stmt]
   (let [across-binding (across-cursor-binding env stmt)
@@ -6535,7 +6563,7 @@
                       (empty? (get-in stmt [:value :args])))
                (let [target-type (infer-type env0 (get-in stmt [:value :target]))]
                  (assoc-in env0 [:across-cursors (:name stmt)]
-                           (tc/cursor-item-type target-type)))
+                           (across-item-type env0 target-type)))
                env0)]
     (if (and (:top-level? env) (not (:scoped-locals? env)))
       [(update env1 :var-types assoc (:name stmt) nex-type)
