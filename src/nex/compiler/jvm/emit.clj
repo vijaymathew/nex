@@ -961,8 +961,10 @@
 (defn- direct-derived-builtin-helper-name
   [helper]
   (cond
-    (re-matches #"^(regex_|datetime_|path_|text_file_|binary_file_|byte_array_).*$" helper)
-    (str "builtin-" (str/replace helper "_" "-"))
+    ;; Library-support builtins are named `__<domain>_<op>`; the runtime helper
+    ;; is `builtin-<domain>-<op>` (the `__` marker is not part of it).
+    (re-matches #"^__(regex_|datetime_|path_|text_file_|binary_file_|byte_array_).*$" helper)
+    (str "builtin-" (str/replace (subs helper 2) "_" "-"))
 
     (str/starts-with? helper "builtin-method:")
     (let [[_ base method] (str/split helper #":" 3)]
@@ -1059,7 +1061,7 @@
    "select-deadline"                         ["select-deadline" [:b0]]
    "deadline-expired?"                       ["deadline-expired?" [:b0]]
    "select-sleep-step"                       ["select-sleep-step!" []]
-   "datetime_make"                           ["builtin-datetime-make-from-array" [:args]]})
+   "__datetime_make"                           ["builtin-datetime-make-from-array" [:args]]})
 
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]

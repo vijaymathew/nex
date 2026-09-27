@@ -18,50 +18,50 @@ class Byte_Array
 create
   -- SIZE zero-filled bytes; raises if size is negative.
   make(size: Integer) do
-    this.handle := byte_array_make(size)
+    this.handle := __byte_array_make(size)
   end
 
   -- A copy of an Array[Byte].
   from_array(items: Array[Byte]) do
-    this.handle := byte_array_from_array(items)
+    this.handle := __byte_array_from_array(items)
   end
 
   -- A copy of the elements of SOURCE in [start, stop); `slice` is this.
   from_slice(source: Byte_Array, start: Integer, stop: Integer) do
-    this.handle := byte_array_slice(source.handle, start, stop)
+    this.handle := __byte_array_slice(source.handle, start, stop)
   end
 
   -- A new Byte_Array holding FIRST's bytes followed by SECOND's; `concat` is this.
   from_concat(first: Byte_Array, second: Byte_Array) do
-    this.handle := byte_array_concat(first.handle, second.handle)
+    this.handle := __byte_array_concat(first.handle, second.handle)
   end
 
   -- A copy of a Java byte[] (for example one returned by a call inside
   -- `with "java"`); raises for anything else.
   from_java(raw: Any) do
-    this.handle := byte_array_from_java(raw)
+    this.handle := __byte_array_from_java(raw)
   end
 
 feature
   handle: Any
 
   length(): Integer do
-    result := byte_array_length(handle)
+    result := __byte_array_length(handle)
   end
 
   -- The element at INDEX; raises when INDEX is outside 0..length-1.
   get(index: Integer): Byte do
-    result := byte_array_get(handle, index)
+    result := __byte_array_get(handle, index)
   end
 
   -- Store VALUE at INDEX; raises when INDEX is outside 0..length-1.
   set(index: Integer, value: Byte) do
-    byte_array_set(handle, index, value)
+    __byte_array_set(handle, index, value)
   end
 
   -- Set every element to VALUE.
   fill(value: Byte) do
-    byte_array_fill(handle, value)
+    __byte_array_fill(handle, value)
   end
 
   -- A copy of the whole Byte_Array.
@@ -77,16 +77,16 @@ feature
   -- Copy all of these bytes into TARGET starting at TARGET_OFFSET (overwriting
   -- what is there); raises unless they fit.
   copy_into(target: Byte_Array, target_offset: Integer) do
-    byte_array_copy_into(handle, target.handle, target_offset)
+    __byte_array_copy_into(handle, target.handle, target_offset)
   end
 
   -- The first index holding VALUE, or -1.
   index_of(value: Byte): Integer do
-    result := byte_array_index_of(handle, value)
+    result := __byte_array_index_of(handle, value)
   end
 
   contains(value: Byte): Boolean do
-    result := byte_array_index_of(handle, value) >= 0
+    result := __byte_array_index_of(handle, value) >= 0
   end
 
   -- A copy of the elements in [start, stop), like String.substring.
@@ -96,7 +96,7 @@ feature
 
   -- A boxed Array[Byte] copy of the elements.
   to_array(): Array[Byte] do
-    result := byte_array_to_array(handle)
+    result := __byte_array_to_array(handle)
   end
 
   -- The underlying Java byte[], shared rather than copied: writes through it
@@ -109,12 +109,12 @@ feature
   equals(other: Any): Boolean do
     result := false
     if convert other to o: Byte_Array then
-      result := byte_array_equals(handle, o.handle)
+      result := __byte_array_equals(handle, o.handle)
     end
   end
 
   hash(): Integer do
-    result := byte_array_hash(handle)
+    result := __byte_array_hash(handle)
   end
 
   -- Lexicographic order, each byte taken as unsigned; a proper prefix orders
@@ -123,7 +123,7 @@ feature
   compare(other: Any): Integer do
     result := 0
     if convert other to o: Byte_Array then
-      result := byte_array_compare(handle, o.handle)
+      result := __byte_array_compare(handle, o.handle)
     else
       raise "Byte_Array.compare requires a Byte_Array"
     end
@@ -131,12 +131,12 @@ feature
 
   -- Two lowercase hex digits per byte, e.g. "c3a9".
   to_hex(): String do
-    result := byte_array_to_hex(handle)
+    result := __byte_array_to_hex(handle)
   end
 
   -- Decode the bytes as UTF-8; raises if they are not valid UTF-8.
   to_utf8_string(): String do
-    result := byte_array_to_utf8(handle)
+    result := __byte_array_to_utf8(handle)
   end
 
   -- A cursor over the bytes, so `across` works: across buf as b do ... end

@@ -17,8 +17,8 @@
                      (repl/eval-code ctx "print(next_run.truncate_to_hour().format_iso())")
                      (repl/eval-code ctx "print(weekly_cutoff.truncate_to_day().format_iso())"))]
         (is (not (.contains output "Type checking failed")))
-        (is (not (.contains output "Undefined function or method: datetime_weekday")))
-        (is (not (.contains output "Undefined function or method: datetime_day_of_year")))))))
+        (is (not (.contains output "Undefined function or method: __datetime_weekday")))
+        (is (not (.contains output "Undefined function or method: __datetime_day_of_year")))))))
 
 (deftest time-library-runtime-test
   (testing "Date_Time and Duration libraries work through the JVM interpreter"

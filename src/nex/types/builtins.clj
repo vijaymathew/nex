@@ -1954,495 +1954,495 @@
      (json-types/nex-json-stringify (first args)))})
 
 (def regex-builtins
-  {"regex_validate"
+  {"__regex_validate"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "regex_validate expects exactly 2 arguments"
-                       {:function "regex_validate"})))
+       (throw (ex-info "__regex_validate expects exactly 2 arguments"
+                       {:function "__regex_validate"})))
      (regex-types/regex-validate (first args) (second args)))
-   "regex_matches"
+   "__regex_matches"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "regex_matches expects exactly 3 arguments"
-                       {:function "regex_matches"})))
+       (throw (ex-info "__regex_matches expects exactly 3 arguments"
+                       {:function "__regex_matches"})))
      (apply regex-types/regex-matches? args))
-   "regex_find"
+   "__regex_find"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "regex_find expects exactly 3 arguments"
-                       {:function "regex_find"})))
+       (throw (ex-info "__regex_find expects exactly 3 arguments"
+                       {:function "__regex_find"})))
      (apply regex-types/regex-find args))
-   "regex_find_all"
+   "__regex_find_all"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "regex_find_all expects exactly 3 arguments"
-                       {:function "regex_find_all"})))
+       (throw (ex-info "__regex_find_all expects exactly 3 arguments"
+                       {:function "__regex_find_all"})))
      (apply regex-types/regex-find-all args))
-   "regex_replace"
+   "__regex_replace"
    (fn [_ctx & args]
      (when (not= (count args) 4)
-       (throw (ex-info "regex_replace expects exactly 4 arguments"
-                       {:function "regex_replace"})))
+       (throw (ex-info "__regex_replace expects exactly 4 arguments"
+                       {:function "__regex_replace"})))
      (apply regex-types/regex-replace args))
-   "regex_split"
+   "__regex_split"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "regex_split expects exactly 3 arguments"
-                       {:function "regex_split"})))
+       (throw (ex-info "__regex_split expects exactly 3 arguments"
+                       {:function "__regex_split"})))
      (apply regex-types/regex-split args))})
 
 (def datetime-builtins
-  {"datetime_now"
+  {"__datetime_now"
    (fn [_ctx & args]
      (when (not= (count args) 0)
-       (throw (ex-info "datetime_now expects exactly 0 arguments"
-                       {:function "datetime_now"})))
+       (throw (ex-info "__datetime_now expects exactly 0 arguments"
+                       {:function "__datetime_now"})))
      (dt/datetime-now))
-   "datetime_from_epoch_millis"
+   "__datetime_from_epoch_millis"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_from_epoch_millis expects exactly 1 argument"
-                       {:function "datetime_from_epoch_millis"})))
+       (throw (ex-info "__datetime_from_epoch_millis expects exactly 1 argument"
+                       {:function "__datetime_from_epoch_millis"})))
      (dt/datetime-from-epoch-millis (first args)))
-   "datetime_parse_iso"
+   "__datetime_parse_iso"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_parse_iso expects exactly 1 argument"
-                       {:function "datetime_parse_iso"})))
+       (throw (ex-info "__datetime_parse_iso expects exactly 1 argument"
+                       {:function "__datetime_parse_iso"})))
      (dt/datetime-parse-iso (first args)))
-   "datetime_make"
+   "__datetime_make"
    (fn [_ctx & args]
      (when (not= (count args) 6)
-       (throw (ex-info "datetime_make expects exactly 6 arguments"
-                       {:function "datetime_make"})))
+       (throw (ex-info "__datetime_make expects exactly 6 arguments"
+                       {:function "__datetime_make"})))
      (apply dt/datetime-make args))
-   "datetime_year"
+   "__datetime_year"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_year expects exactly 1 argument"
-                       {:function "datetime_year"})))
+       (throw (ex-info "__datetime_year expects exactly 1 argument"
+                       {:function "__datetime_year"})))
      (dt/datetime-year (first args)))
-   "datetime_month"
+   "__datetime_month"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_month expects exactly 1 argument"
-                       {:function "datetime_month"})))
+       (throw (ex-info "__datetime_month expects exactly 1 argument"
+                       {:function "__datetime_month"})))
      (dt/datetime-month (first args)))
-   "datetime_day"
+   "__datetime_day"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_day expects exactly 1 argument"
-                       {:function "datetime_day"})))
+       (throw (ex-info "__datetime_day expects exactly 1 argument"
+                       {:function "__datetime_day"})))
      (dt/datetime-day (first args)))
-   "datetime_weekday"
+   "__datetime_weekday"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_weekday expects exactly 1 argument"
-                       {:function "datetime_weekday"})))
+       (throw (ex-info "__datetime_weekday expects exactly 1 argument"
+                       {:function "__datetime_weekday"})))
      (dt/datetime-weekday (first args)))
-   "datetime_day_of_year"
+   "__datetime_day_of_year"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_day_of_year expects exactly 1 argument"
-                       {:function "datetime_day_of_year"})))
+       (throw (ex-info "__datetime_day_of_year expects exactly 1 argument"
+                       {:function "__datetime_day_of_year"})))
      (dt/datetime-day-of-year (first args)))
-   "datetime_hour"
+   "__datetime_hour"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_hour expects exactly 1 argument"
-                       {:function "datetime_hour"})))
+       (throw (ex-info "__datetime_hour expects exactly 1 argument"
+                       {:function "__datetime_hour"})))
      (dt/datetime-hour (first args)))
-   "datetime_minute"
+   "__datetime_minute"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_minute expects exactly 1 argument"
-                       {:function "datetime_minute"})))
+       (throw (ex-info "__datetime_minute expects exactly 1 argument"
+                       {:function "__datetime_minute"})))
      (dt/datetime-minute (first args)))
-   "datetime_second"
+   "__datetime_second"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_second expects exactly 1 argument"
-                       {:function "datetime_second"})))
+       (throw (ex-info "__datetime_second expects exactly 1 argument"
+                       {:function "__datetime_second"})))
      (dt/datetime-second (first args)))
-   "datetime_epoch_millis"
+   "__datetime_epoch_millis"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_epoch_millis expects exactly 1 argument"
-                       {:function "datetime_epoch_millis"})))
+       (throw (ex-info "__datetime_epoch_millis expects exactly 1 argument"
+                       {:function "__datetime_epoch_millis"})))
      (dt/datetime-epoch-millis (first args)))
-   "datetime_add_millis"
+   "__datetime_add_millis"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "datetime_add_millis expects exactly 2 arguments"
-                       {:function "datetime_add_millis"})))
+       (throw (ex-info "__datetime_add_millis expects exactly 2 arguments"
+                       {:function "__datetime_add_millis"})))
      (apply dt/datetime-add-millis args))
-   "datetime_diff_millis"
+   "__datetime_diff_millis"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "datetime_diff_millis expects exactly 2 arguments"
-                       {:function "datetime_diff_millis"})))
+       (throw (ex-info "__datetime_diff_millis expects exactly 2 arguments"
+                       {:function "__datetime_diff_millis"})))
      (apply dt/datetime-diff-millis args))
-   "datetime_truncate_to_day"
+   "__datetime_truncate_to_day"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_truncate_to_day expects exactly 1 argument"
-                       {:function "datetime_truncate_to_day"})))
+       (throw (ex-info "__datetime_truncate_to_day expects exactly 1 argument"
+                       {:function "__datetime_truncate_to_day"})))
      (dt/datetime-truncate-to-day (first args)))
-   "datetime_truncate_to_hour"
+   "__datetime_truncate_to_hour"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_truncate_to_hour expects exactly 1 argument"
-                       {:function "datetime_truncate_to_hour"})))
+       (throw (ex-info "__datetime_truncate_to_hour expects exactly 1 argument"
+                       {:function "__datetime_truncate_to_hour"})))
      (dt/datetime-truncate-to-hour (first args)))
-   "datetime_format_iso"
+   "__datetime_format_iso"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "datetime_format_iso expects exactly 1 argument"
-                       {:function "datetime_format_iso"})))
+       (throw (ex-info "__datetime_format_iso expects exactly 1 argument"
+                       {:function "__datetime_format_iso"})))
      (dt/datetime-format-iso (first args)))})
 
 (def path-query-builtins
   "Read-only path inspection and navigation."
-  {"path_exists"
+  {"__path_exists"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_exists expects exactly 1 argument"
-                       {:function "path_exists"})))
+       (throw (ex-info "__path_exists expects exactly 1 argument"
+                       {:function "__path_exists"})))
      (rt/path-exists? (str (first args))))
-   "path_is_file"
+   "__path_is_file"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_is_file expects exactly 1 argument"
-                       {:function "path_is_file"})))
+       (throw (ex-info "__path_is_file expects exactly 1 argument"
+                       {:function "__path_is_file"})))
      (rt/path-is-file? (str (first args))))
-   "path_is_directory"
+   "__path_is_directory"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_is_directory expects exactly 1 argument"
-                       {:function "path_is_directory"})))
+       (throw (ex-info "__path_is_directory expects exactly 1 argument"
+                       {:function "__path_is_directory"})))
      (rt/path-is-directory? (str (first args))))
-   "path_name"
+   "__path_name"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_name expects exactly 1 argument"
-                       {:function "path_name"})))
+       (throw (ex-info "__path_name expects exactly 1 argument"
+                       {:function "__path_name"})))
      (rt/path-name (str (first args))))
-   "path_extension"
+   "__path_extension"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_extension expects exactly 1 argument"
-                       {:function "path_extension"})))
+       (throw (ex-info "__path_extension expects exactly 1 argument"
+                       {:function "__path_extension"})))
      (rt/path-extension (str (first args))))
-   "path_name_without_extension"
+   "__path_name_without_extension"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_name_without_extension expects exactly 1 argument"
-                       {:function "path_name_without_extension"})))
+       (throw (ex-info "__path_name_without_extension expects exactly 1 argument"
+                       {:function "__path_name_without_extension"})))
      (rt/path-name-without-extension (str (first args))))
-   "path_absolute"
+   "__path_absolute"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_absolute expects exactly 1 argument"
-                       {:function "path_absolute"})))
+       (throw (ex-info "__path_absolute expects exactly 1 argument"
+                       {:function "__path_absolute"})))
      (str (rt/path-absolute (str (first args)))))
-   "path_normalize"
+   "__path_normalize"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_normalize expects exactly 1 argument"
-                       {:function "path_normalize"})))
+       (throw (ex-info "__path_normalize expects exactly 1 argument"
+                       {:function "__path_normalize"})))
      (str (rt/path-normalize (str (first args)))))
-   "path_size"
+   "__path_size"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_size expects exactly 1 argument"
-                       {:function "path_size"})))
+       (throw (ex-info "__path_size expects exactly 1 argument"
+                       {:function "__path_size"})))
      (rt/path-size (str (first args))))
-   "path_modified_time"
+   "__path_modified_time"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_modified_time expects exactly 1 argument"
-                       {:function "path_modified_time"})))
+       (throw (ex-info "__path_modified_time expects exactly 1 argument"
+                       {:function "__path_modified_time"})))
      (rt/path-modified-time (str (first args))))
-   "path_parent"
+   "__path_parent"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_parent expects exactly 1 argument"
-                       {:function "path_parent"})))
+       (throw (ex-info "__path_parent expects exactly 1 argument"
+                       {:function "__path_parent"})))
      (rt/path-parent (str (first args))))
-   "path_child"
+   "__path_child"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_child expects exactly 2 arguments"
-                       {:function "path_child"})))
+       (throw (ex-info "__path_child expects exactly 2 arguments"
+                       {:function "__path_child"})))
      (rt/path-child (str (first args)) (str (second args))))
-   "path_list"
+   "__path_list"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_list expects exactly 1 argument"
-                       {:function "path_list"})))
+       (throw (ex-info "__path_list expects exactly 1 argument"
+                       {:function "__path_list"})))
      (rt/path-list (str (first args))))})
 
 (def path-mutation-builtins
   "Filesystem-mutating path operations (create/delete/copy/move)."
-  {"path_create_file"
+  {"__path_create_file"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_create_file expects exactly 1 argument"
-                       {:function "path_create_file"})))
+       (throw (ex-info "__path_create_file expects exactly 1 argument"
+                       {:function "__path_create_file"})))
      (rt/path-create-file (str (first args))))
-   "path_create_directory"
+   "__path_create_directory"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_create_directory expects exactly 1 argument"
-                       {:function "path_create_directory"})))
+       (throw (ex-info "__path_create_directory expects exactly 1 argument"
+                       {:function "__path_create_directory"})))
      (rt/path-create-directory (str (first args))))
-   "path_create_directories"
+   "__path_create_directories"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_create_directories expects exactly 1 argument"
-                       {:function "path_create_directories"})))
+       (throw (ex-info "__path_create_directories expects exactly 1 argument"
+                       {:function "__path_create_directories"})))
      (rt/path-create-directories (str (first args))))
-   "path_delete"
+   "__path_delete"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_delete expects exactly 1 argument"
-                       {:function "path_delete"})))
+       (throw (ex-info "__path_delete expects exactly 1 argument"
+                       {:function "__path_delete"})))
      (rt/path-delete (str (first args))))
-   "path_delete_tree"
+   "__path_delete_tree"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_delete_tree expects exactly 1 argument"
-                       {:function "path_delete_tree"})))
+       (throw (ex-info "__path_delete_tree expects exactly 1 argument"
+                       {:function "__path_delete_tree"})))
      (rt/path-delete-tree (str (first args))))
-   "path_copy"
+   "__path_copy"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_copy expects exactly 2 arguments"
-                       {:function "path_copy"})))
+       (throw (ex-info "__path_copy expects exactly 2 arguments"
+                       {:function "__path_copy"})))
      (rt/path-copy (str (first args)) (str (second args))))
-   "path_move"
+   "__path_move"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_move expects exactly 2 arguments"
-                       {:function "path_move"})))
+       (throw (ex-info "__path_move expects exactly 2 arguments"
+                       {:function "__path_move"})))
      (rt/path-move (str (first args)) (str (second args))))})
 
 (def path-io-builtins
   "Whole-file text read/write helpers."
-  {"path_read_text"
+  {"__path_read_text"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "path_read_text expects exactly 1 argument"
-                       {:function "path_read_text"})))
+       (throw (ex-info "__path_read_text expects exactly 1 argument"
+                       {:function "__path_read_text"})))
      (rt/path-read-text (str (first args))))
-   "path_write_text"
+   "__path_write_text"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_write_text expects exactly 2 arguments"
-                       {:function "path_write_text"})))
+       (throw (ex-info "__path_write_text expects exactly 2 arguments"
+                       {:function "__path_write_text"})))
      (rt/path-write-text (str (first args)) (str (second args))))
-   "path_append_text"
+   "__path_append_text"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "path_append_text expects exactly 2 arguments"
-                       {:function "path_append_text"})))
+       (throw (ex-info "__path_append_text expects exactly 2 arguments"
+                       {:function "__path_append_text"})))
      (rt/path-append-text (str (first args)) (str (second args))))})
 
 (def path-builtins
   (merge path-query-builtins path-mutation-builtins path-io-builtins))
 
 (def file-builtins
-  {"text_file_open_read"
+  {"__text_file_open_read"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_open_read expects exactly 1 argument"
-                       {:function "text_file_open_read"})))
+       (throw (ex-info "__text_file_open_read expects exactly 1 argument"
+                       {:function "__text_file_open_read"})))
      (rt/text-file-open-read (str (first args))))
-   "text_file_open_write"
+   "__text_file_open_write"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_open_write expects exactly 1 argument"
-                       {:function "text_file_open_write"})))
+       (throw (ex-info "__text_file_open_write expects exactly 1 argument"
+                       {:function "__text_file_open_write"})))
      (rt/text-file-open-write (str (first args))))
-   "text_file_open_append"
+   "__text_file_open_append"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_open_append expects exactly 1 argument"
-                       {:function "text_file_open_append"})))
+       (throw (ex-info "__text_file_open_append expects exactly 1 argument"
+                       {:function "__text_file_open_append"})))
      (rt/text-file-open-append (str (first args))))
-   "text_file_read_line"
+   "__text_file_read_line"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_read_line expects exactly 1 argument"
-                       {:function "text_file_read_line"})))
+       (throw (ex-info "__text_file_read_line expects exactly 1 argument"
+                       {:function "__text_file_read_line"})))
      (rt/text-file-read-line (first args)))
-   "text_file_write"
+   "__text_file_write"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "text_file_write expects exactly 2 arguments"
-                       {:function "text_file_write"})))
+       (throw (ex-info "__text_file_write expects exactly 2 arguments"
+                       {:function "__text_file_write"})))
      (rt/text-file-write (first args) (str (second args))))
-   "text_file_close"
+   "__text_file_close"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "text_file_close expects exactly 1 argument"
-                       {:function "text_file_close"})))
+       (throw (ex-info "__text_file_close expects exactly 1 argument"
+                       {:function "__text_file_close"})))
      (rt/text-file-close (first args)))
-   "binary_file_open_read"
+   "__binary_file_open_read"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_open_read expects exactly 1 argument"
-                       {:function "binary_file_open_read"})))
+       (throw (ex-info "__binary_file_open_read expects exactly 1 argument"
+                       {:function "__binary_file_open_read"})))
      (rt/binary-file-open-read (str (first args))))
-   "binary_file_open_write"
+   "__binary_file_open_write"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_open_write expects exactly 1 argument"
-                       {:function "binary_file_open_write"})))
+       (throw (ex-info "__binary_file_open_write expects exactly 1 argument"
+                       {:function "__binary_file_open_write"})))
      (rt/binary-file-open-write (str (first args))))
-   "binary_file_open_append"
+   "__binary_file_open_append"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_open_append expects exactly 1 argument"
-                       {:function "binary_file_open_append"})))
+       (throw (ex-info "__binary_file_open_append expects exactly 1 argument"
+                       {:function "__binary_file_open_append"})))
      (rt/binary-file-open-append (str (first args))))
-   "binary_file_read_all"
+   "__binary_file_read_all"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_read_all expects exactly 1 argument"
-                       {:function "binary_file_read_all"})))
+       (throw (ex-info "__binary_file_read_all expects exactly 1 argument"
+                       {:function "__binary_file_read_all"})))
      (rt/binary-file-read-all (first args)))
-   "binary_file_read"
+   "__binary_file_read"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "binary_file_read expects exactly 2 arguments"
-                       {:function "binary_file_read"})))
+       (throw (ex-info "__binary_file_read expects exactly 2 arguments"
+                       {:function "__binary_file_read"})))
      (rt/binary-file-read (first args) (second args)))
-   "binary_file_write"
+   "__binary_file_write"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "binary_file_write expects exactly 2 arguments"
-                       {:function "binary_file_write"})))
+       (throw (ex-info "__binary_file_write expects exactly 2 arguments"
+                       {:function "__binary_file_write"})))
      (rt/binary-file-write (first args) (second args)))
-   "binary_file_position"
+   "__binary_file_position"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_position expects exactly 1 argument"
-                       {:function "binary_file_position"})))
+       (throw (ex-info "__binary_file_position expects exactly 1 argument"
+                       {:function "__binary_file_position"})))
      (rt/binary-file-position (first args)))
-   "binary_file_seek"
+   "__binary_file_seek"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "binary_file_seek expects exactly 2 arguments"
-                       {:function "binary_file_seek"})))
+       (throw (ex-info "__binary_file_seek expects exactly 2 arguments"
+                       {:function "__binary_file_seek"})))
      (rt/binary-file-seek (first args) (second args)))
-   "binary_file_close"
+   "__binary_file_close"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "binary_file_close expects exactly 1 argument"
-                       {:function "binary_file_close"})))
+       (throw (ex-info "__binary_file_close expects exactly 1 argument"
+                       {:function "__binary_file_close"})))
      (rt/binary-file-close (first args)))
-   "byte_array_make"
+   "__byte_array_make"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "byte_array_make expects exactly 1 argument"
-                       {:function "byte_array_make"})))
+       (throw (ex-info "__byte_array_make expects exactly 1 argument"
+                       {:function "__byte_array_make"})))
      (rt/byte-array-make (nth args 0)))
-   "byte_array_from_array"
+   "__byte_array_from_array"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "byte_array_from_array expects exactly 1 argument"
-                       {:function "byte_array_from_array"})))
+       (throw (ex-info "__byte_array_from_array expects exactly 1 argument"
+                       {:function "__byte_array_from_array"})))
      (rt/byte-array-from-array (nth args 0)))
-   "byte_array_from_java"
+   "__byte_array_from_java"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "byte_array_from_java expects exactly 1 argument"
-                       {:function "byte_array_from_java"})))
+       (throw (ex-info "__byte_array_from_java expects exactly 1 argument"
+                       {:function "__byte_array_from_java"})))
      (rt/byte-array-from-java (nth args 0)))
-   "byte_array_length"
+   "__byte_array_length"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "byte_array_length expects exactly 1 argument"
-                       {:function "byte_array_length"})))
+       (throw (ex-info "__byte_array_length expects exactly 1 argument"
+                       {:function "__byte_array_length"})))
      (rt/byte-array-length (nth args 0)))
-   "byte_array_get"
+   "__byte_array_get"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "byte_array_get expects exactly 2 arguments"
-                       {:function "byte_array_get"})))
+       (throw (ex-info "__byte_array_get expects exactly 2 arguments"
+                       {:function "__byte_array_get"})))
      (rt/byte-array-get (nth args 0), (nth args 1)))
-   "byte_array_set"
+   "__byte_array_set"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "byte_array_set expects exactly 3 arguments"
-                       {:function "byte_array_set"})))
+       (throw (ex-info "__byte_array_set expects exactly 3 arguments"
+                       {:function "__byte_array_set"})))
      (rt/byte-array-set! (nth args 0), (nth args 1), (nth args 2)))
-   "byte_array_slice"
+   "__byte_array_slice"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "byte_array_slice expects exactly 3 arguments"
-                       {:function "byte_array_slice"})))
+       (throw (ex-info "__byte_array_slice expects exactly 3 arguments"
+                       {:function "__byte_array_slice"})))
      (rt/byte-array-slice (nth args 0), (nth args 1), (nth args 2)))
-   "byte_array_to_array"
+   "__byte_array_to_array"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "byte_array_to_array expects exactly 1 argument"
-                       {:function "byte_array_to_array"})))
+       (throw (ex-info "__byte_array_to_array expects exactly 1 argument"
+                       {:function "__byte_array_to_array"})))
      (rt/byte-array-to-array (nth args 0)))
-   "byte_array_equals"
+   "__byte_array_equals"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "byte_array_equals expects exactly 2 arguments"
-                       {:function "byte_array_equals"})))
+       (throw (ex-info "__byte_array_equals expects exactly 2 arguments"
+                       {:function "__byte_array_equals"})))
      (rt/byte-array-equals (nth args 0), (nth args 1)))
-   "byte_array_hash"
+   "__byte_array_hash"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "byte_array_hash expects exactly 1 argument"
-                       {:function "byte_array_hash"})))
+       (throw (ex-info "__byte_array_hash expects exactly 1 argument"
+                       {:function "__byte_array_hash"})))
      (rt/byte-array-hash (nth args 0)))
-   "byte_array_fill"
+   "__byte_array_fill"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "byte_array_fill expects exactly 2 arguments"
-                       {:function "byte_array_fill"})))
+       (throw (ex-info "__byte_array_fill expects exactly 2 arguments"
+                       {:function "__byte_array_fill"})))
      (rt/byte-array-fill! (nth args 0), (nth args 1)))
-   "byte_array_concat"
+   "__byte_array_concat"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "byte_array_concat expects exactly 2 arguments"
-                       {:function "byte_array_concat"})))
+       (throw (ex-info "__byte_array_concat expects exactly 2 arguments"
+                       {:function "__byte_array_concat"})))
      (rt/byte-array-concat (nth args 0), (nth args 1)))
-   "byte_array_copy_into"
+   "__byte_array_copy_into"
    (fn [_ctx & args]
      (when (not= (count args) 3)
-       (throw (ex-info "byte_array_copy_into expects exactly 3 arguments"
-                       {:function "byte_array_copy_into"})))
+       (throw (ex-info "__byte_array_copy_into expects exactly 3 arguments"
+                       {:function "__byte_array_copy_into"})))
      (rt/byte-array-copy-into! (nth args 0), (nth args 1), (nth args 2)))
-   "byte_array_index_of"
+   "__byte_array_index_of"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "byte_array_index_of expects exactly 2 arguments"
-                       {:function "byte_array_index_of"})))
+       (throw (ex-info "__byte_array_index_of expects exactly 2 arguments"
+                       {:function "__byte_array_index_of"})))
      (rt/byte-array-index-of (nth args 0), (nth args 1)))
-   "byte_array_compare"
+   "__byte_array_compare"
    (fn [_ctx & args]
      (when (not= (count args) 2)
-       (throw (ex-info "byte_array_compare expects exactly 2 arguments"
-                       {:function "byte_array_compare"})))
+       (throw (ex-info "__byte_array_compare expects exactly 2 arguments"
+                       {:function "__byte_array_compare"})))
      (rt/byte-array-compare (nth args 0), (nth args 1)))
-   "byte_array_to_hex"
+   "__byte_array_to_hex"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "byte_array_to_hex expects exactly 1 argument"
-                       {:function "byte_array_to_hex"})))
+       (throw (ex-info "__byte_array_to_hex expects exactly 1 argument"
+                       {:function "__byte_array_to_hex"})))
      (rt/byte-array-to-hex (nth args 0)))
-   "byte_array_to_utf8"
+   "__byte_array_to_utf8"
    (fn [_ctx & args]
      (when (not= (count args) 1)
-       (throw (ex-info "byte_array_to_utf8 expects exactly 1 argument"
-                       {:function "byte_array_to_utf8"})))
+       (throw (ex-info "__byte_array_to_utf8 expects exactly 1 argument"
+                       {:function "__byte_array_to_utf8"})))
      (rt/byte-array-to-utf8 (nth args 0)))})
 
 (def http-server-builtins

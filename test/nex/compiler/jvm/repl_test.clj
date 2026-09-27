@@ -2065,9 +2065,9 @@ end")
                    (compiled-repl/compile-and-eval!
                     session
                     (p/ast
-                     (str "print(regex_validate(\"a+\", \"\"))\n"
-                          "print(regex_replace(\"a\", \"\", \"banana\", \"o\"))\n"
-                          "datetime_year(datetime_now())"))))]
+                     (str "print(__regex_validate(\"a+\", \"\"))\n"
+                          "print(__regex_replace(\"a\", \"\", \"banana\", \"o\"))\n"
+                          "__datetime_year(__datetime_now())"))))]
       (is (:compiled? result))
       (is (= ["true" "\"bonono\""] (:output result)))
       (is (integer? (:result result))))))
@@ -2085,21 +2085,21 @@ end")
                        (compiled-repl/compile-and-eval!
                         session
                         (p/ast
-                         (str "path_write_text(\"" file-path "\", \"hello\")\n"
-                              "print(path_exists(\"" file-path "\"))\n"
-                              "let h := text_file_open_read(\"" file-path "\")\n"
-                              "print(text_file_read_line(h))\n"
-                              "text_file_close(h)\n"
-                              "let b := binary_file_open_write(\"" file-path-bin "\")\n"
-                              "binary_file_write(b, [65, 66, 67])\n"
-                              "print(binary_file_position(b))\n"
-                              "binary_file_seek(b, 1)\n"
-                              "binary_file_write(b, [90])\n"
-                              "binary_file_close(b)\n"
-                              "let br := binary_file_open_read(\"" file-path-bin "\")\n"
-                              "print(binary_file_read(br, 3))\n"
-                              "binary_file_close(br)\n"
-                              "path_read_text(\"" file-path "\")"))))]
+                         (str "__path_write_text(\"" file-path "\", \"hello\")\n"
+                              "print(__path_exists(\"" file-path "\"))\n"
+                              "let h := __text_file_open_read(\"" file-path "\")\n"
+                              "print(__text_file_read_line(h))\n"
+                              "__text_file_close(h)\n"
+                              "let b := __binary_file_open_write(\"" file-path-bin "\")\n"
+                              "__binary_file_write(b, [65, 66, 67])\n"
+                              "print(__binary_file_position(b))\n"
+                              "__binary_file_seek(b, 1)\n"
+                              "__binary_file_write(b, [90])\n"
+                              "__binary_file_close(b)\n"
+                              "let br := __binary_file_open_read(\"" file-path-bin "\")\n"
+                              "print(__binary_file_read(br, 3))\n"
+                              "__binary_file_close(br)\n"
+                              "__path_read_text(\"" file-path "\")"))))]
           (is (:compiled? result))
           (is (= ["true" "\"hello\"" "3" "[65, 90, 67]"] (:output result)))
           (is (= "hello" (:result result))))

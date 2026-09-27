@@ -3445,48 +3445,48 @@
   "Http_Response")
 
 (defn- check-builtin-text-file-write [env args]
-  (assert-builtin-arity! "text_file_write" 2 args)
+  (assert-builtin-arity! "__text_file_write" 2 args)
   (check-expression env (first args))
   (let [text-type (check-expression env (second args))]
     (when-not (= (attachable-type text-type) "String")
-      (throw (ex-info "text_file_write second argument must be String"
+      (throw (ex-info "__text_file_write second argument must be String"
                       {:error (type-error
-                               (str "text_file_write second argument must be String, got "
+                               (str "__text_file_write second argument must be String, got "
                                     (display-type text-type)))}))))
   "Void")
 
 (defn- check-builtin-binary-file-read [env args]
-  (assert-builtin-arity! "binary_file_read" 2 args)
+  (assert-builtin-arity! "__binary_file_read" 2 args)
   (check-expression env (first args))
   (let [count-type (check-expression env (second args))]
     (when-not (= (attachable-type count-type) "Integer")
-      (throw (ex-info "binary_file_read second argument must be Integer"
+      (throw (ex-info "__binary_file_read second argument must be Integer"
                       {:error (type-error
-                               (str "binary_file_read second argument must be Integer, got "
+                               (str "__binary_file_read second argument must be Integer, got "
                                     (display-type count-type)))}))))
   {:base-type "Array" :type-params ["Byte"]})
 
 (defn- check-builtin-binary-file-write [env args]
-  (assert-builtin-arity! "binary_file_write" 2 args)
+  (assert-builtin-arity! "__binary_file_write" 2 args)
   (check-expression env (first args))
   (let [bytes-type (normalize-type (check-expression env (second args)))]
     (when-not (and (map? bytes-type)
                    (= (:base-type bytes-type) "Array")
                    (= (first (or (:type-params bytes-type) (:type-args bytes-type))) "Byte"))
-      (throw (ex-info "binary_file_write second argument must be Array[Byte]"
+      (throw (ex-info "__binary_file_write second argument must be Array[Byte]"
                       {:error (type-error
-                               (str "binary_file_write second argument must be Array[Byte], got "
+                               (str "__binary_file_write second argument must be Array[Byte], got "
                                     (display-type bytes-type)))}))))
   "Void")
 
 (defn- check-builtin-binary-file-seek [env args]
-  (assert-builtin-arity! "binary_file_seek" 2 args)
+  (assert-builtin-arity! "__binary_file_seek" 2 args)
   (check-expression env (first args))
   (let [offset-type (check-expression env (second args))]
     (when-not (= (attachable-type offset-type) "Integer")
-      (throw (ex-info "binary_file_seek second argument must be Integer"
+      (throw (ex-info "__binary_file_seek second argument must be Integer"
                       {:error (type-error
-                               (str "binary_file_seek second argument must be Integer, got "
+                               (str "__binary_file_seek second argument must be Integer, got "
                                     (display-type offset-type)))}))))
   "Void")
 
@@ -3519,102 +3519,102 @@
    "hint_spin"    (builtin-nullary "hint_spin" "Void")
    "exit"    (builtin-single-arg "exit" "Integer" "Void")
    "random_real"  (builtin-nullary "random_real" "Real")
-   "datetime_now" (builtin-nullary "datetime_now" "Integer")
+   "__datetime_now" (builtin-nullary "__datetime_now" "Integer")
    "type_of"  (builtin-checked-args "type_of" 1 "String")
    "type_is"  check-builtin-type-is
    "await_all" check-builtin-await-all
    "await_any" check-builtin-await-any
 
    ;; regex
-   "regex_validate" (builtin-uniform-args "regex_validate" 2 "String" "Boolean")
-   "regex_matches"  (builtin-uniform-args "regex_matches" 3 "String" "Boolean")
-   "regex_find"     (builtin-uniform-args "regex_find" 3 "String" {:base-type "String" :detachable true})
-   "regex_find_all" (builtin-uniform-args "regex_find_all" 3 "String" {:base-type "Array" :type-args ["String"]})
-   "regex_replace"  (builtin-uniform-args "regex_replace" 4 "String" "String")
-   "regex_split"    (builtin-uniform-args "regex_split" 3 "String" {:base-type "Array" :type-args ["String"]})
+   "__regex_validate" (builtin-uniform-args "__regex_validate" 2 "String" "Boolean")
+   "__regex_matches"  (builtin-uniform-args "__regex_matches" 3 "String" "Boolean")
+   "__regex_find"     (builtin-uniform-args "__regex_find" 3 "String" {:base-type "String" :detachable true})
+   "__regex_find_all" (builtin-uniform-args "__regex_find_all" 3 "String" {:base-type "Array" :type-args ["String"]})
+   "__regex_replace"  (builtin-uniform-args "__regex_replace" 4 "String" "String")
+   "__regex_split"    (builtin-uniform-args "__regex_split" 3 "String" {:base-type "Array" :type-args ["String"]})
 
    ;; datetime
-   "datetime_from_epoch_millis" (builtin-single-arg "datetime_from_epoch_millis" "Integer" "Integer")
-   "datetime_parse_iso"  (builtin-single-arg "datetime_parse_iso" "String" "Integer")
-   "datetime_make"       (builtin-uniform-args "datetime_make" 6 "Integer" "Integer")
-   "datetime_year"       (builtin-single-arg "datetime_year" "Integer" "Integer")
-   "datetime_month"      (builtin-single-arg "datetime_month" "Integer" "Integer")
-   "datetime_day"        (builtin-single-arg "datetime_day" "Integer" "Integer")
-   "datetime_weekday"    (builtin-single-arg "datetime_weekday" "Integer" "Integer")
-   "datetime_day_of_year" (builtin-single-arg "datetime_day_of_year" "Integer" "Integer")
-   "datetime_hour"       (builtin-single-arg "datetime_hour" "Integer" "Integer")
-   "datetime_minute"     (builtin-single-arg "datetime_minute" "Integer" "Integer")
-   "datetime_second"     (builtin-single-arg "datetime_second" "Integer" "Integer")
-   "datetime_epoch_millis" (builtin-single-arg "datetime_epoch_millis" "Integer" "Integer")
-   "datetime_add_millis"  (builtin-uniform-args "datetime_add_millis" 2 "Integer" "Integer")
-   "datetime_diff_millis" (builtin-uniform-args "datetime_diff_millis" 2 "Integer" "Integer")
-   "datetime_truncate_to_day"  (builtin-single-arg "datetime_truncate_to_day" "Integer" "Integer")
-   "datetime_truncate_to_hour" (builtin-single-arg "datetime_truncate_to_hour" "Integer" "Integer")
-   "datetime_format_iso" (builtin-single-arg "datetime_format_iso" "Integer" "String")
+   "__datetime_from_epoch_millis" (builtin-single-arg "__datetime_from_epoch_millis" "Integer" "Integer")
+   "__datetime_parse_iso"  (builtin-single-arg "__datetime_parse_iso" "String" "Integer")
+   "__datetime_make"       (builtin-uniform-args "__datetime_make" 6 "Integer" "Integer")
+   "__datetime_year"       (builtin-single-arg "__datetime_year" "Integer" "Integer")
+   "__datetime_month"      (builtin-single-arg "__datetime_month" "Integer" "Integer")
+   "__datetime_day"        (builtin-single-arg "__datetime_day" "Integer" "Integer")
+   "__datetime_weekday"    (builtin-single-arg "__datetime_weekday" "Integer" "Integer")
+   "__datetime_day_of_year" (builtin-single-arg "__datetime_day_of_year" "Integer" "Integer")
+   "__datetime_hour"       (builtin-single-arg "__datetime_hour" "Integer" "Integer")
+   "__datetime_minute"     (builtin-single-arg "__datetime_minute" "Integer" "Integer")
+   "__datetime_second"     (builtin-single-arg "__datetime_second" "Integer" "Integer")
+   "__datetime_epoch_millis" (builtin-single-arg "__datetime_epoch_millis" "Integer" "Integer")
+   "__datetime_add_millis"  (builtin-uniform-args "__datetime_add_millis" 2 "Integer" "Integer")
+   "__datetime_diff_millis" (builtin-uniform-args "__datetime_diff_millis" 2 "Integer" "Integer")
+   "__datetime_truncate_to_day"  (builtin-single-arg "__datetime_truncate_to_day" "Integer" "Integer")
+   "__datetime_truncate_to_hour" (builtin-single-arg "__datetime_truncate_to_hour" "Integer" "Integer")
+   "__datetime_format_iso" (builtin-single-arg "__datetime_format_iso" "Integer" "String")
 
    ;; path
-   "path_exists"       (builtin-single-arg "path_exists" "String" "Boolean")
-   "path_is_file"      (builtin-single-arg "path_is_file" "String" "Boolean")
-   "path_is_directory" (builtin-single-arg "path_is_directory" "String" "Boolean")
-   "path_name"         (builtin-single-arg "path_name" "String" "String")
-   "path_extension"    (builtin-single-arg "path_extension" "String" "String")
-   "path_name_without_extension" (builtin-single-arg "path_name_without_extension" "String" "String")
-   "path_absolute"     (builtin-single-arg "path_absolute" "String" "String")
-   "path_normalize"    (builtin-single-arg "path_normalize" "String" "String")
-   "path_size"         (builtin-single-arg "path_size" "String" "Integer")
-   "path_modified_time" (builtin-single-arg "path_modified_time" "String" "Integer")
-   "path_parent"       (builtin-single-arg "path_parent" "String" {:base-type "String" :detachable true})
-   "path_child"        (builtin-positional-args "path_child" ["String" "String"] "String")
-   "path_create_file"  (builtin-single-arg "path_create_file" "String" "Void")
-   "path_create_directory"   (builtin-single-arg "path_create_directory" "String" "Void")
-   "path_create_directories" (builtin-single-arg "path_create_directories" "String" "Void")
-   "path_delete"       (builtin-single-arg "path_delete" "String" "Void")
-   "path_delete_tree"  (builtin-single-arg "path_delete_tree" "String" "Void")
-   "path_copy"         (builtin-positional-args "path_copy" ["String" "String"] "Void")
-   "path_move"         (builtin-positional-args "path_move" ["String" "String"] "Void")
-   "path_read_text"    (builtin-single-arg "path_read_text" "String" "String")
-   "path_write_text"   (builtin-positional-args "path_write_text" ["String" "String"] "Void")
-   "path_append_text"  (builtin-positional-args "path_append_text" ["String" "String"] "Void")
-   "path_list"         (builtin-single-arg "path_list" "String" {:base-type "Array" :type-params ["String"]})
+   "__path_exists"       (builtin-single-arg "__path_exists" "String" "Boolean")
+   "__path_is_file"      (builtin-single-arg "__path_is_file" "String" "Boolean")
+   "__path_is_directory" (builtin-single-arg "__path_is_directory" "String" "Boolean")
+   "__path_name"         (builtin-single-arg "__path_name" "String" "String")
+   "__path_extension"    (builtin-single-arg "__path_extension" "String" "String")
+   "__path_name_without_extension" (builtin-single-arg "__path_name_without_extension" "String" "String")
+   "__path_absolute"     (builtin-single-arg "__path_absolute" "String" "String")
+   "__path_normalize"    (builtin-single-arg "__path_normalize" "String" "String")
+   "__path_size"         (builtin-single-arg "__path_size" "String" "Integer")
+   "__path_modified_time" (builtin-single-arg "__path_modified_time" "String" "Integer")
+   "__path_parent"       (builtin-single-arg "__path_parent" "String" {:base-type "String" :detachable true})
+   "__path_child"        (builtin-positional-args "__path_child" ["String" "String"] "String")
+   "__path_create_file"  (builtin-single-arg "__path_create_file" "String" "Void")
+   "__path_create_directory"   (builtin-single-arg "__path_create_directory" "String" "Void")
+   "__path_create_directories" (builtin-single-arg "__path_create_directories" "String" "Void")
+   "__path_delete"       (builtin-single-arg "__path_delete" "String" "Void")
+   "__path_delete_tree"  (builtin-single-arg "__path_delete_tree" "String" "Void")
+   "__path_copy"         (builtin-positional-args "__path_copy" ["String" "String"] "Void")
+   "__path_move"         (builtin-positional-args "__path_move" ["String" "String"] "Void")
+   "__path_read_text"    (builtin-single-arg "__path_read_text" "String" "String")
+   "__path_write_text"   (builtin-positional-args "__path_write_text" ["String" "String"] "Void")
+   "__path_append_text"  (builtin-positional-args "__path_append_text" ["String" "String"] "Void")
+   "__path_list"         (builtin-single-arg "__path_list" "String" {:base-type "Array" :type-params ["String"]})
 
    ;; text files
-   "text_file_open_read"   (builtin-single-arg "text_file_open_read" "String" "Any")
-   "text_file_open_write"  (builtin-single-arg "text_file_open_write" "String" "Any")
-   "text_file_open_append" (builtin-single-arg "text_file_open_append" "String" "Any")
-   "text_file_read_line"   (builtin-checked-args "text_file_read_line" 1 {:base-type "String" :detachable true})
-   "text_file_write"       check-builtin-text-file-write
-   "text_file_close"       (builtin-checked-args "text_file_close" 1 "Void")
+   "__text_file_open_read"   (builtin-single-arg "__text_file_open_read" "String" "Any")
+   "__text_file_open_write"  (builtin-single-arg "__text_file_open_write" "String" "Any")
+   "__text_file_open_append" (builtin-single-arg "__text_file_open_append" "String" "Any")
+   "__text_file_read_line"   (builtin-checked-args "__text_file_read_line" 1 {:base-type "String" :detachable true})
+   "__text_file_write"       check-builtin-text-file-write
+   "__text_file_close"       (builtin-checked-args "__text_file_close" 1 "Void")
 
    ;; binary files
-   "binary_file_open_read"   (builtin-single-arg "binary_file_open_read" "String" "Any")
-   "binary_file_open_write"  (builtin-single-arg "binary_file_open_write" "String" "Any")
-   "binary_file_open_append" (builtin-single-arg "binary_file_open_append" "String" "Any")
-   "binary_file_read_all"    (builtin-checked-args "binary_file_read_all" 1
+   "__binary_file_open_read"   (builtin-single-arg "__binary_file_open_read" "String" "Any")
+   "__binary_file_open_write"  (builtin-single-arg "__binary_file_open_write" "String" "Any")
+   "__binary_file_open_append" (builtin-single-arg "__binary_file_open_append" "String" "Any")
+   "__binary_file_read_all"    (builtin-checked-args "__binary_file_read_all" 1
                                                    {:base-type "Array" :type-params ["Byte"]})
-   "binary_file_read"        check-builtin-binary-file-read
-   "binary_file_write"       check-builtin-binary-file-write
-   "binary_file_position"    (builtin-checked-args "binary_file_position" 1 "Integer")
-   "binary_file_seek"        check-builtin-binary-file-seek
-   "binary_file_close"       (builtin-checked-args "binary_file_close" 1 "Void")
+   "__binary_file_read"        check-builtin-binary-file-read
+   "__binary_file_write"       check-builtin-binary-file-write
+   "__binary_file_position"    (builtin-checked-args "__binary_file_position" 1 "Integer")
+   "__binary_file_seek"        check-builtin-binary-file-seek
+   "__binary_file_close"       (builtin-checked-args "__binary_file_close" 1 "Void")
 
    ;; Byte_Array (lib/data/byte_array.nex): a real Java byte[] behind an opaque handle
-   "byte_array_make" (builtin-checked-args "byte_array_make" 1 "Any")
-   "byte_array_from_array" (builtin-checked-args "byte_array_from_array" 1 "Any")
-   "byte_array_from_java" (builtin-checked-args "byte_array_from_java" 1 "Any")
-   "byte_array_length" (builtin-checked-args "byte_array_length" 1 "Integer")
-   "byte_array_get" (builtin-checked-args "byte_array_get" 2 "Byte")
-   "byte_array_set" (builtin-checked-args "byte_array_set" 3 "Void")
-   "byte_array_slice" (builtin-checked-args "byte_array_slice" 3 "Any")
-   "byte_array_to_array" (builtin-checked-args "byte_array_to_array" 1 {:base-type "Array" :type-params ["Byte"]})
-   "byte_array_equals" (builtin-checked-args "byte_array_equals" 2 "Boolean")
-   "byte_array_hash" (builtin-checked-args "byte_array_hash" 1 "Integer")
-   "byte_array_fill" (builtin-checked-args "byte_array_fill" 2 "Void")
-   "byte_array_concat" (builtin-checked-args "byte_array_concat" 2 "Any")
-   "byte_array_copy_into" (builtin-checked-args "byte_array_copy_into" 3 "Void")
-   "byte_array_index_of" (builtin-checked-args "byte_array_index_of" 2 "Integer")
-   "byte_array_compare" (builtin-checked-args "byte_array_compare" 2 "Integer")
-   "byte_array_to_hex" (builtin-checked-args "byte_array_to_hex" 1 "String")
-   "byte_array_to_utf8" (builtin-checked-args "byte_array_to_utf8" 1 "String")
+   "__byte_array_make" (builtin-checked-args "__byte_array_make" 1 "Any")
+   "__byte_array_from_array" (builtin-checked-args "__byte_array_from_array" 1 "Any")
+   "__byte_array_from_java" (builtin-checked-args "__byte_array_from_java" 1 "Any")
+   "__byte_array_length" (builtin-checked-args "__byte_array_length" 1 "Integer")
+   "__byte_array_get" (builtin-checked-args "__byte_array_get" 2 "Byte")
+   "__byte_array_set" (builtin-checked-args "__byte_array_set" 3 "Void")
+   "__byte_array_slice" (builtin-checked-args "__byte_array_slice" 3 "Any")
+   "__byte_array_to_array" (builtin-checked-args "__byte_array_to_array" 1 {:base-type "Array" :type-params ["Byte"]})
+   "__byte_array_equals" (builtin-checked-args "__byte_array_equals" 2 "Boolean")
+   "__byte_array_hash" (builtin-checked-args "__byte_array_hash" 1 "Integer")
+   "__byte_array_fill" (builtin-checked-args "__byte_array_fill" 2 "Void")
+   "__byte_array_concat" (builtin-checked-args "__byte_array_concat" 2 "Any")
+   "__byte_array_copy_into" (builtin-checked-args "__byte_array_copy_into" 3 "Void")
+   "__byte_array_index_of" (builtin-checked-args "__byte_array_index_of" 2 "Integer")
+   "__byte_array_compare" (builtin-checked-args "__byte_array_compare" 2 "Integer")
+   "__byte_array_to_hex" (builtin-checked-args "__byte_array_to_hex" 1 "String")
+   "__byte_array_to_utf8" (builtin-checked-args "__byte_array_to_utf8" 1 "String")
 
    ;; http client / json
    "http_get"  check-builtin-http-get
@@ -7405,6 +7405,19 @@
                                          "Free-function names must be unique within a program; "
                                          "a later definition would silently replace the earlier one. "
                                          "Rename or remove the duplicate."))})))
+
+       ;; A free function may not reuse a built-in function's name: the compiled
+       ;; backend resolves builtins first (silently ignoring the user's
+       ;; function) while the interpreter prefers the user's (which then also
+       ;; hijacks library code calling the builtin). Reject it up front so
+       ;; both backends agree.
+         (when-let [clash (first (filter #(contains? bi/builtins %)
+                                         (map :name normalized-functions)))]
+           (throw (ex-info (str "Function name clashes with built-in: " clash)
+                           {:error (type-error
+                                    (str "Function '" clash "' has the same name as a built-in "
+                                         "function, so calls to it would not reach your definition. "
+                                         "Rename it."))})))
 
        ;; A `declare function` signature must be matched exactly by its later
        ;; definition (the declaration is collapsed away, so an unchecked

@@ -1,5 +1,9 @@
 # Built-in Functions
 
+A program may not define a free function with the same name as a built-in; the
+type checker rejects it. Built-ins prefixed `__` are internal helpers for the
+standard library classes and are not part of the public API.
+
 ## `print`
 
 ```nex

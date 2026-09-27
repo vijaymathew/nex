@@ -711,7 +711,7 @@
   (let [f (java.io.File. path)]
     (when (.exists f)
       (if (.isDirectory f)
-        (throw (ex-info "path_delete does not remove directories" {:path path}))
+        (throw (ex-info "__path_delete does not remove directories" {:path path}))
         (.delete f))))
   nil)
 

@@ -1,6 +1,8 @@
 -- Narrative examples from Chapter 27 (Working with Data), collected into
 -- one self-checking, non-interactive program.
 
+intern io/Path
+
 function sum(items: Array[Integer]): Integer
 do
   result := 0
@@ -94,7 +96,7 @@ class File_Word_Counter
       require
         path_not_empty: path.length > 0
       do
-        result := word_count(path_read_text(path))
+        result := word_count((create Path.make(path)).read_text())
       end
 end
 
