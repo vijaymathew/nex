@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.3 - 2026-09-27
+
 - **New: `data/Mutex`.** Exclusive, scoped access to a wrapped value across
   tasks, for protecting a whole critical section (several statements against a
   mutable `Array`/`Map`/`Set` or object) where a single `Atomic_*` doesn't fit.
