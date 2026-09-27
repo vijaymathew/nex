@@ -399,13 +399,21 @@
   [v]
   (instance? Short v))
 
+(def ^:private ^"[Ljava.lang.Short;" byte-box-cache
+  ;; Short.valueOf only caches -128..127, so 128..255 would allocate a fresh box
+  ;; on every conversion. Cache the whole Byte range, as Byte.valueOf does.
+  (let [a (make-array Short 256)]
+    (dotimes [i 256] (aset a i (Short/valueOf (short i))))
+    a))
+
 (defn ->nex-byte
-  "Coerce an integer in 0..255 to a Nex Byte; raises when out of range."
+  "Coerce an integer in 0..255 to a Nex Byte; raises when out of range.
+   Returns a shared, cached Short box."
   [v]
   (let [n (long v)]
     (when-not (<= 0 n 255)
       (throw (ex-info (str "Byte value must be in range 0..255, got " n) {:value n})))
-    (short n)))
+    (aget byte-box-cache (int n))))
 
 (defn java->nex
   "Normalize a value coming back from a Java call. A Java `short` is a
@@ -703,7 +711,7 @@
   (let [f (java.io.File. path)]
     (when (.exists f)
       (if (.isDirectory f)
-        (throw (ex-info "path_delete does not remove directories" {:path path}))
+        (throw (ex-info "__path_delete does not remove directories" {:path path}))
         (.delete f))))
   nil)
 

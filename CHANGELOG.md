@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Fix: redefining a built-in function.** A free function whose name is a
+  built-in function's is now a type error. Before, the compiled backend
+  silently ignored the definition while the interpreter honoured it (and let it
+  hijack library code that calls the built-in).
+- **Change: library-support built-ins are now `__`-prefixed** —
+  `__byte_array_*`, `__binary_file_*`, `__text_file_*`, `__path_*`, `__regex_*`,
+  `__datetime_*`. They back the `lib/` classes (`Byte_Array`, `Path`, `Regex`,
+  `Date_Time`, ...); use those instead. The documented built-ins (`print`,
+  `http_get`, `json_parse`, ...) are unchanged. The `__` prefix is not
+  reserved: your own functions may use it.
+
 ## 0.5.2 - 2026-09-26
 
 - **New: fixed-width integer types.** `Byte` (unsigned, `0..255`),

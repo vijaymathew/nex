@@ -2217,12 +2217,12 @@ end"
       (is (empty? (:errors result))))))
 
 (deftest test-regex-validate-types-as-boolean-expression
-  (testing "regex_validate remains a Boolean expression so it composes with print and control flow"
+  (testing "__regex_validate remains a Boolean expression so it composes with print and control flow"
     (let [code "class Main
   feature
     demo()
     do
-      if regex_validate(\"a+\", \"\") then
+      if __regex_validate(\"a+\", \"\") then
         print(\"ok\")
       end
     end

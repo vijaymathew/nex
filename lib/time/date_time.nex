@@ -5,30 +5,30 @@ class Date_Time
 
 create
   now() do
-    this.millis := datetime_now()
+    this.millis := __datetime_now()
   end
 
   from_epoch_millis(ms: Integer) do
-    this.millis := datetime_from_epoch_millis(ms)
+    this.millis := __datetime_from_epoch_millis(ms)
   end
 
   parse_iso(text: String) do
-    this.millis := datetime_parse_iso(text)
+    this.millis := __datetime_parse_iso(text)
   end
 
   make(year, month, day, hour, minute, second: Integer) do
-    this.millis := datetime_make(year, month, day, hour, minute, second)
+    this.millis := __datetime_make(year, month, day, hour, minute, second)
   end
 
 feature
   millis: Integer
 
   year(): Integer do
-    result := datetime_year(millis)
+    result := __datetime_year(millis)
   end
 
   month(): Integer do
-    result := datetime_month(millis)
+    result := __datetime_month(millis)
   end
 
   month_name(): String do
@@ -38,11 +38,11 @@ feature
   end
 
   day(): Integer do
-    result := datetime_day(millis)
+    result := __datetime_day(millis)
   end
 
   weekday(): Integer do
-    result := datetime_weekday(millis)
+    result := __datetime_weekday(millis)
   end
 
   weekday_name(): String do
@@ -51,43 +51,43 @@ feature
   end
 
   day_of_year(): Integer do
-    result := datetime_day_of_year(millis)
+    result := __datetime_day_of_year(millis)
   end
 
   hour(): Integer do
-    result := datetime_hour(millis)
+    result := __datetime_hour(millis)
   end
 
   minute(): Integer do
-    result := datetime_minute(millis)
+    result := __datetime_minute(millis)
   end
 
   second(): Integer do
-    result := datetime_second(millis)
+    result := __datetime_second(millis)
   end
 
   epoch_millis(): Integer do
-    result := datetime_epoch_millis(millis)
+    result := __datetime_epoch_millis(millis)
   end
 
   add(duration: Duration): Date_Time do
-    result := create Date_Time.from_epoch_millis(datetime_add_millis(millis, duration.total_milliseconds()))
+    result := create Date_Time.from_epoch_millis(__datetime_add_millis(millis, duration.total_milliseconds()))
   end
 
   subtract(duration: Duration): Date_Time do
-    result := create Date_Time.from_epoch_millis(datetime_add_millis(millis, -duration.total_milliseconds()))
+    result := create Date_Time.from_epoch_millis(__datetime_add_millis(millis, -duration.total_milliseconds()))
   end
 
   difference(other: Date_Time): Duration do
-    result := create Duration.milliseconds(datetime_diff_millis(millis, other.epoch_millis()))
+    result := create Duration.milliseconds(__datetime_diff_millis(millis, other.epoch_millis()))
   end
 
   truncate_to_day(): Date_Time do
-    result := create Date_Time.from_epoch_millis(datetime_truncate_to_day(millis))
+    result := create Date_Time.from_epoch_millis(__datetime_truncate_to_day(millis))
   end
 
   truncate_to_hour(): Date_Time do
-    result := create Date_Time.from_epoch_millis(datetime_truncate_to_hour(millis))
+    result := create Date_Time.from_epoch_millis(__datetime_truncate_to_hour(millis))
   end
 
   is_before(other: Date_Time): Boolean do
@@ -99,7 +99,7 @@ feature
   end
 
   format_iso(): String do
-    result := datetime_format_iso(millis)
+    result := __datetime_format_iso(millis)
   end
 
   to_string(): String do

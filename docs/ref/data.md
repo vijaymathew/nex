@@ -130,8 +130,8 @@ end
 `Byte_Array` is a fixed-size, mutable sequence of `Byte`s stored in a real Java `byte[]`, one
 byte per element. Use it for binary data where `Array[Byte]` (a list of boxed values, several
 times larger) is too heavy, and to hand a real `byte[]` to Java code inside `with "java"`.
-It is shipped as a Nex library under `lib/data/byte_array.nex`, on top of `byte_array_*`
-runtime primitives.
+It is shipped as a Nex library under `lib/data/byte_array.nex`, on top of `__byte_array_*`
+runtime primitives (the `__` prefix marks internal library helpers; user code should use `Byte_Array`).
 
 ### Loading
 

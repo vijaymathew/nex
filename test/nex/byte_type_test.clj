@@ -161,10 +161,10 @@ print(195u8.bitwise_not())")))))
                        "convert cannot change numeric representation"))))
 
 (deftest binary-file-io-is-byte-typed
-  (testing "binary_file_read/read_all return Array[Byte]; binary_file_write takes one"
-    (is (nil? (type-errors "let h := binary_file_open_read(\"x\")\nlet xs: Array[Byte] := binary_file_read_all(h)\nlet ys: Array[Byte] := binary_file_read(h, 4)")))
-    (is (nil? (type-errors "let h := binary_file_open_write(\"x\")\nbinary_file_write(h, \"cat\".to_bytes())")))
-    (is (some? (type-errors "let h := binary_file_open_write(\"x\")\nlet xs: Array[Integer] := [1, 2]\nbinary_file_write(h, xs)")))))
+  (testing "__binary_file_read/read_all return Array[Byte]; __binary_file_write takes one"
+    (is (nil? (type-errors "let h := __binary_file_open_read(\"x\")\nlet xs: Array[Byte] := __binary_file_read_all(h)\nlet ys: Array[Byte] := __binary_file_read(h, 4)")))
+    (is (nil? (type-errors "let h := __binary_file_open_write(\"x\")\n__binary_file_write(h, \"cat\".to_bytes())")))
+    (is (some? (type-errors "let h := __binary_file_open_write(\"x\")\nlet xs: Array[Integer] := [1, 2]\n__binary_file_write(h, xs)")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Runtime representation
@@ -463,15 +463,15 @@ print(s.abs() * -1)")))))
           path (.replace (.getPath f) "\\" "/")]
       (try
         (is (= ["[195, 169, 65]" "[195, 169]" "[65]" "true"]
-               (both (str "let w := binary_file_open_write(\"" path "\")
-binary_file_write(w, \"éA\".to_bytes())
-binary_file_close(w)
-let r := binary_file_open_read(\"" path "\")
-let all: Array[Byte] := binary_file_read_all(r)
+               (both (str "let w := __binary_file_open_write(\"" path "\")
+__binary_file_write(w, \"éA\".to_bytes())
+__binary_file_close(w)
+let r := __binary_file_open_read(\"" path "\")
+let all: Array[Byte] := __binary_file_read_all(r)
 print(all)
-print(binary_file_read(r, 2))
-print(binary_file_read(r, 5))
+print(__binary_file_read(r, 2))
+print(__binary_file_read(r, 5))
 print(all.get(0).equals((195).to_byte()))
-binary_file_close(r)"))))
+__binary_file_close(r)"))))
         (is (= [195 169 65] (mapv #(bit-and % 0xFF) (java.nio.file.Files/readAllBytes (.toPath f)))))
         (finally (.delete f))))))
