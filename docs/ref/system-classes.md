@@ -217,6 +217,9 @@ create Atomic_Reference.make(nil)
 
 - `Atomic_Reference[T]` can store `nil`.
 - `compare_and_set` for `Atomic_Reference[T]` uses Nex value equality at the language level.
+- For protecting a whole critical section — several statements against a mutable
+  `Array`/`Map`/`Set` or object, not a single value — see `data/Mutex` in the
+  [Data Libraries](data.md) reference.
 
 ## Examples
 

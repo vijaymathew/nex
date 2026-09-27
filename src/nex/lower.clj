@@ -7252,6 +7252,18 @@
   [unit-name visible-functions visible-imports fn-def]
   (let [fn-def (normalized-function-def fn-def)
         return-type (function-return-type fn-def)
+        ;; An explicit `: Void` return type means exactly the same thing as
+        ;; omitting the return type (function-return-type coalesces the
+        ;; latter to "Void" too), but everything below this point keys off
+        ;; (:return-type fn-def)'s mere PRESENCE to decide whether a `result`
+        ;; local and a return statement are needed. Left as "Void", that
+        ;; produces a `result` local of JVM type :void -- not a real storable
+        ;; local type, so the emitted set-local blows up downstream ("Unsupported
+        ;; local store type"). Clearing it here folds the explicit spelling
+        ;; onto the already-correct "no return value" path that an omitted
+        ;; return type already takes; `return-type` (above) still carries the
+        ;; real "Void" through to the emitted node's own return-type metadata.
+        fn-def (if (= return-type "Void") (dissoc fn-def :return-type) fn-def)
         current-class (:class-name fn-def)
         env0 (lower-function-env visible-functions visible-imports fn-def)
         [env-with-params params]

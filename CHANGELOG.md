@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **New: `data/Mutex`.** Exclusive, scoped access to a wrapped value across
+  tasks, for protecting a whole critical section (several statements against a
+  mutable `Array`/`Map`/`Set` or object) where a single `Atomic_*` doesn't fit.
+  The wrapped value is reachable only inside a `.use(fn(v) do ... end)`
+  callback — there is no `lock`/`unlock`/`get` to forget, mismatch, or leak the
+  value through — and the lock is released even when the callback raises.
+  Self-reentrancy (nested `use` on the same `Mutex`, same task) raises rather
+  than silently succeeding or deadlocking. Built entirely as a `lib/data/`
+  library on top of `with "java"` + `java.util.concurrent.locks.ReentrantLock`
+  and `private feature` fields — no runtime/typechecker/compiler changes of
+  its own. See `docs/ref/data.md`.
+- **Fix: explicit `: Void` return type on a method or function.** Declaring a
+  return type of `Void` explicitly (rather than omitting it, the usual
+  convention) failed both a spurious typecheck ("does not definitely assign
+  result on all returning paths") and, once that was worked around, a compiled-
+  backend crash ("Unsupported local store type") — both `Void` was never
+  exercised as an explicit annotation before. This blocks any callback typed
+  `Function(...): Void` that is actually invoked, a common and previously
+  broken pattern (confirmed via a small standalone repro on both backends,
+  fixed in `typechecker.clj`/`lower.clj`).
 - **Fix: redefining a built-in function.** A free function whose name is a
   built-in function's is now a type error. Before, the compiled backend
   silently ignored the definition while the interpreter honoured it (and let it
