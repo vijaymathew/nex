@@ -1,0 +1,70 @@
+-- Mutex[T]: exclusive, scoped access to a wrapped value across tasks.
+--
+-- The wrapped value is reachable only inside a `use` callback: the lock is
+-- acquired before the callback runs and released when it returns *or*
+-- raises, so there is no separate lock()/unlock() pair to forget, mismatch,
+-- or leave held across an exception. Import with `intern data/Mutex`.
+--
+--   let counters: Mutex[Map[String, Integer]] := create Mutex.make({})
+--
+--   counters.use(fn(m: Map[String, Integer]) do
+--     m.put("hits", m.try_get("hits", 0) + 1)
+--   end)
+--
+-- Not reentrant: calling `use` again on the same Mutex from inside its own
+-- callback (the same task, still holding the lock) raises rather than
+-- silently succeeding (Java's `synchronized`) or silently deadlocking
+-- (Rust's `std::sync::Mutex`, a plain POSIX mutex).
+--
+-- Blocking or awaiting inside the callback -- `spawn`, `Task.await`, a
+-- `Channel` send/receive, `select`, or `use` on a *different* Mutex -- is not
+-- itself detected; avoid it, the same discipline other languages ask of
+-- their own mutex guards. A `use` call deadlocked this way eventually looks
+-- like any other blocked acquire, not a raised error.
+
+import java.util.concurrent.locks.ReentrantLock
+
+class Mutex [T]
+  note "Exclusive, scoped access to a wrapped value across tasks."
+
+  private feature
+    value: T
+    lock: Any
+
+create
+  -- Wrap INITIAL. The Mutex owns it from here: reach it only through `use`.
+  make(initial: T) do
+    value := initial
+    with "java" do
+      lock := ReentrantLock.new()
+    end
+  end
+
+feature
+  -- Acquire the lock, invoke BODY with the wrapped value, and release the
+  -- lock when BODY returns or raises. BODY mutates the value in place (it is
+  -- typically an Array/Map/Set/object); `use` itself always returns Void.
+  use(body: Function(T): Void): Void do
+    let already_held: Boolean := false
+    with "java" do
+      already_held := lock.isHeldByCurrentThread()
+    end
+    if already_held then
+      raise "Mutex.use: already held by this task"
+    end
+    with "java" do
+      lock.lock()
+    end
+    do
+      body(value)
+    rescue
+      with "java" do
+        lock.unlock()
+      end
+      raise exception
+    end
+    with "java" do
+      lock.unlock()
+    end
+  end
+end

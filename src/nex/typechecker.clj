@@ -775,6 +775,7 @@
   [t]
   (let [n (normalize-type t)]
     (and (not (detachable-type? n))
+         (not= n "Void")
          (reference-like-type? n)
          (not (auto-initializable-collection-type? n)))))
 

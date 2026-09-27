@@ -208,3 +208,70 @@ let out: Byte_Array := create Byte_Array.from_java(digest)
 print(out.length())                     -- 32
 print(out.slice(0, 4).to_array())       -- [186, 120, 22, 191]
 ```
+
+## `data/Mutex`
+
+`Mutex[T]` gives one task at a time exclusive access to a wrapped value. Unlike the
+`Atomic_*` classes (a single lock-free value), a `Mutex` protects a whole critical
+section — several statements against, typically, a mutable `Array`/`Map`/`Set` or
+object that must be read and written as one unit. It is shipped as a Nex library
+under `lib/data/mutex.nex`, built entirely on `with "java"` around
+`java.util.concurrent.locks.ReentrantLock` plus `private feature` fields — no
+runtime, typechecker, or compiler support of its own.
+
+### Loading
+
+```nex
+intern data/Mutex
+```
+
+### Support
+
+| Target | Supported |
+|---|---|
+| JVM REPL / interpreter | Yes |
+| Generated JVM code | Yes |
+
+### Construction
+
+| Constructor | Arguments | Description |
+|---|---|---|
+| `make` | `initial: T` | Wrap `initial`. The `Mutex` owns it from here — the only way back to it is `use`. |
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `use` | `body: Function(T): Void` | `Void` | Acquire the lock, invoke `body` with the wrapped value, release when `body` returns *or raises*. Raises `"Mutex.use: already held by this task"` on self-reentrancy. |
+
+### Notes
+
+- There is no `lock`/`unlock`/`get` — the wrapped value is reachable only inside a
+  `use` callback, so it can neither be read without the lock nor leaked past the
+  block. `body` mutates it in place (through its own methods); `use` itself always
+  returns `Void`. If you need a result out, write it into an `Atomic_Reference`
+  declared outside and set it inside `body`.
+- Release is guaranteed even when `body` raises (`use`'s own `rescue` releases the
+  lock and re-raises the same exception), so an exception mid-critical-section never
+  leaves the `Mutex` held.
+- **Not reentrant.** A nested `use` on the *same* `Mutex` from the *same* task (an
+  outer `use`'s `body` calling `use` again on it) raises rather than silently
+  succeeding (Java's `synchronized`) or silently deadlocking (Rust's
+  `std::sync::Mutex`, a plain POSIX mutex).
+- Blocking or awaiting inside `body` — `spawn`, `Task.await`, a `Channel`
+  send/receive, `select`, or `use` on a *different* `Mutex` — is not itself
+  detected. Avoid it; a `Mutex` deadlocked this way looks like any other blocked
+  acquire, not a raised error.
+
+```nex
+intern data/Mutex
+
+let counters: Mutex[Map[String, Integer]] := create Mutex.make({})
+
+counters.use(fn(m: Map[String, Integer]) do
+  m.put("hits", m.try_get("hits", 0) + 1)
+end)
+counters.use(fn(m: Map[String, Integer]) do
+  print(m.get("hits"))                  -- 1
+end)
+```
