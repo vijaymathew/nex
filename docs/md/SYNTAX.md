@@ -455,7 +455,7 @@ end
 
 `select` probes its clauses using `try_send` / `try_receive` for channels and `is_done` for tasks. Task clauses must use `Task.await`; they fire only when the task has already completed. If no clause is ready and there is no `else`, `select` waits until one becomes ready.
 
-For full concurrency semantics and runtime details, see [CONCURRENCY.md](CONCURRENCY.md).
+For full concurrency semantics and runtime details, see the [Concurrency Guide](docs/definition-of-nex/concurrency.html).
 
 ## Classes
 
@@ -637,9 +637,12 @@ let alias := "vj"          -- still a perfectly good variable
 print(u.alias)             -- and a perfectly good field
 ```
 
-`union` and `where` are soft keywords too, but narrower: each remains usable
-as a **member name** (`Set.union`, `u.where`), not as a general identifier —
-`let union := 5` does not parse.
+`union` is a keyword too, but narrower than `alias`: it still works as a
+**member name** (`Set.union`), but not as a general identifier — `let union := 5`
+does not parse. `where` is not restricted at all; it is recognized only inside a
+refinement type's `where n: <expr>` clause (see [Refinement
+Types](#refinement-types)) and is an ordinary identifier everywhere else,
+including `let where := 5`.
 
 A class whose values are compared with `=` — including in a postcondition like
 `ensure reduced: balance = old balance - amount` — should also override `equals`
@@ -1024,7 +1027,7 @@ A type pattern may go on to match the narrowed field's payload —
 
 ```nex
 match result of
-  Ok(inner: Some[Integer](value as x)) then use(x)   -- Ok whose inner is a Some
+  Ok(value: Some[Integer](value as x)) then use(x)   -- Ok whose value is a Some
   _                                    then fallback()
 end
 ```
@@ -1102,7 +1105,7 @@ end
 
 ```nex
 if ?p.age as a and ?q.age as b then
-  result := if a < b then -1 elseif a > b then 1 else 0 end
+  print(when a < b then "p is younger" else "p is not younger" end)
 end
 ```
 

@@ -298,7 +298,7 @@ end
 
 `select` uses channel readiness checks for channels and `is_done` checks for tasks. Task clauses use `Task.await`, but only become selectable after the task has already completed. If no clause is ready and there is no `else`, `select` waits until one becomes ready. If a `timeout` clause is present, that body runs once the timeout expires.
 
-For the precise concurrency semantics and runtime design, see [CONCURRENCY.md](CONCURRENCY.md).
+For the precise concurrency semantics and runtime design, see the [Concurrency Guide](docs/definition-of-nex/concurrency.html).
 
 ## 8. Classes and Objects
 
@@ -374,8 +374,8 @@ class Animal
     end
   create
     named(name: String) do
-	  this.name := name
-	end
+      this.name := name
+    end
 end
 
 class Dog
@@ -386,7 +386,7 @@ class Dog
     end
 end
 
-let a: A := create Animal.named("Ko")
+let a: Animal := create Animal.named("Ko")
 a.speak -- "Ko"
 let d: Animal := create Dog.named("Ki")
 d.speak -- "Ki says woof"
@@ -414,98 +414,25 @@ class Wallet
       end
 
     create
-	   with_balance(amount: Real) do
-	     money := amount
-	   end
+      with_balance(amount: Real) do
+        money := amount
+      end
 
   invariant
     never_negative: money >= 0.0
 end
 
-let w: Wallet := create Wallet.with_balance(-10)
+let w: Wallet := create Wallet.with_balance(-10.0)
 Error: Class invariant violation: never_negative
 ```
 
-## 12. Debugger Quickstart
-
-Enable debugger in REPL:
-
-```text
-:debug on
-```
-
-Set breakpoints and run:
-
-```text
-:break Wallet.spend
-:break Wallet.spend if amount > 100
-:break field:money
-:tbreak Wallet.spend:42
-```
-
-At `dbg>` prompt:
-
-```text
-:where
-:locals
-:print money
-:next
-:continue
-```
-
-Watch values change:
-
-```text
-:watch money
-:watch money if money > 100
-:watches
-```
-
-Tune breakpoint hit behavior:
-
-```text
-:ignore 1 2   -- breakpoint[1] ignores first 2 hits
-:every 1 3    -- breakpoint[1] pauses every 3rd hit
-```
-
-Control breakpoints without deleting:
-
-```text
-:disable 1
-:enable 1
-```
-
-Pause on failures:
-
-```text
-:breakon exception on
-:breakon contract on
-:breakon contract filter invariant
-```
-
-The contract filter takes `pre`, `post`, `invariant`, or `assert` — or any
-substring to match against the violation message.
-
-Save and restore debugger state:
-
-```text
-:breaksave .nex-debug.edn
-:breakload .nex-debug.edn
-```
-
-Script debugger commands from a file:
-
-```text
-:debugscript debug_commands.dbg
-```
-
-For full command reference, see `docs/md/DEBUGGER.md`.
+With a valid balance the methods run, and a broken precondition is reported the same way:
 
 ```nex
 let w: Wallet := create Wallet.with_balance(10.2)
-w.spend(9)
+w.spend(9.0)
 w.money -- 1.1999999999999993
-w.spend(2) -- Error: Precondition violation: enough
+w.spend(2.0) -- Error: Precondition violation: enough
 ```
 
 Use contracts to state assumptions (`require`), guarantees (`ensure`), and global consistency rules (`invariant`).
@@ -628,3 +555,80 @@ account.show
 3. Define a generic `Pair [A, B]` class with `first` and `second`.
 4. Add contracts to a `transfer(amount)` method between two accounts.
 5. Create two files and load one class from the other with `intern`.
+
+## 17. Debugger Quickstart
+
+Optional tooling — skip on a first read. Nex ships an interactive debugger you
+can drive from the REPL once you are comfortable writing programs. This is a
+quick reference; the full command set is in `docs/md/DEBUGGER.md`.
+
+Enable the debugger in the REPL:
+
+```text
+:debug on
+```
+
+Set breakpoints and run:
+
+```text
+:break Wallet.spend
+:break Wallet.spend if amount > 100
+:break field:money
+:tbreak Wallet.spend:42
+```
+
+At the `dbg>` prompt:
+
+```text
+:where
+:locals
+:print money
+:next
+:continue
+```
+
+Watch values change:
+
+```text
+:watch money
+:watch money if money > 100
+:watches
+```
+
+Tune breakpoint hit behavior:
+
+```text
+:ignore 1 2   -- breakpoint[1] ignores first 2 hits
+:every 1 3    -- breakpoint[1] pauses every 3rd hit
+```
+
+Control breakpoints without deleting:
+
+```text
+:disable 1
+:enable 1
+```
+
+Pause on failures:
+
+```text
+:breakon exception on
+:breakon contract on
+:breakon contract filter invariant
+```
+
+The contract filter takes `pre`, `post`, `invariant`, or `assert` — or any
+substring to match against the violation message.
+
+Save and restore debugger state:
+
+```text
+:breaksave .nex-debug.edn
+:breakload .nex-debug.edn
+```
+
+Script debugger commands from a file:
+
+```text
+:debugscript debug_commands.dbg
+```

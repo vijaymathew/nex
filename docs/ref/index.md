@@ -14,7 +14,7 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - [Time Libraries](time.md)
 - [Library Index](libraries.md)
 - [Networking Libraries](networking.md)
-- [Concurrency Guide](../md/CONCURRENCY.md)
+- [Concurrency Guide](../definition-of-nex/concurrency.html)
 
 ## Conventions
 
