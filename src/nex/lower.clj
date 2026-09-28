@@ -7164,8 +7164,8 @@
 
 (defn- body-assigns-result?
   "Whether any statement anywhere in `stmts` — however deeply nested inside
-   if/match/case/loop/etc. bodies — is an explicit `result := ...` (or
-   `let result := ...`) assignment. Used to suppress the implicit-tail-
+   if/match/case/loop/etc. bodies — is an explicit `result := ...`
+   assignment. Used to suppress the implicit-tail-
    expression-as-result sugar in `lower-function`: once a function's body
    has already committed to an explicit assignment somewhere earlier, a
    later statement kept purely for its side effect (most commonly a bare

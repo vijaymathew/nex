@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Fix: `result` can no longer be declared.** `let result := ...` inside a
+  routine used to hide the return value on the compiled backend, so the
+  routine returned the default (`nil`), while the interpreter treated it as an
+  assignment and returned the value. Parameters, fields, `across`/`match`/
+  object-test/`select` variables named `result` misbehaved the same way. Every
+  such declaration is now rejected when the program is parsed, so the error
+  appears even in the REPL with type checking off. Assign the return value with
+  `result := ...`.
+- **Fix: a `let` can no longer hide a field.** `let value := v` in a constructor,
+  where `value` is a field, used to leave the field unset on the compiled
+  backend (0) while the interpreter assigned it (42). A `let` inside a class's
+  routines that reuses the name of a field or constant visible there, own or
+  inherited, is now rejected. Parameters and loop/pattern variables are
+  unaffected.
+
 - **New: an attribute can redeclare an inherited query.** A heir may answer an
   inherited zero-argument routine (including a `deferred` one) with a stored
   attribute of the same name and a conforming type. It is desugared into the

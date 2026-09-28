@@ -35,7 +35,7 @@ end"
     (let [code "class Account
   create
     with_balance(bal: Integer) do
-      let balance: Integer := bal
+      balance := bal
     end
   feature
     balance: Integer
@@ -122,7 +122,7 @@ end"
     (let [code "class Counter
   create
     with_value(val: Integer) do
-      let count: Integer := val
+      count := val
     end
   feature
     count: Integer
@@ -146,7 +146,7 @@ end"
       require
         positive: initial >= 0
       do
-        let balance: Integer := initial
+        balance := initial
       end
   feature
     balance: Integer

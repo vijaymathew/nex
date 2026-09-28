@@ -1,6 +1,7 @@
 (ns nex.walker
   (:require [clojure.string :as str]
-            [clojure.walk :as walk]))
+            [clojure.walk :as walk]
+            [nex.field-shadowing :as field-shadowing]))
 
 ;;
 ;; Utilities
@@ -2978,12 +2979,65 @@
 ;; Public API
 ;;
 
+(defn- result-declaration-kind
+  "What NODE declares under the reserved name `result`, or nil."
+  [node]
+  (cond
+    (and (= :let (:type node)) (= "result" (:name node)))
+    (cond
+      (:from-pattern (:value node)) "pattern binding"
+      (:synthetic node) "loop variable"
+      :else "local variable")
+
+    (and (= :field (:type node)) (= "result" (:name node)))
+    "field"
+
+    (and (sequential? (:params node))
+         (some #(and (map? %) (= "result" (:name %))) (:params node)))
+    "parameter"
+
+    (= "result" (:var-name node))
+    "pattern binding"
+
+    (and (= "result" (:alias node)) (contains? node :expr))
+    "select binding"))
+
+(defn- check-no-result-declarations!
+  "`result` names the value a routine returns. Declaring anything else under
+   that name hides it: the routine then silently returns the default, and the
+   backends disagree on which binding an assignment updates."
+  [ast]
+  (letfn [(walk [node line]
+            (cond
+              (map? node)
+              (let [line (or (:dbg/line node) line)]
+                (when-let [kind (result-declaration-kind node)]
+                  (let [msg (str (when line (str "Line " line ": "))
+                                 "'result' is reserved for a routine's return value and"
+                                 " cannot be declared as a " kind ". Choose another name.")]
+                    (throw (ex-info msg {:error msg :line line}))))
+                (doseq [v (vals node)] (walk v line)))
+
+              (sequential? node)
+              (doseq [v node] (walk v line))))]
+    (walk ast nil)
+    ast))
+
+(defn- check-no-field-shadowing!
+  "Parents declared in the same unit are resolved here; the type checker
+   repeats the check with every class in scope."
+  [ast]
+  (when (and (map? ast) (seq (:classes ast)))
+    (let [by-name (into {} (keep (fn [cd] (when (map? cd) [(:name cd) cd]))) (:classes ast))]
+      (field-shadowing/check-classes! (:classes ast) by-name)))
+  ast)
+
 (defn walk-node
   "Transform an ANTLR parse tree into a clean AST.
    This is the main entry point for tree transformation."
   [parse-tree]
   (try
-    (transform-node parse-tree)
+    (check-no-field-shadowing! (check-no-result-declarations! (transform-node parse-tree)))
     (catch Exception e
       (let [err-message (.getMessage e)]
         (throw (ex-info err-message

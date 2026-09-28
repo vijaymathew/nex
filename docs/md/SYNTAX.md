@@ -71,7 +71,7 @@ Convert with a method; narrowing raises if the value does not fit:
 ```nex
 let n: Integer := 300
 let s: Integer16 := n.to_integer16()   -- ok
-let b: Byte := n.to_byte()             -- raises: 300 is not in 0..255
+let bb: Byte := n.to_byte()            -- raises: 300 is not in 0..255
 let back: Integer := s.to_integer()
 ```
 
@@ -222,6 +222,12 @@ end
 
 print(double(5))                 -- 10
 ```
+
+`result` is reserved for the value a routine returns. It cannot be declared as
+anything else — a `let`, a parameter, a field, an `across` or `match` variable —
+because the declaration would hide the return value and the routine would
+silently return the default. Assign it with `result := ...`; choose another name
+for everything else.
 
 Every function in a program is checked against every other function's
 signature regardless of which is written first, so mutually recursive
@@ -517,6 +523,12 @@ end
 let c: Circle := create Circle.make(5.0)
 print(c.area)                    -- 78.53975
 ```
+
+A field is set by assigning it (`radius := r`). Declaring a local with the
+field's name (`let radius := r`) would only hide the field, so a `let` in a
+class's routines may not reuse the name of a field or constant visible there,
+including an inherited one. A parameter may, as in `make(name: String) do
+this.name := name end`.
 
 A constructor can delegate to another constructor of the same class with
 `this.<ctor-name>(...)`, so shared setup lives in one place:
@@ -1196,8 +1208,8 @@ parameter and return types can be left out — they're inferred from that
 target:
 
 ```nex
-let add: Function(a: Integer, b: Integer): Integer := fn(a, b) do result := a + b end
-print(add(3, 4))                -- 7
+let add2: Function(a: Integer, b: Integer): Integer := fn(a, b) do result := a + b end
+print(add2(3, 4))                -- 7
 ```
 
 Inference only works where a target type is actually available (here, the

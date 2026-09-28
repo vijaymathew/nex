@@ -132,16 +132,16 @@ class Calculator
     end
 
     factorial(n: Integer) do
+      let product := 1
       from
         let i := 1
-        let result := 1
       until
         i > n
       do
-        let result := result * i
-        let i := i + 1
+        product := product * i
+        i := i + 1
       end
-      print(result)
+      print(product)
     end
 end
 ```
@@ -176,7 +176,7 @@ class BankAccount          -- 'class' is a keyword, 'BankAccount' is a type
       require              -- Contract keyword
         positive: amount > 0    -- 'positive:' is a label
       do                   -- 'do' is a keyword
-        let balance := balance + amount  -- 'let', ':=' are keywords
+        balance := balance + amount  -- ':=' is the assignment operator
       ensure               -- Contract keyword
         increased: balance > 0
       end                  -- 'end' is a keyword

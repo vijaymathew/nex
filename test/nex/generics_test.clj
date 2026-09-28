@@ -119,7 +119,7 @@ end"
     (let [code "class Box [T]
   create
     make(val: T) do
-      let value: T := val
+      value := val
     end
   feature
     value: T
@@ -147,13 +147,13 @@ end"
     (let [code "class Box [T]
   create
     make(val: T) do
-      let value: T := val
+      value := val
     end
   feature
     value: T
 
     get_value(): T do
-      let result: T := value
+      result := value
     end
 end
 
