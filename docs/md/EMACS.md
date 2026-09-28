@@ -176,7 +176,7 @@ class BankAccount          -- 'class' is a keyword, 'BankAccount' is a type
       require              -- Contract keyword
         positive: amount > 0    -- 'positive:' is a label
       do                   -- 'do' is a keyword
-        let balance := balance + amount  -- 'let', ':=' are keywords
+        balance := balance + amount  -- ':=' is the assignment operator
       ensure               -- Contract keyword
         increased: balance > 0
       end                  -- 'end' is a keyword

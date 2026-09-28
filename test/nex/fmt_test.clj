@@ -60,7 +60,7 @@ feature
 x: Integer
 create
 make(px: Integer) do
-let x := px
+x := px
 end
 end"
           formatted (fmt/format-code unformatted)
@@ -70,7 +70,7 @@ feature
 
 constructors
   make(px: Integer) do
-    let x := px
+    x := px
   end
 end"]
       (is (= expected formatted)))))

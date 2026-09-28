@@ -2,6 +2,7 @@
   "Static type checker for Nex language"
   (:require [clojure.string :as str]
             [clojure.set :as set]
+            [nex.field-shadowing :as field-shadowing]
             [nex.redeclare :as redeclare]
             [nex.types.builtins :as bi]))
 
@@ -7476,6 +7477,10 @@
        (reset! (:ambiguous-classes env) ambiguous-classes)
        (reset! (:ambiguous-functions env) ambiguous-functions)
        (try
+         (try
+           (field-shadowing/check-classes! all-class-defs (redeclare/class-lookup all-class-defs))
+           (catch clojure.lang.ExceptionInfo e
+             (throw (ex-info (ex-message e) {:error (type-error (ex-message e))}))))
        ;; Reject duplicate free-function definitions before they are collapsed
        ;; last-wins (which would otherwise make the earlier definition silently
        ;; vanish and surface later as an obscure "Method not found: callN").

@@ -524,6 +524,12 @@ let c: Circle := create Circle.make(5.0)
 print(c.area)                    -- 78.53975
 ```
 
+A field is set by assigning it (`radius := r`). Declaring a local with the
+field's name (`let radius := r`) would only hide the field, so a `let` in a
+class's routines may not reuse the name of a field or constant visible there,
+including an inherited one. A parameter may, as in `make(name: String) do
+this.name := name end`.
+
 A constructor can delegate to another constructor of the same class with
 `this.<ctor-name>(...)`, so shared setup lives in one place:
 

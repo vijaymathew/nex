@@ -1,6 +1,7 @@
 (ns nex.walker
   (:require [clojure.string :as str]
-            [clojure.walk :as walk]))
+            [clojure.walk :as walk]
+            [nex.field-shadowing :as field-shadowing]))
 
 ;;
 ;; Utilities
@@ -3022,12 +3023,21 @@
     (walk ast nil)
     ast))
 
+(defn- check-no-field-shadowing!
+  "Parents declared in the same unit are resolved here; the type checker
+   repeats the check with every class in scope."
+  [ast]
+  (when (and (map? ast) (seq (:classes ast)))
+    (let [by-name (into {} (keep (fn [cd] (when (map? cd) [(:name cd) cd]))) (:classes ast))]
+      (field-shadowing/check-classes! (:classes ast) by-name)))
+  ast)
+
 (defn walk-node
   "Transform an ANTLR parse tree into a clean AST.
    This is the main entry point for tree transformation."
   [parse-tree]
   (try
-    (check-no-result-declarations! (transform-node parse-tree))
+    (check-no-field-shadowing! (check-no-result-declarations! (transform-node parse-tree)))
     (catch Exception e
       (let [err-message (.getMessage e)]
         (throw (ex-info err-message

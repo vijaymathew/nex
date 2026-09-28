@@ -103,15 +103,15 @@ end
 print(create Box.make(7).q)")))))
 
 (deftest refinement-field-check-ignores-shadowing-local
-  (testing "a local `let` that shares a refinement-typed field's name is never
-            mistaken for a field write — only the later `this.q := v` is
-            checked, and a local-only reassignment does not raise"
+  (testing "a local that is not the refinement-typed field is never mistaken
+            for a field write — only the later `this.q := v` is checked, and a
+            local-only reassignment does not raise"
     (is (= ["5"]
            (run "declare type Quantity = Integer where n: n > 0
 class Box
   create make(v: Integer) do
-    let q := -100
-    q := -200
+    let tmp := -100
+    tmp := -200
     this.q := v
   end
   feature q: Quantity

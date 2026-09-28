@@ -1128,7 +1128,7 @@ end"
 
                     deposit(amount: Integer)
                     do
-                      let balance: Integer := balance + amount
+                      balance := balance + amount
                     end
                   end
 
@@ -1140,7 +1140,7 @@ end"
 
                   deposit(amount: Integer)
                   do
-                    let balance: Integer := balance + amount
+                    super.deposit(amount)
                   end
                 end"
           ast (p/ast code)
