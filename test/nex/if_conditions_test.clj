@@ -53,13 +53,13 @@ end"
   feature
     demo() do
       let x := 10
-      let result := 0
+      let r := 0
       if x > 5 then
-        let result := x * 2
-        print(result)
+        let r := x * 2
+        print(r)
       else
-        let result := x + 10
-        print(result)
+        let r := x + 10
+        print(r)
       end
     end
 end"
@@ -348,8 +348,8 @@ end"
     demo() do
       let a := 10
       let b := 20
-      let result := when a > b then a * 2 else b * 2 end
-      print(result)
+      let r := when a > b then a * 2 else b * 2 end
+      print(r)
     end
 end"
           output (execute-method code)]

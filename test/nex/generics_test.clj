@@ -153,7 +153,7 @@ end"
     value: T
 
     get_value(): T do
-      let result: T := value
+      result := value
     end
 end
 

@@ -91,13 +91,13 @@ end"
   feature
     demo() do
       let x := 10
-      let result := x * 2
+      let r := x * 2
       do
         let x := 5
-        let result := x * 3
-        print(result)
+        let r := x * 3
+        print(r)
       end
-      print(result)
+      print(r)
     end
 end"
           output (execute-method code)]

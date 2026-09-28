@@ -71,7 +71,7 @@ Convert with a method; narrowing raises if the value does not fit:
 ```nex
 let n: Integer := 300
 let s: Integer16 := n.to_integer16()   -- ok
-let b: Byte := n.to_byte()             -- raises: 300 is not in 0..255
+let bb: Byte := n.to_byte()            -- raises: 300 is not in 0..255
 let back: Integer := s.to_integer()
 ```
 
@@ -222,6 +222,12 @@ end
 
 print(double(5))                 -- 10
 ```
+
+`result` is reserved for the value a routine returns. It cannot be declared as
+anything else — a `let`, a parameter, a field, an `across` or `match` variable —
+because the declaration would hide the return value and the routine would
+silently return the default. Assign it with `result := ...`; choose another name
+for everything else.
 
 Every function in a program is checked against every other function's
 signature regardless of which is written first, so mutually recursive
@@ -1196,8 +1202,8 @@ parameter and return types can be left out — they're inferred from that
 target:
 
 ```nex
-let add: Function(a: Integer, b: Integer): Integer := fn(a, b) do result := a + b end
-print(add(3, 4))                -- 7
+let add2: Function(a: Integer, b: Integer): Integer := fn(a, b) do result := a + b end
+print(add2(3, 4))                -- 7
 ```
 
 Inference only works where a target type is actually available (here, the

@@ -132,16 +132,16 @@ class Calculator
     end
 
     factorial(n: Integer) do
+      let product := 1
       from
         let i := 1
-        let result := 1
       until
         i > n
       do
-        let result := result * i
-        let i := i + 1
+        product := product * i
+        i := i + 1
       end
-      print(result)
+      print(product)
     end
 end
 ```
