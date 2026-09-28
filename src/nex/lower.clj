@@ -3977,24 +3977,46 @@
 
 (defn- direct-let-declarations
   "Every `:let` this pass treats as \"directly\" in STMTS: a plain top-level
-   one, plus — the one deliberate, narrow exception to the \"not nested
-   inside an if/loop/etc.\" rule box-candidate-lets otherwise holds to — a
-   `from`-loop's own control variable, declared in a top-level `:loop`
-   node's `:init` rather than as an ordinary statement (`from let i := 0
-   until ... do ... end` parses `i`'s :let into the :loop node's :init, not
-   as a sibling statement; see nex.walker). That variable is exactly as
-   legitimate a boxing target as any other mutated-and-closed-over :let —
-   `from let i := 0 until i = n do spawn do result := i end ... end` needs
-   `i` boxed for the same reason a `let total := 0` does — but it lives one
-   field deeper, so box-candidate-lets' own plain `filter` over STMTS never
-   saw it without this. A loop nested inside another loop/if/etc. is still
-   out of scope, same as before: only a :loop directly in STMTS is looked
-   into."
+   one, plus two deliberate, narrow exceptions to the \"not nested inside an
+   if/loop/etc.\" rule box-candidate-lets otherwise holds to:
+
+   1. A `from`-loop's own control variable, declared in a top-level `:loop`
+      node's `:init` rather than as an ordinary statement (`from let i := 0
+      until ... do ... end` parses `i`'s :let into the :loop node's :init,
+      not as a sibling statement; see nex.walker). That variable is exactly
+      as legitimate a boxing target as any other mutated-and-closed-over
+      :let — `from let i := 0 until i = n do spawn do result := i end ...
+      end` needs `i` boxed for the same reason a `let total := 0` does —
+      but it lives one field deeper, so box-candidate-lets' own plain
+      `filter` over STMTS never saw it without this. A loop nested inside
+      another loop/if/etc. is still out of scope, same as before: only a
+      :loop directly in STMTS is looked into.
+
+   2. A `:let` declared directly inside a bare `do ... end` used as a plain
+      statement (a `:scoped-block` node — see nex.walker/handle-scoped-
+      block) rather than at the true top level of STMTS. A scoped block
+      still opens its own nested scope (see docs/md/SYNTAX.md's \"Scoped
+      Blocks\" section — `do / let x := 99 -- shadows outer x / end`), but
+      that has no bearing on whether a name mutated inside it and read from
+      a sibling closure needs sharing: `do / let total := 0 / let add :=
+      fn(x) do total := total + x end / ... / end` needs `total` boxed for
+      the identical reason an unwrapped top-level `let total := 0` does.
+      Without this case, box-target-names/names-touched-inside-closures
+      (both full tree-seqs, already scope-agnostic) correctly saw `total`
+      as reassigned-and-closed-over, but box-candidate-lets' own plain
+      `filter` never found the :let itself to box — the same shape of gap
+      as the :loop/:init case above, just for `do...end` instead. Recurses
+      into a scoped-block's own :body so a scoped-block nested inside
+      another scoped-block is handled too, to arbitrary depth; a
+      scoped-block nested inside a :loop's own :body, or inside an
+      if/case/match clause body, is still out of scope — see box-mutable-
+      closure-captures for the matching rewrite-side handling."
   [stmts]
   (mapcat (fn [s]
             (cond
               (and (map? s) (= :let (:type s))) [s]
               (and (map? s) (= :loop (:type s))) (filter #(and (map? %) (= :let (:type %))) (:init s))
+              (and (map? s) (= :scoped-block (:type s))) (direct-let-declarations (:body s))
               :else nil))
           stmts))
 
@@ -4259,7 +4281,20 @@
    statements, a function body, a method/constructor body) BEFORE the
    ordinary closure-capture rewrite, which needs no changes of its own:
    capturing a boxed name already captures the shared box object by
-   reference, exactly like capturing any other Nex object."
+   reference, exactly like capturing any other Nex object.
+
+   A :let declared directly inside a nested :scoped-block (a bare `do ...
+   end` used as a statement) is boxed too, to arbitrary scoped-block-inside-
+   scoped-block depth — see direct-let-declarations' own :scoped-block case
+   for why this is exactly as legitimate a target as a true top-level :let.
+   The box-wrapped :let stays INSIDE the scoped-block's own :body
+   (preserving its scope, per docs/md/SYNTAX.md's \"Scoped Blocks\" section)
+   rather than being hoisted anywhere, unlike the unrelated mutual-recursion
+   hoisting box-forward-referenced-closures does. A :scoped-block nested
+   inside a :loop's own :body (as opposed to a :loop's :init, already
+   handled below), or inside an if/case/match clause body, is deliberately
+   left out of scope, same as :loop's own :init special-case already was
+   before this — see direct-let-declarations for the full rationale."
   [ctx local-types stmts]
   (let [candidates (box-candidate-lets stmts)]
     (if (empty? candidates)
@@ -4273,12 +4308,13 @@
                                       :generic-args [t]
                                       :constructor "make"
                                       :args [(:value s)]}))
-            ;; One :let (top-level, or nested one level into a top-level
-            ;; :loop's own :init — see direct-let-declarations) threaded
-            ;; through the same lt/acc update either kind gets when it is
-            ;; a plain statement: box-typed and recorded when it is a
-            ;; boxing candidate, otherwise just folded into lt so a LATER
-            ;; boxed let's initializer can still resolve its type.
+            ;; One :let (top-level, nested one level into a top-level
+            ;; :loop's own :init, or nested into a :scoped-block's own
+            ;; :body — see direct-let-declarations) threaded through the
+            ;; same lt/acc update either kind gets when it is a plain
+            ;; statement: box-typed and recorded when it is a boxing
+            ;; candidate, otherwise just folded into lt so a LATER boxed
+            ;; let's initializer can still resolve its type.
             thread-let (fn [[lt acc] s]
                          (if (contains? candidates (:name s))
                            (let [t (box-let-type ctx lt s)]
@@ -4287,41 +4323,60 @@
             ;; Types are resolved against the ORIGINAL (pre-rewrite) lets,
             ;; threading local-types forward exactly like the ordinary
             ;; closure-rewrite :let case does, so a later boxed let's own
-            ;; initializer can still refer to an earlier one's declared type.
-            box-types (second
-                       (reduce (fn [[lt acc] s]
-                                 (cond
-                                   (and (map? s) (= :let (:type s)) (:name s))
-                                   (thread-let [lt acc] s)
+            ;; initializer can still refer to an earlier one's declared
+            ;; type. A named (not anonymous) fn so the :scoped-block branch
+            ;; below can recurse into a nested scoped-block's own :body,
+            ;; keeping this in sync with direct-let-declarations' own
+            ;; recursive descent.
+            thread-stmts (fn thread-stmts [[lt acc] ss]
+                           (reduce (fn [[lt acc] s]
+                                     (cond
+                                       (and (map? s) (= :let (:type s)) (:name s))
+                                       (thread-let [lt acc] s)
 
-                                   (and (map? s) (= :loop (:type s)))
-                                   (reduce (fn [state init-let]
-                                             (if (and (map? init-let) (= :let (:type init-let)) (:name init-let))
-                                               (thread-let state init-let)
-                                               state))
-                                           [lt acc]
-                                           (:init s))
+                                       (and (map? s) (= :loop (:type s)))
+                                       (reduce (fn [state init-let]
+                                                 (if (and (map? init-let) (= :let (:type init-let)) (:name init-let))
+                                                   (thread-let state init-let)
+                                                   state))
+                                               [lt acc]
+                                               (:init s))
 
-                                   :else [lt acc]))
-                               [local-types {}]
-                               stmts))
-            rewritten (rewrite-boxed-references boxed-names stmts)]
-        (mapv (fn [s]
-                (cond
-                  (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
-                  (box-wrap s (get box-types (:name s)))
+                                       (and (map? s) (= :scoped-block (:type s)))
+                                       (thread-stmts [lt acc] (:body s))
 
-                  (and (map? s) (= :loop (:type s)))
-                  (assoc s :init
-                         (mapv (fn [init-let]
-                                 (if (and (map? init-let) (= :let (:type init-let))
-                                          (contains? boxed-names (:name init-let)))
-                                   (box-wrap init-let (get box-types (:name init-let)))
-                                   init-let))
-                               (:init s)))
+                                       :else [lt acc]))
+                                   [lt acc]
+                                   ss))
+            box-types (second (thread-stmts [local-types {}] stmts))
+            rewritten (rewrite-boxed-references boxed-names stmts)
+            ;; The actual :let -> Closure_Mut_Box rewrite, mirroring
+            ;; thread-stmts' own shape exactly (including its recursive
+            ;; :scoped-block case) so every candidate thread-stmts typed
+            ;; gets box-wrapped in place — one level (:init) into a :loop,
+            ;; or arbitrarily many levels (:body) into a :scoped-block —
+            ;; and nowhere else.
+            rewrite-stmts (fn rewrite-stmts [ss]
+                            (mapv (fn [s]
+                                    (cond
+                                      (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
+                                      (box-wrap s (get box-types (:name s)))
 
-                  :else s))
-              rewritten)))))
+                                      (and (map? s) (= :loop (:type s)))
+                                      (assoc s :init
+                                             (mapv (fn [init-let]
+                                                     (if (and (map? init-let) (= :let (:type init-let))
+                                                              (contains? boxed-names (:name init-let)))
+                                                       (box-wrap init-let (get box-types (:name init-let)))
+                                                       init-let))
+                                                   (:init s)))
+
+                                      (and (map? s) (= :scoped-block (:type s)))
+                                      (assoc s :body (rewrite-stmts (:body s)))
+
+                                      :else s))
+                                  ss))]
+        (rewrite-stmts rewritten)))))
 
 (defn prepare-program-for-closures
   [program opts]

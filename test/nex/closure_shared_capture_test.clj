@@ -71,6 +71,82 @@ add(10)
 print(peek())
 print(total)")))))
 
+(deftest sibling-closures-inside-a-bare-scoped-block-share-a-mutated-capture-test
+  (testing "the identical sibling-closure sharing works when the whole thing
+            is wrapped in a bare `do ... end` used as a plain statement (a
+            :scoped-block node — see nex.walker/handle-scoped-block), not
+            just at the true top level of a file. Regression test for a gap
+            in direct-let-declarations: the detection passes (box-target-
+            names/names-touched-inside-closures) already tree-seq the whole
+            subtree and see `total` reassigned/read regardless of
+            :scoped-block nesting, but direct-let-declarations' own plain
+            filter over STMTS never looked one level into a :scoped-block's
+            :body, so `total` was never boxed at all here — sibling closures
+            each captured their own private snapshot instead of sharing one
+            box, and printed 0/0/0 instead of 5/15/15. This surfaces at the
+            REPL whenever a user types a literal `do ... end` to force
+            several lines into one input cell (see nex.repl/continue-
+            reading?), but the bug itself is backend/REPL-agnostic — the
+            same do...end wrapper in a plain .nex file hit it too."
+    (is (= ["5" "15" "15"]
+           (both "do
+  let total := 0
+  let add := fn (x: Integer) do total := total + x end
+  let peek := fn (): Integer do result := total end
+  add(5)
+  print(peek())
+  add(10)
+  print(peek())
+  print(total)
+end")))))
+
+(deftest sibling-closures-inside-nested-scoped-blocks-share-a-mutated-capture-test
+  (testing "the same sharing still works when the scoped block boxing a
+            shared capture is itself nested inside ANOTHER bare do...end —
+            regression coverage for direct-let-declarations' and box-
+            mutable-closure-captures' recursive (not just one-level)
+            :scoped-block handling"
+    (is (= ["5" "15" "15"]
+           (both "do
+  do
+    let total := 0
+    let add := fn (x: Integer) do total := total + x end
+    let peek := fn (): Integer do result := total end
+    add(5)
+    print(peek())
+    add(10)
+    print(peek())
+    print(total)
+  end
+end")))))
+
+(deftest closure-parameter-shadowing-a-mutated-capture-inside-a-scoped-block-does-not-crash-test
+  (testing "the same shadowing guard (shadowed-anywhere-names) that protects
+            a top-level boxed capture from a lowering-time crash also
+            protects one boxed inside a :scoped-block — a sibling closure's
+            own same-named parameter must not be rewritten into a field
+            access just because an outer, same-named local inside the
+            enclosing do...end got boxed. Not run through `both`, for the
+            identical reason closure-parameter-shadowing-a-mutated-outer-
+            capture-does-not-crash-test above is not: the compiled backend
+            legitimately reverts to per-closure-snapshot (0) for this one
+            shadowed name, while the interpreter's true lexical scoping
+            still shares it (5) — a known, accepted imprecision, not a bug
+            to chase."
+    (let [f (java.io.File/createTempFile "closure_shadow_scoped_block" ".nex")]
+      (try
+        (spit f "do
+  let total := 0
+  let add := fn (x: Integer) do total := total + x end
+  let reset := fn (total: Integer) do print(total) end
+  add(5)
+  reset(99)
+  print(total)
+end")
+        (is (= ["99" "0"]
+               (str/split-lines (str/trim-newline (with-out-str (e/eval-file (.getPath f) {}))))))
+        (finally (.delete f))))))
+
 (deftest sibling-closures-returned-from-a-function-share-a-mutated-capture-test
   (testing "the classic factory-of-closures pattern: a function declares a
             local, builds two closures that share it, and returns/exposes
