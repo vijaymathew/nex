@@ -55,6 +55,35 @@
         (is (= "Integer" (runtime/state-get-type (:state session) "x")))
         (is (str/includes? output "42"))))))
 
+(deftest repl-do-end-wrapped-sibling-closures-share-a-mutated-capture-test
+  (testing "typing a literal `do ... end` at the REPL to force several
+            lines into one input cell (see nex.repl/continue-reading?) no
+            longer loses a shared mutable closure capture — regression test
+            for the :scoped-block gap in nex.lower/direct-let-declarations,
+            at the REPL path directly: eval-code receives the whole
+            do...end block as ONE multi-line string, exactly as read-input
+            would join it, and that string lowers through the identical
+            prepare-program-for-closures/lower-repl-cell path a real REPL
+            session uses"
+    (binding [repl/*type-checking-enabled* (atom false)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)
+            output (with-out-str
+                     (repl/eval-code ctx "do
+  let total := 0
+  let add := fn (x: Integer) do total := total + x end
+  let peek := fn (): Integer do result := total end
+  add(5)
+  print(peek())
+  add(10)
+  print(peek())
+  print(total)
+end"))]
+        (is (= ["5" "15" "15"]
+               (str/split-lines (str/trim-newline output))))))))
+
 (deftest repl-compiled-backend-type-alias-vars-compare-test
   (testing "vars declared with a `declare type` alias compare/arithmetic on the compiled backend"
     ;; The compiled backend is alias-agnostic. A variable recorded with its raw

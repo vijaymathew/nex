@@ -284,14 +284,22 @@ let is_odd := fn(n: Integer): Boolean do
 end
 ```
 
-This works for a whole file and for a single, multi-statement REPL input. It
-does **not** currently work across separate REPL inputs — defining both
-closures in one input and then calling one from a later, separate input fails
-(a limitation of the interactive session bridging interpreted and compiled
-state, not of the language). A single self-recursive closure is unaffected;
-the gap is specific to two or more closures calling each other across
-separate inputs. If you need that, use `function` (with `declare function` if
-needed) instead of `let` — named functions are not affected.
+This works for a whole file (as bare top-level statements) and for a single,
+multi-statement REPL input (wrap the statements in `do ... end` to submit
+them to the REPL as one input, since the REPL otherwise treats each complete
+statement as its own separate input) — including two or more closures that
+merely *share* a captured, mutated variable without calling each other at
+all (`let total := 0 / let add := fn(x) do total := total + x end / let peek
+:= fn(): Integer do result := total end`). It does **not** currently work
+across separate REPL inputs — defining both closures
+in one input and then calling one from a later, separate input fails (a
+limitation of the interactive session bridging interpreted and compiled
+state, not of the language). A single self-recursive or self-mutating
+closure (e.g. a counter) is unaffected either way; the gap is specific to
+two or more closures that reference each other or share mutated state,
+split across separate inputs. If you need that, use `function` (with
+`declare function` if needed) instead of `let` — named functions are not
+affected.
 
 ### No default arguments
 
