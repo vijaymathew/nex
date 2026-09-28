@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.5.4 - 2026-09-28
+
+- **New: an attribute can redeclare an inherited query.** A heir may answer an
+  inherited zero-argument routine (including a `deferred` one) with a stored
+  attribute of the same name and a conforming type. It is desugared into the
+  attribute plus a same-named getter (`nex.redeclare`), so dynamic dispatch,
+  deferred effecting and inherited postconditions all work through the ordinary
+  override machinery. Before, a field implementing a deferred query was a type
+  error. A field over a concrete query ran without complaint but gave different
+  answers on the two backends, and neither was right.
 - **Fix: `result` can no longer be declared.** `let result := ...` inside a
   routine used to hide the return value on the compiled backend, so the
   routine returned the default (`nil`), while the interpreter treated it as an
@@ -16,15 +26,6 @@
   routines that reuses the name of a field or constant visible there, own or
   inherited, is now rejected. Parameters and loop/pattern variables are
   unaffected.
-
-- **New: an attribute can redeclare an inherited query.** A heir may answer an
-  inherited zero-argument routine (including a `deferred` one) with a stored
-  attribute of the same name and a conforming type. It is desugared into the
-  attribute plus a same-named getter (`nex.redeclare`), so dynamic dispatch,
-  deferred effecting and inherited postconditions all work through the ordinary
-  override machinery. Before, a field implementing a deferred query was a type
-  error. A field over a concrete query ran without complaint but gave different
-  answers on the two backends, and neither was right.
 - **Fix: an attribute redeclared as a routine is now a type error.** A heir
   routine with the same name as an inherited attribute used to compile silently.
   The compiled backend then read the parent's field while the interpreter called
@@ -32,6 +33,15 @@
   keep using the stored value while clients saw the routine. The error suggests
   publishing the value as a query over private storage instead (see "Redeclaring
   queries as attributes" in `docs/md/SYNTAX.md`).
+- **Fix: closures sharing a mutated variable on the compiled backend.** Two
+  closures that captured the same reassigned local each took their own copy of
+  it, so `let total := 0 / let add := fn(x) do total := total + x end / let peek
+  := fn(): Integer do result := total end` left `peek` (and later reads of
+  `total`) blind to `add`'s writes. The interpreter already got this right. Such
+  a local is now boxed, so every closure and the enclosing scope see one value.
+  This also fixes the same pattern in a single REPL input wrapped in
+  `do ... end`; closures that share state across *separate* REPL inputs are
+  still unsupported (see `docs/md/SYNTAX.md`).
 
 ## 0.5.3 - 2026-09-27
 
