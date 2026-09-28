@@ -2,6 +2,7 @@
   "Static type checker for Nex language"
   (:require [clojure.string :as str]
             [clojure.set :as set]
+            [nex.redeclare :as redeclare]
             [nex.types.builtins :as bi]))
 
 ;;
@@ -6344,11 +6345,83 @@
                      (not (types-compatible? env cr pr)))
             (throw (ex-info (str "Invalid override of '" m-name "'")
                             {:error (type-error
-                                     (str "Override of '" m-name "' in class '" class-name
-                                          "' changes the return type from " (display-type pr)
-                                          " to " (display-type cr) ", which does not conform. "
-                                          "Returns are covariant: the overriding return type must "
-                                          "conform to the inherited one."))}))))))))
+                                     (if (:synthesized-getter? member)
+                                       (str "Attribute '" m-name "' in class '" class-name
+                                            "' redeclares the inherited query '" m-name "': "
+                                            (display-type pr) " with type " (display-type cr)
+                                            ", which does not conform. The attribute's type must "
+                                            "conform to the query's return type.")
+                                       (str "Override of '" m-name "' in class '" class-name
+                                            "' changes the return type from " (display-type pr)
+                                            " to " (display-type cr) ", which does not conform. "
+                                            "Returns are covariant: the overriding return type must "
+                                            "conform to the inherited one.")))}))))))))
+
+(defn- inherited-attribute-member
+  "The nearest ancestor's non-constant field named FIELD-NAME, or nil."
+  [env parents field-name]
+  (letfn [(search [class-name visited]
+            (when (and (string? class-name) (not (contains? visited class-name)))
+              (when-let [class-def (env-lookup-class env class-name)]
+                (or (some (fn [member]
+                            (when (and (= (:type member) :field)
+                                       (not (:constant? member))
+                                       (= (:name member) field-name))
+                              (assoc member :declaring-class class-name)))
+                          (feature-members class-def))
+                    (some #(search (:parent %) (conj visited class-name))
+                          (:parents class-def))))))]
+    (some #(search (:parent %) #{}) parents)))
+
+(defn- inherited-routine-arities
+  "Arities of every routine named ROUTINE-NAME declared by some ancestor."
+  [env parents routine-name]
+  (letfn [(walk [class-name visited]
+            (when (and (string? class-name) (not (contains? visited class-name)))
+              (when-let [class-def (env-lookup-class env class-name)]
+                (concat (keep (fn [member]
+                                (when (and (= (:type member) :method)
+                                           (= (:name member) routine-name))
+                                  (count (or (:params member) []))))
+                              (feature-members class-def))
+                        (mapcat #(walk (:parent %) (conj visited class-name))
+                                (:parents class-def))))))]
+    (set (mapcat #(walk (:parent %) #{}) parents))))
+
+(defn- check-attribute-redeclaration
+  "An inherited attribute may not be redeclared as a routine: the ancestor's
+   own code (and its contracts) keeps reading and writing the stored value,
+   while every client would see the routine instead. The reverse is allowed
+   for a zero-argument query (see nex.redeclare), but not for a routine that
+   takes arguments."
+  [env class-name parents member]
+  (when (seq parents)
+    (cond
+      (and (= (:type member) :method) (not (:synthesized-getter? member)))
+      (when-let [attr (inherited-attribute-member env parents (:name member))]
+        (let [n (:name member)]
+          (throw (ex-info (str "Invalid redeclaration of attribute '" n "'")
+                          {:error (type-error
+                                   (str "Routine '" n "' in class '" class-name
+                                        "' redeclares the attribute '" n "' inherited from '"
+                                        (:declaring-class attr) "'. An attribute cannot be "
+                                        "redeclared as a routine: '" (:declaring-class attr)
+                                        "' and its contracts would keep using the stored value "
+                                        "while clients see the routine. Instead, store the value "
+                                        "under another name in '" (:declaring-class attr)
+                                        "' and publish '" n "' as a query there; '" class-name
+                                        "' can then override that query."))}))))
+
+      (and (= (:type member) :field) (not (:constant? member)))
+      (let [arities (inherited-routine-arities env parents (:name member))]
+        (when (and (seq arities) (not (contains? arities 0)))
+          (let [n (:name member)]
+            (throw (ex-info (str "Invalid redeclaration of routine '" n "'")
+                            {:error (type-error
+                                     (str "Attribute '" n "' in class '" class-name
+                                          "' redeclares an inherited routine '" n
+                                          "' that takes arguments. Only a query with no "
+                                          "arguments can be redeclared as an attribute."))}))))))))
 
 (defn- class-defines-method?
   "True when the class body itself declares a method of the given name."
@@ -6523,14 +6596,20 @@
         (cond
           (= (:type member) :method)
           (do
-            (check-override-conformance env name parents member)
+            (with-type-error-location
+              member
+              (fn []
+                (check-attribute-redeclaration env name parents member)
+                (check-override-conformance env name parents member)))
             (when-not (:declaration-only? member)
               (check-method class-env name member)))
           (= (:type member) :field)
           (when-not (:constant? member)
             (with-type-error-location
               member
-              (fn [] (validate-type-annotation class-env (:field-type member)))))))
+              (fn []
+                (check-attribute-redeclaration env name parents member)
+                (validate-type-annotation class-env (:field-type member)))))))
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]
@@ -7357,7 +7436,8 @@
    (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))]
      (let [env (make-type-env)
            normalized-functions (normalize-function-defs classes functions)
-           all-class-defs (vec (concat classes (function-class-defs normalized-functions)))
+           all-class-defs (vec (concat (redeclare/desugar-classes classes)
+                                       (function-class-defs normalized-functions)))
            visible-classes (class-defs-by-name-last-wins all-class-defs)
            fn-name->class (into {} (map (juxt :name :class-name)) normalized-functions)
          ;; Every interned class-def, under its qualified identity (Phase 3,

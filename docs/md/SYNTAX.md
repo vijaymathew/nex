@@ -594,6 +594,66 @@ class Dog
 end
 ```
 
+### Redeclaring queries as attributes
+
+A heir may answer an inherited **query** (a routine with no arguments) with a
+stored **attribute** of the same name. Its type must conform to the query's
+return type. This is also how a deferred query is most often implemented:
+
+```nex
+deferred class Shape
+  feature
+    area(): Real deferred
+    describe: String do result := "area=" + area.to_string end
+end
+
+class Square
+  inherit Shape
+  feature
+    area: Real                     -- answers Shape's area
+  create
+    make(a: Real) do area := a end
+end
+
+let sh: Shape := create Square.make(4.0)
+print(sh.describe)                 -- "area=4.0"
+```
+
+Clients and the parent's own code (`describe` above) read the attribute through
+the query, and the query's inherited postconditions still apply to it. Inside
+`Square`, `area` is the attribute, which only `Square` can assign. `super.area`
+still reaches the parent's query.
+
+The reverse is **not** allowed. An attribute cannot be redeclared as a routine:
+the class that declares the attribute, and its contracts, would keep using the
+stored value while every client saw the routine. So the parent's promises would
+describe something clients can no longer observe. To keep a value open to
+redefinition, store it under another name and publish it as a query:
+
+```nex
+class Account
+  feature
+    stored_balance: Integer
+    balance: Integer do result := stored_balance end
+    deposit(amount: Integer) do stored_balance := stored_balance + amount end
+  create
+    make(b: Integer) do stored_balance := b end
+end
+
+class Checking_Account
+  inherit Account
+  feature
+    required: Integer
+    balance: Integer do                -- overrides the query
+      if super.balance > required then result := super.balance end
+    end
+  create
+    make(b, r: Integer) do super.make(b) required := r end
+end
+```
+
+Clients write `a.balance` either way, whether the value is stored or computed.
+
 ## Operator Aliases
 
 A feature can bind itself to an arithmetic operator with an `alias` clause. The
