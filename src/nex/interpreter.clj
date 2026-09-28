@@ -11,7 +11,8 @@
             [nex.types.regex :as regex-types]
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
-            [nex.types.bootstrap :as bootstrap])
+            [nex.types.bootstrap :as bootstrap]
+            [nex.redeclare :as redeclare])
   (:import [clj_antlr ParseError]
            [java.lang.reflect Field]
            [java.nio.charset StandardCharsets]
@@ -2007,7 +2008,7 @@
           (process-intern ctx intern-node)))
 
       ;; Register all class definitions
-      (doseq [class-node classes]
+      (doseq [class-node (redeclare/desugar-classes classes #(lookup-class-if-exists ctx %))]
         (when (map? class-node)
           (register-class ctx class-node)))
 
@@ -2028,7 +2029,7 @@
 (defmethod eval-node :class
   [ctx class-def]
   ;; Classes are just registered, not executed
-  (register-class ctx class-def)
+  (register-class ctx (redeclare/desugar-class #(lookup-class-if-exists ctx %) class-def))
   nil)
 
 (defmethod eval-node :function

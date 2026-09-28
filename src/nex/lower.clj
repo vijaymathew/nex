@@ -18,6 +18,7 @@
             [nex.types.bootstrap :as bootstrap]
             [nex.ir :as ir]
             [nex.parser :as parser]
+            [nex.redeclare :as redeclare]
             [nex.typechecker :as tc])
   (:import [org.objectweb.asm Type]))
 
@@ -29,7 +30,7 @@
 (declare lower-member-assign-stmt)
 (declare lower-call-stmt)
 (declare lower-loop-stmt)
-(declare lower-class-def)
+(declare lower-class-def lower-class-def*)
 (declare class-self-registration-name)
 (declare if-branch-expression)
 (declare current-class-def)
@@ -4577,6 +4578,9 @@
            (false? has-parens))
       (lower-instance-this-carrier-field-get env method)
 
+      ;; Field before method is "nearest declaration wins": the typechecker
+      ;; rejects a routine redeclaring an inherited attribute, so when both
+      ;; resolve, the field is the heir's redeclaration of an inherited query.
       field-def
       (lower-instance-user-field-get env target-expr method base-type target-ir field-def type-map)
 
@@ -8135,6 +8139,11 @@
        (mapv #(make-delegation-method-node env class-meta class-name compiled-classes %))))
 
 (defn lower-class-def
+  [class-def opts]
+  (let [class-def (redeclare/desugar-class (redeclare/class-lookup (:classes opts)) class-def)]
+    (lower-class-def* class-def opts)))
+
+(defn- lower-class-def*
   [class-def opts]
   (assert-distinct-lowered-methods! (:name class-def) class-def)
   (let [compiled-classes (:compiled-classes opts)
