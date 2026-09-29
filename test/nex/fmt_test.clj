@@ -129,3 +129,15 @@ private feature
   y: Integer
 end"]
       (is (= expected formatted)))))
+
+(deftest format-unary-expression-test
+  (testing "Format unary operators with their operand (`not` spaced)"
+    (let [formatted (fmt/format-code "class Test
+feature
+demo(n: Integer, b: Boolean) do
+print(-n)
+print(not b)
+end
+end")]
+      (is (re-find #"print\(-n\)" formatted) formatted)
+      (is (re-find #"print\(not b\)" formatted) formatted))))

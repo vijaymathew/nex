@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- **Change: a trailing expression is no longer a routine's return value.** The
+  compiled backend used to return a routine's last statement when it was an
+  expression and nothing before it assigned `result`
+  (`function twice(n: Integer): Integer do n * 2 end` returned 10). The
+  interpreter never did (it returned 0), the rule was undocumented, and a
+  `result :=` anywhere earlier — even in a branch that never ran, or inside a
+  nested `fn` — silently switched it off. A routine now returns only what
+  `result` holds on exit: its explicit `result :=` assignments, or the return
+  type's zero value (`0`, `0.0`, `false`, `[]`, `{}`, `#{}`, `nil`). A return
+  type with no zero value (`String`, an attached class) must still assign
+  `result` on every returning path, as before.
+- **New: a routine body may not end in a discarded value.** Since a trailing
+  expression is not returned, `do n * 2 end` would compute a value and silently
+  drop it. The typechecker now rejects a function, method, `fn`, constructor or
+  `spawn` body whose last statement — or the last statement of any branch of a
+  trailing `if`/`case`/`match`/`do` — is a value-only expression (a literal,
+  name, operator, `when`, collection literal or `fn` value), and suggests the
+  `result := ...` it probably meant. Calls are still allowed there, since they
+  may be made for their effect. Top-level statements, and so REPL input, are
+  unaffected.
+- **Fix: `nex format` corrupted unary expressions.** `-n` was rewritten as
+  `-nil` and `not b` as `notnil`.
+- **Fix: ordering a Comparable object in the REPL with type checking on.** With
+  `:typecheck on`, `a < b` on instances of a user class was run by the
+  interpreter, which could not call `compare` on a compiled object and ordered
+  the objects by their printed form instead. `compare` never ran, so its
+  contracts were skipped and the answer could be wrong. It now runs `compare`,
+  as it always did with type checking off. The result also shows its type
+  (`Boolean true`), like `=` did.
+- **Fix: a bare variable name standing alone as a statement typechecks as that
+  variable.** `k` on its own line, with `k` an `Integer`, failed with "Method
+  not found: call0", and a bare `Function` variable was typed as a call of it,
+  though both backends evaluate either as the plain value.
+
 ## 0.5.4 - 2026-09-28
 
 - **New: an attribute can redeclare an inherited query.** A heir may answer an

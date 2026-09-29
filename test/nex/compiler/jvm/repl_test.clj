@@ -155,8 +155,8 @@ end"))]
 
 (deftest repl-compiled-backend-method-call-on-interpreter-object-test
   (testing "a compiled method call dispatches on an object produced by an interpreter-fallback function"
-    ;; `vectorize` below does not compile (its closures convert/iterate arrays),
-    ;; so it runs on the interpreter and returns an interpreter `NexObject` that is
+    ;; `vectorize` below names the `Op2` type alias in a local annotation, which
+    ;; routes it to the interpreter, so it returns an interpreter `NexObject` that is
     ;; stored in the compiled session. A later compiled method call on that binding
     ;; (`vec.apply_add(...)`) could not reflect user methods off a `NexObject` and
     ;; failed with `Method not found: apply_add`; it must dispatch back through the
@@ -185,7 +185,7 @@ end"))]
                                    "if convert b to bi:Integer then result := ai + bi "
                                    "else raise \"nope\" end else raise \"nope\" end end)"))
           (repl/eval-code ctx (str "function vectorize(b: VecArith): VecArith do\n"
-                                   "  result := create VecArith.make(\n"
+                                   "  let op: Op2 :=\n"
                                    "    fn (a: Any, c: Any): Any do\n"
                                    "      if convert a to av:Array[Any] then\n"
                                    "        if convert c to cv:Array[Any] then\n"
@@ -197,7 +197,8 @@ end"))]
                                    "          result := out\n"
                                    "        else raise \"na\" end\n"
                                    "      else raise \"na\" end\n"
-                                   "    end) end"))
+                                   "    end\n"
+                                   "  result := create VecArith.make(op) end"))
           (repl/eval-code ctx "let vec: VecArith := vectorize(base)"))
         ;; The producing function fell back to the interpreter, so `vec` is an
         ;; interpreter object stored in the compiled session.
@@ -269,6 +270,28 @@ end"))
         (is (str/includes? eq-output "true"))
         (is (str/includes? neq-output "false"))
         (is (str/includes? id-output "false"))))))
+
+(deftest repl-typechecked-comparable-ordering-runs-compare-contracts-test
+  (testing "with typechecking on, `<`/`>` on a Comparable object run its compiled
+            `compare` (contracts included) and show a type like `=` does"
+    ;; Typechecking used to route every non-builtin ordering to the interpreter,
+    ;; which cannot dispatch `compare` on a compiled object: it ordered by the
+    ;; printed form instead, skipping the precondition, and that path printed
+    ;; no type for an expression statement.
+    (binding [repl/*type-checking-enabled* (atom true)
+              repl/*repl-var-types* (atom {})
+              repl/*repl-backend* (atom :compiled)
+              repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+      (let [ctx (repl/init-repl-context)]
+        (with-out-str
+          (repl/eval-code ctx "class C inherit Comparable create make(v: Integer) do x := v end feature x: Integer compare(c: C): Integer require valid_c: c.x > 10 do if x < c.x then result := -1 elseif x > c.x then result := 1 else result := 0 end end end")
+          (repl/eval-code ctx "let c1 := create C.make(10)")
+          (repl/eval-code ctx "let c2 := create C.make(100)"))
+        (is (= "Boolean true" (str/trim (with-out-str (repl/eval-code ctx "c1 < c2")))))
+        (is (= "Boolean false" (str/trim (with-out-str (repl/eval-code ctx "c1 > c2")))))
+        (is (= "Boolean false" (str/trim (with-out-str (repl/eval-code ctx "c1 = c2")))))
+        (is (str/includes? (with-out-str (repl/eval-code ctx "c2 < c1"))
+                           "Precondition violation: valid_c"))))))
 
 (deftest repl-compiled-backend-private-field-is-not-publicly-readable-test
   (testing "compiled backend rejects top-level access to private fields while keeping public methods callable"

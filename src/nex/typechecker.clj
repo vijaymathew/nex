@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [clojure.set :as set]
             [nex.field-shadowing :as field-shadowing]
+            [nex.fmt :as fmt]
             [nex.redeclare :as redeclare]
             [nex.types.builtins :as bi]))
 
@@ -14,6 +15,7 @@
 (declare env-lookup-type-alias-generic-params)
 (declare resolve-generic-type)
 (declare type-error)
+(declare check-no-discarded-tail!)
 
 (def ^:dynamic *strict-undefined-targets*
   "When true, a member access / call on an unresolved bare-identifier target is a
@@ -2599,6 +2601,7 @@
     (env-add-var spawn-env "__spawn_result_type__" "Void")
     (doseq [stmt body]
       (check-statement spawn-env stmt))
+    (check-no-discarded-tail! spawn-env body true)
     (let [result-type (env-lookup-var spawn-env "__spawn_result_type__")]
       (if (= result-type "Void")
         "Task"
@@ -3846,7 +3849,7 @@
 
 (defn check-call
   "Check the type of a method call"
-  [env {:keys [target method args explicit-generic-args] :as expr}]
+  [env {:keys [target method args has-parens explicit-generic-args] :as expr}]
   (cond
     (and (map? target) (= :create (:type target)) (nil? method))
     (if (nil? (:constructor target))
@@ -3869,8 +3872,9 @@
       (if-let [checker (get builtin-call-checkers method)]
         (checker env args)
         (let [current-class (env-lookup-var env "__current_class__")]
-          (if (and current-class
-                   (lookup-class-method env current-class method (count args) current-class))
+          (cond
+            (and current-class
+                 (lookup-class-method env current-class method (count args) current-class))
             ;; An own method of the enclosing class, matched by name+arity,
             ;; takes priority over a same-named readable global (§7) — a free
             ;; `function` is registered as a :var reachable from anywhere in
@@ -3883,6 +3887,27 @@
             ;; signature. check-bare-name-call re-derives this same
             ;; current-class/method-sig pair to actually perform the call.
             (check-bare-name-call env method args)
+
+            ;; A bare name standing alone as a statement arrives here as a
+            ;; paren-less call (see nex.walker/statement-position-node), but a
+            ;; variable or function value named without parentheses is that
+            ;; value, not a call of it — both backends evaluate it so (the
+            ;; interpreter's eval-call-without-target, the lowering's
+            ;; lower-call-expr). Type it the same way, or an implicit-result
+            ;; tail `do k end` on an Integer `k` fails as "Method not found:
+            ;; call0", and `do f end` on a Function `f` checks as f's return
+            ;; type while the routine really returns f.
+            (and (false? has-parens)
+                 (empty? args)
+                 (or (env-lookup-var env method)
+                     (and current-class
+                          (not (anonymous-function-class-name? current-class))
+                          (env-lookup-global env method))))
+            (check-identifier env {:type :identifier
+                                   :name method
+                                   :explicit-generic-args explicit-generic-args})
+
+            :else
             (if-let [var-type (when-let [vt (env-lookup-var env method)]
                                 (expand-type-aliases
                                  env (resolve-explicit-generic-args env vt explicit-generic-args)))]
@@ -5489,6 +5514,76 @@
 ;; Method/Constructor Type Checking
 ;;
 
+(def ^:private value-only-node-types
+  "Expression shapes that do nothing but produce a value — standing alone as a
+   statement, that value is simply thrown away. Calls, `create` and `spawn` are
+   deliberately absent: they may be run for their effect."
+  #{:integer :byte :int16 :int32 :real :string :char :boolean :nil
+    :identifier :binary :unary :when :this :old
+    :array-literal :map-literal :set-literal :anonymous-function})
+
+(defn- discarded-value-statement?
+  "True when STMT, standing alone as a statement, only computes a value that is
+   then discarded. A bare name alone on a line arrives as a paren-less call (see
+   nex.walker/statement-position-node); it is a call only when it names one of
+   the current class's own zero-argument routines or a builtin function —
+   otherwise it merely reads a variable, field, constant or function value."
+  [env stmt]
+  (and (map? stmt)
+       (or (contains? value-only-node-types (:type stmt))
+           (and (= :call (:type stmt))
+                (nil? (:target stmt))
+                (false? (:has-parens stmt))
+                (empty? (:args stmt))
+                (not (contains? builtin-call-checkers (:method stmt)))
+                (not (when-let [current-class (env-lookup-var env "__current_class__")]
+                       (lookup-class-method env current-class (:method stmt) 0 current-class)))))))
+
+(defn- tail-statements
+  "The statements in tail position of STMTS: its last statement, or — when that
+   is a branching or block statement — the tail statements of each branch."
+  [stmts]
+  (let [stmts (if (map? stmts) [stmts] stmts)
+        stmt (last stmts)]
+    (when (map? stmt)
+      (case (:type stmt)
+        :if (concat (tail-statements (:then stmt))
+                    (mapcat (comp tail-statements :then) (:elseif stmt))
+                    (tail-statements (:else stmt)))
+        :match (concat (mapcat (comp tail-statements :body) (:clauses stmt))
+                       (tail-statements (:else stmt)))
+        :case (concat (mapcat (comp tail-statements :body) (:clauses stmt))
+                      (tail-statements (:else stmt)))
+        (:scoped-block :with) (tail-statements (:body stmt))
+        [stmt]))))
+
+(defn- check-no-discarded-tail!
+  "Reject a routine body that ends in a value-only expression. A routine returns
+   only what `result` holds, so a trailing `n * 2` is computed and silently
+   dropped — almost always a missing `result :=`. (Top-level statements, and so
+   REPL input, are never routine bodies and may still end in an expression.)"
+  [env body returns-value?]
+  (doseq [stmt (tail-statements body)]
+    (when (discarded-value-statement? env stmt)
+      (let [src (let [s (if (= :call (:type stmt))
+                          (:method stmt)  ; a bare name — fmt would add `()`
+                          (try (fmt/format-expression stmt) (catch Exception _ nil)))]
+                  (when (and s (<= (count s) 60)) s))
+            msg (str "Discarded value: " (if src (str "`" src "`") "this expression")
+                     " is computed and thrown away. "
+                     (cond
+                       (and returns-value? src)
+                       (str "A routine returns only what `result` holds; did you mean `result := " src "`?")
+
+                       returns-value?
+                       "A routine returns only what `result` holds; assign it with `result := ...`."
+
+                       :else
+                       "Remove it, or use its value."))]
+        (with-type-error-location
+          stmt
+          #(throw (ex-info msg {:error (type-error msg)})))))))
+
 (defn references-result?
   "Check if an AST node or any of its descendants references 'result' or 'Result'."
   [node]
@@ -5830,6 +5925,10 @@
 
     ;; Check method body
     (check-statements method-env body)
+    ;; A REPL cell is run as `__ReplTemp__.__eval__` and may end in a bare
+    ;; expression, whose value the REPL shows.
+    (when-not (and (= class-name "__ReplTemp__") (= name "__eval__"))
+      (check-no-discarded-tail! method-env body (some? return-type)))
 
     ;; Check rescue clause
     (when rescue
@@ -5895,6 +5994,7 @@
 
     ;; Check body
     (check-statements ctor-env body)
+    (check-no-discarded-tail! ctor-env body false)
 
     ;; Check postconditions
     (doseq [assertion ensure]

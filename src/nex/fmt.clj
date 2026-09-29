@@ -69,7 +69,8 @@
       :binary (str (format-expression (:left expr))
                    " " (:operator expr) " "
                    (format-expression (:right expr)))
-      :unary (str (:operator expr) (format-expression (:operand expr)))
+      :unary (let [op (:operator expr)]
+               (str op (when (= "not" op) " ") (format-expression (:expr expr))))
       :when (str "when " (format-expression (:condition expr))
                  " then " (format-expression (:consequent expr))
                  " else " (format-expression (:alternative expr))

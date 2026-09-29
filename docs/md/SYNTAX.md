@@ -229,6 +229,43 @@ because the declaration would hide the return value and the routine would
 silently return the default. Assign it with `result := ...`; choose another name
 for everything else.
 
+A routine returns whatever `result` holds when it exits — the last assignment
+that ran, or whatever was done to it in place (`result.add(x)`). Only an explicit
+`result := ...` sets it: a trailing expression is **not** the return value.
+Because such an expression would be computed and silently thrown away, the
+typechecker rejects a routine body (function, method, `fn`, constructor or
+`spawn` body) that ends in one:
+
+```
+function twice(n: Integer): Integer do
+  n * 2
+end
+-- Type error: Discarded value: `n * 2` is computed and thrown away.
+--   A routine returns only what `result` holds; did you mean `result := n * 2`?
+```
+
+"Ends in" includes the last statement of each branch of a trailing `if`, `case`,
+`match` or `do ... end`. Only value-only expressions count — literals, names,
+operators, `when`, collection literals, `fn` values. A trailing call is fine,
+since it may be made for its effect (`items.remove(x)`), and so is a paren-less
+call of one of the class's own routines. Top-level statements are not a routine
+body, so a script or the REPL can still end in an expression (the REPL shows its
+value).
+
+`result` starts at its return type's zero value, so a routine that never assigns
+it returns that value:
+
+| Return type | Zero value |
+|---|---|
+| `Integer` (and the other integer types), `Real` | `0`, `0.0` |
+| `Boolean`, `Char` | `false`, `#nul` |
+| `Array[T]`, `Map[K, V]`, `Set[T]` | `[]`, `{}`, `#{}` (a fresh empty collection) |
+| any detachable type `?T` | `nil` |
+
+Any other return type — `String`, or an attached class type — has no zero value,
+so the typechecker rejects a routine that does not assign `result` on every path
+that returns.
+
 Every function in a program is checked against every other function's
 signature regardless of which is written first, so mutually recursive
 functions need no forward declaration at all:

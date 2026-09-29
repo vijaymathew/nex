@@ -1067,10 +1067,13 @@
     (nil? type-val) nil
     (string? type-val) type-val
     (map? type-val) (let [base (:base-type type-val)
-                          params (or (:type-params type-val) (:type-args type-val))]
-                      (if (seq params)
-                        (str base "[" (str/join ", " (map format-type params)) "]")
-                        base))
+                          params (or (:type-params type-val) (:type-args type-val))
+                          core-type (if (seq params)
+                                      (str base "[" (str/join ", " (map format-type params)) "]")
+                                      base)]
+                      (if (:detachable type-val)
+                        (str "?" core-type)
+                        core-type))
     :else (str type-val)))
 
 (defn infer-result-type
@@ -1096,9 +1099,6 @@
         (format-type t))
       (catch Exception _
         nil))))
-
-(def ordered-comparison-ops
-  #{"<" "<=" ">" ">="})
 
 (def builtin-sortable-types
   #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"})
@@ -1129,26 +1129,6 @@
            (string? element-type)
            (not (contains? builtin-sortable-types element-type))
            (not (tc/types-compatible? tc-env element-type "Comparable"))))))
-
-(defn- string-ordered-comparison?
-  [ctx node]
-  (when (and (map? node)
-             (#{:binary :binary-op} (:type node))
-             (contains? ordered-comparison-ops (:operator node))
-             @*type-checking-enabled*)
-    (let [env {:classes (vals @(:classes ctx))
-               :imports @(:imports ctx)
-               :var-types @*repl-var-types*}
-          left-type (try (tc/infer-expression-type (:left node) env)
-                         (catch Exception _ nil))
-          right-type (try (tc/infer-expression-type (:right node) env)
-                          (catch Exception _ nil))]
-      (or (= "String" left-type)
-          (= "String" right-type)
-          (nil? left-type)
-          (nil? right-type)
-          (not (contains? builtin-sortable-types left-type))
-          (not (contains? builtin-sortable-types right-type))))))
 
 (defn- uncompiled-user-function-call?
   [node]
@@ -1206,8 +1186,7 @@
             nodes (tree-seq coll? seq top-nodes)]
         (boolean
          (some (fn [node]
-                 (or (string-ordered-comparison? ctx node)
-                     (nonbuiltin-array-sort? ctx node)
+                 (or (nonbuiltin-array-sort? ctx node)
                      (uncompiled-user-function-call? node)))
                nodes)))))
 
@@ -1681,8 +1660,7 @@
           ;; only to tell whether the cell printed anything.
           output @(:output exec-ctx)]
       (when (and (some? result) (empty? output) (not registered?))
-        (if-let [type-str (when (seq calls)
-                            (infer-result-type exec-ctx (last calls)))]
+        (if-let [type-str (infer-result-type exec-ctx (last top-nodes))]
           (println (str type-str " " (format-value exec-ctx result)))
           (println (format-value exec-ctx result)))))
     (sync-interpreter-back-into-compiled-session! exec-ctx ast source-id)
@@ -1944,9 +1922,6 @@
   (println "║     A high-level language for design and implementation    ║")
   (println "╚════════════════════════════════════════════════════════════╝")
   (println)
-  (println "Default backend: COMPILED (unsupported inputs fall back to the interpreter)")
-  (println "Fallback details are logged to ~/.nex/repl.log")
-  (println "Use :backend interpreter for the tree-walking fallback/escape hatch")
   (println "Type :help for help, :quit to exit")
   (println))
 
