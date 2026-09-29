@@ -1947,9 +1947,6 @@
   (println "║     A high-level language for design and implementation    ║")
   (println "╚════════════════════════════════════════════════════════════╝")
   (println)
-  (println "Default backend: COMPILED (unsupported inputs fall back to the interpreter)")
-  (println "Fallback details are logged to ~/.nex/repl.log")
-  (println "Use :backend interpreter for the tree-walking fallback/escape hatch")
   (println "Type :help for help, :quit to exit")
   (println))
 
