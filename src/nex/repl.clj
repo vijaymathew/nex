@@ -1067,10 +1067,13 @@
     (nil? type-val) nil
     (string? type-val) type-val
     (map? type-val) (let [base (:base-type type-val)
-                          params (or (:type-params type-val) (:type-args type-val))]
-                      (if (seq params)
-                        (str base "[" (str/join ", " (map format-type params)) "]")
-                        base))
+                          params (or (:type-params type-val) (:type-args type-val))
+                          core-type (if (seq params)
+                                      (str base "[" (str/join ", " (map format-type params)) "]")
+                                      base)]
+                      (if (:detachable type-val)
+                        (str "?" core-type)
+                        core-type))
     :else (str type-val)))
 
 (defn infer-result-type
