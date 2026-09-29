@@ -3846,7 +3846,7 @@
 
 (defn check-call
   "Check the type of a method call"
-  [env {:keys [target method args explicit-generic-args] :as expr}]
+  [env {:keys [target method args has-parens explicit-generic-args] :as expr}]
   (cond
     (and (map? target) (= :create (:type target)) (nil? method))
     (if (nil? (:constructor target))
@@ -3869,8 +3869,9 @@
       (if-let [checker (get builtin-call-checkers method)]
         (checker env args)
         (let [current-class (env-lookup-var env "__current_class__")]
-          (if (and current-class
-                   (lookup-class-method env current-class method (count args) current-class))
+          (cond
+            (and current-class
+                 (lookup-class-method env current-class method (count args) current-class))
             ;; An own method of the enclosing class, matched by name+arity,
             ;; takes priority over a same-named readable global (§7) — a free
             ;; `function` is registered as a :var reachable from anywhere in
@@ -3883,6 +3884,27 @@
             ;; signature. check-bare-name-call re-derives this same
             ;; current-class/method-sig pair to actually perform the call.
             (check-bare-name-call env method args)
+
+            ;; A bare name standing alone as a statement arrives here as a
+            ;; paren-less call (see nex.walker/statement-position-node), but a
+            ;; variable or function value named without parentheses is that
+            ;; value, not a call of it — both backends evaluate it so (the
+            ;; interpreter's eval-call-without-target, the lowering's
+            ;; lower-call-expr). Type it the same way, or an implicit-result
+            ;; tail `do k end` on an Integer `k` fails as "Method not found:
+            ;; call0", and `do f end` on a Function `f` checks as f's return
+            ;; type while the routine really returns f.
+            (and (false? has-parens)
+                 (empty? args)
+                 (or (env-lookup-var env method)
+                     (and current-class
+                          (not (anonymous-function-class-name? current-class))
+                          (env-lookup-global env method))))
+            (check-identifier env {:type :identifier
+                                   :name method
+                                   :explicit-generic-args explicit-generic-args})
+
+            :else
             (if-let [var-type (when-let [vt (env-lookup-var env method)]
                                 (expand-type-aliases
                                  env (resolve-explicit-generic-args env vt explicit-generic-args)))]
