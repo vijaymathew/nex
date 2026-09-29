@@ -13,6 +13,17 @@
   type's zero value (`0`, `0.0`, `false`, `[]`, `{}`, `#{}`, `nil`). A return
   type with no zero value (`String`, an attached class) must still assign
   `result` on every returning path, as before.
+- **New: a routine body may not end in a discarded value.** Since a trailing
+  expression is not returned, `do n * 2 end` would compute a value and silently
+  drop it. The typechecker now rejects a function, method, `fn`, constructor or
+  `spawn` body whose last statement — or the last statement of any branch of a
+  trailing `if`/`case`/`match`/`do` — is a value-only expression (a literal,
+  name, operator, `when`, collection literal or `fn` value), and suggests the
+  `result := ...` it probably meant. Calls are still allowed there, since they
+  may be made for their effect. Top-level statements, and so REPL input, are
+  unaffected.
+- **Fix: `nex format` corrupted unary expressions.** `-n` was rewritten as
+  `-nil` and `not b` as `notnil`.
 - **Fix: ordering a Comparable object in the REPL with type checking on.** With
   `:typecheck on`, `a < b` on instances of a user class was run by the
   interpreter, which could not call `compare` on a compiled object and ordered

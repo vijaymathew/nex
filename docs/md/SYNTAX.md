@@ -232,14 +232,25 @@ for everything else.
 A routine returns whatever `result` holds when it exits — the last assignment
 that ran, or whatever was done to it in place (`result.add(x)`). Only an explicit
 `result := ...` sets it: a trailing expression is **not** the return value.
+Because such an expression would be computed and silently thrown away, the
+typechecker rejects a routine body (function, method, `fn`, constructor or
+`spawn` body) that ends in one:
 
-```nex
-function twice(n: Integer): Integer do
-  n * 2                            -- evaluated, then discarded
-end
-
-print(twice(5))                  -- 0, not 10
 ```
+function twice(n: Integer): Integer do
+  n * 2
+end
+-- Type error: Discarded value: `n * 2` is computed and thrown away.
+--   A routine returns only what `result` holds; did you mean `result := n * 2`?
+```
+
+"Ends in" includes the last statement of each branch of a trailing `if`, `case`,
+`match` or `do ... end`. Only value-only expressions count — literals, names,
+operators, `when`, collection literals, `fn` values. A trailing call is fine,
+since it may be made for its effect (`items.remove(x)`), and so is a paren-less
+call of one of the class's own routines. Top-level statements are not a routine
+body, so a script or the REPL can still end in an expression (the REPL shows its
+value).
 
 `result` starts at its return type's zero value, so a routine that never assigns
 it returns that value:
