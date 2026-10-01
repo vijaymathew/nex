@@ -2585,6 +2585,7 @@
                      :ensure "Postcondition"
                      :invariant "Loop invariant"
                      :variant "Loop variant"
+                     :variant-bound "Loop variant bound"
                      :class-invariant "Class invariant"
                      :assert "Assertion"
                      (name kind))

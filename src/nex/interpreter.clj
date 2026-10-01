@@ -3136,6 +3136,13 @@
           (let [;; Evaluate variant before body (if present)
                 curr-variant (when variant (eval-node loop-ctx variant))
 
+                ;; Check variant is non-negative (Eiffel semantics: a bounded-below
+                ;; variant is what makes strict decrease a termination argument)
+                _ (when (and variant (neg? curr-variant))
+                    (throw (ex-info "Loop variant must be non-negative"
+                                    {:iteration iteration
+                                     :current-variant curr-variant})))
+
                 ;; Check variant decreases (if present and not first iteration)
                 _ (when (and variant prev-variant)
                     (when-not (< curr-variant prev-variant)

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Fix: a loop `variant` must now be non-negative.** The README always said
+  the variant "never falls below zero", but only strict decrease was checked,
+  so a loop could count down through `-1, -2, ...` without complaint. Both
+  backends now fail with `Loop variant must be non-negative` when the variant
+  evaluates below zero (checked each time it is evaluated, before the body).
+  A loop whose variant legitimately went negative needs a different variant,
+  e.g. `variant i - lo` instead of `variant i`.
+- **Fix: a class inheriting a constructor from a qualified parent compiles.**
+  `class Premium inherit finance/Account` (where `Account` collides with
+  another interned class) fell back to the interpreter because the inherited
+  constructor shim could not resolve the parent.
+- **Change: a local no longer shadows an interned module name outside its own
+  routine.** `trade.ship(x)` is a qualified call unless `trade` is bound in the
+  enclosing routine/class (or globally).
+
 - **Change: a trailing expression is no longer a routine's return value.** The
   compiled backend used to return a routine's last statement when it was an
   expression and nothing before it assigned `result`

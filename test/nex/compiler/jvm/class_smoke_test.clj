@@ -934,6 +934,25 @@ end"))
       (is (re-find #"Loop invariant violation: non_negative|Loop invariant violation: large" (str invariant-ex)))
       (is (re-find #"Loop variant must decrease" (str variant-ex))))))
 
+(deftest compiled-loop-variant-must-be-non-negative-test
+  (testing "the compiled backend rejects a strictly decreasing variant that goes below zero"
+    (let [session (compiled-repl/make-session)
+          ex (try
+               (compiled-repl/compile-and-eval! session
+                                                (p/ast "from
+  let i := 2
+variant
+  i
+until
+  i = -3
+do
+  i := i - 1
+end"))
+               nil
+               (catch Throwable t
+                 (root-cause t)))]
+      (is (re-find #"Loop variant must be non-negative" (str ex))))))
+
 (deftest compiled-deferred-parent-virtual-dispatch-test
   (testing "compiled helper dispatches virtually through a deferred parent-typed reference"
     (let [session (compiled-repl/make-session)

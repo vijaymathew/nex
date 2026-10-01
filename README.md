@@ -395,7 +395,7 @@ See [examples/README.md](examples/README.md) for the full list.
 | Postcondition | `ensure` | Method exit | After execution |
 | Class invariant | `invariant` | Class | After every operation |
 | Loop invariant | `invariant` | Loop body | Each iteration |
-| Loop variant | `variant` | Loop | Each iteration, must decrease |
+| Loop variant | `variant` | Loop | Each iteration, must decrease and stay non-negative |
 
 ### Type System
 

@@ -1284,6 +1284,7 @@
   ([kind label line]
    (ex-info (cond
               (= kind "Loop variant") "Loop variant must decrease"
+              (= kind "Loop variant bound") "Loop variant must be non-negative"
               label                   (str kind " violation: " label)
               ;; Only a bare `assert expr` is unlabelled; name it by its line.
               line                    (str kind " violation (line " line ")")

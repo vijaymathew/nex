@@ -7018,7 +7018,10 @@
                                          (:slot seen-local)
                                          (:nex-type seen-local)
                                          (:jvm-type seen-local))
-                compare-node (ir/compare-node :lt curr-node prev-node "Boolean" :boolean)]
+                compare-node (ir/compare-node :lt curr-node prev-node "Boolean" :boolean)
+                non-negative-node (ir/compare-node :gte curr-node
+                                                   (default-const-node (:nex-type curr-local) (:jvm-type curr-local))
+                                                   "Boolean" :boolean)]
             [env3
              [(ir/set-local-node (:slot prev-local)
                                  (default-const-node (:nex-type prev-local) (:jvm-type prev-local))
@@ -7032,6 +7035,7 @@
                                  (lower-expression env3 variant-expr)
                                  (:nex-type curr-local)
                                  (:jvm-type curr-local))
+              (ir/assert-node :variant-bound "must be non-negative" non-negative-node)
               (ir/if-stmt-node seen-node
                                [(ir/assert-node :variant "must decrease" compare-node)]
                                [])
