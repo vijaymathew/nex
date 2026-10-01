@@ -2871,8 +2871,8 @@
 ;; finding no such var here means either name really is wrong). This must
 ;; NOT fire when "target.method" exactly matches a registered qualified name:
 ;; that combination reaching here at all means the rewrite pass deliberately
-;; declined it (collect-possibly-bound-names saw TARGET used as a real
-;; local/param somewhere in the program and conservatively refused to steal
+;; declined it (collect-possibly-bound-names saw TARGET bound as a real
+;; local/param in the enclosing routine/class and refused to steal
 ;; its meaning) — "Undefined variable" is the correct, intentional message
 ;; for that shadowing case.
 (defn- reject-undefined-target!

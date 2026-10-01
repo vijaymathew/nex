@@ -8041,11 +8041,15 @@
   "Constructors a class inherits verbatim from its composed parents: for each
    parent constructor whose name the class does not itself declare, a copy
    tagged with `:shim-parent` so lower-constructor forwards it to that parent."
-  [class-def visible-classes own-ctor-names]
+  [class-def visible-classes compiled-classes own-ctor-names]
   (->> (:parents class-def)
        (remove #(= "Any" (:parent %)))
        (mapcat (fn [{:keys [parent]}]
-                 (let [parent-def (get (visible-class-map {:classes visible-classes}) parent)]
+                 ;; :compiled-classes lets a qualified parent (`finance.Account`)
+                 ;; that lost a bare-name collision still resolve.
+                 (let [parent-def (get (visible-class-map {:classes visible-classes
+                                                           :compiled-classes compiled-classes})
+                                       parent)]
                    (for [ctor-def (class-constructors parent-def)
                          :when (not (contains? own-ctor-names (:name ctor-def)))]
                      (assoc ctor-def :shim-parent parent)))))
@@ -8112,7 +8116,7 @@
         visible-functions (vec (:functions opts))
         visible-imports (vec (:imports opts))
         own-ctor-names (set (map :name (class-constructors class-def)))
-        inherited-shims (inherited-constructor-shims class-def (:classes opts) own-ctor-names)
+        inherited-shims (inherited-constructor-shims class-def (:classes opts) compiled-classes own-ctor-names)
         constructors (->> (concat (class-constructors class-def) inherited-shims)
                           (mapv (fn [ctor-def]
                                   (lower-constructor (:jvm-name class-meta)
