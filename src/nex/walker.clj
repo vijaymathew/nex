@@ -966,10 +966,9 @@
 ;; reuses `.`, resolved semantically rather than syntactically: `trade.ship`
 ;; parses as an ordinary method-call chain (`nex.walker`'s existing
 ;; memberAccess/callSuffix folding), and is only reinterpreted as a
-;; module-qualified call when its ROOT identifier fails to resolve as a
-;; value at all — a bound local/param/field of that name always wins,
-;; exactly like Python resolving `os.path` against a local named `os`
-;; before ever considering the `os` module.
+;; module-qualified call when its ROOT identifier is not bound at the call
+;; site — a local/param/field of that name wins inside the routine or class
+;; that declares it, but never leaks out to shadow the module elsewhere.
 ;;
 ;; That resolution decision has to happen once, as an AST rewrite, not
 ;; inside the typechecker's per-node inference: the same merged AST feeds
@@ -1005,29 +1004,52 @@
     :else nil))
 
 (defn- collect-possibly-bound-names
-  "Every :name appearing anywhere in PROGRAM — a deliberately coarse,
-   whole-program over-approximation (same technique as body-let-names) of
-   'could this identifier be a real local/param/field/class/function
-   somewhere', used only to decide whether a dotted call chain's ROOT
-   segment is safe to reinterpret as a module path.
+  "Every :name appearing anywhere in FORM — a deliberately coarse
+   over-approximation (same technique as body-let-names) of 'could this
+   identifier be a real local/param/field/class/function here', used only to
+   decide whether a dotted call chain's ROOT segment is safe to reinterpret
+   as a module path.
 
-   Over-inclusive is the safe direction here: a name wrongly treated as
-   'possibly bound' just leaves a genuinely qualifiable call unrewritten,
-   falling through to the ordinary (today's) 'Undefined variable' error —
-   the same outcome as before this feature existed. Under-inclusive would
-   risk silently stealing a real variable's meaning, which is why this
-   doesn't try to be a precise scope analysis."
-  [program]
+   Over-inclusive is the safe direction: a name wrongly treated as bound just
+   leaves a genuinely qualifiable call unrewritten (today's 'Undefined
+   variable' error). Under-inclusive would risk silently stealing a real
+   variable's meaning, which is why this doesn't try to be a precise scope
+   analysis — but it is applied per enclosing unit (see
+   resolve-qualified-function-calls), so a local in one function never
+   blocks a qualified call elsewhere."
+  [form]
   (into #{}
         (comp (filter map?) (keep :name))
-        (tree-seq coll? seq program)))
+        (tree-seq coll? seq form)))
+
+(defn- rewrite-qualified-calls
+  "Postwalk FORM, rewriting each qualified call whose root is not in BOUND."
+  [form qualified-fn-names bound]
+  (walk/postwalk
+   (fn [n]
+     (if (and (map? n) (= :call (:type n)) (:target n))
+       (if-let [segments (collect-dotted-call-segments (:target n))]
+         (let [qualified-name (str/join "." (conj (vec segments) (:method n)))]
+           (if (and (contains? qualified-fn-names qualified-name)
+                    (not (contains? bound (first segments))))
+             (assoc n :target nil :method qualified-name)
+             n))
+         n)
+       n))
+   form))
 
 (defn resolve-qualified-function-calls
-  "Rewrite a `path.name(...)` / `path.sub.name(...)` call whose root fails
-   ordinary resolution into an ordinary bare call naming the qualified
+  "Rewrite a `path.name(...)` / `path.sub.name(...)` call whose root is not
+   bound at the call site into an ordinary bare call naming the qualified
    function directly (`{:target nil :method \"path.name\" ...}`) — from
    there it type-checks and lowers exactly like any other free-function
    call; nothing downstream needs to know this rewrite happened at all.
+
+   Scoping is per enclosing unit (function, class, or the top-level
+   statements): a root is bound if the unit itself declares it (param, let,
+   field, closure param, ...) or it is program-global (a top-level `let`, or
+   a class/function name). A local in one function therefore never shadows
+   an interned module name in another function or at top level.
 
    PROGRAM must already carry every reachable function's :qualified-name
    (stamped by nex.interpreter/resolve-interned* on the intern-merged
@@ -1041,19 +1063,18 @@
                                  (:functions program))]
     (if (empty? qualified-fn-names)
       program
-      (let [possibly-bound (collect-possibly-bound-names program)]
-        (walk/postwalk
-         (fn [n]
-           (if (and (map? n) (= :call (:type n)) (:target n))
-             (if-let [segments (collect-dotted-call-segments (:target n))]
-               (let [qualified-name (str/join "." (conj (vec segments) (:method n)))]
-                 (if (and (contains? qualified-fn-names qualified-name)
-                          (not (contains? possibly-bound (first segments))))
-                   (assoc n :target nil :method qualified-name)
-                   n))
-               n)
-             n))
-         program)))))
+      (let [top-level (select-keys program [:statements :calls])
+            global-bound (into (collect-possibly-bound-names top-level)
+                               (keep :name)
+                               (concat (:classes program) (:functions program)))
+            rewrite-unit (fn [unit]
+                           (rewrite-qualified-calls
+                            unit qualified-fn-names
+                            (into global-bound (collect-possibly-bound-names unit))))]
+        (-> program
+            (update :functions #(mapv rewrite-unit %))
+            (update :classes #(mapv rewrite-unit %))
+            (merge (rewrite-qualified-calls top-level qualified-fn-names global-bound)))))))
 
 (defn- class-field-refinements
   "field-name -> refinement info, for CLASS-NODE's own (non-constant) fields

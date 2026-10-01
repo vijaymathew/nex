@@ -664,13 +664,10 @@ print(trade.core.ship(3))")
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
 
-(deftest file-eval-qualified-function-call-yields-to-a-same-named-local-test
-  (testing "a bound local/param sharing the intern path's leading segment
-            always wins — `trade.ship(x)` stays an ordinary (rejected as
-            undefined) member-call chain on the local, never reinterpreted
-            as the module path, anywhere the local's name is in scope at
-            all (nex.walker/collect-possibly-bound-names is a coarse,
-            whole-program check, not a precise per-scope one)"
+(deftest file-eval-qualified-function-call-local-does-not-shadow-intern-elsewhere-test
+  (testing "a local/param sharing the intern path's leading segment shadows it
+            only inside its own routine — `trade.ship(x)` elsewhere (here, at
+            top level) still resolves to the interned function"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
                            (str "nex-ns-fn-shadow-" (System/nanoTime)))
           lib-file (spit-function-lib! tmp-dir "trade" "ship" "n + 1")
@@ -681,10 +678,32 @@ function use(trade: Integer): Integer do
   result := trade + 1
 end
 
-print(trade.ship(10))")
+print(trade.ship(10))
+print(use(5))")
+      (try
+        (let [out (with-out-str (e/eval-file (.getPath main-file)))]
+          (is (= "11\n6\n" out)))
+        (finally
+          (.delete lib-file)
+          (.delete (io/file tmp-dir "lib" "trade"))
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir)))))
+  (testing "inside the routine that declares the local, the local still wins"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-fn-shadow2-" (System/nanoTime)))
+          lib-file (spit-function-lib! tmp-dir "trade" "ship" "n + 1")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern trade/ship
+
+function use(trade: Integer): Integer do
+  result := trade.ship(1)
+end
+
+print(use(5))")
       (try
         (let [ex (is (thrown? clojure.lang.ExceptionInfo (e/eval-file (.getPath main-file))))]
-          (is (.contains (ex-message ex) "Undefined variable: trade") (ex-message ex)))
+          (is (some? ex)))
         (finally
           (.delete lib-file)
           (.delete (io/file tmp-dir "lib" "trade"))
