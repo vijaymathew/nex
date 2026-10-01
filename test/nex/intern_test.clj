@@ -1971,3 +1971,36 @@ print(Status.In_Transit.to_string)")
           (.delete lib-dir)
           (.delete (io/file tmp-dir "lib"))
           (.delete tmp-dir))))))
+
+(deftest file-eval-qualified-parent-inherited-constructor-links-compiled-test
+  (testing "a class inheriting a constructor from a qualified parent whose bare
+            name collides with another interned class compiles — it must not
+            fall back to the interpreter because the constructor shim could
+            not find the parent's class-def"
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir")
+                           (str "nex-ns-qualified-ctor-shim-" (System/nanoTime)))
+          finance-file (spit-account-lib! tmp-dir "finance" "balance")
+          billing-file (spit-account-lib! tmp-dir "billing" "id")
+          main-file (io/file tmp-dir "main.nex")]
+      (spit main-file "intern finance/Account
+intern billing/Account
+
+class Premium inherit finance/Account
+end
+
+let p := create Premium.make(5)
+print(p.balance)")
+      (try
+        (let [err (java.io.StringWriter.)
+              out (binding [*err* err]
+                    (with-out-str (e/eval-file (.getPath main-file) {})))]
+          (is (not (.contains (str err) "falling back")) (str err))
+          (is (.contains out "5")))
+        (finally
+          (.delete finance-file)
+          (.delete billing-file)
+          (.delete main-file)
+          (.delete (io/file tmp-dir "lib" "finance"))
+          (.delete (io/file tmp-dir "lib" "billing"))
+          (.delete (io/file tmp-dir "lib"))
+          (.delete tmp-dir))))))
