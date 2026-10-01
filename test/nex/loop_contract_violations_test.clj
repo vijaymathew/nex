@@ -58,6 +58,27 @@ end"]
            #"Loop variant must decrease"
            (execute-first-method-body code))))))
 
+(deftest loop-variant-must-be-non-negative-test
+  (testing "Loop variant must not go below zero, even while strictly decreasing"
+    (let [code "class Test
+  feature
+    demo() do
+      from
+        let i := 2
+      variant
+        i
+      until
+        i = -3
+      do
+        i := i - 1
+      end
+    end
+end"]
+      (is (thrown-with-msg?
+           Exception
+           #"Loop variant must be non-negative"
+           (execute-first-method-body code))))))
+
 (deftest valid-loop-contracts-pass-test
   (testing "Valid loop with invariant+variant runs successfully"
     (let [code "class Test
