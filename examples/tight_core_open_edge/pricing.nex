@@ -33,10 +33,11 @@ class Percent_Off inherit Price_Expr
     percent: Integer
     base: Price_Expr
     eval(d: Draft): Money
-      require valid_percent: percent >= 0 and percent <= 100
       do result := base.eval(d).less_percent(percent)
       ensure no_increase: result <= base.eval(d)
       end
+  invariant
+    valid_percent: percent >= 0 and percent <= 100
 end
 
 class When inherit Price_Expr

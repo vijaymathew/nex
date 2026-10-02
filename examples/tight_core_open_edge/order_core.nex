@@ -63,7 +63,9 @@ end
 
 class Shipped
   inherit Order
-  create make(xs: Array[Line_Item], t: Tracking_Id) do Order.init(xs)  tracking := t end
+  create make(xs: Array[Line_Item], t: Tracking_Id)
+    require not_empty: xs.length > 0
+    do Order.init(xs)  tracking := t end
   feature
     tracking: Tracking_Id
 end

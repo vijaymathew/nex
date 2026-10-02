@@ -33,11 +33,21 @@ class Substitution
       end
 end
 
+-- Is t the variable called name?
+function is_var(t: Term, name: String): Boolean
+  do
+    match t of
+      Var(name as n) then result := n = name
+      else result := false
+    end
+  end
+
 function unify(a: Term, b: Term, s: Substitution): Result[Substitution, String]
   do
     let x: Term := s.resolve(a)
     let y: Term := s.resolve(b)
     match x of
+      Var(name) if is_var(y, name) then result := create Ok[Substitution, String].make(s)
       Var(name) then result := create Ok[Substitution, String].make(s.bind(name, y))
       Atom as ax then result := unify_atom(ax, y, s)
       Compound as cx then result := unify_compound(cx, y, s)
@@ -95,6 +105,15 @@ function routing_query(o: Placed): Term
 function satisfies_constraints(s: Substitution): Boolean
   do result := s.bindings.contains_key("Warehouse") end
 
+-- route's postcondition: a committed answer satisfies the domain.
+function is_admissible(r: Result[Substitution, String]): Boolean
+  do
+    match r of
+      Ok as ok then result := satisfies_constraints(ok.value)
+      Err then result := true
+    end
+  end
+
 function warehouse_of(s: Substitution): String
   do
     match s.resolve(create Var.make("Warehouse")) of
@@ -139,4 +158,6 @@ function route(query: Term, routes: Array[Term]): Result[Substitution, String]
       end
       i := i + 1
     end
+  ensure
+    satisfies_domain: is_admissible(result)
   end

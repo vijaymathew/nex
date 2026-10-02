@@ -134,6 +134,14 @@ let shipped: Shipped := ship(placed_ok, "TRACK-1")
 chk.check("ship: tracking id", "TRACK-1", shipped.tracking)
 chk.check("ship: items preserved", "true", "" + (shipped.items = placed_ok.items))
 
+let shipped_empty_items_caught: Boolean := false
+do
+  let bad: Shipped := create Shipped.make([], "TRACK-2")
+rescue
+  shipped_empty_items_caught := true
+end
+chk.check("Shipped require: not_empty items", "true", "" + shipped_empty_items_caught)
+
 -- ===========================================================================
 -- B.4 -- The open pricing edge: Base, Percent_Off, When, Floored, Over_Amount.
 -- ===========================================================================
@@ -156,12 +164,11 @@ chk.check("rule: small order stays at base", "1000 USD", "" + discount_rule.eval
 
 let invalid_percent_caught: Boolean := false
 do
-  let bad_rule: Price_Expr := create Percent_Off.make(150, create Base)
-  bad_rule.eval(big_draft)
+  let bad_rule: Price_Expr := create Percent_Off.make(150, create Base)   -- invariant fires here
 rescue
   invalid_percent_caught := true
 end
-chk.check("Percent_Off require: valid_percent", "true", "" + invalid_percent_caught)
+chk.check("Percent_Off invariant: valid_percent", "true", "" + invalid_percent_caught)
 
 -- A steep discount that would fall below the floor: Floored clamps it back up.
 let steep_draft: Draft := create Draft.make(
@@ -207,6 +214,10 @@ end
 match unify(create Atom.make("zone-a"), create Atom.make("zone-b"), s0) of
   Ok then chk.check("unify: clashing atoms", "false", "true")
   Err then chk.check("unify: clashing atoms", "false", "false")
+end
+match unify(create Var.make("X"), create Var.make("X"), create Substitution.make()) of
+  Ok as ok then chk.check("unify: var with itself binds nothing", "0", "" + ok.value.bindings.size())
+  Err then chk.check("unify: var with itself binds nothing", "0", "failed")
 end
 match unify(create Var.make("X"), create Atom.make("zone-a"), create Substitution.make()) of
   Ok as ok then

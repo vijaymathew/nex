@@ -30,7 +30,7 @@ the standard library's, via `intern data/Result` — not hand-rolled here.
 ## Running
 
 ```bash
-nex check.nex              # 54/54 checks, exits 0; exits 1 (with a FAIL line) on any regression
+nex check.nex              # 56/56 checks, exits 0; exits 1 (with a FAIL line) on any regression
 ```
 
 ## Notes on fidelity to the book
@@ -53,7 +53,7 @@ nex check.nex              # 54/54 checks, exits 0; exits 1 (with a FAIL line) o
 ## Backend
 
 `nex check.nex` runs on the default (compiled JVM) backend and is green:
-54/54. `nex check.nex --interpret` does not run: the tree-walking
+56/56. `nex check.nex --interpret` does not run: the tree-walking
 interpreter's `intern <Name>` requires a class literally named `<Name>` to
 exist in `<name>.nex` (`intern Order_Core` demands a class `Order_Core`
 inside `order_core.nex`), which none of these multi-class modules satisfy —
