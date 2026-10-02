@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.5 - 2026-10-02
+
 - **Fix: a loop `variant` must now be non-negative.** The README always said
   the variant "never falls below zero", but only strict decrease was checked,
   so a loop could count down through `-1, -2, ...` without complaint. Both
@@ -16,7 +18,6 @@
 - **Change: a local no longer shadows an interned module name outside its own
   routine.** `trade.ship(x)` is a qualified call unless `trade` is bound in the
   enclosing routine/class (or globally).
-
 - **Change: a trailing expression is no longer a routine's return value.** The
   compiled backend used to return a routine's last statement when it was an
   expression and nothing before it assigned `result`
@@ -50,6 +51,11 @@
   variable.** `k` on its own line, with `k` an `Integer`, failed with "Method
   not found: call0", and a bare `Function` variable was typed as a call of it,
   though both backends evaluate either as the plain value.
+- **Change: the REPL shows the type of every expression result.** With
+  `:typecheck on`, only a result whose input ended in a call used to be
+  prefixed with its type; now any expression is (`40 + 2` prints `Integer 42`),
+  and a detachable type keeps its `?` (`?String nil`). The startup banner no
+  longer prints the backend notice.
 
 ## 0.5.4 - 2026-09-28
 
