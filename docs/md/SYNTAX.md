@@ -1372,7 +1372,13 @@ b.value -- 42
 
 Type arguments must match exactly: a `Box[Dog]` is not a `Box[Animal]`, even
 though a `Dog` is an `Animal`. Otherwise an `Animal` could be put into the
-`Box[Dog]` through it. The same holds for `Array`, `Map` and `Set`.
+`Box[Dog]` through it. The same holds for `Array`, `Map` and `Set`, and for
+`Any`: a `Box[Dog]` is not a `Box[Any]` either. Arguments left to inference
+fit what the context needs: `let xs: Array[Integer] := []`, and
+`let b: Box[Any] := create Box.make(5)` makes a `Box[Any]`.
+
+A value of type `Any` reaches a more specific type, a generic one included,
+only through `convert`: `if convert json.parse(text) to m: Map[String, Any] then`.
 
 Generic functions use the same bracket syntax after the function name:
 
