@@ -991,14 +991,15 @@
             :b2         [(fn [] (emit-boxed-expr! mv (nth args 2) state-slot))]
             :args       [(fn [] (emit-boxed-arg-array! mv args state-slot))]
             :args-drop2 [(fn [] (emit-boxed-arg-array! mv (vec (drop 2 args)) state-slot))]
+            :args-drop3 [(fn [] (emit-boxed-arg-array! mv (vec (drop 3 args)) state-slot))]
             :bvar       (mapv (fn [arg] (fn [] (emit-boxed-expr! mv arg state-slot))) args)))
         spec)))
 
 (def ^:private direct-runtime-helper-specs
   "helper key -> [runtime-fn-name arg-emitter-spec]. Spec tokens (read by
    runtime-helper-emitters): :state loads the repl state; :e<n>/:b<n> emit the
-   nth arg raw/boxed; :args / :args-drop2 pass all args / args after the first
-   two as a boxed array; :bvar splices each arg boxed."
+   nth arg raw/boxed; :args / :args-drop2 / :args-drop3 pass all args / args
+   after the first two / three as a boxed array; :bvar splices each arg boxed."
   {"builtin-method:Cursor:start"             ["builtin-cursor-start" [:state :e0]]
    "builtin-method:Cursor:cursor"            ["builtin-cursor-cursor" [:state :e0]]
    "builtin-method:Cursor:item"              ["builtin-cursor-item" [:state :e0]]
@@ -1033,6 +1034,7 @@
    "java-call-static"                        ["java-call-static" [:state :b0 :b1 :args-drop2]]
    "java-get-static-field"                   ["java-get-static-field" [:state :b0 :b1]]
    "validate-object-state"                   ["validate-object-state" [:state :b0 :b1]]
+   "dispatch-self-call"                      ["dispatch-self-call" [:state :b0 :b1 :b2 :args-drop3]]
    "op:string-concat"                        ["string-concat" [:state :args]]
    "op:div-int"                              ["div-int" [:b0 :b1]]
    "op:div-long"                             ["div-long" [:b0 :b1]]
@@ -2460,7 +2462,16 @@
 (defn- emit-compare!
   [^MethodVisitor mv expr state-slot]
   (let [operator (:operator expr)]
-    (if (#{:ident-eq :ident-neq} operator)
+    (cond
+      ;; Compiler-internal reference identity on two object operands (see
+      ;; nex.lower/overridable-self-call-ir): a bare IF_ACMPEQ, no runtime call.
+      (= :ref-eq operator)
+      (do
+        (emit-boxed-expr! mv (:left expr) state-slot)
+        (emit-boxed-expr! mv (:right expr) state-slot)
+        (emit-object-compare! mv :eq))
+
+      (#{:ident-eq :ident-neq} operator)
       (do
         (emit-runtime-var! mv "identity-equals")
         (emit-boxed-expr! mv (:left expr) state-slot)
@@ -2475,6 +2486,8 @@
         (when (= :ident-neq operator)
           (.visitInsn mv Opcodes/ICONST_1)
           (.visitInsn mv Opcodes/IXOR)))
+
+      :else
       (let [declared-left-type (:jvm-type (:left expr))
             declared-right-type (:jvm-type (:right expr))
             compare-type (or (numeric-promotion-jvm-type declared-left-type declared-right-type)

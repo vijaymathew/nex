@@ -4555,8 +4555,7 @@
                                                       (exact-class-jvm-type env (:this-type env)))
                                         "Any"
                                         (ir/object-jvm-type "java/lang/Object"))]
-        (ir/call-runtime-node (str (if (:unqualified? target-expr) "user-method-unchecked:" "user-method:")
-                                   method)
+        (ir/call-runtime-node (str "user-method:" method)
                               (into [outer-ir] (mapv #(lower-expression env %) args))
                               nex-type
                               jvm-type))
@@ -4744,10 +4743,8 @@
                                     ((fn [class-def]
                                        (or (class-method-def class-def (:name expr) 0)
                                            (inherited-method-def env class-def (:name expr) 0)))))]
-          ;; Dispatched like `this.f`, but still an unqualified call, so
-          ;; exempt from the invariant check (see self-call-method-name).
+          ;; The same unqualified call as `name()`.
           (lower-expression env {:type :call
-                                 :target {:type :this :unqualified? true}
                                  :method (:name expr)
                                  :args []
                                  :has-parens true})
@@ -5471,6 +5468,44 @@
             base-type (base-type-name target-type)]
         (boolean (:import (get (visible-class-map env) base-type)))))))
 
+(defn- dispatch-self-call-ir
+  "An unqualified call to METHOD-DEF dispatched at run time on TARGET-IR (the
+   heir's object a carrier's `__outer__` points to): its unchecked twin when
+   the heir's class has one, else its ordinary routine (see
+   nex.compiler.jvm.runtime/dispatch-self-call)."
+  [target-ir method-def arg-irs nex-type jvm-type]
+  (let [name-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
+    (ir/call-runtime-node "dispatch-self-call"
+                          (into [target-ir
+                                 (name-const (unchecked-instance-method-name method-def))
+                                 (name-const (lowered-instance-method-name method-def))]
+                                arg-irs)
+                          nex-type
+                          jvm-type)))
+
+(defn- overridable-self-call-ir
+  "An unqualified call to an own or inherited routine an heir may override.
+   Inherited code runs on a composition carrier, whose `__outer__` points at
+   the heir's object it lives in (an object not inside another has
+   `__outer__` = `this`). DIRECT-IR, the call on `this`'s own routine, is
+   right only in the second case; in the first the call dispatches on
+   `__outer__` at run time, as `this.f` does, so the heir's override runs."
+  [env method-def arg-irs nex-type jvm-type direct-ir]
+  (let [this-ir (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+        outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                    "__outer__"
+                                    this-ir
+                                    "Any"
+                                    (ir/object-jvm-type "java/lang/Object"))
+        ;; Both branches must leave the same stack. A Void routine's direct
+        ;; call leaves its boxed null there, so the runtime call keeps its own.
+        branch-jvm-type (if (= :void jvm-type) (ir/object-jvm-type "java/lang/Object") jvm-type)]
+    (ir/if-node (ir/compare-node :ref-eq outer-ir this-ir "Boolean" :boolean)
+                [direct-ir]
+                [(dispatch-self-call-ir outer-ir method-def arg-irs nex-type branch-jvm-type)]
+                nex-type
+                branch-jvm-type)))
+
 (defn- lower-implicit-self-call
   [env expr arg-irs]
   (let [own-method-def (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
@@ -5482,14 +5517,15 @@
       ;; Declared with a real body on this exact class: INVOKEVIRTUAL against
       ;; it links fine, since the bytecode for it lives right here.
       (and own-method-def (not (lowered-deferred-method? (current-class-def env) own-method-def)))
-      (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
-                            (self-call-method-name env (:this-type env) method-def)
-                            (desc/repl-instance-method-descriptor)
-                            (ir/this-node (:this-type env)
-                                          (exact-class-jvm-type env (:this-type env)))
-                            arg-irs
-                            nex-type
-                            jvm-type)
+      (overridable-self-call-ir env method-def arg-irs nex-type jvm-type
+                                (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                                      (self-call-method-name env (:this-type env) method-def)
+                                                      (desc/repl-instance-method-descriptor)
+                                                      (ir/this-node (:this-type env)
+                                                                    (exact-class-jvm-type env (:this-type env)))
+                                                      arg-irs
+                                                      nex-type
+                                                      jvm-type))
 
       ;; Declared on this class but deferred (no body compiled here) — e.g. a
       ;; deferred class's own routine calling one of its sibling deferred
@@ -5503,24 +5539,22 @@
                                                       (exact-class-jvm-type env (:this-type env)))
                                         "Any"
                                         (ir/object-jvm-type "java/lang/Object"))]
-        (ir/call-runtime-node (str "user-method-unchecked:" (:method expr))
-                              (into [outer-ir] arg-irs)
-                              nex-type
-                              jvm-type))
+        (dispatch-self-call-ir outer-ir method-def arg-irs nex-type jvm-type))
 
       :else
       (let [{:keys [owner-internal-name carrier-path source-class]}
             (get (direct-parent-method-map env (current-class-def env))
                  [(:method expr) (count (:args expr))])]
-        (ir/call-virtual-node owner-internal-name
-                              (self-call-method-name env source-class method-def)
-                              (desc/repl-instance-method-descriptor)
-                              (carrier-path-target-ir env carrier-path
-                                                      (ir/this-node (:this-type env)
-                                                                    (exact-class-jvm-type env (:this-type env))))
-                              arg-irs
-                              nex-type
-                              jvm-type)))))
+        (overridable-self-call-ir env method-def arg-irs nex-type jvm-type
+                                  (ir/call-virtual-node owner-internal-name
+                                                        (self-call-method-name env source-class method-def)
+                                                        (desc/repl-instance-method-descriptor)
+                                                        (carrier-path-target-ir env carrier-path
+                                                                                (ir/this-node (:this-type env)
+                                                                                              (exact-class-jvm-type env (:this-type env))))
+                                                        arg-irs
+                                                        nex-type
+                                                        jvm-type))))))
 
 (defn- lower-call-without-target
   "A call with no receiver: an implicit call on `this` inside the currently
