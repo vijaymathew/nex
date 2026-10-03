@@ -154,6 +154,12 @@ end
 let label: String := when age >= 18 then "adult" else "minor" end
 ```
 
+The type of a `when` is the narrowest type both branches conform to:
+`when c then create Dog.make else create Fish.make end` is an `Animal`. When
+there is no single narrowest type, it is `Any`: `when c then 1 else "one" end`,
+or even `when c then 1 else 2.5 end`, since no numeric type conforms to another.
+A `nil` branch makes the type optional (`?T`).
+
 ## Loops: from / until
 
 ```nex
@@ -1254,6 +1260,9 @@ if ?p.age as a and ?q.age as b then
 end
 ```
 
+The same goes for `x /= nil`: after `if x /= nil and y /= nil then`, both `x`
+and `y` are attached in the branch.
+
 ## Anonymous Functions
 
 ```nex
@@ -1360,6 +1369,10 @@ end
 let b: Box [Integer] := create Box[Integer].make(42)
 b.value -- 42
 ```
+
+Type arguments must match exactly: a `Box[Dog]` is not a `Box[Animal]`, even
+though a `Dog` is an `Animal`. Otherwise an `Animal` could be put into the
+`Box[Dog]` through it. The same holds for `Array`, `Map` and `Set`.
 
 Generic functions use the same bracket syntax after the function name:
 

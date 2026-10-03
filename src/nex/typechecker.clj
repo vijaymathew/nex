@@ -1040,10 +1040,12 @@
      (when (and (string? b1) (string? b2) (seq args2)
                 (not= b1 "Function") (not= b2 "Function"))
        (when-let [inst (ancestor-instantiation env b1 args1 b2 #{})]
+         ;; Type arguments are invariant, as for the same-base case in
+         ;; types-compatible?.
          (and (= (count inst) (count args2))
               (every? true? (map (fn [p1 p2]
                                    (or (= p1 "Any") (= p2 "Any")
-                                       (types-compatible? env p1 p2)))
+                                       (types-equal? env p1 p2)))
                                  inst args2))))))))
 
 (defn types-compatible?
@@ -1180,13 +1182,17 @@
           ;; generic-class-conforms? branch above, which resolves the heir's
           ;; arguments through its inherit clause instead of assuming they line up
           ;; positionally with the parent's.
+          ;;
+          ;; Type arguments are invariant: Box[Dog] does not conform to
+          ;; Box[Animal], or an Animal could be put into the Box[Dog] through
+          ;; it. (`Any` still matches any argument — see types-equal?.)
           (and (map? a1) (map? a2)
                (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
                (= (:base-type a1) (:base-type a2))
                (= (count (:type-params a1)) (count (:type-params a2)))
                (every? true? (map (fn [p1 p2]
                                     (or (= p1 "Any") (= p2 "Any")
-                                        (types-compatible? env p1 p2)))
+                                        (types-equal? env p1 p2)))
                                   (:type-params a1) (:type-params a2))))))))
 
 (defn validate-generic-args
@@ -2349,6 +2355,16 @@
         (and right-id (nil-literal? left)) right-id
         :else nil))))
 
+(defn guarded-non-nil-vars
+  "Every variable CONDITION proves non-nil when true: `x` in `x /= nil`, and
+   in each conjunct of an `and` chain of them (`x /= nil and y /= nil`)."
+  [condition]
+  (if (and (map? condition) (= :binary (:type condition)) (= "and" (:operator condition)))
+    (concat (guarded-non-nil-vars (:left condition))
+            (guarded-non-nil-vars (:right condition)))
+    (when-let [var-name (guarded-non-nil-var condition)]
+      [var-name])))
+
 (defn guarded-else-non-nil-var
   "Extract variable name from condition of the form `x = nil` or `nil = x`,
    where the variable is proven non-nil in the else branch."
@@ -2370,7 +2386,7 @@
   (case branch
     :then
     (do
-      (when-let [non-nil-var (guarded-non-nil-var condition)]
+      (doseq [non-nil-var (guarded-non-nil-vars condition)]
         (env-mark-non-nil env non-nil-var))
       (doseq [{:keys [name type]} (convert-guard-bindings condition)]
         (env-add-var env name type)
@@ -4407,6 +4423,62 @@
         (assoc :params patched-params :return-type patched-return)
         (update :class-def patch-class-def))))
 
+(defn- proper-ancestor-types
+  "Every type class type T conforms to through inheritance, T itself
+   excluded: each ancestor class, instantiated with the type arguments T's
+   `inherit` clauses give it."
+  [env t]
+  (let [base (if (map? t) (:base-type t) t)
+        args (if (map? t) (vec (or (:type-params t) (:type-args t))) [])]
+    (when (and (string? base) (env-lookup-class env base))
+      (letfn [(ancestors-of [name seen]
+                (if (contains? seen name)
+                  seen
+                  (reduce (fn [acc parent] (ancestors-of parent acc))
+                          (conj seen name)
+                          (keep :parent (:parents (env-lookup-class env name))))))]
+        (for [ancestor (disj (ancestors-of base #{}) base)
+              :let [inst (ancestor-instantiation env base args ancestor #{})]
+              :when inst]
+          (if (seq inst) {:base-type ancestor :type-params inst} ancestor))))))
+
+(defn join-type
+  "The type of `when c then a else b end` from the types of A and B: the
+   narrowest type to which both conform. When there is no single narrowest
+   one — Integer and String, say, both inherit Comparable and Hashable, and
+   neither of those conforms to the other — it is Any. A nil branch makes the
+   other branch's type optional."
+  [env t1 t2]
+  (let [n1 (normalize-type t1)
+        n2 (normalize-type t2)]
+    (cond
+      (and (= n1 "Nil") (= n2 "Nil")) "Nil"
+      (= n1 "Nil") (detachable-version t2)
+      (= n2 "Nil") (detachable-version t1)
+      :else
+      (let [a1 (attachable-type n1)
+            a2 (attachable-type n2)
+            joined (cond
+                     ;; types-equal? lets Any match anything, so it is
+                     ;; settled first: whatever joins with Any is Any.
+                     (or (= a1 "Any") (= a2 "Any")) "Any"
+                     (types-compatible? env a1 a2) a2
+                     (types-compatible? env a2 a1) a1
+                     :else
+                     (let [common (filter #(types-compatible? env a2 %)
+                                          (proper-ancestor-types env a1))
+                           narrowest (remove (fn [c]
+                                               (some #(and (not= % c) (types-compatible? env % c))
+                                                     common))
+                                             common)]
+                       (if (= 1 (count (distinct narrowest)))
+                         (first narrowest)
+                         "Any")))]
+        (if (and (not= joined "Any")
+                 (or (detachable-type? n1) (detachable-type? n2)))
+          (detachable-version joined)
+          joined)))))
+
 (defn- check-expr-when
   [env expr]
   (let [cond-type (check-condition env (:condition expr))
@@ -4415,28 +4487,12 @@
         alt-env (doto (make-type-env env)
                   (apply-condition-branch-refinement! (:condition expr) :else))
         cons-type (check-expression cons-env (:consequent expr))
-        alt-type (check-expression alt-env (:alternative expr))
-        cons-nil? (= (normalize-type cons-type) "Nil")
-        alt-nil? (= (normalize-type alt-type) "Nil")
-        result-type (cond
-                      (and cons-nil? alt-nil?) "Nil"
-                      cons-nil? (detachable-version alt-type)
-                      alt-nil? (detachable-version cons-type)
-                      :else cons-type)]
+        alt-type (check-expression alt-env (:alternative expr))]
     (when-not (types-compatible? env cond-type "Boolean")
       (throw (ex-info "when condition must be Boolean"
                       {:error (type-error
                                (str "when condition has type " cond-type ", expected Boolean"))})))
-    (when-not (or cons-nil?
-                  alt-nil?
-                  (types-compatible? env cons-type alt-type)
-                  (types-compatible? env alt-type cons-type))
-      (throw (ex-info "when branches must have compatible types"
-                      {:error (type-error
-                               (str "when branches have incompatible types: "
-                                    (display-type cons-type) " and "
-                                    (display-type alt-type)))})))
-    result-type))
+    (join-type env cons-type alt-type)))
 
 (defn- check-expr-old
   [env expr]

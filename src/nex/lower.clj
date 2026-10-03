@@ -31,6 +31,7 @@
 (declare lower-call-stmt)
 (declare lower-loop-stmt)
 (declare lower-class-def lower-class-def*)
+(declare lowering-type-env)
 (declare class-self-registration-name)
 (declare if-branch-expression)
 (declare current-class-def)
@@ -799,18 +800,17 @@
         else-env (refine-condition-branch-env env (:condition expr) :else)
         cons-type (infer-type-or-any then-env (:consequent expr))
         alt-type (infer-type-or-any else-env (:alternative expr))]
-    ;; Detachable-wrap the surviving branch's type when the other is bare
-    ;; `nil` -- mirroring tc/check-expr-when's cons-nil?/alt-nil? handling
-    ;; exactly (a `?.` whose value comes back nil takes this `alt-type =
-    ;; "Nil"` branch). Without it, a concrete-but-still-nilable result (e.g.
-    ;; `Integer`) resolves to that type's ordinary, non-detachable jvm-type
-    ;; -- a primitive `long` for Integer -- and reading it back where the
-    ;; value is actually nil unboxes a null Long, crashing with a raw NPE
-    ;; instead of running the branch that produced nil.
+    ;; The same join tc/check-expr-when gives the expression. A bare `nil`
+    ;; branch makes the other's type optional (a `?.` whose value comes back
+    ;; nil takes the `alt-type = "Nil"` case): left at, say, `Integer`, the
+    ;; result would get a primitive `long` jvm-type, and reading back a nil
+    ;; would unbox a null Long. And a result typed as the then-branch alone
+    ;; is wrong whenever the else-branch is wider.
     (cond
       (= alt-type "Nil") (tc/detachable-version cons-type)
       (= cons-type "Nil") (tc/detachable-version alt-type)
-      :else cons-type)))
+      (= cons-type alt-type) cons-type
+      :else (tc/join-type (lowering-type-env env) cons-type alt-type))))
 
 (def ^:private infer-type-dispatch
   "AST node `:type` -> `(fn [env expr] ...)`: the primary (non-fallback) half
@@ -2905,9 +2905,7 @@
   [env condition branch]
   (case branch
     :then
-    (let [env' (if-let [var-name (tc/guarded-non-nil-var condition)]
-                 (refine-var-non-nil env var-name)
-                 env)]
+    (let [env' (reduce refine-var-non-nil env (tc/guarded-non-nil-vars condition))]
       (reduce (fn [acc {:keys [name type]}]
                 (refine-var-non-nil
                  (cond
