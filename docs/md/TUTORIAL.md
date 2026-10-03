@@ -139,11 +139,11 @@ across [10, 20, 30] as x do
 end
 ```
 
-`across` also works with strings and maps.
+`across` also works with strings, maps and anything that exposes a `cursor`.
 
 ## 6. Functions
 
-Top-level functions use `function`:
+Top-level functions:
 
 ```nex
 function greet(name: String) do
@@ -560,7 +560,7 @@ account.show
 
 Optional tooling — skip on a first read. Nex ships an interactive debugger you
 can drive from the REPL once you are comfortable writing programs. This is a
-quick reference; the full command set is in `docs/md/DEBUGGER.md`.
+quick reference; type `:help` at the `nex>` or `dbg>` prompt for every command.
 
 Enable the debugger in the REPL:
 
@@ -568,14 +568,22 @@ Enable the debugger in the REPL:
 :debug on
 ```
 
-Set breakpoints and run:
+Turn it on *before* you define or `:load` the code you want to debug. Classes
+defined while the debugger is off run compiled and do not stop at breakpoints.
+
+Set breakpoints, then run some code (for example `w.spend(150.0)` with the
+`Wallet` from Section 11):
 
 ```text
 :break Wallet.spend
 :break Wallet.spend if amount > 100
 :break field:money
-:tbreak Wallet.spend:42
+:tbreak Wallet.spend
+:breaks
 ```
+
+`field:money` pauses on writes of the form `this.money := ...`. `:tbreak` sets
+a temporary breakpoint that is removed after its first hit.
 
 At the `dbg>` prompt:
 
@@ -583,8 +591,12 @@ At the `dbg>` prompt:
 :where
 :locals
 :print money
-:next
-:continue
+:step         -- or :s, step into calls
+:next         -- or :n, step over calls
+:finish       -- or :f, run until the current method returns
+:frames
+:frame 1
+:continue     -- or :c
 ```
 
 Watch values change:
@@ -602,11 +614,26 @@ Tune breakpoint hit behavior:
 :every 1 3    -- breakpoint[1] pauses every 3rd hit
 ```
 
+Hit counts and watched values start fresh with each REPL input, so `:ignore`,
+`:every`, and watchpoints act within a single input — for example a loop:
+
+```nex
+across [1, 2, 3, 4, 5, 6] as x do w.spend(1.0) end
+```
+
 Control breakpoints without deleting:
 
 ```text
 :disable 1
 :enable 1
+```
+
+Remove them:
+
+```text
+:clearbreak 1
+:clearbreak all
+:clearwatch all
 ```
 
 Pause on failures:
@@ -632,3 +659,6 @@ Script debugger commands from a file:
 ```text
 :debugscript debug_commands.dbg
 ```
+
+The file's lines are fed, in order, to the `dbg>` prompt whenever execution
+pauses. Turn the debugger off with `:debug off`.
