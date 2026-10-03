@@ -8134,22 +8134,41 @@
         (filter :constant? (class-fields class-def))))
 
 (defn- inherited-constructor-shims
-  "Constructors a class inherits verbatim from its composed parents: for each
-   parent constructor whose name the class does not itself declare, a copy
-   tagged with `:shim-parent` so lower-constructor forwards it to that parent."
+  "Constructors a class inherits from its composed parents: for each
+   constructor a parent has whose name the class does not itself declare, a
+   copy tagged with `:shim-parent` so lower-constructor forwards it to that
+   parent. A parent has the constructors it declares and, in turn, the ones it
+   inherits (compiled as its own shims), so `C inherit B`, `B inherit A` gives
+   C the constructors of A that neither declares."
   [class-def visible-classes compiled-classes own-ctor-names]
-  (->> (:parents class-def)
-       (remove #(= "Any" (:parent %)))
-       (mapcat (fn [{:keys [parent]}]
-                 ;; :compiled-classes lets a qualified parent (`finance.Account`)
-                 ;; that lost a bare-name collision still resolve.
-                 (let [parent-def (get (visible-class-map {:classes visible-classes
-                                                           :compiled-classes compiled-classes})
-                                       parent)]
-                   (for [ctor-def (class-constructors parent-def)
-                         :when (not (contains? own-ctor-names (:name ctor-def)))]
-                     (assoc ctor-def :shim-parent parent)))))
-       vec))
+  ;; :compiled-classes lets a qualified parent (`finance.Account`) that lost a
+  ;; bare-name collision still resolve.
+  (let [class-map (visible-class-map {:classes visible-classes
+                                      :compiled-classes compiled-classes})]
+    (letfn [(shims [class-def own-ctor-names seen]
+              (->> (:parents class-def)
+                   (remove #(= "Any" (:parent %)))
+                   (remove #(contains? seen (:parent %)))
+                   (mapcat (fn [{:keys [parent generic-args]}]
+                             (let [parent-def (get class-map parent)
+                                   parent-own (class-constructors parent-def)
+                                   parent-ctors (concat parent-own
+                                                        (shims parent-def
+                                                               (set (map :name parent-own))
+                                                               (conj seen parent)))
+                                   ;; The parent's parameter types are written in
+                                   ;; its own generic parameters; `inherit Box[Dog]`
+                                   ;; binds Box's T to Dog, and the shim is this
+                                   ;; class's constructor.
+                                   subst (zipmap (map :name (:generic-params parent-def)) generic-args)]
+                               (for [ctor-def parent-ctors
+                                     :when (not (contains? own-ctor-names (:name ctor-def)))]
+                                 (cond-> (assoc ctor-def :shim-parent parent)
+                                   (seq subst)
+                                   (update :params (fn [params]
+                                                     (mapv #(update % :type tc/resolve-generic-type subst)
+                                                           params))))))))))]
+      (vec (shims class-def own-ctor-names #{(:name class-def)})))))
 
 (defn- lower-own-methods
   "Each routine the class declares. In a class whose hierarchy declares an
@@ -8175,7 +8194,8 @@
                                                     (effective-method-contracts env class-def method-def)
                                                     extra)))]
                  (if (or (not twins?) deferred?)
-                   [(lower {})] [(lower {:unchecked-twin? true})
+                   [(lower {})]
+                   [(lower {:unchecked-twin? true})
                           (forwarding-method-node env class-meta class-name compiled-classes
                                                   {:source-class class-name
                                                    :carrier-path []

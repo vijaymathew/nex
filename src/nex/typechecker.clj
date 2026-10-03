@@ -2927,6 +2927,8 @@
                                   (display-type normalized-target)
                                   ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))}))))
 
+(declare self-type-with-own-generic-params)
+
 ;; `super.method(...)` / `super.method` resolve against the immediate super
 ;; parent only — never further up the chain for a constructor, and never
 ;; falling back to a universal `Any` protocol signature — because that is
@@ -2938,12 +2940,19 @@
 ;; opaque "internal error" instead of a real type error.
 (defn- check-super-call
   [env {:keys [method args has-parens]} {:keys [base-type current-class]}]
+  ;; The parent's members are written in its generic parameters, which the
+  ;; inherit clause instantiates (`inherit Box[Dog]` binds Box's T to Dog), so
+  ;; resolve them along the chain, as the `Parent.make(...)` spelling does.
   (if-let [ctor-def (class-own-constructor env base-type method (count args))]
     (check-call-signature env method args
                           {:params (:params ctor-def) :return-type base-type}
-                          {})
+                          (build-member-generic-type-map
+                           env (self-type-with-own-generic-params env current-class) base-type))
     (if-let [method-sig (lookup-super-feature-method env base-type method (count args))]
-      (check-call-signature env method args method-sig {})
+      (check-call-signature env method args method-sig
+                            (build-member-generic-type-map
+                             env (self-type-with-own-generic-params env current-class)
+                             (or (:declaring-class method-sig) base-type)))
       (if-let [field-member (and (false? has-parens)
                                  (lookup-class-field-member env base-type method current-class))]
         (resolve-generic-type (:field-type field-member) {})
@@ -4222,6 +4231,23 @@
             ctor-name (or constructor "make")
             ctor-sig (lookup-class-method env class-name ctor-name)
             gparams (:generic-params class-def)
+            ;; The constructor's parameter types, in this class's own generic
+            ;; parameters. An inherited one is written in its declaring
+            ;; class's (`make(v: T)` in Box), which `class Dog_Box inherit
+            ;; Box[Dog]` instantiates at Dog: resolve them along the inherit
+            ;; chain, as build-member-generic-type-map does for a routine.
+            param-types (when ctor-sig
+                          (let [declaring (:declaring-class ctor-sig)
+                                raw (mapv :type (:params ctor-sig))]
+                            (or (when (and declaring (not= declaring class-name))
+                                  (when-let [inst (ancestor-instantiation
+                                                   env class-name
+                                                   (mapv #(type-name-string (:name %)) gparams)
+                                                   declaring #{})]
+                                    (let [declaring-params (:generic-params (env-lookup-class env declaring))
+                                          subst (zipmap (map :name declaring-params) inst)]
+                                      (mapv #(resolve-generic-type % subst) raw))))
+                                raw)))
             arg-types (when (and (or constructor (seq args)) ctor-sig)
                         (mapv #(check-expression env %) args))
             ;; When type arguments are not written explicitly, infer them from
@@ -4229,13 +4255,13 @@
             ;; Ok[Integer, Any]); parameters not mentioned by the constructor
             ;; stay `Any`. Explicit `[…]` remains authoritative.
             inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
-                           (reduce (fn [acc [arg-type param]]
+                           (reduce (fn [acc [arg-type param-type]]
                                      (merge-inferred-generic-bindings
                                       env acc
                                       (infer-generic-type-map-from-arg
-                                       env (set (map :name gparams)) (:type param) arg-type)))
+                                       env (set (map :name gparams)) param-type arg-type)))
                                    {}
-                                   (map vector arg-types (:params ctor-sig))))
+                                   (map vector arg-types param-types)))
             target-type (cond
                           (seq generic-args)
                           (do (validate-generic-args env class-name generic-args)
@@ -4265,8 +4291,8 @@
                               {:error (type-error
                                        (str "Expected " (count params) " args, got "
                                             (count args)))})))
-            (doseq [[arg-type param] (map vector arg-types params)]
-              (let [param-type (resolve-generic-type (:type param) type-map)]
+            (doseq [[arg-type param declared-type] (map vector arg-types params param-types)]
+              (let [param-type (resolve-generic-type declared-type type-map)]
                 (when (any-into-concrete-without-convert? env param-type arg-type)
                   (throw-any-narrowing-error! (str "parameter '" (:name param) "' of constructor "
                                                    class-name "." ctor-name)
