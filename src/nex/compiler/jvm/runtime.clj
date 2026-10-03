@@ -1091,6 +1091,12 @@
   [method-name arity]
   (str "__method_" method-name "$arity" arity))
 
+(defn- unchecked-instance-method-name
+  "A routine's unchecked twin: its body without the class-invariant check on
+   exit (see nex.lower/self-call-method-name)."
+  [method-name arity]
+  (str "__imethod_" method-name "$arity" arity))
+
 (defn- reflected-field
   [^Class cls field-name]
   (or (try
@@ -1167,6 +1173,20 @@
                                 {:method method-name
                                  :arity (count args)
                                  :class (.getName cls)}))))))))))
+
+(defn- invoke-user-method-unchecked
+  "An unqualified call dispatched at run time — a deferred routine called from
+   its own class's code, run on the concrete object `__outer__` points to.
+   Links to the routine's unchecked twin, which the object's class emits when
+   its hierarchy declares an invariant; otherwise there is nothing to check
+   and the ordinary routine runs."
+  [state target method-name args]
+  (if-let [[effective-target ^Method method]
+           (and (some? target)
+                (not (interp/nex-object? target))
+                (find-user-method target (unchecked-instance-method-name method-name (count args))))]
+    (invoke-reflective! method effective-target (object-array [state (object-array args)]))
+    (invoke-user-method state target method-name args)))
 
 (defn- get-user-field
   [target field-name]
@@ -2894,6 +2914,9 @@
       ;; top-level builtins).
       (str/starts-with? name "user-method:")
       (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
+
+      (str/starts-with? name "user-method-unchecked:")
+      (invoke-user-method-unchecked state (first args) (subs name (count "user-method-unchecked:")) (rest args))
 
       (str/starts-with? name "user-field-get:")
       (get-user-field (first args) (subs name (count "user-field-get:")))

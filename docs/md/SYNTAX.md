@@ -858,6 +858,34 @@ class Wallet
 end
 ```
 
+The invariant is checked when an object is created and on exit from every
+*qualified* call: `w.spend(1.0)`, or `this.spend(1.0)`. An unqualified call
+(`spend(1.0)`), `super.spend(1.0)` or `Parent.spend(1.0)` is part of the
+routine that makes it, so it is not checked. A routine may break the
+invariant for a moment and call a helper, as long as the invariant holds
+again by the time the routine returns:
+
+```nex
+class Pair
+  feature
+    a: Integer
+    b: Integer
+
+    bump do
+      a := a + 1      -- invariant broken here...
+      log             -- ...so this call is unqualified, and not checked
+      b := b + 1      -- ...and restored before bump returns
+    end
+
+    log do print(a.to_string + " " + b.to_string) end
+  invariant
+    same: a = b
+end
+```
+
+A call made from inside a closure counts as qualified, since the closure may
+run long after the routine that made it has returned.
+
 `require`, `ensure`, and `invariant` speak about a routine's boundaries or a
 class. `assert` states what must be true at one point *inside* a body:
 

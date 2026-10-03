@@ -2160,9 +2160,10 @@
    *second* mid-construction call (e.g. a constructor's own field assignment
    followed later by a call to a setter method) with the stale snapshot as
    CURRENT-OBJ would sync that stale snapshot's fields back over ENV
-   afterward, clobbering the assignment that ran first. Called at each such
-   call site (never inside dispatch-parent-call itself, which is also used
-   for ordinary parent/super delegation where CURRENT-OBJ is already live)."
+   afterward, clobbering the assignment that ran first. A `super.f`/`A.f`
+   call partway through a routine has the same problem: :current-object is
+   the object as it was when the routine was entered. Called at each such
+   call site rather than inside dispatch-parent-call itself."
   [ctx obj]
   (let [class-def (lookup-class-if-exists ctx (:class-name obj))
         all-fields (when class-def (get-all-fields ctx class-def))
@@ -2405,6 +2406,7 @@
             _ (env-define method-env "result" default-result)
             _ (env-define method-env "this" obj)
             new-ctx (-> ctx
+                        (dissoc :unchecked-call?)
                         (assoc :current-env method-env)
                         (assoc :current-object obj)
                         (assoc :current-target target-name)
@@ -2433,7 +2435,11 @@
         (try
           (when-let [ensure-assertions effective-ensure]
             (check-assertions new-ctx ensure-assertions Postcondition))
-          (check-class-invariant new-ctx class-def)
+          ;; As in Eiffel, only a qualified call (`x.f`, `this.f`) checks the
+          ;; invariant on exit; an unqualified one (`f`) runs mid-routine,
+          ;; where the invariant may be broken for a moment.
+          (when-not (:unchecked-call? ctx)
+            (check-class-invariant new-ctx class-def))
           (write-back-target! ctx target updated-obj source-obj)
           (annotate-reference-result target obj result)
           (catch Exception e
@@ -2470,7 +2476,11 @@
 (defn- invoke-nex-object-call
   [ctx target target-name method obj has-parens arg-values]
   (let [class-def (lookup-class ctx (:class-name obj))
-        method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values))]
+        ;; An unqualified self-call (re-dispatched here by
+        ;; eval-call-without-target) may reach the class's private routines.
+        method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values)
+                                                      (when (:unchecked-call? ctx)
+                                                        (:current-class-name ctx)))]
     (if method-lookup
       (invoke-found-nex-method ctx target target-name class-def method method-lookup obj has-parens arg-values)
       (resolve-nex-object-field-or-any-protocol ctx target target-name class-def method obj has-parens arg-values))))
@@ -2579,7 +2589,8 @@
       ;; super.method()/super.make(...), where the parent is resolved from
       ;; the current class rather than named at the call site.
       parent-class
-      (dispatch-parent-call ctx (:current-object ctx) (or super-parent-name target-name) method arg-values)
+      (dispatch-parent-call ctx (refresh-object-fields-from-env ctx (:current-object ctx))
+                            (or super-parent-name target-name) method arg-values)
 
       this-own-ctor?
       (dispatch-parent-call ctx (:current-object ctx) (:current-class-name ctx) method arg-values)
@@ -2726,16 +2737,21 @@
                                          (:fields current-obj)
                                          all-fields)
                   updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
-                  target-name (:current-target ctx)]
+                  target-name (:current-target ctx)
+                  ;; Still an unqualified call, so exempt from the invariant
+                  ;; check on exit (see invoke-found-nex-method). Arguments go
+                  ;; in already evaluated, so none of them runs under the flag.
+                  self-ctx (assoc ctx :unchecked-call? true)
+                  literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
               (if (string? target-name)
               ;; The enclosing method was invoked on a plain variable, so route
               ;; the self-call back through that variable to propagate any
               ;; field mutations to the caller.
                 (let [_ (env-set! (-> ctx :current-env :parent) target-name updated-obj)
-                      result (eval-node ctx {:type :call
-                                             :target target-name
-                                             :method method
-                                             :args args})
+                      result (eval-node self-ctx {:type :call
+                                                  :target target-name
+                                                  :method method
+                                                  :args literal-args})
                       called-obj (env-lookup (-> ctx :current-env :parent) target-name)
                       _ (when called-obj
                           (doseq [[field-name field-val] (:fields called-obj)]
@@ -2746,10 +2762,10 @@
               ;; through. Dispatch straight to the current object; rewriting
               ;; with a nil target would re-enter this branch forever
               ;; (StackOverflow).
-                (eval-node ctx {:type :call
-                                :target {:type :literal :value updated-obj}
-                                :method method
-                                :args args})))
+                (eval-node self-ctx {:type :call
+                                     :target {:type :literal :value updated-obj}
+                                     :method method
+                                     :args literal-args})))
             (if-let [builtin (get builtins method)]
               (apply builtin ctx arg-values)
               (throw (ex-info (str "Undefined method: " method)
@@ -3318,16 +3334,11 @@
                                                                   0
                                                                   current-class-name)]
                 (if method-lookup
-                  ;; It's a method - invoke it (implicit this). Route through the
-                  ;; caller variable when the enclosing method was invoked on one;
-                  ;; otherwise dispatch straight to the current object (a nil
-                  ;; target would re-enter this branch forever -- StackOverflow).
-                  (eval-node ctx {:type :call
-                                  :target (if (string? (:current-target ctx))
-                                            (:current-target ctx)
-                                            {:type :literal :value current-obj})
-                                  :method name
-                                  :args []})
+                  ;; It's a method - invoke it (implicit this), exactly as the
+                  ;; same call written `name()` is: on the object's live
+                  ;; fields, writing them back afterwards, and unqualified, so
+                  ;; with no invariant check on exit.
+                  (eval-call-without-target ctx name [] nil [])
                   (throw (ex-info (str "Undefined variable: " name)
                                   {:var-name name}))))
               (throw (ex-info (str "Undefined variable: " name)
