@@ -31,6 +31,8 @@
 (declare lower-call-stmt)
 (declare lower-loop-stmt)
 (declare lower-class-def lower-class-def*)
+(declare lowering-type-env)
+(declare ancestor-qualified-call-type)
 (declare class-self-registration-name)
 (declare if-branch-expression)
 (declare current-class-def)
@@ -799,18 +801,17 @@
         else-env (refine-condition-branch-env env (:condition expr) :else)
         cons-type (infer-type-or-any then-env (:consequent expr))
         alt-type (infer-type-or-any else-env (:alternative expr))]
-    ;; Detachable-wrap the surviving branch's type when the other is bare
-    ;; `nil` -- mirroring tc/check-expr-when's cons-nil?/alt-nil? handling
-    ;; exactly (a `?.` whose value comes back nil takes this `alt-type =
-    ;; "Nil"` branch). Without it, a concrete-but-still-nilable result (e.g.
-    ;; `Integer`) resolves to that type's ordinary, non-detachable jvm-type
-    ;; -- a primitive `long` for Integer -- and reading it back where the
-    ;; value is actually nil unboxes a null Long, crashing with a raw NPE
-    ;; instead of running the branch that produced nil.
+    ;; The same join tc/check-expr-when gives the expression. A bare `nil`
+    ;; branch makes the other's type optional (a `?.` whose value comes back
+    ;; nil takes the `alt-type = "Nil"` case): left at, say, `Integer`, the
+    ;; result would get a primitive `long` jvm-type, and reading back a nil
+    ;; would unbox a null Long. And a result typed as the then-branch alone
+    ;; is wrong whenever the else-branch is wider.
     (cond
       (= alt-type "Nil") (tc/detachable-version cons-type)
       (= cons-type "Nil") (tc/detachable-version alt-type)
-      :else cons-type)))
+      (= cons-type alt-type) cons-type
+      :else (tc/join-type (lowering-type-env env) cons-type alt-type))))
 
 (def ^:private infer-type-dispatch
   "AST node `:type` -> `(fn [env expr] ...)`: the primary (non-fallback) half
@@ -1018,8 +1019,16 @@
 
 (defn- infer-target-call-type
   [env expr class-target-name across-item-type target-expr]
-  (if (= :super (:type target-expr))
+  (cond
+    (= :super (:type target-expr))
     (infer-super-call-type env expr)
+
+    ;; `Ancestor.m(...)`, typed exactly as lower-parent-qualified-call lowers it.
+    (and class-target-name
+         (ancestor-qualified-call-type env class-target-name (:method expr) (count (:args expr))))
+    (ancestor-qualified-call-type env class-target-name (:method expr) (count (:args expr)))
+
+    :else
     (infer-instance-call-type env expr class-target-name across-item-type target-expr)))
 
 (def ^:private builtin-free-function-return-types
@@ -2113,6 +2122,39 @@
                base
                *type-aliases*)))
 
+(defn- class-declares-invariant-in-hierarchy?
+  "Whether `class-name` or any ancestor resolvable in `class-map` (name ->
+   class-def) declares a class invariant — the set the runtime must validate."
+  [class-map class-name]
+  (letfn [(walk [name seen]
+            (boolean
+             (when-let [cd (and name (not (contains? seen name)) (get class-map name))]
+               (or (seq (:invariant cd))
+                   (some #(walk (:parent %) (conj seen name)) (:parents cd))))))]
+    (walk class-name #{})))
+
+(defn- unchecked-instance-method-name
+  "JVM name of METHOD-DEF's unchecked twin: the same routine body as
+   `lowered-instance-method-name`, minus the class-invariant check on exit.
+   See `self-call-method-name`."
+  [method-def]
+  (str "__imethod_" (:name method-def) "$arity" (count (:params method-def))))
+
+(defn- self-call-method-name
+  "The JVM method an internal call to METHOD-DEF on an instance of
+   OWNER-CLASS links to: an unqualified call (`f`), `super.f` or `Parent.f`.
+   The invariant is checked only on exit from a qualified call (`x.f`,
+   `this.f`), as in Eiffel, so a routine may break it for a moment and call
+   a helper. A class whose hierarchy declares an invariant therefore emits
+   every routine twice (see `lower-own-methods`): the checked
+   `__method_` name every outside caller links to, and the `__imethod_`
+   twin internal calls link to. A class with no invariant anywhere in its
+   hierarchy has nothing to check, so emits only the first."
+  [env owner-class method-def]
+  (if (class-declares-invariant-in-hierarchy? (visible-class-map env) owner-class)
+    (unchecked-instance-method-name method-def)
+    (lowered-instance-method-name method-def)))
+
 (defn- lowering-type-env
   [env]
   (let [type-env (tc/make-type-env)]
@@ -2872,9 +2914,7 @@
   [env condition branch]
   (case branch
     :then
-    (let [env' (if-let [var-name (tc/guarded-non-nil-var condition)]
-                 (refine-var-non-nil env var-name)
-                 env)]
+    (let [env' (reduce refine-var-non-nil env (tc/guarded-non-nil-vars condition))]
       (reduce (fn [acc {:keys [name type]}]
                 (refine-var-non-nil
                  (cond
@@ -3239,6 +3279,16 @@
         new-target (cond
                      (or implicit-this-member? this-target?)
                      {:type :identifier :name closure-this-capture-name}
+
+                     ;; A field of `this` as the receiver (`n.to_string`),
+                     ;; rewritten as a bare `n` is. Any other name stays a
+                     ;; string: it may be a class (`Animal.name()`).
+                     (and (string? target)
+                          (not (contains? local-types target))
+                          (not (contains? (:var-types ctx) target))
+                          (this-type-field? ctx target))
+                     (rewrite-identifier-for-closures ctx local-types captures
+                                                      {:type :identifier :name target})
 
                      target
                      (rewrite-expression-for-closures ctx local-types captures target)
@@ -4557,7 +4607,11 @@
   [env target-expr method args has-parens]
   (let [target-type (resolve-type-alias (infer-type env target-expr))
         base-type (base-type-name target-type)
-        target-ir (lower-expression env target-expr)
+        ;; A member reached through `this` lives on the carrier itself.
+        target-ir (if (= (:type target-expr) :this)
+                    (ir/this-node (:this-type env)
+                                  (exact-class-jvm-type env (:this-type env)))
+                    (lower-expression env target-expr))
         class-def (get (visible-class-map env) base-type)
         field-def (when (and class-def (false? has-parens))
                     (if (= (:type target-expr) :this)
@@ -4710,8 +4764,8 @@
                                     ((fn [class-def]
                                        (or (class-method-def class-def (:name expr) 0)
                                            (inherited-method-def env class-def (:name expr) 0)))))]
+          ;; The same unqualified call as `name()`.
           (lower-expression env {:type :call
-                                 :target {:type :this}
                                  :method (:name expr)
                                  :args []
                                  :has-parens true})
@@ -4754,12 +4808,30 @@
                                 {:name (:name expr)}))))))))))
 
 (defn- lower-expr-this
+  "`this` as a value — passed, stored, printed, captured by a closure.
+   Inherited code runs on a composition carrier inside the heir's object, and
+   the value must be that object, or a call on it would miss the heir's
+   overrides; `__outer__` holds it (an object inside no other is its own
+   `__outer__`). Typed Object, since the heir is a different JVM class.
+   Member access through `this` inside the class stays on the carrier, which
+   is where the fields live (see lower-instance-dispatch)."
   [env expr]
-  (if (:this-type env)
+  (cond
+    (nil? (:this-type env))
+    (throw (ex-info "this is only valid in instance-method lowering"
+                    {:expr expr}))
+
+    (function-root-class? env (:this-type env))
     (ir/this-node (:this-type env)
                   (exact-class-jvm-type env (:this-type env)))
-    (throw (ex-info "this is only valid in instance-method lowering"
-                    {:expr expr}))))
+
+    :else
+    (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                       "__outer__"
+                       (ir/this-node (:this-type env)
+                                     (exact-class-jvm-type env (:this-type env)))
+                       (:this-type env)
+                       (ir/object-jvm-type "java/lang/Object"))))
 
 (defn- lower-expr-super
   "Bare `super` used as a value (e.g. `result := super`), as opposed to
@@ -5435,6 +5507,44 @@
             base-type (base-type-name target-type)]
         (boolean (:import (get (visible-class-map env) base-type)))))))
 
+(defn- dispatch-self-call-ir
+  "An unqualified call to METHOD-DEF dispatched at run time on TARGET-IR (the
+   heir's object a carrier's `__outer__` points to): its unchecked twin when
+   the heir's class has one, else its ordinary routine (see
+   nex.compiler.jvm.runtime/dispatch-self-call)."
+  [target-ir method-def arg-irs nex-type jvm-type]
+  (let [name-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
+    (ir/call-runtime-node "dispatch-self-call"
+                          (into [target-ir
+                                 (name-const (unchecked-instance-method-name method-def))
+                                 (name-const (lowered-instance-method-name method-def))]
+                                arg-irs)
+                          nex-type
+                          jvm-type)))
+
+(defn- overridable-self-call-ir
+  "An unqualified call to an own or inherited routine an heir may override.
+   Inherited code runs on a composition carrier, whose `__outer__` points at
+   the heir's object it lives in (an object not inside another has
+   `__outer__` = `this`). DIRECT-IR, the call on `this`'s own routine, is
+   right only in the second case; in the first the call dispatches on
+   `__outer__` at run time, as `this.f` does, so the heir's override runs."
+  [env method-def arg-irs nex-type jvm-type direct-ir]
+  (let [this-ir (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+        outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                    "__outer__"
+                                    this-ir
+                                    "Any"
+                                    (ir/object-jvm-type "java/lang/Object"))
+        ;; Both branches must leave the same stack. A Void routine's direct
+        ;; call leaves its boxed null there, so the runtime call keeps its own.
+        branch-jvm-type (if (= :void jvm-type) (ir/object-jvm-type "java/lang/Object") jvm-type)]
+    (ir/if-node (ir/compare-node :ref-eq outer-ir this-ir "Boolean" :boolean)
+                [direct-ir]
+                [(dispatch-self-call-ir outer-ir method-def arg-irs nex-type branch-jvm-type)]
+                nex-type
+                branch-jvm-type)))
+
 (defn- lower-implicit-self-call
   [env expr arg-irs]
   (let [own-method-def (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
@@ -5446,14 +5556,15 @@
       ;; Declared with a real body on this exact class: INVOKEVIRTUAL against
       ;; it links fine, since the bytecode for it lives right here.
       (and own-method-def (not (lowered-deferred-method? (current-class-def env) own-method-def)))
-      (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
-                            (lowered-instance-method-name method-def)
-                            (desc/repl-instance-method-descriptor)
-                            (ir/this-node (:this-type env)
-                                          (exact-class-jvm-type env (:this-type env)))
-                            arg-irs
-                            nex-type
-                            jvm-type)
+      (overridable-self-call-ir env method-def arg-irs nex-type jvm-type
+                                (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                                      (self-call-method-name env (:this-type env) method-def)
+                                                      (desc/repl-instance-method-descriptor)
+                                                      (ir/this-node (:this-type env)
+                                                                    (exact-class-jvm-type env (:this-type env)))
+                                                      arg-irs
+                                                      nex-type
+                                                      jvm-type))
 
       ;; Declared on this class but deferred (no body compiled here) — e.g. a
       ;; deferred class's own routine calling one of its sibling deferred
@@ -5467,24 +5578,22 @@
                                                       (exact-class-jvm-type env (:this-type env)))
                                         "Any"
                                         (ir/object-jvm-type "java/lang/Object"))]
-        (ir/call-runtime-node (str "user-method:" (:method expr))
-                              (into [outer-ir] arg-irs)
-                              nex-type
-                              jvm-type))
+        (dispatch-self-call-ir outer-ir method-def arg-irs nex-type jvm-type))
 
       :else
-      (let [{:keys [owner-internal-name carrier-path]}
+      (let [{:keys [owner-internal-name carrier-path source-class]}
             (get (direct-parent-method-map env (current-class-def env))
                  [(:method expr) (count (:args expr))])]
-        (ir/call-virtual-node owner-internal-name
-                              (lowered-instance-method-name method-def)
-                              (desc/repl-instance-method-descriptor)
-                              (carrier-path-target-ir env carrier-path
-                                                      (ir/this-node (:this-type env)
-                                                                    (exact-class-jvm-type env (:this-type env))))
-                              arg-irs
-                              nex-type
-                              jvm-type)))))
+        (overridable-self-call-ir env method-def arg-irs nex-type jvm-type
+                                  (ir/call-virtual-node owner-internal-name
+                                                        (self-call-method-name env source-class method-def)
+                                                        (desc/repl-instance-method-descriptor)
+                                                        (carrier-path-target-ir env carrier-path
+                                                                                (ir/this-node (:this-type env)
+                                                                                              (exact-class-jvm-type env (:this-type env))))
+                                                        arg-irs
+                                                        nex-type
+                                                        jvm-type))))))
 
 (defn- lower-call-without-target
   "A call with no receiver: an implicit call on `this` inside the currently
@@ -5637,7 +5746,7 @@
           (let [nex-type (function-return-type method-def)
                 jvm-type (resolve-jvm-type env nex-type)]
             (ir/call-virtual-node (:internal-name parent-meta)
-                                  (lowered-instance-method-name method-def)
+                                  (self-call-method-name env parent-name method-def)
                                   (desc/repl-instance-method-descriptor)
                                   target-ir
                                   []
@@ -5652,7 +5761,7 @@
         (let [nex-type (function-return-type method-def)
               jvm-type (resolve-jvm-type env nex-type)]
           (ir/call-virtual-node (:internal-name parent-meta)
-                                (lowered-instance-method-name method-def)
+                                (self-call-method-name env parent-name method-def)
                                 (desc/repl-instance-method-descriptor)
                                 target-ir
                                 arg-irs
@@ -5670,23 +5779,66 @@
       (lower-java-super-call env expr parent-name java-super-klass arg-irs)
       (lower-nex-super-call env expr parent-name parent-def arg-irs))))
 
+(defn- ancestor-carrier-path
+  "The composition hops from an instance of CLASS-NAME to the carrier of its
+   ancestor ANCESTOR (see carrier-path-target-ir), or nil when ANCESTOR is not
+   one. A direct parent is one hop; a grandparent is reached through the
+   parent's own carrier, and so on."
+  [env class-name ancestor]
+  (some (fn [{:keys [parent]}]
+          (when (get (:compiled-classes env) parent)
+            (let [hop {:owner class-name
+                       :field (parent-field-name parent)
+                       :ancestor parent
+                       :ancestor-jvm-type (exact-class-jvm-type env parent)}]
+              (if (= parent ancestor)
+                [hop]
+                (when-let [further (ancestor-carrier-path env parent ancestor)]
+                  (into [hop] further))))))
+        (:parents (get (visible-class-map env) class-name))))
+
+(defn- ancestor-qualified-method-def
+  "The routine `Ancestor.m(...)` names from inside the current class: the one
+   ANCESTOR declares or inherits, when ANCESTOR is an ancestor of the current
+   class. Nil otherwise."
+  [env ancestor method arity]
+  (when (and (:this-type env)
+             (ancestor-carrier-path env (:this-type env) ancestor))
+    (when-let [ancestor-def (get (visible-class-map env) ancestor)]
+      (or (class-method-def ancestor-def method arity)
+          (inherited-method-def env ancestor-def method arity)))))
+
+(defn- ancestor-qualified-call-type
+  "The type of `Ancestor.m(...)` (see ancestor-qualified-method-def), or nil
+   when it does not name an ancestor's routine. The routine's return type is
+   written in its declaring class's generic parameters, which the inherit
+   chain binds for this object."
+  [env ancestor method arity]
+  (when-let [method-def (ancestor-qualified-method-def env ancestor method arity)]
+    (let [own-params (map :name (:generic-params (current-class-def env)))
+          self-type (if (seq own-params)
+                      {:base-type (:this-type env) :type-args (vec own-params)}
+                      (:this-type env))]
+      (tc/resolve-generic-type
+       (function-return-type method-def)
+       (generic-type-map env self-type (or (:declaring-class method-def) ancestor))))))
+
 (defn- lower-parent-qualified-call
+  "`Ancestor.m(...)`: ANCESTOR's own version of m, run on its carrier inside
+   this object, never an override (like `super.m`, and unchecked like it)."
   [env expr class-target-name arg-irs]
-  (let [parent-meta (class-jvm-meta env class-target-name)
-        method-def (class-method-def (get (visible-class-map env) class-target-name)
-                                     (:method expr)
-                                     (count (:args expr)))
-        nex-type (function-return-type method-def)
+  (let [method-def (ancestor-qualified-method-def env class-target-name
+                                                  (:method expr) (count (:args expr)))
+        nex-type (ancestor-qualified-call-type env class-target-name
+                                               (:method expr) (count (:args expr)))
         jvm-type (resolve-jvm-type env nex-type)]
-    (ir/call-virtual-node (:internal-name parent-meta)
-                          (lowered-instance-method-name method-def)
+    (ir/call-virtual-node (:internal-name (class-jvm-meta env class-target-name))
+                          (self-call-method-name env class-target-name method-def)
                           (desc/repl-instance-method-descriptor)
-                          (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                             (parent-field-name class-target-name)
-                                             (ir/this-node (:this-type env)
-                                                           (exact-class-jvm-type env (:this-type env)))
-                                             class-target-name
-                                             (exact-class-jvm-type env class-target-name))
+                          (carrier-path-target-ir env
+                                                  (ancestor-carrier-path env (:this-type env) class-target-name)
+                                                  (ir/this-node (:this-type env)
+                                                                (exact-class-jvm-type env (:this-type env))))
                           arg-irs
                           nex-type
                           jvm-type)))
@@ -6529,13 +6681,18 @@
     (lower-super-call env expr arg-irs)
 
     (and class-target-name
-         (:this-type env)
-         (some #(= class-target-name (:parent %))
-               (:parents (current-class-def env)))
-         (if-let [parent-def (get (visible-class-map env) class-target-name)]
-           (class-method-def parent-def (:method expr) (count (:args expr)))
-           false))
+         (ancestor-qualified-method-def env class-target-name (:method expr) (count (:args expr))))
     (lower-parent-qualified-call env expr class-target-name arg-irs)
+
+    ;; `Ancestor.field`: an object has one field of each name, whichever
+    ;; class in its chain declares it, so this reads that field.
+    (and class-target-name
+         (false? (:has-parens expr))
+         (:this-type env)
+         (ancestor-carrier-path env (:this-type env) class-target-name)
+         (get (:fields env) (:method expr))
+         (not (lookup-class-constant env class-target-name (:method expr))))
+    (lower-expression env {:type :identifier :name (:method expr)})
 
     (and class-target-name (false? (:has-parens expr)))
     (lower-class-constant-or-static-field env expr class-target-name)
@@ -6807,9 +6964,57 @@
    :retry         lower-stmt-retry
    :assert        lower-stmt-assert})
 
+(def ^:private nested-statement-keys
+  "AST keys holding a nested block of statements, which lower-statement
+   reaches on its own when it lowers them."
+  #{:body :block :rescue :then :else :elseif :init :clauses :statements})
+
+(defn- statement-binding-nodes
+  "The `convert` and object-test (`?e as x`) nodes in STMT's own expressions:
+   not in a nested block, nor in a closure, which is compiled separately."
+  [stmt]
+  (letfn [(walk [node]
+            (cond
+              (map? node)
+              (when-not (#{:anonymous-function :spawn} (:type node))
+                (concat (when (#{:convert :attached-test} (:type node)) [node])
+                        (mapcat (fn [[k v]]
+                                  (when-not (contains? nested-statement-keys k)
+                                    (walk v)))
+                                node)))
+              (sequential? node) (mapcat walk node)
+              :else nil))]
+    (walk stmt)))
+
+(defn- ensure-statement-bindings
+  "Allocate the variable each `convert`/object test in STMT binds before STMT
+   is lowered. Expression lowering cannot allocate a local, so one written
+   anywhere an expression may go — `print(convert a to d: Dog)` — would
+   otherwise find no slot to store into. The cases with their own allocation
+   (`let x := convert ...`) find the binding already there. An `if` allocates
+   its condition's guards itself, scoped to the `if` (they narrow its
+   branches), so only a test nested deeper in its condition is done here."
+  [env stmt]
+  (let [nodes (if (= :if (:type stmt))
+                (let [guards (set (concat (map :name (tc/convert-guard-bindings (:condition stmt)))
+                                          (map :name (tc/attached-test-guards (:condition stmt)))))]
+                  (remove #(contains? guards (:var-name %))
+                          (statement-binding-nodes (:condition stmt))))
+                (statement-binding-nodes stmt))]
+    (reduce (fn [env node]
+              (first
+               (if (= :convert (:type node))
+                 (ensure-convert-binding env node)
+                 (ensure-convert-binding env {:var-name (:var-name node)
+                                              :type (tc/attachable-type
+                                                     (infer-type-or-any env (:value node)))}))))
+            env
+            nodes)))
+
 (defn lower-statement
   [env stmt]
-  (let [[env' lowered]
+  (let [env (ensure-statement-bindings env stmt)
+        [env' lowered]
         (if-let [handler (get lower-statement-dispatch (:type stmt))]
           (handler env stmt)
           (if (contains? expression-node-types (:type stmt))
@@ -7095,6 +7300,7 @@
 
 (defn- lower-repl-tail
   [env stmt]
+  (let [env (ensure-statement-bindings env stmt)]
   (cond
     (= :if (:type stmt))
     [env [] (lower-expression env stmt)]
@@ -7131,7 +7337,7 @@
       [env'' [] convert-ir])
 
     :else
-    [env [] nil]))
+    [env [] nil])))
 
 (defn- repl-tail-returns-value?
   [env stmt]
@@ -7250,6 +7456,16 @@
                         :state-slot 1
                         :next-slot 3})))
 
+(defn- lowered-routine-emitted-name
+  "The JVM method name `lower-function` emits FN-DEF under: a free function's
+   or class routine's ordinary name, or a class routine's unchecked twin's
+   (see `self-call-method-name`) when lowered with `:unchecked-twin?`."
+  [fn-def]
+  (cond
+    (:unchecked-twin? fn-def) (unchecked-instance-method-name fn-def)
+    (:class-name fn-def) (lowered-top-level-function-emitted-name fn-def)
+    :else (lowered-function-method-name fn-def)))
+
 (defn lower-function
   [unit-name visible-functions visible-imports fn-def]
   (let [fn-def (normalized-function-def fn-def)
@@ -7291,9 +7507,7 @@
       (ir/fn-node {:name (:name fn-def)
                    :qualified-name (:qualified-name fn-def)
                    :owner unit-name
-                   :emitted-name (if (:class-name fn-def)
-                                   (lowered-top-level-function-emitted-name fn-def)
-                                   (lowered-function-method-name fn-def))
+                   :emitted-name (lowered-routine-emitted-name fn-def)
                    :params params
                    :return-type return-type
                    :return-jvm-type (ir/object-jvm-type "java/lang/Object")
@@ -7310,6 +7524,7 @@
             ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
             ensure-stmts (mapv #(assertion-ir ensure-env :ensure %) effective-ensure)
             class-validation-stmts (if (and (:class-def fn-def)
+                                            (not (:unchecked-twin? fn-def))
                                             (get (:compiled-classes fn-def) current-class))
                                      [(ir/pop-node
                                        (validate-object-state-ir ensure-env
@@ -7331,9 +7546,7 @@
         (ir/fn-node {:name (:name fn-def)
                      :qualified-name (:qualified-name fn-def)
                      :owner unit-name
-                     :emitted-name (if (:class-name fn-def)
-                                     (lowered-top-level-function-emitted-name fn-def)
-                                     (lowered-function-method-name fn-def))
+                     :emitted-name (lowered-routine-emitted-name fn-def)
                      :params params
                      :return-type return-type
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
@@ -7638,9 +7851,13 @@
                                       class-name
                                       (ir/object-jvm-type "java/lang/Object"))]))})))
 
-(defn- make-delegation-method-node
+(defn- forwarding-method-node
+  "A method EMITTED-NAME that passes its arguments on to CALLEE-NAME, called
+   on the object CARRIER-PATH leads to from `this` (an instance of
+   OWNER-INTERNAL-NAME), and returns its result — first validating this
+   object's class invariant when VALIDATE?."
   [env class-meta class-name compiled-classes
-   {:keys [source-class carrier-path owner-internal-name method-def]}]
+   {:keys [source-class carrier-path owner-internal-name method-def callee-name emitted-name validate?]}]
   (let [;; method-def is declared by source-class, so its parameter/return types
         ;; may name the *parent's* generic params — resolve with both the
         ;; subclass's generics (env) and the declaring class's in scope, or a
@@ -7683,40 +7900,64 @@
                                           (ir/this-node class-name
                                                         (exact-class-jvm-type {:compiled-classes compiled-classes} class-name)))
         call-ir (ir/call-virtual-node owner-internal-name
-                                      (lowered-instance-method-name method-def)
+                                      callee-name
                                       (desc/repl-instance-method-descriptor)
                                       target-ir
                                       call-args
                                       return-type
                                       (resolve-jvm-type resolve-env return-type))
-        class-validation (ir/pop-node
-                          (validate-object-state-ir {:compiled-classes compiled-classes}
-                                                    class-name
-                                                    (ir/this-node class-name
-                                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                                    class-name))]
+        class-validation (when validate?
+                           [(ir/pop-node
+                             (validate-object-state-ir {:compiled-classes compiled-classes}
+                                                       class-name
+                                                       (ir/this-node class-name
+                                                                     (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                                       class-name))])]
     (ir/fn-node {:name (:name method-def)
                  :owner (:jvm-name class-meta)
-                 :emitted-name (lowered-instance-method-name method-def)
+                 :emitted-name emitted-name
                  :params params
                  :return-type return-type
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")
                  :locals (vec params)
-                 :body (if (:return-type method-def)
-                         [(ir/set-local-node result-slot
-                                             call-ir
-                                             return-type
-                                             (resolve-jvm-type resolve-env return-type))
-                          class-validation
-                          (ir/return-node (ir/local-node "__result"
-                                                         result-slot
-                                                         return-type
-                                                         (resolve-jvm-type resolve-env return-type))
-                                          return-type
-                                          (ir/object-jvm-type "java/lang/Object"))]
-                         [(ir/pop-node call-ir)
-                          class-validation])
+                 ;; Keyed off the coalesced type: an explicit `: Void` has no result.
+                 :body (if (not= "Void" return-type)
+                         (vec (concat [(ir/set-local-node result-slot
+                                                          call-ir
+                                                          return-type
+                                                          (resolve-jvm-type resolve-env return-type))]
+                                      class-validation
+                                      [(ir/return-node (ir/local-node "__result"
+                                                                      result-slot
+                                                                      return-type
+                                                                      (resolve-jvm-type resolve-env return-type))
+                                                       return-type
+                                                       (ir/object-jvm-type "java/lang/Object"))]))
+                         (into [(ir/pop-node call-ir)] class-validation))
                  :override? false})))
+
+(defn- make-delegation-method-node
+  "Forwarding stub for an inherited routine, run on the composition carrier
+   that declares it. The stub checks this object's whole invariant (which
+   chains to the carrier's), so it calls the carrier's unchecked twin where
+   there is one rather than checking the parent's clauses twice."
+  [env class-meta class-name compiled-classes {:keys [source-class method-def] :as entry}]
+  (forwarding-method-node env class-meta class-name compiled-classes
+                          (assoc entry
+                                 :callee-name (self-call-method-name env source-class method-def)
+                                 :emitted-name (lowered-instance-method-name method-def)
+                                 :validate? true)))
+
+(defn- unchecked-delegation-method-node
+  "The unchecked twin (see `self-call-method-name`) of
+   `make-delegation-method-node`'s stub: the same forwarding call, with no
+   invariant check."
+  [env class-meta class-name compiled-classes {:keys [source-class method-def] :as entry}]
+  (forwarding-method-node env class-meta class-name compiled-classes
+                          (assoc entry
+                                 :callee-name (self-call-method-name env source-class method-def)
+                                 :emitted-name (unchecked-instance-method-name method-def)
+                                 :validate? false)))
 
 (def ^:private invariant-method-def
   "The synthetic, no-argument method each class with invariants carries; its body
@@ -7730,17 +7971,6 @@
    different JVM method (`__method___invariant$arity0`) and is left an
    ordinary method (see runtime `has-invariant-method?`)."
   {:name "$invariant" :params []})
-
-(defn- class-declares-invariant-in-hierarchy?
-  "Whether `class-name` or any ancestor resolvable in `class-map` (name ->
-   class-def) declares a class invariant — the set the runtime must validate."
-  [class-map class-name]
-  (letfn [(walk [name seen]
-            (boolean
-             (when-let [cd (and name (not (contains? seen name)) (get class-map name))]
-               (or (seq (:invariant cd))
-                   (some #(walk (:parent %) (conj seen name)) (:parents cd))))))]
-    (walk class-name #{})))
 
 (defn- lower-invariant-method
   "Synthesize the `__invariant` instance method for a class that has invariants
@@ -8042,49 +8272,93 @@
         (filter :constant? (class-fields class-def))))
 
 (defn- inherited-constructor-shims
-  "Constructors a class inherits verbatim from its composed parents: for each
-   parent constructor whose name the class does not itself declare, a copy
-   tagged with `:shim-parent` so lower-constructor forwards it to that parent."
+  "Constructors a class inherits from its composed parents: for each
+   constructor a parent has whose name the class does not itself declare, a
+   copy tagged with `:shim-parent` so lower-constructor forwards it to that
+   parent. A parent has the constructors it declares and, in turn, the ones it
+   inherits (compiled as its own shims), so `C inherit B`, `B inherit A` gives
+   C the constructors of A that neither declares."
   [class-def visible-classes compiled-classes own-ctor-names]
-  (->> (:parents class-def)
-       (remove #(= "Any" (:parent %)))
-       (mapcat (fn [{:keys [parent]}]
-                 ;; :compiled-classes lets a qualified parent (`finance.Account`)
-                 ;; that lost a bare-name collision still resolve.
-                 (let [parent-def (get (visible-class-map {:classes visible-classes
-                                                           :compiled-classes compiled-classes})
-                                       parent)]
-                   (for [ctor-def (class-constructors parent-def)
-                         :when (not (contains? own-ctor-names (:name ctor-def)))]
-                     (assoc ctor-def :shim-parent parent)))))
-       vec))
+  ;; :compiled-classes lets a qualified parent (`finance.Account`) that lost a
+  ;; bare-name collision still resolve.
+  (let [class-map (visible-class-map {:classes visible-classes
+                                      :compiled-classes compiled-classes})]
+    (letfn [(shims [class-def own-ctor-names seen]
+              (->> (:parents class-def)
+                   (remove #(= "Any" (:parent %)))
+                   (remove #(contains? seen (:parent %)))
+                   (mapcat (fn [{:keys [parent generic-args]}]
+                             (let [parent-def (get class-map parent)
+                                   parent-own (class-constructors parent-def)
+                                   parent-ctors (concat parent-own
+                                                        (shims parent-def
+                                                               (set (map :name parent-own))
+                                                               (conj seen parent)))
+                                   ;; The parent's parameter types are written in
+                                   ;; its own generic parameters; `inherit Box[Dog]`
+                                   ;; binds Box's T to Dog, and the shim is this
+                                   ;; class's constructor.
+                                   subst (zipmap (map :name (:generic-params parent-def)) generic-args)]
+                               (for [ctor-def parent-ctors
+                                     :when (not (contains? own-ctor-names (:name ctor-def)))]
+                                 (cond-> (assoc ctor-def :shim-parent parent)
+                                   (seq subst)
+                                   (update :params (fn [params]
+                                                     (mapv #(update % :type tc/resolve-generic-type subst)
+                                                           params))))))))))]
+      (vec (shims class-def own-ctor-names #{(:name class-def)})))))
 
 (defn- lower-own-methods
+  "Each routine the class declares. In a class whose hierarchy declares an
+   invariant, a routine with a body is emitted as its unchecked twin (see
+   `self-call-method-name`) plus a checked stub that calls the twin and
+   validates the invariant. A deferred routine has no body to emit either way."
   [env class-def class-name class-meta visible-functions visible-imports visible-classes compiled-classes]
-  (mapv (fn [method-def]
-          (lower-function (:jvm-name class-meta)
-                          visible-functions
-                          visible-imports
-                          (merge method-def
-                                 {:class-name class-name
-                                  :class-def class-def
-                                  :visible-classes visible-classes
-                                  :deferred? (lowered-deferred-method? class-def method-def)
-                                  :override? (method-override? env class-def method-def)
-                                  :compiled-classes compiled-classes}
-                                 (effective-method-contracts env class-def method-def))))
-        (class-methods class-def)))
+  (let [twins? (class-declares-invariant-in-hierarchy? (visible-class-map env) class-name)]
+    (vec
+     (mapcat (fn [method-def]
+               (let [deferred? (lowered-deferred-method? class-def method-def)
+                     lower (fn [extra]
+                             (lower-function (:jvm-name class-meta)
+                                             visible-functions
+                                             visible-imports
+                                             (merge method-def
+                                                    {:class-name class-name
+                                                     :class-def class-def
+                                                     :visible-classes visible-classes
+                                                     :deferred? deferred?
+                                                     :override? (method-override? env class-def method-def)
+                                                     :compiled-classes compiled-classes}
+                                                    (effective-method-contracts env class-def method-def)
+                                                    extra)))]
+                 (if (or (not twins?) deferred?)
+                   [(lower {})]
+                   [(lower {:unchecked-twin? true})
+                          (forwarding-method-node env class-meta class-name compiled-classes
+                                                  {:source-class class-name
+                                                   :carrier-path []
+                                                   :owner-internal-name (:internal-name class-meta)
+                                                   :method-def method-def
+                                                   :callee-name (unchecked-instance-method-name method-def)
+                                                   :emitted-name (lowered-instance-method-name method-def)
+                                                   :validate? true})])))
+             (class-methods class-def)))))
 
 (defn- lower-delegation-methods
   "Forwarding stubs for parent methods a composed class exposes but does not
-   itself override."
+   itself override — with their unchecked twins, in a class whose hierarchy
+   declares an invariant."
   [env class-def class-name class-meta compiled-classes own-method-names]
-  (->> (direct-parent-method-map env class-def)
-       vals
-       (remove (fn [{:keys [method-def]}]
-                 (contains? own-method-names
-                            [(:name method-def) (count (or (:params method-def) []))])))
-       (mapv #(make-delegation-method-node env class-meta class-name compiled-classes %))))
+  (let [twins? (class-declares-invariant-in-hierarchy? (visible-class-map env) class-name)]
+    (->> (direct-parent-method-map env class-def)
+         vals
+         (remove (fn [{:keys [method-def]}]
+                   (contains? own-method-names
+                              [(:name method-def) (count (or (:params method-def) []))])))
+         (mapcat (fn [entry]
+                   (cond-> [(make-delegation-method-node env class-meta class-name compiled-classes entry)]
+                     twins? (conj (unchecked-delegation-method-node env class-meta class-name compiled-classes entry)))))
+         vec)))
 
 (defn lower-class-def
   [class-def opts]

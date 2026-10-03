@@ -41,22 +41,30 @@ service.start()
 print("calc_service on port " + service.port())
 
 let client: Http_Client := create Http_Client.make()
-let json: Json := create Json.make()
+
+-- A response body as a JSON object (an empty map if it is not one).
+function parse_object(text: String): Map[String, Any] do
+  result := {}
+  let json: Json := create Json.make()
+  if convert json.parse(text) to m: Map[String, Any] then
+    result := m
+  end
+end
 let base: String := "http://localhost:" + service.port()
 
 let r1: Http_Response := client.post(base + "/evaluate", "{\"expr\":\"1 + 2 * 3\"}")
 c.check("status ok", "200", "" + r1.status())
-let body1: Map[String, Any] := json.parse(r1.body())
+let body1: Map[String, Any] := parse_object(r1.body())
 c.check("simple result", "7.0", "" + body1.get("result"))
 
 let r2: Http_Response := client.post(base + "/evaluate",
   "{\"expr\":\"x * x + y\",\"vars\":{\"x\":3,\"y\":1}}")
-let body2: Map[String, Any] := json.parse(r2.body())
+let body2: Map[String, Any] := parse_object(r2.body())
 c.check("vars result", "10.0", "" + body2.get("result"))
 
 let r3: Http_Response := client.post(base + "/evaluate", "{\"expr\":\"1 / 0\"}")
 c.check("division by zero status", "400", "" + r3.status())
-let body3: Map[String, Any] := json.parse(r3.body())
+let body3: Map[String, Any] := parse_object(r3.body())
 c.check("division by zero has error", "true", "" + body3.contains_key("error"))
 
 let r4: Http_Response := client.post(base + "/evaluate", "{\"expr\":\"undefined_name\"}")

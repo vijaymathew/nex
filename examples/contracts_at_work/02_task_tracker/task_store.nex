@@ -144,15 +144,18 @@ class Task_Store
       let rows: Array[Map[String, Any]] := []
       if trimmed.starts_with("[") then
         -- schema version 1: one JSON document, a bare top-level array.
-        let items: Array[Any] := json.parse(trimmed)
-        let i: Integer := 0
-        from
-          i := 0
-        until
-          i = items.length
-        do
-          rows.add(items.get(i))
-          i := i + 1
+        if convert json.parse(trimmed) to items: Array[Any] then
+          let i: Integer := 0
+          from
+            i := 0
+          until
+            i = items.length
+          do
+            if convert items.get(i) to row: Map[String, Any] then
+              rows.add(row)
+            end
+            i := i + 1
+          end
         end
       else
         -- schema version 2: one JSON object per line; skip the header line.
@@ -165,9 +168,10 @@ class Task_Store
         do
           let line: String := lines.get(i).trim()
           if line /= "" then
-            let m: Map[String, Any] := json.parse(line)
-            if not m.contains_key("schema_version") then
-              rows.add(m)
+            if convert json.parse(line) to m: Map[String, Any] then
+              if not m.contains_key("schema_version") then
+                rows.add(m)
+              end
             end
           end
           i := i + 1

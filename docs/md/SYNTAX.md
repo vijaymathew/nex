@@ -154,6 +154,12 @@ end
 let label: String := when age >= 18 then "adult" else "minor" end
 ```
 
+The type of a `when` is the narrowest type both branches conform to:
+`when c then create Dog.make else create Fish.make end` is an `Animal`. When
+there is no single narrowest type, it is `Any`: `when c then 1 else "one" end`,
+or even `when c then 1 else 2.5 end`, since no numeric type conforms to another.
+A `nil` branch makes the type optional (`?T`).
+
 ## Loops: from / until
 
 ```nex
@@ -858,6 +864,34 @@ class Wallet
 end
 ```
 
+The invariant is checked when an object is created and on exit from every
+*qualified* call: `w.spend(1.0)`, or `this.spend(1.0)`. An unqualified call
+(`spend(1.0)`), `super.spend(1.0)` or `Parent.spend(1.0)` is part of the
+routine that makes it, so it is not checked. A routine may break the
+invariant for a moment and call a helper, as long as the invariant holds
+again by the time the routine returns:
+
+```nex
+class Pair
+  feature
+    a: Integer
+    b: Integer
+
+    bump do
+      a := a + 1      -- invariant broken here...
+      log             -- ...so this call is unqualified, and not checked
+      b := b + 1      -- ...and restored before bump returns
+    end
+
+    log do print(a.to_string + " " + b.to_string) end
+  invariant
+    same: a = b
+end
+```
+
+A call made from inside a closure counts as qualified, since the closure may
+run long after the routine that made it has returned.
+
 `require`, `ensure`, and `invariant` speak about a routine's boundaries or a
 class. `assert` states what must be true at one point *inside* a body:
 
@@ -1226,6 +1260,9 @@ if ?p.age as a and ?q.age as b then
 end
 ```
 
+The same goes for `x /= nil`: after `if x /= nil and y /= nil then`, both `x`
+and `y` are attached in the branch.
+
 ## Anonymous Functions
 
 ```nex
@@ -1332,6 +1369,16 @@ end
 let b: Box [Integer] := create Box[Integer].make(42)
 b.value -- 42
 ```
+
+Type arguments must match exactly: a `Box[Dog]` is not a `Box[Animal]`, even
+though a `Dog` is an `Animal`. Otherwise an `Animal` could be put into the
+`Box[Dog]` through it. The same holds for `Array`, `Map` and `Set`, and for
+`Any`: a `Box[Dog]` is not a `Box[Any]` either. Arguments left to inference
+fit what the context needs: `let xs: Array[Integer] := []`, and
+`let b: Box[Any] := create Box.make(5)` makes a `Box[Any]`.
+
+A value of type `Any` reaches a more specific type, a generic one included,
+only through `convert`: `if convert json.parse(text) to m: Map[String, Any] then`.
 
 Generic functions use the same bracket syntax after the function name:
 

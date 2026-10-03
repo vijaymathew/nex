@@ -47,14 +47,15 @@ let json: Json := create Json.make()
 intern data/Json
 
 let json: Json := create Json.make()
-let root: Map[String, Any] := json.parse("{\"name\":\"nex\",\"count\":3,\"items\":[1,2]}")
-print(root.get("name"))
-print(json.stringify(root))
+if convert json.parse("{\"name\":\"nex\",\"count\":3,\"items\":[1,2]}") to root: Map[String, Any] then
+  print(root.get("name"))
+  print(json.stringify(root))
+end
 ```
 
 ### Notes
 
-- `parse` returns `Any`, so callers usually bind the result to `Map[String, Any]` or `Array[Any]` when they know the expected shape.
+- `parse` returns `Any`. Narrow the result with `convert` to the shape you expect, usually `Map[String, Any]` or `Array[Any]`; the `convert` is false if the document has another shape. Values read out of it are `Any` too, and are narrowed the same way.
 - `stringify` supports Nex `Map`, `Array`, scalar values, and `nil`.
 - Sets are serialized as JSON arrays.
 

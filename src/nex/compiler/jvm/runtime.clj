@@ -1112,26 +1112,62 @@
 
 (defn- deep-reflected-field
   [value field-name]
-  (or (when-let [^Field f (reflected-field (.getClass value) field-name)]
+  (or (when-let [^Field f (reflected-field (.getClass ^Object value) field-name)]
         [value f])
       (some (fn [^Field parent-field]
               (when-let [parent-value (.get parent-field value)]
                 (deep-reflected-field parent-value field-name)))
-            (composition-fields (.getClass value)))))
+            (composition-fields (.getClass ^Object value)))))
+
+(def ^:private declared-user-method-cache
+  "Class -> (lowered method name -> Method, or `false` when the class declares
+   no such method). Every runtime-dispatched call (`obj.f`, `this.f`, a
+   self-call inside a composition carrier) looks its target up here, so a
+   reflective getDeclaredMethod — or a thrown NoSuchMethodException — happens
+   once per class and name rather than on every call."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(def ^:private user-method-param-types
+  (into-array Class [nex.compiler.jvm.runtime.NexReplState
+                     (class (object-array 0))]))
+
+(defn- declared-user-method
+  "The method LOWERED-NAME that CLS itself declares, or nil. A plain `.get`
+   first: the hit path allocates nothing."
+  ^Method [^Class cls ^String lowered-name]
+  (let [^java.util.concurrent.ConcurrentHashMap cache declared-user-method-cache
+        ^java.util.concurrent.ConcurrentHashMap by-name
+        (or (.get cache cls)
+            (.computeIfAbsent cache
+                              cls
+                              (reify java.util.function.Function
+                                (apply [_ _] (java.util.concurrent.ConcurrentHashMap.)))))
+        found (or (.get by-name lowered-name)
+                  (.computeIfAbsent by-name
+                                    lowered-name
+                                    (reify java.util.function.Function
+                                      (apply [_ _]
+                                        (try
+                                          (.getDeclaredMethod cls lowered-name user-method-param-types)
+                                          (catch NoSuchMethodException _ false))))))]
+    (when found found)))
+
+(def ^:private composition-fields-cache
+  (java.util.concurrent.ConcurrentHashMap.))
 
 (defn- find-user-method
   "Find a user method on the target object, traversing composition parents if needed."
   [target lowered-name]
-  (let [^Class cls (.getClass target)
-        param-types (into-array Class [nex.compiler.jvm.runtime.NexReplState
-                                       (class (object-array 0))])]
-    (or (try
-          [target (.getDeclaredMethod cls lowered-name param-types)]
-          (catch NoSuchMethodException _ nil))
-        (some (fn [^Field parent-field]
-                (when-let [parent-value (.get parent-field target)]
-                  (find-user-method parent-value lowered-name)))
-              (composition-fields cls)))))
+  (let [^Class cls (.getClass ^Object target)]
+    (if-let [method (declared-user-method cls lowered-name)]
+      [target method]
+      (some (fn [^Field parent-field]
+              (when-let [parent-value (.get parent-field target)]
+                (find-user-method parent-value lowered-name)))
+            (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap composition-fields-cache
+                              cls
+                              (reify java.util.function.Function
+                                (apply [_ c] (vec (composition-fields c)))))))))
 
 (defn- invoke-user-method
   [state target method-name args]
@@ -1146,7 +1182,7 @@
     ;; compiled runtime cannot reflect user methods off an interpreter object, so
     ;; dispatch it back through the interpreter — mirroring invoke-function-object.
     (invoke-interpreter-object-method state target method-name args)
-    (let [^Class cls (.getClass target)
+    (let [^Class cls (.getClass ^Object target)
           lowered-name (lowered-instance-method-name method-name (count args))]
       (if-let [[effective-target ^Method method] (find-user-method target lowered-name)]
         (invoke-reflective! method effective-target (object-array [state (object-array args)]))
@@ -1168,6 +1204,26 @@
                                  :arity (count args)
                                  :class (.getName cls)}))))))))))
 
+(defn dispatch-self-call
+  "An unqualified call made by code running on a composition carrier, so on
+   behalf of the heir's object TARGET (the carrier's `__outer__`), which may
+   override the routine. Runs TARGET's unchecked twin UNCHECKED-NAME (see
+   nex.lower/self-call-method-name), which its class emits when its
+   hierarchy declares an invariant, else the ordinary routine CHECKED-NAME —
+   with nothing to check. Both names arrive as constants, and the lookup is
+   cached per class, so a hot self-call allocates no more than its args."
+  [state target ^String unchecked-name ^String checked-name ^objects args]
+  (let [^Class cls (.getClass ^Object target)
+        call-args (object-array [state args])]
+    (if-let [method (or (declared-user-method cls unchecked-name)
+                        (declared-user-method cls checked-name))]
+      (invoke-reflective! method target call-args)
+      (if-let [[effective-target ^Method method] (or (find-user-method target unchecked-name)
+                                                     (find-user-method target checked-name))]
+        (invoke-reflective! method effective-target call-args)
+        (throw (ex-info (str "Method not found: " checked-name)
+                        {:method checked-name :class (.getName cls)}))))))
+
 (defn- get-user-field
   [target field-name]
   (if (interp/nex-object? target)
@@ -1181,7 +1237,7 @@
     (let [[owner ^Field field] (or (deep-reflected-field target field-name)
                                    (throw (ex-info (str "Undefined compiled field: " field-name)
                                                    {:field field-name
-                                                    :class (.getName (.getClass target))})))]
+                                                    :class (.getName (.getClass ^Object target))})))]
       (.get field owner))))
 
 (defn- set-user-field!
@@ -1189,7 +1245,7 @@
   (let [[owner ^Field field] (or (deep-reflected-field target field-name)
                                  (throw (ex-info (str "Undefined compiled field: " field-name)
                                                  {:field field-name
-                                                  :class (.getName (.getClass target))})))]
+                                                  :class (.getName (.getClass ^Object target))})))]
     (.set field owner value)
     nil))
 
@@ -1247,7 +1303,7 @@
 (defn- compiled-runtime-class-name
   [state value]
   (when value
-    (let [binary-name (.getName (.getClass value))
+    (let [binary-name (.getName (.getClass ^Object value))
           simple-name (last (str/split binary-name #"\."))]
       (cond
         (contains? @(:classes state) simple-name)
@@ -1378,14 +1434,20 @@
   [value]
   (and (some? value)
        (not (interp/nex-object? value))
-       (.computeIfAbsent invariant-method-present-cache
-                         (.getClass value)
-                         (reify java.util.function.Function
-                           (apply [_ _]
-                             (boolean
-                              (find-user-method
-                               value
-                               (lowered-instance-method-name synthetic-invariant-method-name 0))))))))
+       (let [^java.util.concurrent.ConcurrentHashMap cache invariant-method-present-cache
+             cls (.getClass ^Object value)]
+         ;; A plain `.get` first: this runs on exit from every checked call,
+         ;; and the hit path should allocate nothing.
+         (if-some [present (.get cache cls)]
+           present
+           (.computeIfAbsent cache
+                             cls
+                             (reify java.util.function.Function
+                               (apply [_ _]
+                                 (boolean
+                                  (find-user-method
+                                   value
+                                   (lowered-instance-method-name synthetic-invariant-method-name 0))))))))))
 
 (defn validate-object-state
   "Validate an object's class invariant after construction or a public call.

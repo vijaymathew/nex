@@ -49,8 +49,7 @@ class Calc_Service
 
     parse_vars(body: Map[String, Any]): Map[String, Real] do
       result := {}
-      if body.contains_key("vars") then
-        let raw_vars: Map[String, Any] := body.get("vars")
+      if body.contains_key("vars") and convert body.get("vars") to raw_vars: Map[String, Any] then
         let names: Array[String] := raw_vars.keys()
         let i: Integer := 0
         from
@@ -67,8 +66,8 @@ class Calc_Service
 
     handle_evaluate(req: Http_Request): Http_Server_Response do
       do
-        let body: Map[String, Any] := json.parse(req.body())
-        if convert body.get("expr") to expr_text: String then
+        if convert json.parse(req.body()) to body: Map[String, Any]
+            and convert body.get("expr") to expr_text: String then
           let vars: Map[String, Real] := parse_vars(body)
           let value: Real := evaluate(expr_text, vars)
           let payload: Map[String, Any] := {}
