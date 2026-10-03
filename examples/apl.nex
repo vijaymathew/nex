@@ -106,12 +106,17 @@ across order as i do
 end
 console.print_line("sorted via grade =" + r9 + " " + is(r9, [1, 1, 2, 3, 4, 5, 6, 9]))
 
-function shape(a: Array[Any]): Array[Integer] do
+function shape(a: Any): Array[Integer] do
   result := []
-  from let cur := a
-  until not(type_is("Array", cur)) do
-    result.add(cur.length)
-    cur := cur.get(0)
+  let cur: Any := a
+  let done := false
+  from until done do
+    if convert cur to arr: Array[Any] then
+      result.add(arr.length)
+      cur := arr.get(0)
+    else
+      done := true
+    end
   end
 end
 

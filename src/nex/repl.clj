@@ -1065,6 +1065,8 @@
   [type-val]
   (cond
     (nil? type-val) nil
+    ;; An argument inference left open (`[]` is Array[unknown]) reads as Any.
+    (= type-val tc/unknown-type-arg) "Any"
     (string? type-val) type-val
     (map? type-val) (let [base (:base-type type-val)
                           params (or (:type-params type-val) (:type-args type-val))

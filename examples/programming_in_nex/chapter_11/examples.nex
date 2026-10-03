@@ -161,7 +161,9 @@ do
   end
   if convert node.get("children") to children: Array[Any] then
     across children as child do
-      result := result + total_amount(child)
+      if convert child to c: Map[String, Any] then
+        result := result + total_amount(c)
+      end
     end
   end
 end

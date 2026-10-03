@@ -24,7 +24,7 @@
       argument's type (nex.lower/infer-generic-type-map-from-arg). That
       match only ever compared base-types by pointwise equality: an
       argument whose OWN class differs from the declared parameter's --
-      `first_field[T](b: Base[T, Any])` called with a `Mid[String,
+      `first_field[T, U](b: Base[T, U])` called with a `Mid[String,
       Integer]` (or a plain `Leaf`, further down: `Leaf inherit
       Mid[String, Integer] inherit Base[Q, P]`) -- fell straight to a
       `{}` (no binding at all) instead of walking the argument's ancestor
@@ -178,7 +178,7 @@ class Mid[P, Q]
   create make(p: P, q: Q) do set_x(q)  set_y(p) end
 end
 
-function first_field[T](b: Base[T, Any]): T do
+function first_field[T, U](b: Base[T, U]): T do
   result := b.x
 end
 
@@ -190,7 +190,7 @@ print(first_field(m))")
   ;; inference already handled this), compiled fine, but crashed at run
   ;; time with NoClassDefFoundError: T — the unbound generic name leaking
   ;; into codegen as though it were a real class.
-  (testing "first_field[T](b: Base[T, Any]) called with a Mid[String, Integer] argument infers T = Integer through Mid's reordered `inherit Base[Q, P]`, not just when the argument's own class matches Base directly"
+  (testing "first_field[T, U](b: Base[T, U]) called with a Mid[String, Integer] argument infers T = Integer through Mid's reordered `inherit Base[Q, P]`, not just when the argument's own class matches Base directly"
     (is (= ["42"] (run-compiled generic-fn-inferred-through-reordered-ancestor-program)))))
 
 (def generic-fn-inferred-through-non-generic-leaf-program
@@ -216,7 +216,7 @@ class Leaf
   create make(s: String, i: Integer) do set_x(i)  set_y(s) end
 end
 
-function first_field[T](b: Base[T, Any]): T do
+function first_field[T, U](b: Base[T, U]): T do
   result := b.x
 end
 
@@ -228,7 +228,7 @@ print(first_field(l))")
   ;; all (it isn't itself generic), so its argument-type is a bare string,
   ;; not the {:base-type ... :type-args ...} map shape the ancestor walk
   ;; otherwise expects — the fix has to accept both shapes.
-  (testing "first_field[T](b: Base[T, Any]) called with a non-generic Leaf (inheriting Mid[String, Integer] inheriting Base[Q, P]) still infers T = Integer"
+  (testing "first_field[T, U](b: Base[T, U]) called with a non-generic Leaf (inheriting Mid[String, Integer] inheriting Base[Q, P]) still infers T = Integer"
     (is (= ["42"] (run-compiled generic-fn-inferred-through-non-generic-leaf-program)))))
 
 (def bare-call-to-inherited-generic-method-program

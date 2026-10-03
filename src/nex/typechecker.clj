@@ -611,10 +611,21 @@
       (catch clojure.lang.ExceptionInfo e
         (throw (annotate-type-exception-source-file e source-file))))))
 
+(def unknown-type-arg
+  "A type argument inference left open: the element type of an empty `[]`,
+   `{}` or set literal, or a generic parameter a constructor's arguments do
+   not mention (`create Ok.make(5)` is `Ok[Integer, unknown]`). It conforms
+   like any argument — `let xs: Array[Integer] := []` — where a written `Any`
+   argument is just `Any` (`Box[Any]` is not a `Box[Dog]`; see
+   type-args-match?). Read as a type in its own right, it is Any. The `$`
+   keeps it from clashing with any name a program can write."
+  "$Unknown")
+
 (defn display-type
   "Format a type value for human-readable display."
   [type-val]
   (cond
+    (= type-val unknown-type-arg) "Any"
     (string? type-val) type-val
     (map? type-val)
     (let [base (:base-type type-val)
@@ -881,6 +892,29 @@
       s)
     s))
 
+(declare types-equal?)
+
+(defn type-args-match?
+  "Whether two type arguments are the same type, as generic invariance needs
+   (Box[Dog] is not a Box[Animal]). An argument inference left open
+   (unknown-type-arg) matches any; a written `Any` only `Any` — otherwise a
+   Box[Dog] would pass as a Box[Any], and through it take a Cat."
+  [env a b]
+  (let [na (normalize-type a)
+        nb (normalize-type b)
+        args #(or (:type-params %) (:type-args %))]
+    (cond
+      (or (= na unknown-type-arg) (= nb unknown-type-arg)) true
+      (or (= na "Any") (= nb "Any")) (= na nb)
+      (and (map? na) (map? nb)
+           (not= "Function" (:base-type na))
+           (not= "Function" (:base-type nb)))
+      (and (= (boolean (:detachable na)) (boolean (:detachable nb)))
+           (types-equal? env (:base-type na) (:base-type nb))
+           (= (count (args na)) (count (args nb)))
+           (every? true? (map #(type-args-match? env %1 %2) (args na) (args nb))))
+      :else (types-equal? env na nb))))
+
 (defn types-equal?
   "Check if two types are equal"
   ([type1 type2]
@@ -918,15 +952,14 @@
               (= (:base-type t1) "Function") (= (:base-type t2) "Function")
               (= (mapv :type (:param-types t1)) (mapv :type (:param-types t2)))
               (= (:return-type t1) (:return-type t2)))
-         ;; Handle other parameterized types. Compare arguments element-wise so a
-         ;; recursive `Any` acts as a wildcard (e.g. an inferred `Ok[Integer, Any]`
-         ;; matches `Ok[Integer, String]` — the permissive-Any policy for partial
-         ;; construction inference).
+         ;; Handle other parameterized types, argument by argument (see
+         ;; type-args-match?: an inferred `Ok[Integer, unknown]` matches
+         ;; `Ok[Integer, String]`; a written `Any` argument is only `Any`).
          (and (map? t1) (map? t2)
               (not= (:base-type t1) "Function")
               (= (:base-type t1) (:base-type t2))
               (= (count (:type-params t1)) (count (:type-params t2)))
-              (every? (fn [[a b]] (types-equal? env a b))
+              (every? (fn [[a b]] (type-args-match? env a b))
                       (map vector (:type-params t1) (:type-params t2))))
          ;; Allow base class name to match parameterized type (e.g., "Box" matches {:base-type "Box", ...})
          (or (and (string? t1) (map? t2) (= t1 (:base-type t2)))
@@ -1043,10 +1076,7 @@
          ;; Type arguments are invariant, as for the same-base case in
          ;; types-compatible?.
          (and (= (count inst) (count args2))
-              (every? true? (map (fn [p1 p2]
-                                   (or (= p1 "Any") (= p2 "Any")
-                                       (types-equal? env p1 p2)))
-                                 inst args2))))))))
+              (every? true? (map #(type-args-match? env %1 %2) inst args2))))))))
 
 (defn types-compatible?
   "Check if two types are compatible (including inheritance)."
@@ -1185,14 +1215,12 @@
           ;;
           ;; Type arguments are invariant: Box[Dog] does not conform to
           ;; Box[Animal], or an Animal could be put into the Box[Dog] through
-          ;; it. (`Any` still matches any argument — see types-equal?.)
+          ;; it (see type-args-match?).
           (and (map? a1) (map? a2)
                (not= (:base-type a1) "Function") (not= (:base-type a2) "Function")
                (= (:base-type a1) (:base-type a2))
                (= (count (:type-params a1)) (count (:type-params a2)))
-               (every? true? (map (fn [p1 p2]
-                                    (or (= p1 "Any") (= p2 "Any")
-                                        (types-equal? env p1 p2)))
+               (every? true? (map #(type-args-match? env %1 %2)
                                   (:type-params a1) (:type-params a2))))))))
 
 (defn validate-generic-args
@@ -2164,16 +2192,22 @@
    raw, unsubstituted generic names even after a caller's G/T bindings are
    known."
   [param-type type-map]
-  (cond
-    (nil? type-map) param-type
-    (string? param-type) (get type-map param-type param-type)
-    (map? param-type) (-> param-type
-                          (update :base-type #(get type-map % %))
-                          (update :type-args #(when % (mapv (fn [t] (resolve-generic-type t type-map)) %)))
-                          (update :type-params #(when % (mapv (fn [t] (resolve-generic-type t type-map)) %)))
-                          (update :param-types #(when % (mapv (fn [p] (update p :type resolve-generic-type type-map)) %)))
-                          (update :return-type #(when % (resolve-generic-type % type-map))))
-    :else param-type))
+  (letfn [(resolve [param-type]
+            (cond
+              (nil? type-map) param-type
+              (string? param-type) (get type-map param-type param-type)
+              (map? param-type) (-> param-type
+                                    (update :base-type #(get type-map % %))
+                                    (update :type-args #(when % (mapv resolve %)))
+                                    (update :type-params #(when % (mapv resolve %)))
+                                    (update :param-types #(when % (mapv (fn [p] (update p :type resolve)) %)))
+                                    (update :return-type #(when % (resolve %))))
+              :else param-type))]
+    ;; A parameter bound to an argument inference left open (`first([])`)
+    ;; is a type of its own here, so Any (see unknown-type-arg); inside a
+    ;; type's arguments it stays open (`Array[T]` -> `Array[unknown]`).
+    (let [resolved (resolve param-type)]
+      (if (= resolved unknown-type-arg) "Any" resolved))))
 
 (defn build-generic-type-map
   "Build a type-map from a class's generic params and a parameterized target type.
@@ -2190,7 +2224,7 @@
     (when-let [generic-params (:generic-params class-def)]
       (into {}
             (map (fn [param arg]
-                   [(:name param) (or arg "Any")])
+                   [(:name param) (if (or (nil? arg) (= arg unknown-type-arg)) "Any" arg)])
                  generic-params
                  (concat type-args (repeat "Any")))))))
 
@@ -2321,6 +2355,25 @@
                      env acc (infer-generic-type-map-from-arg env generic-names param-arg arg-arg)))
                   {}
                   (map vector param-args arg-args))
+          {}))
+
+      ;; The argument's class inherits the parameter's (`Leaf inherit
+      ;; Mid[String, Integer]`, `Mid[P, Q] inherit Base[Q, P]`, against a
+      ;; `Base[T, U]` parameter): match against the arguments its inherit
+      ;; chain gives that ancestor (here Base[Integer, String]).
+      (and (map? param-type)
+           (not= "Function" (:base-type param-type))
+           (string? (if (map? arg-type) (:base-type arg-type) arg-type)))
+      (let [arg-base (if (map? arg-type) (:base-type arg-type) arg-type)
+            arg-args (when (map? arg-type) (or (:type-params arg-type) (:type-args arg-type)))
+            param-args (vec (or (:type-params param-type) (:type-args param-type)))
+            inst (ancestor-instantiation env arg-base (vec arg-args) (:base-type param-type) #{})]
+        (if (and inst (= (count param-args) (count inst)))
+          (reduce (fn [acc [param-arg inst-arg]]
+                    (merge-inferred-generic-bindings
+                     env acc (infer-generic-type-map-from-arg env generic-names param-arg inst-arg)))
+                  {}
+                  (map vector param-args inst))
           {}))
 
       :else
@@ -4324,7 +4377,7 @@
                               {:base-type class-name :type-args generic-args})
                           (and (seq gparams) inferred-map)
                           {:base-type class-name
-                           :type-args (mapv #(get inferred-map (:name %) "Any") gparams)}
+                           :type-args (mapv #(get inferred-map (:name %) unknown-type-arg) gparams)}
                           :else class-name)
             type-map (build-generic-type-map env target-type)]
         ;; If class defines constructors, disallow implicit default create.
@@ -4371,7 +4424,7 @@
   "Check the type of an array literal"
   [env {:keys [elements] :as expr}]
   (if (empty? elements)
-    {:base-type "Array" :type-params ["Any"]}
+    {:base-type "Array" :type-params [unknown-type-arg]}
     (let [first-type (check-expression env (first elements))]
       ;; Check all elements have same type
       (doseq [elem (rest elements)]
@@ -4387,7 +4440,7 @@
   "Check the type of a map literal"
   [env {:keys [entries] :as expr}]
   (if (empty? entries)
-    {:base-type "Map" :type-params ["Any" "Any"]}
+    {:base-type "Map" :type-params [unknown-type-arg unknown-type-arg]}
     (let [entry-types (mapv (fn [{:keys [key value]}]
                               {:key-type (check-expression env key)
                                :value-type (check-expression env value)})
@@ -4411,7 +4464,7 @@
   "Check the type of a set literal"
   [env {:keys [elements] :as expr}]
   (if (empty? elements)
-    {:base-type "Set" :type-params ["Any"]}
+    {:base-type "Set" :type-params [unknown-type-arg]}
     (let [first-type (check-expression env (first elements))]
       (doseq [elem (rest elements)]
         (let [elem-type (check-expression env elem)]
@@ -4734,6 +4787,22 @@
   [env expr expected-type]
   (let [expected-type (normalize-type (expand-type-aliases env expected-type))]
     (cond
+      ;; `let b: Box[Any] := create Box.make(5)`: with no type arguments
+      ;; written, the declared ones are meant (Box[Any], not the Box[Integer]
+      ;; the argument alone would give — which, generics being invariant, is
+      ;; not a Box[Any]).
+      (and (map? expr)
+           (= :create (:type expr))
+           (empty? (:generic-args expr))
+           (map? expected-type)
+           (not (:detachable expected-type))
+           (seq (:type-params expected-type))
+           (= (class-name-identity env (:class-name expr))
+              (class-name-identity env (:base-type expected-type)))
+           (= (count (:type-params expected-type))
+              (count (:generic-params (env-lookup-class env (:class-name expr))))))
+      (check-expression env (assoc expr :generic-args (vec (:type-params expected-type))))
+
       (and (map? expr)
            (= :array-literal (:type expr))
            (map? expected-type)
@@ -4824,11 +4893,11 @@
    downcast would (`let b: B := an_instance_of_a` is already rejected).
    Narrowing must go through the same explicit mechanism a class downcast
    already requires: `convert ... to ...: T` (or `?attached-test`).
-   Compound/parameterized targets (Array[...], Map[...], a generic class) are
-   deliberately left alone here -- they keep today's permissive Any-element
-   behavior, since a read out of them still needs its own convert to reach a
-   concrete type (this is exactly what makes `result := node.get(\"amount\")`
-   unsound but `let m: Map[String, Any] := json.parse(text)` fine).
+   That includes a parameterized target (Array[...], Map[...], a generic
+   class): `let m: Map[String, Any] := json.parse(text)` is unchecked in just
+   the same way — the value need not be a Map at all — so it is written
+   `if convert json.parse(text) to m: Map[String, Any] then ... end`. Only
+   the Function types are left out; a closure's type is checked elsewhere.
    A `with \"java\" do ... end` block is also exempt: everything unresolved
    inside one is deliberately typed Any (the java-interop dynamic escape
    hatch -- see `__with_java__` in check-statement's :with case), and its
@@ -4842,9 +4911,9 @@
   (and (not (env-lookup-var env "__with_java__"))
        (= (normalize-type (expand-type-aliases env val-type)) "Any")
        (let [tt (normalize-type (expand-type-aliases env target-type))]
-         (and (string? tt)
+         (and (or (string? tt) (and (map? tt) (not= "Function" (:base-type tt))))
               (not= tt "Any")
-              (not (is-generic-type-param? env tt))))))
+              (not (and (string? tt) (is-generic-type-param? env tt)))))))
 
 (defn- throw-any-narrowing-error!
   [what target-type]
@@ -5358,7 +5427,7 @@
         (if (and parent-entry (= (count parent-args) (count subject-args)))
           (let [name->arg (zipmap parent-args subject-args)]
             {:base-type class-name
-             :type-args (mapv #(get name->arg % "Any") gparams)})
+             :type-args (mapv #(get name->arg % unknown-type-arg) gparams)})
           class-name))
       class-name)))
 
