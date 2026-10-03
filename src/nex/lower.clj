@@ -32,6 +32,7 @@
 (declare lower-loop-stmt)
 (declare lower-class-def lower-class-def*)
 (declare lowering-type-env)
+(declare ancestor-qualified-call-type)
 (declare class-self-registration-name)
 (declare if-branch-expression)
 (declare current-class-def)
@@ -1018,8 +1019,16 @@
 
 (defn- infer-target-call-type
   [env expr class-target-name across-item-type target-expr]
-  (if (= :super (:type target-expr))
+  (cond
+    (= :super (:type target-expr))
     (infer-super-call-type env expr)
+
+    ;; `Ancestor.m(...)`, typed exactly as lower-parent-qualified-call lowers it.
+    (and class-target-name
+         (ancestor-qualified-call-type env class-target-name (:method expr) (count (:args expr))))
+    (ancestor-qualified-call-type env class-target-name (:method expr) (count (:args expr)))
+
+    :else
     (infer-instance-call-type env expr class-target-name across-item-type target-expr)))
 
 (def ^:private builtin-free-function-return-types
@@ -5738,23 +5747,66 @@
       (lower-java-super-call env expr parent-name java-super-klass arg-irs)
       (lower-nex-super-call env expr parent-name parent-def arg-irs))))
 
+(defn- ancestor-carrier-path
+  "The composition hops from an instance of CLASS-NAME to the carrier of its
+   ancestor ANCESTOR (see carrier-path-target-ir), or nil when ANCESTOR is not
+   one. A direct parent is one hop; a grandparent is reached through the
+   parent's own carrier, and so on."
+  [env class-name ancestor]
+  (some (fn [{:keys [parent]}]
+          (when (get (:compiled-classes env) parent)
+            (let [hop {:owner class-name
+                       :field (parent-field-name parent)
+                       :ancestor parent
+                       :ancestor-jvm-type (exact-class-jvm-type env parent)}]
+              (if (= parent ancestor)
+                [hop]
+                (when-let [further (ancestor-carrier-path env parent ancestor)]
+                  (into [hop] further))))))
+        (:parents (get (visible-class-map env) class-name))))
+
+(defn- ancestor-qualified-method-def
+  "The routine `Ancestor.m(...)` names from inside the current class: the one
+   ANCESTOR declares or inherits, when ANCESTOR is an ancestor of the current
+   class. Nil otherwise."
+  [env ancestor method arity]
+  (when (and (:this-type env)
+             (ancestor-carrier-path env (:this-type env) ancestor))
+    (when-let [ancestor-def (get (visible-class-map env) ancestor)]
+      (or (class-method-def ancestor-def method arity)
+          (inherited-method-def env ancestor-def method arity)))))
+
+(defn- ancestor-qualified-call-type
+  "The type of `Ancestor.m(...)` (see ancestor-qualified-method-def), or nil
+   when it does not name an ancestor's routine. The routine's return type is
+   written in its declaring class's generic parameters, which the inherit
+   chain binds for this object."
+  [env ancestor method arity]
+  (when-let [method-def (ancestor-qualified-method-def env ancestor method arity)]
+    (let [own-params (map :name (:generic-params (current-class-def env)))
+          self-type (if (seq own-params)
+                      {:base-type (:this-type env) :type-args (vec own-params)}
+                      (:this-type env))]
+      (tc/resolve-generic-type
+       (function-return-type method-def)
+       (generic-type-map env self-type (or (:declaring-class method-def) ancestor))))))
+
 (defn- lower-parent-qualified-call
+  "`Ancestor.m(...)`: ANCESTOR's own version of m, run on its carrier inside
+   this object, never an override (like `super.m`, and unchecked like it)."
   [env expr class-target-name arg-irs]
-  (let [parent-meta (class-jvm-meta env class-target-name)
-        method-def (class-method-def (get (visible-class-map env) class-target-name)
-                                     (:method expr)
-                                     (count (:args expr)))
-        nex-type (function-return-type method-def)
+  (let [method-def (ancestor-qualified-method-def env class-target-name
+                                                  (:method expr) (count (:args expr)))
+        nex-type (ancestor-qualified-call-type env class-target-name
+                                               (:method expr) (count (:args expr)))
         jvm-type (resolve-jvm-type env nex-type)]
-    (ir/call-virtual-node (:internal-name parent-meta)
+    (ir/call-virtual-node (:internal-name (class-jvm-meta env class-target-name))
                           (self-call-method-name env class-target-name method-def)
                           (desc/repl-instance-method-descriptor)
-                          (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                             (parent-field-name class-target-name)
-                                             (ir/this-node (:this-type env)
-                                                           (exact-class-jvm-type env (:this-type env)))
-                                             class-target-name
-                                             (exact-class-jvm-type env class-target-name))
+                          (carrier-path-target-ir env
+                                                  (ancestor-carrier-path env (:this-type env) class-target-name)
+                                                  (ir/this-node (:this-type env)
+                                                                (exact-class-jvm-type env (:this-type env))))
                           arg-irs
                           nex-type
                           jvm-type)))
@@ -6597,13 +6649,18 @@
     (lower-super-call env expr arg-irs)
 
     (and class-target-name
-         (:this-type env)
-         (some #(= class-target-name (:parent %))
-               (:parents (current-class-def env)))
-         (if-let [parent-def (get (visible-class-map env) class-target-name)]
-           (class-method-def parent-def (:method expr) (count (:args expr)))
-           false))
+         (ancestor-qualified-method-def env class-target-name (:method expr) (count (:args expr))))
     (lower-parent-qualified-call env expr class-target-name arg-irs)
+
+    ;; `Ancestor.field`: an object has one field of each name, whichever
+    ;; class in its chain declares it, so this reads that field.
+    (and class-target-name
+         (false? (:has-parens expr))
+         (:this-type env)
+         (ancestor-carrier-path env (:this-type env) class-target-name)
+         (get (:fields env) (:method expr))
+         (not (lookup-class-constant env class-target-name (:method expr))))
+    (lower-expression env {:type :identifier :name (:method expr)})
 
     (and class-target-name (false? (:has-parens expr)))
     (lower-class-constant-or-static-field env expr class-target-name)
@@ -6875,9 +6932,57 @@
    :retry         lower-stmt-retry
    :assert        lower-stmt-assert})
 
+(def ^:private nested-statement-keys
+  "AST keys holding a nested block of statements, which lower-statement
+   reaches on its own when it lowers them."
+  #{:body :block :rescue :then :else :elseif :init :clauses :statements})
+
+(defn- statement-binding-nodes
+  "The `convert` and object-test (`?e as x`) nodes in STMT's own expressions:
+   not in a nested block, nor in a closure, which is compiled separately."
+  [stmt]
+  (letfn [(walk [node]
+            (cond
+              (map? node)
+              (when-not (#{:anonymous-function :spawn} (:type node))
+                (concat (when (#{:convert :attached-test} (:type node)) [node])
+                        (mapcat (fn [[k v]]
+                                  (when-not (contains? nested-statement-keys k)
+                                    (walk v)))
+                                node)))
+              (sequential? node) (mapcat walk node)
+              :else nil))]
+    (walk stmt)))
+
+(defn- ensure-statement-bindings
+  "Allocate the variable each `convert`/object test in STMT binds before STMT
+   is lowered. Expression lowering cannot allocate a local, so one written
+   anywhere an expression may go — `print(convert a to d: Dog)` — would
+   otherwise find no slot to store into. The cases with their own allocation
+   (`let x := convert ...`) find the binding already there. An `if` allocates
+   its condition's guards itself, scoped to the `if` (they narrow its
+   branches), so only a test nested deeper in its condition is done here."
+  [env stmt]
+  (let [nodes (if (= :if (:type stmt))
+                (let [guards (set (concat (map :name (tc/convert-guard-bindings (:condition stmt)))
+                                          (map :name (tc/attached-test-guards (:condition stmt)))))]
+                  (remove #(contains? guards (:var-name %))
+                          (statement-binding-nodes (:condition stmt))))
+                (statement-binding-nodes stmt))]
+    (reduce (fn [env node]
+              (first
+               (if (= :convert (:type node))
+                 (ensure-convert-binding env node)
+                 (ensure-convert-binding env {:var-name (:var-name node)
+                                              :type (tc/attachable-type
+                                                     (infer-type-or-any env (:value node)))}))))
+            env
+            nodes)))
+
 (defn lower-statement
   [env stmt]
-  (let [[env' lowered]
+  (let [env (ensure-statement-bindings env stmt)
+        [env' lowered]
         (if-let [handler (get lower-statement-dispatch (:type stmt))]
           (handler env stmt)
           (if (contains? expression-node-types (:type stmt))
@@ -7163,6 +7268,7 @@
 
 (defn- lower-repl-tail
   [env stmt]
+  (let [env (ensure-statement-bindings env stmt)]
   (cond
     (= :if (:type stmt))
     [env [] (lower-expression env stmt)]
@@ -7199,7 +7305,7 @@
       [env'' [] convert-ir])
 
     :else
-    [env [] nil]))
+    [env [] nil])))
 
 (defn- repl-tail-returns-value?
   [env stmt]

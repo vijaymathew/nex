@@ -3018,10 +3018,13 @@
                        (if-let [i (clojure.string/index-of runtime-name "[")]
                          (subs runtime-name 0 i)
                          runtime-name))
-        ok? (and (some? v)
-                 (string? target-name)
-                 (or (convert-compatible-runtime? ctx runtime-name target-name)
-                     (convert-compatible-runtime? ctx runtime-base target-name)))]
+        ;; `boolean`: a failed convert is false, never the nil an `and`/`or`
+        ;; chain would otherwise yield.
+        ok? (boolean
+             (and (some? v)
+                  (string? target-name)
+                  (or (convert-compatible-runtime? ctx runtime-name target-name)
+                      (convert-compatible-runtime? ctx runtime-base target-name))))]
     (env-define (:current-env ctx) var-name (if ok? v nil))
     ok?))
 

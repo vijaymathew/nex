@@ -2381,8 +2381,25 @@
         (and right-id (nil-literal? left)) right-id
         :else nil))))
 
+(declare detachable-version)
+
+(defn- nested-convert-nodes
+  "The `convert` expressions inside CONDITION that are not its guards (see
+   convert-guard-bindings): `convert a to d: Dog` passed as an argument, say.
+   Each still binds its variable, as a ?S, for the rest of the scope."
+  [condition]
+  (let [guards (set (map :name (convert-guard-bindings condition)))]
+    (->> (tree-seq #(and (or (map? %) (sequential? %))
+                         (not= :anonymous-function (:type %)))
+                   #(if (map? %) (vals %) (seq %))
+                   condition)
+         (filter #(and (map? %) (= :convert (:type %))
+                       (not (contains? guards (:var-name %))))))))
+
 (defn- apply-condition-branch-refinement!
   [env condition branch]
+  (doseq [{:keys [var-name target-type]} (nested-convert-nodes condition)]
+    (env-add-var env var-name (detachable-version target-type)))
   (case branch
     :then
     (do
@@ -2840,7 +2857,21 @@
         target-type (expand-type-aliases
                      env
                      (if class-target
-                       target-name
+                       ;; `Ancestor.m(...)` from inside a heir runs on this
+                       ;; object, so the ancestor's generic parameters are
+                       ;; the ones the inherit chain binds (`inherit
+                       ;; Box[Integer]`: T = Integer), not unknowns.
+                       (or (when (and current-class
+                                      (seq (:generic-params class-target))
+                                      (not= (class-name-identity env current-class)
+                                            (class-name-identity env target-name)))
+                             (when-let [inst (ancestor-instantiation
+                                              env current-class
+                                              (mapv #(type-name-string (:name %))
+                                                    (:generic-params (env-lookup-class env current-class)))
+                                              target-name #{})]
+                               {:base-type target-name :type-args inst}))
+                           target-name)
                        (if (string? target)
                          (or (env-lookup-var env target)
                              (when current-class
@@ -3236,6 +3267,25 @@
                    (count args) " argument(s)")]
       (throw (ex-info msg {:error (type-error msg)})))))
 
+(defn- check-ancestor-qualified-target!
+  "`Ancestor.m(...)` runs ANCESTOR's version of m on this object, so it is
+   meaningful only inside a proper descendant of ANCESTOR. From anywhere else
+   there is no object to run it on: Nex has no static routines."
+  [env {:keys [method]} {:keys [target-name current-class]}]
+  (let [fail! (fn [msg] (throw (ex-info msg {:error (type-error msg)})))]
+    (cond
+      (nil? current-class)
+      (fail! (str target-name "." method "(...) can only be called from inside a class that inherits "
+                  target-name "; call it on an object instead"))
+
+      (= (class-name-identity env current-class) (class-name-identity env target-name))
+      (fail! (str target-name "." method "(...) names " current-class
+                  " itself; call it as " method "(...) or this." method "(...)"))
+
+      (not (class-subtype? env current-class target-name))
+      (fail! (str target-name "." method "(...) is not reachable here: " target-name
+                  " is not an ancestor of " current-class)))))
+
 (defn- check-target-call
   [env {:keys [target method has-parens] :as expr}]
   (let [call-info (resolve-call-target-info env expr)]
@@ -3270,6 +3320,12 @@
       (and (:class-target call-info) has-parens
            (explicit-class-constructor-name+arity? env (:target-name call-info) method (count (:args expr))))
       (check-explicit-class-constructor-call env expr call-info)
+
+      (and (:class-target call-info) has-parens
+           (not (:import (:class-target call-info)))
+           (not (builtin-type? (:target-name call-info))))
+      (do (check-ancestor-qualified-target! env expr call-info)
+          (check-general-target-call env expr call-info))
 
       :else
       (check-general-target-call env expr call-info))))

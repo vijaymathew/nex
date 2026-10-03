@@ -1351,12 +1351,12 @@
   (.visitTypeInsn mv Opcodes/CHECKCAST "[Ljava/lang/Object;")
   (.visitVarInsn mv Opcodes/ASTORE temp-slot)
 
-  (.visitVarInsn mv Opcodes/ALOAD temp-slot)
-  (.visitInsn mv Opcodes/ICONST_1)
-  (.visitInsn mv Opcodes/AALOAD)
   (case (:kind binding)
     :local
     (do
+      (.visitVarInsn mv Opcodes/ALOAD temp-slot)
+      (.visitInsn mv Opcodes/ICONST_1)
+      (.visitInsn mv Opcodes/AALOAD)
       (emit-unbox-or-cast! mv (:jvm-type binding))
       (.visitVarInsn mv (local-store-op (:jvm-type binding)) (:slot binding)))
 
