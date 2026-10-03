@@ -2044,7 +2044,15 @@
   [ctx {:keys [class-def class-name]}]
   ;; Register the generated function class and return an object with closure env
   (register-class ctx class-def)
-  (make-object class-name {} (:current-env ctx)))
+  (cond-> (make-object class-name {} (:current-env ctx))
+    ;; Made inside a routine: its body's `this`, and its unqualified calls,
+    ;; are that routine's object's, as they are in the routine itself (see
+    ;; invoke-found-nex-method). The fields are reached through the closure
+    ;; env, which holds the routine's live bindings.
+    (:current-object ctx)
+    (assoc :enclosing (assoc (select-keys ctx [:current-object :current-class-name :current-target
+                                               :param-names :modified-fields])
+                             :in-closure? true))))
 
 (defn- write-back-target!
   "Propagate an updated object value back into a direct target expression.
@@ -2214,6 +2222,7 @@
             new-ctx (-> ctx
                         (assoc :current-env method-env)
                         (assoc :current-object current-obj)
+                        (assoc :param-names (set (map :name params)))
                         (assoc :current-target (:current-target ctx))
                         (assoc :current-class-name parent-class-name)
                         (assoc :current-method-name method)
@@ -2316,6 +2325,50 @@
      :java-class? java-class?
      :obj obj}))
 
+(defn- live-current-object
+  "`this` inside a routine: the object with the fields the routine has set so
+   far. A routine's fields live as env bindings while it runs (read back into
+   the object when it returns), so :current-object is the object as it was on
+   entry. A parameter that shadows a field hides the field's binding; that
+   field keeps its entry value unless the routine wrote it with
+   `this.field :=`."
+  [ctx]
+  (when-let [obj (:current-object ctx)]
+    (let [live (refresh-object-fields-from-env ctx obj)
+          written (some-> (:modified-fields ctx) deref)
+          shadowed (remove #(contains? written %) (:param-names ctx))]
+      (if (seq shadowed)
+        (update live :fields merge (select-keys (:fields obj) (map keyword shadowed)))
+        live))))
+
+(defn- invoke-on-this!
+  "`this.m(args)` inside a routine. A qualified call, so the invariant is
+   checked on exit, but run on the live object (live-current-object), and
+   with the fields it changes copied back into the running routine's
+   bindings, where the routine (and its own read-back on return) sees them."
+  [ctx obj method has-parens arg-values]
+  (let [slot "$this"                    ; `$` cannot start a Nex identifier
+        call-env (make-env (:current-env ctx))
+        _ (env-define call-env slot obj)
+        result (eval-node (assoc ctx :current-env call-env :self-call? true)
+                          {:type :call
+                           :target slot
+                           :method method
+                           :args (mapv (fn [v] {:type :literal :value v}) arg-values)
+                           :has-parens has-parens})
+        after (env-lookup call-env slot)]
+    (doseq [[field-key value] (:fields after)
+            :when (not= value (get (:fields obj) field-key))]
+      (let [field-name (name field-key)]
+        ;; A field hidden by a parameter is written through it, as
+        ;; `this.field :=` does, and marked so the read-back keeps it.
+        (when (contains? (:param-names ctx) field-name)
+          (some-> (:modified-fields ctx) (swap! conj field-name)))
+        (try
+          (env-set! (:current-env ctx) field-name value)
+          (catch Exception _))))
+    result))
+
 (defn- invoke-java-static-call
   "Java static method or field access inside a `with \"java\"` block."
   [ctx target-name method has-parens arg-values]
@@ -2406,7 +2459,8 @@
             _ (env-define method-env "result" default-result)
             _ (env-define method-env "this" obj)
             new-ctx (-> ctx
-                        (dissoc :unchecked-call?)
+                        (dissoc :unchecked-call? :self-call? :in-closure?)
+                        (assoc :param-names param-names)
                         (assoc :current-env method-env)
                         (assoc :current-object obj)
                         (assoc :current-target target-name)
@@ -2421,7 +2475,10 @@
                                  :arg-names (set (map :name (or params [])))
                                  :field-names (set (map name (keys (:fields obj))))
                                  :source (:debug-source ctx)})
-                        (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
+                        (assoc :debug-depth (inc (or (:debug-depth ctx) 0)))
+                        ;; A closure's body runs as part of the routine that
+                        ;; made it (see eval-node :anonymous-function).
+                        (merge (:enclosing obj)))
             _ (when-let [require-assertions effective-require]
                 (check-assertions new-ctx require-assertions Precondition))
             _ (if-let [rescue (:rescue method-def)]
@@ -2476,10 +2533,11 @@
 (defn- invoke-nex-object-call
   [ctx target target-name method obj has-parens arg-values]
   (let [class-def (lookup-class ctx (:class-name obj))
-        ;; An unqualified self-call (re-dispatched here by
-        ;; eval-call-without-target) may reach the class's private routines.
+        ;; A call on the current object — unqualified (re-dispatched here by
+        ;; eval-call-without-target) or `this.m` (invoke-on-this!) — may
+        ;; reach the class's private routines.
         method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values)
-                                                      (when (:unchecked-call? ctx)
+                                                      (when (or (:unchecked-call? ctx) (:self-call? ctx))
                                                         (:current-class-name ctx)))]
     (if method-lookup
       (invoke-found-nex-method ctx target target-name class-def method method-lookup obj has-parens arg-values)
@@ -2598,6 +2656,15 @@
       this-method-mid-construction?
       (let [live-obj (refresh-object-fields-from-env ctx (:current-object ctx))]
         (dispatch-parent-call ctx live-obj (:class-name live-obj) method arg-values))
+
+      (and (map? target)
+           (= :this (:type target))
+           (:current-object ctx)
+           (nex-object? obj)
+           (lookup-method-with-inheritance ctx (lookup-class ctx (:class-name obj))
+                                           method (count arg-values)
+                                           (:current-class-name ctx)))
+      (invoke-on-this! ctx obj method has-parens arg-values)
 
       ;; `a(1)(2)(3)` — invoking the result of a call/expression directly, no
       ;; member name to dispatch on (see :postfix's "Call on expression
@@ -2739,9 +2806,13 @@
                   updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
                   target-name (:current-target ctx)
                   ;; Still an unqualified call, so exempt from the invariant
-                  ;; check on exit (see invoke-found-nex-method). Arguments go
-                  ;; in already evaluated, so none of them runs under the flag.
-                  self-ctx (assoc ctx :unchecked-call? true)
+                  ;; check on exit (see invoke-found-nex-method) — unless it
+                  ;; is made from a closure, which may run long after the
+                  ;; routine that made it, so counts as qualified. Arguments
+                  ;; go in already evaluated, so none of them runs under the
+                  ;; flag.
+                  self-ctx (assoc ctx :unchecked-call? (not (:in-closure? ctx))
+                                      :self-call? true)
                   literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
               (if (string? target-name)
               ;; The enclosing method was invoked on a plain variable, so route
@@ -2793,7 +2864,7 @@
 
 (defmethod eval-node :this
   [ctx _]
-  (:current-object ctx))
+  (live-current-object ctx))
 
 (defmethod eval-node :super
   [ctx _]

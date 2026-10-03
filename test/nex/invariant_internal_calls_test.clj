@@ -258,15 +258,10 @@ let k: Child := create Child.make
 k.inc_a"))))
 
 (deftest this-qualified-call-is-checked-test
-  ;; Compiled backend only: the interpreter runs `this.f` against the object
-  ;; as it was on entry to the calling routine, so it sees no broken invariant.
   (testing "this.f is a qualified call"
-    (is (thrown-with-msg? Exception #"Class invariant violation: same"
-                          (run (str (format pair "bump do a := a + 1 this.trace b := b + 1 end")
-                                    "let p: Pair := create Pair.make\np.bump")
-                               {})))
-    (is (thrown-with-msg? Exception #"Class invariant violation: same"
-                          (run (str base "class Child
+    (violation-on-both (str (format pair "bump do a := a + 1 this.trace b := b + 1 end")
+                            "let p: Pair := create Pair.make\np.bump"))
+    (violation-on-both (str base "class Child
 inherit Base
 create
   make do end
@@ -278,5 +273,4 @@ feature
   end
 end
 let k: Child := create Child.make
-k.bump")
-                               {})))))
+k.bump"))))

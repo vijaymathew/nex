@@ -3280,6 +3280,16 @@
                      (or implicit-this-member? this-target?)
                      {:type :identifier :name closure-this-capture-name}
 
+                     ;; A field of `this` as the receiver (`n.to_string`),
+                     ;; rewritten as a bare `n` is. Any other name stays a
+                     ;; string: it may be a class (`Animal.name()`).
+                     (and (string? target)
+                          (not (contains? local-types target))
+                          (not (contains? (:var-types ctx) target))
+                          (this-type-field? ctx target))
+                     (rewrite-identifier-for-closures ctx local-types captures
+                                                      {:type :identifier :name target})
+
                      target
                      (rewrite-expression-for-closures ctx local-types captures target)
 
@@ -4597,7 +4607,11 @@
   [env target-expr method args has-parens]
   (let [target-type (resolve-type-alias (infer-type env target-expr))
         base-type (base-type-name target-type)
-        target-ir (lower-expression env target-expr)
+        ;; A member reached through `this` lives on the carrier itself.
+        target-ir (if (= (:type target-expr) :this)
+                    (ir/this-node (:this-type env)
+                                  (exact-class-jvm-type env (:this-type env)))
+                    (lower-expression env target-expr))
         class-def (get (visible-class-map env) base-type)
         field-def (when (and class-def (false? has-parens))
                     (if (= (:type target-expr) :this)
@@ -4794,12 +4808,30 @@
                                 {:name (:name expr)}))))))))))
 
 (defn- lower-expr-this
+  "`this` as a value — passed, stored, printed, captured by a closure.
+   Inherited code runs on a composition carrier inside the heir's object, and
+   the value must be that object, or a call on it would miss the heir's
+   overrides; `__outer__` holds it (an object inside no other is its own
+   `__outer__`). Typed Object, since the heir is a different JVM class.
+   Member access through `this` inside the class stays on the carrier, which
+   is where the fields live (see lower-instance-dispatch)."
   [env expr]
-  (if (:this-type env)
+  (cond
+    (nil? (:this-type env))
+    (throw (ex-info "this is only valid in instance-method lowering"
+                    {:expr expr}))
+
+    (function-root-class? env (:this-type env))
     (ir/this-node (:this-type env)
                   (exact-class-jvm-type env (:this-type env)))
-    (throw (ex-info "this is only valid in instance-method lowering"
-                    {:expr expr}))))
+
+    :else
+    (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
+                       "__outer__"
+                       (ir/this-node (:this-type env)
+                                     (exact-class-jvm-type env (:this-type env)))
+                       (:this-type env)
+                       (ir/object-jvm-type "java/lang/Object"))))
 
 (defn- lower-expr-super
   "Bare `super` used as a value (e.g. `result := super`), as opposed to
