@@ -602,3 +602,96 @@ print(create P.make(1).z)")]
           (str "must not leak private fields, got: " (pr-str msgs)))
       (is (not-any? #(re-find #"In a pattern" %) msgs)
           (str "no pattern hint outside a pattern, got: " (pr-str msgs))))))
+
+;; A guard sees every binding its clause makes (Definition 2.8). Bindings a
+;; type test or a nested pattern makes depend on that pattern's `convert`, so
+;; they are only bound at the head of the body; the walker rewrites the guard
+;; to read them through the `convert` variables, and the typechecker checks
+;; the guard's `and` chain with each conjunct's narrowing in effect. `run`
+;; skips the typechecker, which is where this went wrong, so these check first.
+
+(defn- checked-run
+  "Type-check CODE, then run it on both backends, asserting they agree."
+  [code]
+  (let [result (tc/type-check (p/ast code))]
+    (is (:success result) (str "expected to type-check: " (pr-str (:errors result))))
+    (when (:success result)
+      (let [interpreted (run code)
+            compiled (run-compiled code)]
+        (is (= interpreted compiled) "compiled and interpreted output must agree")
+        compiled))))
+
+(def ^:private shape-decl
+  "union Shape
+  Circle(radius: Real)
+  Labelled(inner: Any, label: String)
+end
+function d(s: Shape): String do
+  result := \"?\"
+  match s of
+")
+
+(def ^:private shape-tail
+  "  end
+end
+")
+
+(defn- shape-program [clauses & calls]
+  (str shape-decl clauses shape-tail (str/join "\n" calls)))
+
+(deftest guard-sees-a-type-test-binding
+  (testing "`f: T` binds f for the guard, and a false guard falls through"
+    (is (= ["\"big\"" "\"small\""]
+           (checked-run
+            (shape-program
+             "    Circle(radius: Real) if radius > 1.0 then result := \"big\"
+    Circle(radius)                    then result := \"small\"
+    Labelled(inner, label)            then result := label
+"
+             "print(d(create Circle.make(2.0)))"
+             "print(d(create Circle.make(0.5)))"))))))
+
+(deftest guard-sees-a-nested-pattern-binding
+  (testing "a binding inside a nested pattern is visible to the guard"
+    (is (= ["\"wheel is big\"" "\"dot\""]
+           (checked-run
+            (shape-program
+             "    Labelled(inner: Circle(radius as r), label) if r > 1.0 then result := label + \" is big\"
+    Labelled(inner, label) then result := label
+    Circle(radius)         then result := \"circle\"
+"
+             "print(d(create Labelled.make(create Circle.make(2.0), \"wheel\")))"
+             "print(d(create Labelled.make(create Circle.make(0.5), \"dot\")))"))))))
+
+(deftest two-level-nested-pattern-binds
+  (testing "a pattern nested two deep reads fields through both `convert`s,
+            with and without a guard over the innermost bindings"
+    (is (= ["\"out/in 3.0\"" "\"other\""]
+           (checked-run
+            (shape-program
+             "    Labelled(inner: Labelled(inner: Circle(radius as r), label as l2), label) then result := label + \"/\" + l2 + \" \" + r.to_string
+    Labelled(inner, label) then result := \"other\"
+    Circle(radius)         then result := \"circle\"
+"
+             "print(d(create Labelled.make(create Labelled.make(create Circle.make(3.0), \"in\"), \"out\")))"
+             "print(d(create Labelled.make(\"x\", \"flat\")))"))))
+    (is (= ["\"out/in\"" "\"other\""]
+           (checked-run
+            (shape-program
+             "    Labelled(inner: Labelled(inner: Circle(radius as r), label as l2), label) if r > 2.0 and l2.length = 2 then result := label + \"/\" + l2
+    Labelled(inner, label) then result := \"other\"
+    Circle(radius)         then result := \"circle\"
+"
+             "print(d(create Labelled.make(create Labelled.make(create Circle.make(3.0), \"in\"), \"out\")))"
+             "print(d(create Labelled.make(create Labelled.make(create Circle.make(1.0), \"in\"), \"out\")))"))))))
+
+(deftest closure-parameter-hides-a-pattern-binding-in-the-guard
+  (testing "a closure parameter that reuses a binding's name means the parameter"
+    (is (= ["\"param\""]
+           (checked-run
+            (shape-program
+             "    Labelled(inner: Circle(radius as r), label) if (fn(r: Integer): Boolean do result := r = 7 end)(7) then result := \"param\"
+    Labelled(inner, label) then result := label
+    Circle(radius)         then result := \"circle\"
+"
+             "print(d(create Labelled.make(create Circle.make(2.0), \"wheel\")))"))))))

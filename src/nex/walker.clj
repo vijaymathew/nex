@@ -2054,6 +2054,64 @@
       :else
       {:kind :bind :field field :bind field})))
 
+(defn- substitute-guard-names
+  "Rewrite NODE (a match clause's explicit `if` guard) so each name in SUBST
+   (name -> expression) reads that expression instead. The names are the
+   clause's :body-binds: bindings that depend on a pattern's narrowing
+   `convert`, so they are only `let` at the head of the body, after the
+   guard has run. The expressions they bind read nothing but the `convert`
+   variables, which the guard's `and` chain already has in scope by the time
+   the explicit guard (its last conjunct) is reached -- so the substituted
+   guard sees the same values the body will. A closure parameter, or a `let`
+   in a statement sequence, that reuses one of the names hides it from there
+   on, as ordinary scoping would."
+  [subst node]
+  (letfn [(located [replacement original]
+            ;; Keep the user's source position on the expression that
+            ;; replaces their name, so an error still points at it.
+            (merge replacement (select-keys original [:dbg/line :dbg/col])))
+          (walk-seq [subst nodes]
+            (loop [subst subst, [n & more :as nodes] nodes, out []]
+              (if (empty? nodes)
+                out
+                (let [n' (walk subst n)
+                      subst' (if (and (map? n) (= :let (:type n)))
+                               (dissoc subst (:name n))
+                               subst)]
+                  (recur subst' more (conj out n'))))))
+          (walk [subst n]
+            (cond
+              (empty? subst) n
+
+              (vector? n) (walk-seq subst n)
+
+              (seq? n) (seq (walk-seq subst n))
+
+              (not (map? n)) n
+
+              (and (= :identifier (:type n)) (contains? subst (:name n)))
+              (located (subst (:name n)) n)
+
+              ;; A paren-less, argument-less bare name can surface as a
+              ;; target-less call; it names the binding all the same.
+              (and (= :call (:type n)) (nil? (:target n)) (not (:has-parens n))
+                   (empty? (:args n)) (contains? subst (:method n)))
+              (located (subst (:method n)) n)
+
+              (= :anonymous-function (:type n))
+              (let [inner (apply dissoc subst (map :name (:params n)))]
+                (into {} (map (fn [[k v]] [k (walk inner v)])) n))
+
+              :else
+              (into {}
+                    (map (fn [[k v]]
+                           (if (and (= :target k) (string? v) (contains? subst v))
+                             ;; `r.length`: the receiver is held as a bare name.
+                             [k (subst v)]
+                             [k (walk subst v)])))
+                    n)))]
+    (walk subst node)))
+
 (defn- handle-match-clause
   [[_ class-name & rest]]
   (let [tokens (vec rest)
@@ -2084,6 +2142,12 @@
       ;; `if`), and body-prepended binds for nested sub-fields.
       (let [var-name (or explicit-var (str "__match_" (swap! next-fn-id inc) "__"))
             {:keys [bindings guards body-binds]} (process-field-patterns var-name field-patterns)
+            ;; The explicit guard runs before :body-binds are bound, so it
+            ;; reads each of them through the expression it would bind.
+            explicit-guard (when explicit-guard
+                             (substitute-guard-names
+                              (into {} (map (juxt :name :value)) body-binds)
+                              explicit-guard))
             guard-parts (concat guards (when explicit-guard [explicit-guard]))
             guard (when (seq guard-parts)
                     (reduce (fn [a b] {:type :binary :operator "and" :left a :right b})
@@ -2267,7 +2331,11 @@
         rescue (when rescue-clause (transform-node rescue-clause))
         [init' until' body'] (rescue-wrap-loop
                               [{:type :let :name counter-name :value {:type :integer :value 0 :text "0"}}]
-                              {:type :binary :operator "=" :left counter-id :right count-ast}
+                              ;; `>=`, not `=` (Definition C.2): the bound is
+                              ;; re-read every pass, so a negative bound, or one
+                              ;; the body lowers below the counter, must stop the
+                              ;; loop rather than never being hit exactly.
+                              {:type :binary :operator ">=" :left counter-id :right count-ast}
                               body-stmts
                               rescue)]
     {:type :loop

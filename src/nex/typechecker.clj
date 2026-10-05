@@ -5515,7 +5515,11 @@
         (doseq [b bindings]
           (check-statement clause-env b))
         (when guard
-          (let [guard-type (check-expression clause-env guard)]
+          ;; check-condition, not check-expression: a pattern's guard is an
+          ;; `and` chain whose later conjuncts read the variables its earlier
+          ;; `convert`s bind (a nested pattern's sub-field reads, and the
+          ;; explicit `if`, which nex.walker rewrites to read them too).
+          (let [guard-type (check-condition clause-env guard)]
             (when-not (types-compatible? clause-env guard-type "Boolean")
               (throw (ex-info "Match guard must be Boolean"
                               {:error (type-error
