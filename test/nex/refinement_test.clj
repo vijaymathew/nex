@@ -202,9 +202,10 @@ print(t.starts_with(\"TRK\"))")))))
 
 (deftest compiled-refinement-field-receiver
   (testing "base-type methods dispatch on a refinement-typed field"
-    ;; `to_string` on a String yields its *quoted* form, which print then quotes
-    ;; again — the interpreter does the same, which is the point of the test.
-    (is (= ["5" "\"\"TRK-1\"\""]
+    ;; `to_string` on a String is the text itself (string_to_string_test),
+    ;; which print then quotes as it does any String — the interpreter does the
+    ;; same, which is the point of the test.
+    (is (= ["5" "\"TRK-1\""]
            (both "declare type Tid = String where s: s.length > 0
 class Shipment
   feature tracking: Tid
