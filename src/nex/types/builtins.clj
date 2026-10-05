@@ -562,6 +562,12 @@
 (def string-type-methods
   {"length"      ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [s & _] (->nex-integer (count s)))
+   ;; The text itself (Definition B.1: to_string is the user-facing
+   ;; rendering). Without its own entry a String fell back to Any's, which
+   ;; formats a value as print shows it inside a collection -- quoted -- so
+   ;; `"x: " + s.to_string` read `x: "abc"`.
+   "to_string"   ^{:signatures [{:params [] :return-type "String"}]}
+   (fn [s & _] s)
    "index_of"    ^{:signatures [{:params [{:name "substr" :type "String"}] :return-type "Integer"}]}
    (fn [s ch & _]
      (let [idx (str/index-of s (str ch))]

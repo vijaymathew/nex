@@ -1644,9 +1644,13 @@
    static type, because the two differ under dynamic dispatch: with
    `let o: Order := create Placed.make(...)` the static `Order` may declare no
    `to_string` while the runtime `Placed` does, and the override must still win
-   — which is exactly what `print` already does for the same value."
+   — which is exactly what `print` already does for the same value. A String or
+   Char is the exception: print shows it quoted, but its own to_string is the
+   text itself (nex.types.builtins' string and char methods)."
   [state value]
-  (print-value state value))
+  (if (or (string? value) (char? value))
+    (bi/call-builtin-method nil value value "to_string" [])
+    (print-value state value)))
 
 (defn- object-field-value
   [value field-name]
