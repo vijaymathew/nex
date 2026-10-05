@@ -5985,8 +5985,9 @@
   [params kind routine-name]
   (when-let [dup (first-duplicate (map :name params))]
     (restriction-error!
-     (str "Duplicate parameter '" dup "' in " kind " '" routine-name
-          "'. The parameters of a routine must have distinct names."))))
+     (str "Duplicate parameter '" dup "' in " kind
+          (when routine-name (str " '" routine-name "'"))
+          ". The parameters of a routine must have distinct names."))))
 
 (defn- check-distinct-fields!
   "No two fields of one class may bind the same identifier."
@@ -6057,7 +6058,7 @@
   (when (some #(seq (collect-old-nodes %)) (cons body (map :condition require)))
     (restriction-error!
      (str "'old' may appear only in an ensure (postcondition) clause; found it "
-          "outside one in " kind " '" routine-name "'.")))
+          "outside one in " kind (when routine-name (str " '" routine-name "'")) ".")))
   (let [param-names (set (map :name params))]
     (doseq [assertion ensure
             o (collect-old-nodes (:condition assertion))]
@@ -6066,13 +6067,14 @@
                    (contains? param-names (:name e)))
           (restriction-error!
            (str "'old' may not be applied to the parameter '" (:name e) "' in "
-                kind " '" routine-name "'; it must denote a field of the current object."))))))
+                kind (when routine-name (str " '" routine-name "'"))
+                "; it must denote a field of the current object."))))))
   (when (seq (concat (mapcat #(collect-illegal-retry (:condition %) false) require)
                      (collect-illegal-retry body false)
                      (mapcat #(collect-illegal-retry (:condition %) false) ensure)))
     (restriction-error!
      (str "'retry' may appear only inside a rescue block; found it elsewhere in "
-          kind " '" routine-name "'."))))
+          kind (when routine-name (str " '" routine-name "'")) "."))))
 
 (defn- require-declared-param-types!
   "Throw unless every param has a non-nil `:type`. A param's type is nil only
@@ -6105,12 +6107,34 @@
                                    (str "Parameter '" name "' of " owner-kind " '" owner-name
                                         "' must declare a type.")))}))))))
 
+(defn- routine-description
+  "[kind name] for the routine METHOD of CLASS-NAME as the program wrote it,
+   for messages. A free function and an anonymous function are checked as the
+   `callN` method of a synthesized wrapper class; naming that method would
+   point the reader at something they never wrote. NAME is nil for an
+   anonymous function, which has none."
+  [class-name method]
+  (cond
+    (:function-name method) ["function" (:function-name method)]
+    ;; A REPL input is checked as this synthesized method.
+    (and (= class-name "__ReplTemp__") (= (:name method) "__eval__")) ["top-level code" nil]
+    (.startsWith ^String (str class-name) "AnonymousFunction_") ["anonymous function" nil]
+    :else ["method" (:name method)]))
+
+(defn- describe-routine
+  "\"function 'f'\", \"anonymous function\", \"method 'm'\"."
+  [[kind routine-name]]
+  (str kind (when routine-name (str " '" routine-name "'"))))
+
 (defn check-method
   "Check a method definition"
   [env class-name {:keys [name params return-type require body ensure rescue] :as method}]
-  (check-distinct-parameters! params "routine" name)
-  (check-old-and-retry! "routine" name params require body ensure)
-  (require-declared-param-types! class-name "method" name params)
+  (let [[kind routine-name :as described] (routine-description class-name method)
+        routine (describe-routine described)
+        Routine (str (str/upper-case (subs routine 0 1)) (subs routine 1))]
+  (check-distinct-parameters! params kind routine-name)
+  (check-old-and-retry! kind routine-name params require body ensure)
+  (require-declared-param-types! class-name kind (or routine-name name) params)
   ;; Validate parameter and return type annotations (generic constraints)
   (with-type-error-location
     method
@@ -6124,10 +6148,10 @@
   (when (and (not return-type)
              (or (some references-result? body)
                  (some #(references-result? (:condition %)) ensure)))
-    (throw (ex-info (str "Return type required for method '" name "' because it uses Result")
+    (throw (ex-info (str "Return type required for " routine " because it uses Result")
                     {:error (type-error
-                             (str "Method '" name "' uses Result but does not declare a return type. "
-                                  "Use: " name "(...): <ReturnType>"))})))
+                             (str Routine " uses Result but does not declare a return type. "
+                                  "Use: " (or routine-name "fn") "(...): <ReturnType>"))})))
 
   (let [method-env (make-type-env env)]
     ;; Track current class for this/super resolution
@@ -6149,7 +6173,7 @@
     (doseq [assertion require]
       (let [cond-type (check-expression method-env (:condition assertion))]
         (when-not (= cond-type "Boolean")
-          (throw (ex-info (str "Precondition must be Boolean in method " name)
+          (throw (ex-info (str "Precondition must be Boolean in " routine)
                           {:error (type-error
                                    (str "Precondition must be Boolean, got " cond-type))})))))
 
@@ -6175,9 +6199,9 @@
                  (attached-non-scalar-type? return-type)
                  (or (and normal-path-returns? (not normal-path-inits?))
                      (and rescue-path-returns? (not rescue-path-inits?))))
-        (throw (ex-info (str "Method " name " does not initialize result")
+        (throw (ex-info (str Routine " does not initialize result")
                         {:error (type-error
-                                 (str "Method '" name "' declares return type "
+                                 (str Routine " declares return type "
                                       (display-type return-type)
                                       " but does not definitely assign result on all returning paths. "
                                       "Use 'result :=' or declare the return type detachable."))}))))
@@ -6186,9 +6210,9 @@
     (doseq [assertion ensure]
       (let [cond-type (check-expression method-env (:condition assertion))]
         (when-not (= cond-type "Boolean")
-          (throw (ex-info (str "Postcondition must be Boolean in method " name)
+          (throw (ex-info (str "Postcondition must be Boolean in " routine)
                           {:error (type-error
-                                   (str "Postcondition must be Boolean, got " cond-type))})))))))
+                                   (str "Postcondition must be Boolean, got " cond-type))}))))))))
 
 (defn check-constructor
   "Check a constructor definition"
@@ -7996,6 +8020,12 @@
 
        ;; Check top-level statements in source order when available.
        ;; Fall back to legacy :calls-only programs.
+         ;; `retry` may appear only inside a rescue block (Definition 2.9);
+         ;; routine bodies are checked by check-method/-constructor.
+         (when-let [stray (first (collect-illegal-retry statements false))]
+           (with-type-error-location
+             stray
+             (fn [] (check-old-and-retry! "top-level code" nil nil nil statements nil))))
          (if (seq statements)
            (check-statements env statements)
            (doseq [call calls]

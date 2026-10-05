@@ -488,6 +488,9 @@
         generic-params-v (when generic-params (transform-node generic-params))
         method-def (cond-> {:type :method
                             :name method-name
+                            ;; The function this wrapper method is, for
+                            ;; messages that would otherwise name `callN`.
+                            :function-name fn-name
                             :params params-v
                             :return-type return-type-v
                             :declaration-only? declaration-only?
@@ -931,6 +934,7 @@
                          :visibility {:type :public}
                          :members [{:type :method
                                     :name "call1"
+                                    :function-name fn-name
                                     :params params
                                     :return-type return-type
                                     :declaration-only? false
@@ -2896,7 +2900,13 @@
 ;; Literals
 (defn- handle-integer-literal
   [[_ value]]
-  (let [v (parse-integer-literal value)]
+  (let [v (try (parse-integer-literal value)
+               (catch NumberFormatException _
+                 ;; The lexer admits any run of digits; the range is checked
+                 ;; here (Definition 2.2), as for the fixed-width literals.
+                 (throw (ex-info (str "Integer literal out of range "
+                                      Long/MIN_VALUE ".." Long/MAX_VALUE ": " value)
+                                 {:literal value}))))]
     {:type :integer
      :value v
      ;; Exact decimal string so the literal survives a JVM->JS AST transfer

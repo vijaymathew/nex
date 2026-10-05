@@ -134,15 +134,16 @@ end
 let c := create Child.init
 ")
 
-(deftest non-immediate-ancestor-constructor-call-is-a-named-gap
-  (testing "qualifying a constructor call by a non-immediate ancestor's name
-            is reported as an unsupported construct, not an internal defect"
-    (let [msg (compile-failure non-immediate-ancestor-ctor-call)]
-      (is (str/includes? msg "does not support yet") msg)
-      (is (str/includes? msg "Grandparent.init(...)") msg)
-      (is (str/includes? msg "non-immediate ancestor") msg)
-      (is (str/includes? msg "--interpret") msg)
-      (is (not (str/includes? msg "internal error")) msg))))
+(deftest non-immediate-ancestor-constructor-call-compiles
+  (testing "qualifying a constructor call by a non-immediate ancestor's name was
+            a named gap in the compiled backend; it now compiles and runs the
+            same as on the interpreter (see ancestor_constructor_delegation_test)"
+    (let [f (java.io.File/createTempFile "diagnostics" ".nex")]
+      (try
+        (spit f non-immediate-ancestor-ctor-call)
+        (is (= "\"Grandparent.init 99\"\n"
+               (with-out-str (e/eval-file (.getPath f) {}))))
+        (finally (.delete f))))))
 
 (deftest non-immediate-ancestor-constructor-call-still-runs-interpreted
   (testing "the same program the compiled backend declines still runs correctly
