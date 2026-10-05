@@ -5,7 +5,8 @@
             [nex.eval :as e]
             [nex.parser :as p]
             [nex.repl :as repl]
-            [nex.interpreter :as interp]))
+            [nex.interpreter :as interp]
+            [nex.typechecker :as tc]))
 
 ;; Refinement types (`declare type X = Base where n: <pred>`) register as an
 ;; alias to Base for type checking and inject a predicate check at every
@@ -269,12 +270,19 @@ print(n + 1)")))))
 ;; because the checker sees Count as related to the value's type and accepts it.
 ;; Aliases are now resolved to their base before either backend sees the convert.
 ;;
-;; A refinement cannot be resolved that way. Its predicate is erased, so a test
-;; against `Quantity = Integer where n > 0` could only ever check `Integer` —
-;; silently matching -5. Rejected rather than silently weakened.
+;; A refinement cannot be resolved that way: a test against
+;; `Quantity = Integer where n > 0` checking only `Integer` would silently
+;; match -5. Definition 4.3/5.6: convert to a refinement tests the base type
+;; *and* the predicate, yielding false (variable nil) when either fails. The
+;; walker routes the value through a synthetic checker, `__refine_Quantity`,
+;; and tests its result against the base; the typechecker still sees the
+;; target as `Quantity`. (This used to be rejected outright.)
 
-(defn- walker-error [code]
-  (try (p/ast code) nil (catch clojure.lang.ExceptionInfo e (ex-message e))))
+(defn- type-error-message [code]
+  (let [result (tc/type-check (p/ast code))]
+    (when-not (:success result)
+      (str/join "\n" (map #(if (map? %) (or (:message %) (pr-str %)) (str %))
+                          (:errors result))))))
 
 (deftest plain-alias-resolves-in-a-convert
   (testing "convert to an alias tests the alias's base type"
@@ -307,33 +315,100 @@ end
 print(d(create Holds.make(5)))
 print(d(create Holds.make(\"hi\")))")))))
 
-(deftest refinement-in-a-type-test-is-rejected
-  (testing "a refinement cannot be a runtime type test, and the error says why"
-    (let [msg (walker-error "declare type Quantity = Integer where n: n > 0
-let x: Any := 5
-if convert x to y: Quantity then print(y) end")]
-      (is (some? msg) "convert to a refinement must be rejected")
-      (is (re-find #"refinement type" msg) msg)
-      (is (re-find #"predicate is erased" msg) msg)
-      (is (re-find #"Test `Integer`" msg)
-          (str "should name the base type to test instead, got: " msg)))))
+(deftest convert-to-a-refinement-tests-base-and-predicate
+  (testing "true and bound for a satisfying value; false and nil for one that
+            fails the predicate or is not the base type at all"
+    (is (= ["\"ok 3\"" "\"rejected\"" "\"rejected\"" "5" "\"no\"" "\"no\""]
+           (both "declare type Quantity = Integer where n: n > 0
+function try(x: Integer): String do
+  result := \"rejected\"
+  if convert x to q: Quantity then
+    result := \"ok \" + q.to_string
+  end
+end
+print(try(3))
+print(try(0))
+print(try(-5))
+let xs: Array[Any] := [5, \"five\", -1]
+across xs as x do
+  if convert x to q: Quantity then print(q) else print(\"no\") end
+end")))))
 
-(deftest refinement-in-a-field-pattern-is-rejected
-  (testing "the same rejection reaches type patterns, which desugar to convert"
-    (let [msg (walker-error "declare type Quantity = Integer where n: n > 0
+(deftest convert-to-a-refinement-as-a-plain-expression
+  (testing "outside a condition: the Boolean result, and the variable nil on failure"
+    (is (= ["false" "nil" "true" "7"]
+           (both "declare type Quantity = Integer where n: n > 0
+let a := convert 0 to q: Quantity
+print(a)
+print(q)
+let b := convert 7 to r: Quantity
+print(b)
+print(r)")))))
+
+(deftest convert-to-a-refinement-binds-the-refinement-type
+  (testing "the bound variable is a Quantity: it passes to a Quantity parameter"
+    (is (= ["42"]
+           (both "declare type Quantity = Integer where n: n > 0
+function need(q: Quantity): Integer do
+  result := q * 2
+end
+let v: Any := 21
+if convert v to q: Quantity then print(need(q)) end")))))
+
+(deftest convert-to-a-refinement-still-requires-related-types
+  (testing "a value whose type cannot be a Quantity is a compile-time error,
+            not a convert that is always false"
+    (let [msg (type-error-message "declare type Quantity = Integer where n: n > 0
+print(convert \"abc\" to q: Quantity)")]
+      (is (some? msg) "String to Quantity must be rejected")
+      (is (re-find #"convert requires related types" (or msg "")) msg))))
+
+(deftest convert-to-a-refinement-of-a-class
+  (testing "a refinement of a user class runs its predicate on the object"
+    (is (= ["10" "\"no\"" "\"no\""]
+           (both "class Account
+create
+  make(b: Integer) do
+    balance := b
+  end
+feature
+  balance: Integer
+end
+declare type Funded = Account where a: a.balance > 0
+let xs: Array[Any] := [create Account.make(10), create Account.make(0), \"acct\"]
+across xs as x do
+  if convert x to f: Funded then print(f.balance) else print(\"no\") end
+end")))))
+
+(deftest convert-to-a-refinement-whose-binder-collides-with-the-checker
+  (testing "a predicate binder named like the checker's own parameter still works"
+    (is (= ["true" "false"]
+           (both "declare type Small = Integer where __refine_value__: __refine_value__ < 10
+print(convert 3 to s: Small)
+print(convert 30 to t: Small)")))))
+
+(deftest refinement-in-a-field-pattern-tests-the-predicate
+  (testing "type patterns desugar to convert, so `content: Quantity` tests the
+            predicate too, and a failing value falls to the next clause"
+    (is (= ["\"qty 4\"" "\"other\"" "\"other\""]
+           (both "declare type Quantity = Integer where n: n > 0
 union Box
   Holds(content: Any)
   Empty
 end
-match create Holds.make(5) of
-  Holds(content: Quantity) then print(content)
-  _                        then print(0)
-end")]
-      (is (some? msg) "a refinement type pattern must be rejected")
-      (is (re-find #"`Quantity` is a refinement type" msg) msg))))
+function d(b: Box): String do
+  match b of
+    Holds(content: Quantity) then result := \"qty \" + content.to_string
+    Holds(content)           then result := \"other\"
+    Empty                    then result := \"empty\"
+  end
+end
+print(d(create Holds.make(4)))
+print(d(create Holds.make(-4)))
+print(d(create Holds.make(\"x\")))")))))
 
 (deftest refinement-still-checked-at-its-narrowing-sites
-  (testing "rejecting the type test does not disturb let/param/return checks"
+  (testing "a convert to a refinement does not disturb let/param/return checks"
     (is (violates? "declare type Quantity = Integer where n: n > 0
 let q: Quantity := -3
 print(q)"))
@@ -356,14 +431,14 @@ if convert b to y: Ints then print(\"parameterized\") else print(\"parameterized
 let c: Any := 7
 if convert c to z: ?Count then print(\"detachable\") else print(\"detachable NO\") end")))))
 
-(deftest detachable-refinement-is-rejected-too
-  (testing "`?Refinement` is rejected like the bare form, and names the alias"
-    (let [msg (walker-error "declare type Quantity = Integer where n: n > 0
+(deftest detachable-refinement-in-a-convert
+  (testing "`?Quantity` as a convert target tests the predicate like the bare form"
+    (is (= ["\"yes 5\"" "\"no\""]
+           (both "declare type Quantity = Integer where n: n > 0
 let a: Any := 5
-if convert a to y: ?Quantity then print(y) end")]
-      (is (some? msg) "?Quantity must be rejected")
-      (is (re-find #"`Quantity` is a refinement type" msg)
-          (str "should name the alias, not the `?` shape, got: " msg)))))
+if convert a to y: ?Quantity then print(\"yes \" + y.to_string) else print(\"no\") end
+let b: Any := -5
+if convert b to z: ?Quantity then print(\"yes\") else print(\"no\") end")))))
 
 ;; Refinement checks are injected at parse time, which sees only the current REPL
 ;; cell's `declare type`. A `let x: R := v` typed on a *later* line than its
@@ -385,6 +460,23 @@ if convert a to y: ?Quantity then print(y) end")]
       (is (= 2 (count (re-seq #"Refinement Quantity violated" out)))
           "both -1 and 0 must be rejected, 5 accepted")
       (is (str/includes? out "5")))))
+
+(deftest convert-to-alias-from-earlier-repl-cell
+  (testing "a convert to a refinement or plain alias declared on a previous REPL
+            line tests the predicate / base type, rather than a class named after
+            the alias (which never matched)"
+    (let [ctx (repl/init-repl-context)
+          out (with-out-str
+                (repl/eval-code ctx "declare type Quantity = Integer where n: n > 0")
+                (repl/eval-code ctx "declare type Count = Integer")
+                (repl/eval-code ctx "print(convert 3 to a: Quantity)")
+                (repl/eval-code ctx "print(convert 0 to b: Quantity)")
+                (repl/eval-code ctx "let v: Any := 9")
+                (repl/eval-code ctx "print(convert v to c: Count)"))
+          printed (->> (str/split-lines out)
+                       (map str/trim)
+                       (filter #{"true" "false"}))]
+      (is (= ["true" "false" "true"] printed) out))))
 
 ;; `where` is matched the same way `alias` is (see operator_alias_test.clj):
 ;; a plain IDENTIFIER at the one position it means something, spelling checked
@@ -520,18 +612,15 @@ print(create Box.make(-5).q)")]
       ;; cross-file enforcement working at all.
       (is (= "Refinement q violated" (:error (run-cross-file main-file)))))))
 
-(deftest cross-file-convert-to-refinement-is-rejected-test
-  (testing "`convert x to y: R` is rejected the same way whether R is declared
-            in the entry file or reached via intern — not silently accepted"
+(deftest cross-file-convert-to-refinement-tests-the-predicate-test
+  (testing "`convert x to y: R` tests R's predicate whether R is declared in the
+            entry file or reached via intern"
     (let [main-file (write-lib-and-main!
                      "declare type Quantity = Integer where n: n > 0"
                      "let x: Any := 5
-if convert x to y: Quantity then print(y) end")
-          {:keys [error]} (run-cross-file main-file)]
-      (is (some? error) "convert to an interned refinement must be rejected")
-      (is (re-find #"`Quantity` is a refinement type" (or error "")) error)
-      (is (not (re-find #"internal error in the compiled backend" (or error "")))
-          "a deliberate rejection must not be reported as a compiler defect"))))
+if convert x to y: Quantity then print(y) end
+print(convert 0 to z: Quantity)")]
+      (is (= "5\nfalse\n" (:output (run-cross-file main-file)))))))
 
 (deftest cross-file-convert-to-plain-alias-still-resolves-test
   (testing "a non-refinement alias reached via intern still resolves in a

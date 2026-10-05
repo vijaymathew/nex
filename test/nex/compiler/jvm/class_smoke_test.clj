@@ -1350,7 +1350,9 @@ end"))
                               "  print(exception)\n"
                               "end")))]
       (is (:compiled? result))
-      (is (= ["\"Precondition violation: not_empty\""] (runtime/state-output (:state session)))))))
+      ;; A built-in failure's `exception` is a Precondition_Violation object
+      ;; (Definition B.7); print renders it through its to_string, unquoted.
+      (is (= ["Precondition violation: not_empty"] (runtime/state-output (:state session)))))))
 
 (deftest compiled-free-function-raise-message-test
   (testing "rescue sees the raised value, not nil, for a raise inside a free function"

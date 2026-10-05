@@ -113,7 +113,7 @@
          (locking (:lock ch)
            (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
              (when closed?
-               (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
+               (throw (ex-info "Cannot send on a closed channel" {:channel ch :builtin-kind "Channel_Closed"})))
              (cond
                (seq receivers)
                (let [[receiver rest-receivers] (queue-pop receivers)]
@@ -135,7 +135,7 @@
                             @(second deliver-now))]
                (cond
                  (= result channel-closed-signal)
-                 (throw (ex-info "Cannot send on a closed channel" {:channel ch}))
+                 (throw (ex-info "Cannot send on a closed channel" {:channel ch :builtin-kind "Channel_Closed"}))
 
                  (= result channel-timeout-signal)
                  (do
@@ -150,7 +150,7 @@
   (locking (:lock ch)
     (let [{:keys [closed? receivers capacity buffer]} @(:state ch)]
       (when closed?
-        (throw (ex-info "Cannot send on a closed channel" {:channel ch})))
+        (throw (ex-info "Cannot send on a closed channel" {:channel ch :builtin-kind "Channel_Closed"})))
       (cond
         (seq receivers)
         (let [[receiver rest-receivers] (queue-pop receivers)]
@@ -204,13 +204,13 @@
        :sender (let [{:keys [value ack]} (second ready)]
                  (deliver ack true)
                  value)
-       :closed (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
+       :closed (throw (ex-info "Cannot receive from a closed channel" {:channel ch :builtin-kind "Channel_Closed"}))
        :wait (let [result (if timed?
                             (deref (second ready) (timeout-ms timeout) channel-timeout-signal)
                             @(second ready))]
                (cond
                  (= result channel-closed-signal)
-                 (throw (ex-info "Cannot receive from a closed channel" {:channel ch}))
+                 (throw (ex-info "Cannot receive from a closed channel" {:channel ch :builtin-kind "Channel_Closed"}))
 
                  (= result channel-timeout-signal)
                  (do

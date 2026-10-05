@@ -2575,11 +2575,16 @@
     (.visitInsn mv Opcodes/ARETURN)))
 
 (defn- emit-raise!
-  [^MethodVisitor mv expr state-slot]
+  [^MethodVisitor mv expr builtin state-slot]
   (let [jvm-type (emit-expr! mv expr state-slot)]
     (when (contains? ir/primitive-jvm-types jvm-type)
       (emit-box! mv jvm-type))
-    (emit-runtime-invoke-1! mv "make-raised-exception")
+    (if builtin
+      (do (.visitLdcInsn mv ^String builtin)
+          (emit-runtime-invoke-2! mv "make-builtin-failure"))
+      (do (.visitVarInsn mv Opcodes/ALOAD state-slot)
+          (.visitInsn mv Opcodes/SWAP)
+          (emit-runtime-invoke-2! mv "make-raised-exception-in")))
     (.visitTypeInsn mv Opcodes/CHECKCAST throwable-internal-name)
     (.visitInsn mv Opcodes/ATHROW)))
 
@@ -2657,8 +2662,9 @@
     (.visitInsn mv Opcodes/ATHROW)
 
     (.visitLabel mv not-retry-label)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
     (.visitVarInsn mv Opcodes/ALOAD throwable-slot)
-    (emit-runtime-invoke-1! mv "exception-value")
+    (emit-runtime-invoke-2! mv "rescue-exception-value")
     (.visitVarInsn mv Opcodes/ASTORE exception-slot)
     (.visitLabel mv rescue-start)
     (doseq [stmt rescue]
@@ -2818,7 +2824,7 @@
    :top-set      emit-stmt-top-set!
    :field-set    emit-stmt-field-set!
    :call-runtime (fn [mv stmt state-slot] (emit-pop! mv (emit-expr! mv stmt state-slot)))
-   :raise        (fn [mv stmt state-slot] (emit-raise! mv (:expr stmt) state-slot))
+   :raise        (fn [mv stmt state-slot] (emit-raise! mv (:expr stmt) (:builtin stmt) state-slot))
    :retry        (fn [mv _stmt _state-slot] (emit-retry! mv))
    :assert       (fn [mv stmt state-slot] (emit-assert! mv stmt state-slot))
    :try          (fn [mv stmt state-slot] (emit-try! mv stmt state-slot))

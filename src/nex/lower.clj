@@ -2816,8 +2816,11 @@
                    :jvm-type (:jvm-type local)}]))))))
 
 (defn- lower-convert-expression
-  [env {:keys [value var-name target-type] :as expr}]
-  (let [target-name (if (map? target-type) (:base-type target-type) target-type)
+  [env {:keys [value var-name target-type runtime-target-type] :as expr}]
+  (let [;; A refinement target is tested at runtime as its base class (its
+        ;; predicate already ran, in the checker nex.walker wrapped the value in).
+        target-type (or runtime-target-type target-type)
+        target-name (if (map? target-type) (:base-type target-type) target-type)
         target-runtime (runtime-type-token-ir env target-type)
         binding (or (lookup-convert-binding env var-name)
                     (throw (ex-info "convert binding must exist before lowering expression"
@@ -7093,14 +7096,15 @@
         else-stmts (if-let [else-body (:else stmt)]
                      else-body
                      [{:type :raise
-                       :value {:type :string :value "No matching clause in match"}}])
+                       :value {:type :string :value "No matching clause in match"}
+                       :builtin "No_Matching_Clause"}])
         [env'' lowered-clauses] (lower-match-clauses env' tmp-name (:clauses stmt) else-stmts)]
     [(scoped-env env env'')
      (ir/block-node (into [init-local] lowered-clauses))]))
 
 (defn- lower-stmt-raise
   [env stmt]
-  [env (ir/raise-node (lower-expression env (:value stmt)))])
+  [env (ir/raise-node (lower-expression env (:value stmt)) (:builtin stmt))])
 
 (defn- lower-stmt-retry
   [env stmt]

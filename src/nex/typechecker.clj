@@ -2593,11 +2593,18 @@
   "Type-check convert expression:
    convert <value> to <var>:<Type>
    Returns Boolean and binds <var> as detachable <Type> in current scope."
-  [env {:keys [value var-name target-type from-pattern]}]
+  [env {:keys [value var-name target-type from-pattern runtime-target-type]}]
   (validate-type-annotation env target-type)
   (when from-pattern
     (check-pattern-type env from-pattern target-type))
-  (let [value-type (check-expression env value)
+  (let [value-type (if runtime-target-type
+                     ;; A refinement target: nex.walker routed the value through
+                     ;; the refinement's checker, `__refine_R(v: Any): ?Base`,
+                     ;; which accepts anything. Relate the value the program
+                     ;; wrote to R instead -- the checker is synthesized, so
+                     ;; checking its call adds nothing.
+                     (check-expression env (first (:args value)))
+                     (check-expression env value))
         target-type (normalize-type target-type)
         base-name (fn [t] (if (map? t) (:base-type t) t))
         numeric? (conj sized-integer-types "Integer" "Real")

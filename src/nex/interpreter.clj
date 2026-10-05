@@ -2650,10 +2650,18 @@
     (last (map #(eval-node ctx %) statements))))
 
 (defmethod eval-node :raise
-  [ctx {:keys [value]}]
+  [ctx {:keys [value builtin]}]
   (maybe-debug-pause ctx {:type :raise :value value})
   (let [val (eval-node ctx value)]
-    (throw (ex-info (str val) {:type :nex-exception :value val}))))
+    (if builtin
+      ;; A failure the language raises itself through a generated `raise`
+      ;; (nex.walker's refinement checks): "Kind" or "Kind/label".
+      (let [[kind label] (str/split (str builtin) #"/" 2)]
+        (throw (ex-info (str val) {:builtin-kind kind :label label})))
+      ;; Rendered as `print` would, so an uncaught raise of an object reports
+      ;; its own to_string rather than an identity; a string stays unquoted.
+      (throw (ex-info (if (string? val) val (print-output-value ctx val))
+                      {:type :nex-exception :value val})))))
 
 (defmethod eval-node :retry
   [ctx _node]
@@ -2667,6 +2675,28 @@
     (when-not (eval-node ctx condition)
       (report-contract-violation bi/Assertion label condition (:dbg/line node))))
   nil)
+
+(defn- rescue-exception-value
+  "What a `rescue` block's `exception` holds for E: a value the program raised
+   is that value; a built-in failure is an instance of its lib/lang/exception.nex
+   class (Definition B.7), built by that library's `__builtin_exception`. A
+   program with a `rescue` has the library (nex.walker/add-implied-interns), so
+   the message string is only a fallback for one that declared a colliding
+   class of its own instead."
+  [ctx e]
+  (if (and (instance? clojure.lang.ExceptionInfo e)
+           (= :nex-exception (:type (ex-data e))))
+    (:value (ex-data e))
+    (or (when-let [[kind message label] (rt/builtin-failure e)]
+          (when (env-contains? (:globals ctx) "__builtin_exception")
+            (eval-node ctx {:type :call
+                            :target nil
+                            :method "__builtin_exception"
+                            :args [{:type :string :value kind}
+                                   {:type :string :value message}
+                                   (if label {:type :string :value label} {:type :nil})]
+                            :has-parens true})))
+        (nex-error-message e))))
 
 (defn eval-body-with-rescue
   "Execute body statements with rescue/retry support.
@@ -2684,10 +2714,7 @@
                    (= :nex-retry (:type (ex-data e))))
             (throw e)
             ;; Real exception — run rescue
-            (let [exc-value (if (and (instance? clojure.lang.ExceptionInfo e)
-                                     (= :nex-exception (:type (ex-data e))))
-                              (:value (ex-data e))
-                              (nex-error-message e))
+            (let [exc-value (rescue-exception-value ctx e)
                   rescue-env (make-env (:current-env ctx))
                   _ (env-define rescue-env "exception" exc-value)
                   rescue-ctx (assoc ctx :current-env rescue-env)]
@@ -2717,8 +2744,11 @@
     (eval-node ctx alternative)))
 
 (defmethod eval-node :convert
-  [ctx {:keys [value var-name target-type]}]
+  [ctx {:keys [value var-name target-type runtime-target-type]}]
   (let [v (eval-node ctx value)
+        ;; A refinement target is tested as its base class (nex.walker ran its
+        ;; predicate in the checker it wrapped the value in).
+        target-type (or runtime-target-type target-type)
         target-name (if (map? target-type) (:base-type target-type) target-type)
         runtime-name (runtime-type-name v)
         ;; A generic instance carries a specialized name ("Some[Integer]") while
@@ -2817,7 +2847,7 @@
       (if else
         (last (map #(eval-node ctx %) else))
         (throw (ex-info "No matching clause in match"
-                        {:value val}))))))
+                        {:value val :builtin-kind "No_Matching_Clause"}))))))
 
 (defmethod eval-node :select
   [ctx {:keys [clauses else timeout] :as node}]
@@ -2868,14 +2898,16 @@
                 ;; variant is what makes strict decrease a termination argument)
                 _ (when (and variant (neg? curr-variant))
                     (throw (ex-info "Loop variant must be non-negative"
-                                    {:iteration iteration
+                                    {:builtin-kind "Variant_Violation"
+                                     :iteration iteration
                                      :current-variant curr-variant})))
 
                 ;; Check variant decreases (if present and not first iteration)
                 _ (when (and variant prev-variant)
                     (when-not (< curr-variant prev-variant)
                       (throw (ex-info "Loop variant must decrease"
-                                      {:iteration iteration
+                                      {:builtin-kind "Variant_Violation"
+                                       :iteration iteration
                                        :previous-variant prev-variant
                                        :current-variant curr-variant}))))
 

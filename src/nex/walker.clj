@@ -794,7 +794,8 @@
            :condition {:type :unary :operator "not" :expr predicate}
            :then [{:type :raise
                    :value {:type :string
-                           :value (str "Refinement " rname " violated")}}]
+                           :value (str "Refinement " rname " violated")}
+                   :builtin (str "Refinement_Violation/" rname)}]
            :elseif []
            :else nil}]})
 
@@ -851,10 +852,13 @@
 ;; accepts it. Resolve the alias to what it actually is before either backend
 ;; sees it, so the test is against Integer.
 ;;
-;; A refinement (`= Integer where n: n > 0`) is not resolvable this way. Its
-;; predicate is erased and cannot be evaluated by a type test, so resolving it to
-;; its base would silently *weaken* the test — `content: Quantity` would happily
-;; match -5. That one is rejected instead.
+;; A refinement (`= Integer where n: n > 0`) is not resolvable this way: a test
+;; against its base alone would silently *weaken* it — `content: Quantity` would
+;; happily match -5. Instead (Definition 4.3, 5.6) the value is passed through a
+;; synthetic checker, `__refine_Quantity`, that yields it when it is an Integer
+;; satisfying the predicate and nil otherwise; the convert then tests that
+;; result. So a failed predicate makes the convert false with its variable nil,
+;; and the typechecker still sees the target as `Quantity`.
 
 (defn- alias-target-name
   "The alias name a convert target refers to, or nil. `Count` and `?Count` both
@@ -876,20 +880,93 @@
     {:base-type type-expr :detachable true}
     (assoc type-expr :detachable true)))
 
+(defn- refinement-checker-name
+  [refinement-name]
+  (str "__refine_" refinement-name))
+
+(def ^:private refinement-checker-param "__refine_value__")
+
+(defn- refinement-checker-function
+  "`function __refine_R(__refine_value__: Any): ?Base do
+     if convert __refine_value__ to <binder>: Base and <predicate> then
+       result := <binder>
+     end
+   end` -- the value when it is a Base satisfying R's predicate, else nil. The
+  predicate runs exactly as written, with its own binder, as at every other
+  narrowing site; the `and` narrows the binder to Base for it."
+  [refinement-name {:keys [type-expr refinement]}]
+  (let [{:keys [binder predicate]} refinement
+        fn-name (refinement-checker-name refinement-name)
+        class-name (str fn-name "_Function")
+        ;; The parameter must not be the predicate's own binder.
+        param (if (= binder refinement-checker-param)
+                (str refinement-checker-param "_")
+                refinement-checker-param)
+        params [{:name param :type "Any"}]
+        return-type (detach type-expr)
+        body [{:type :if
+               :condition {:type :binary :operator "and"
+                           :left {:type :convert
+                                  :value (identifier-node param)
+                                  :var-name binder
+                                  :target-type type-expr}
+                           :right predicate}
+               :then [{:type :assign :target "result" :value (identifier-node binder)}]
+               :elseif []
+               :else nil}]]
+    {:type :function
+     :name fn-name
+     :class-name class-name
+     :generic-params nil
+     :declaration-only? false
+     :params params
+     :return-type return-type
+     :body body
+     :class-def {:type :class
+                 :name class-name
+                 :generic-params nil
+                 :note nil
+                 :parents [{:parent "Function"}]
+                 :body [{:type :feature-section
+                         :visibility {:type :public}
+                         :members [{:type :method
+                                    :name "call1"
+                                    :params params
+                                    :return-type return-type
+                                    :declaration-only? false
+                                    :note nil
+                                    :require nil
+                                    :body body
+                                    :ensure nil
+                                    :rescue nil}]}]
+                 :invariant nil}}))
+
 (defn- resolve-convert-alias
-  [{:keys [target-type] :as node} aliases]
+  "NODE with its alias target resolved. A refinement target R is kept as
+  written, for the typechecker; the value is routed through R's checker, the
+  runtime test is made against R's base (:runtime-target-type), and R's name
+  is recorded in USED-REFINEMENTS so its checker gets defined."
+  [{:keys [target-type value] :as node} aliases used-refinements]
   (let [alias-name (alias-target-name target-type)]
     (if-let [{:keys [type-expr refinement]} (get aliases alias-name)]
-      (if refinement
-        (let [base (if (string? type-expr)
-                     type-expr
-                     (or (:base-type type-expr) (pr-str type-expr)))
-              msg (str "`" alias-name "` is a refinement type, so it cannot be used as a"
-                       " runtime type test: its predicate is erased, so the test could only"
-                       " check `" base "` and would match values `" alias-name "` excludes."
-                       " Test `" base "` and check the predicate in a guard, or narrow with a"
-                       " typed `let`, which does run the predicate.")]
-          (throw (ex-info msg {:error msg})))
+      (cond
+        ;; Already routed through its checker (this pass may run twice).
+        (:runtime-target-type node)
+        node
+
+        refinement
+        (do (swap! used-refinements conj alias-name)
+            (assoc node
+                   :value {:type :call
+                           :target nil
+                           :method (refinement-checker-name alias-name)
+                           :args [value]
+                           :has-parens true}
+                   :runtime-target-type (if (and (map? target-type) (:detachable target-type))
+                                          (detach type-expr)
+                                          type-expr)))
+
+        :else
         (assoc node :target-type (if (and (map? target-type) (:detachable target-type))
                                    (detach type-expr)
                                    type-expr)))
@@ -897,29 +974,37 @@
 
 (defn resolve-convert-aliases
   "Rewrite every `convert` whose target names a plain alias to name the alias's
-  base type, and reject one whose target names a refinement.
+  base type, and route one whose target names a refinement through that
+  refinement's checker function, which this adds to the program.
 
    Public so a later pass over a program with more type-aliases in scope than
    its own file had at parse time (an intern-merged program — see
    nex.compiler.jvm.file/augment-ast-with-interns) can re-run this: a
    `convert x to y: R` naming a refinement R declared in a different,
    interned file was invisible to `aliases` here at that file's own parse
-   time, so it silently passed through unresolved and unrejected instead of
-   raising the same 'refinement type, so it cannot be used as a runtime type
-   test' error a same-file refinement already gets. Safe to call twice: a
-   `:convert` this already resolved now names its base type (or a name that
-   is itself not a refinement), which `aliases` either doesn't contain or
-   maps to itself, so a second pass is a no-op for it."
+   time, so it silently passed through unresolved, its runtime test against
+   a class named R that never matches. Safe to call twice: a `:convert` this
+   already resolved names its base type (or a name that is itself not a
+   refinement), or carries :runtime-target-type, and a checker function
+   already in the program is not added again, so a second pass is a no-op."
   [program]
   (let [aliases (into {} (map (juxt :name identity) (:type-aliases program)))]
     (if (empty? aliases)
       program
-      (walk/postwalk
-       (fn [n]
-         (if (and (map? n) (= :convert (:type n)))
-           (resolve-convert-alias n aliases)
-           n))
-       program))))
+      (let [used-refinements (atom #{})
+            program' (walk/postwalk
+                      (fn [n]
+                        (if (and (map? n) (= :convert (:type n)))
+                          (resolve-convert-alias n aliases used-refinements)
+                          n))
+                      program)
+            defined (set (map :name (:functions program')))
+            checkers (->> (sort @used-refinements)
+                          (remove #(defined (refinement-checker-name %)))
+                          (mapv #(refinement-checker-function % (get aliases %))))]
+        (cond-> program'
+          (seq checkers) (-> (update :functions #(vec (concat % checkers)))
+                             (update :classes #(vec (concat % (map :class-def checkers))))))))))
 
 (defn qualify-interned-function-class-names
   "An interned function's synthetic wrapper class name (build-function-node
@@ -1331,6 +1416,32 @@
     (cond-> program
       (seq implied) (update :interns into implied))))
 
+(def ^:private exception-library-classes
+  "The classes lib/lang/exception.nex declares (Definition B.7)."
+  #{"Exception" "Contract_Violation" "Precondition_Violation"
+    "Postcondition_Violation" "Invariant_Violation" "Loop_Invariant_Violation"
+    "Variant_Violation" "Assertion_Violation" "Refinement_Violation"
+    "Division_by_Zero" "Arithmetic_Overflow" "Void_Access" "Index_Out_Of_Bounds"
+    "Conversion_Error" "No_Matching_Clause" "Channel_Closed" "Host_Exception"})
+
+(defn- add-implied-exception-intern
+  "Intern lib/lang/exception.nex into a program that can observe a built-in
+   exception -- one with a `rescue` anywhere, whose `exception` the runtime
+   builds as an instance of the library's classes -- or that names one of
+   those classes. Not when the program declares one of them itself (the
+   library's own file does), nor when it already interns it."
+  [program]
+  (let [nodes (tree-seq coll? seq (select-keys program [:statements :functions :classes]))
+        declared-classes (set (map :name (:classes program)))]
+    (if (and (not-any? declared-classes exception-library-classes)
+             (not-any? #(= ["lang" "Exception"] [(:path %) (:class-name %)]) (:interns program))
+             (some #(or (and (map? %) (seq (:rescue %)))
+                        (and (string? %) (contains? exception-library-classes %)))
+                   nodes))
+      (update program :interns conj
+              {:type :intern :path "lang" :class-name "Exception" :alias nil :implied true})
+      program)))
+
 (defn- handle-program
   [[_ & nodes]]
   (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
@@ -1387,6 +1498,7 @@
          :statements (vec statements)
          :calls (vec calls)}
         add-implied-interns
+        add-implied-exception-intern
         resolve-convert-aliases
         inject-refinement-checks)))
 
