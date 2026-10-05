@@ -8,6 +8,7 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - [Collection Types](collection-types.md)
 - [Cursor Types](cursor-types.md)
 - [System Classes](system-classes.md)
+- [Exception Classes](exceptions.md)
 - [Data Libraries](data.md)
 - [IO Libraries](io.md)
 - [Text Libraries](text.md)

@@ -12,6 +12,10 @@ Unlike built-in runtime classes, these libraries may be platform-specific and mu
 - [Time Libraries](time.md) - `time/Date_Time` and `time/Duration` for UTC timestamps and time spans
 - [Networking Libraries](networking.md) - `Http_Client`, `Http_Server`, and TCP wrappers under `lib/net`
 
+One library is loaded for you: `lang/Exception`, the [built-in exception
+classes](exceptions.md), is interned automatically into any program that has a
+`rescue` or names one of its classes.
+
 ## Conventions
 
 - Library pages state their platform scope explicitly
