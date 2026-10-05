@@ -1305,12 +1305,48 @@
   (or (compiled-runtime-class-name state value)
       (typeinfo/runtime-type-name interp-object? typeinfo/get-type-name value)))
 
+(defn- split-target-type-name
+  "\"Some[String,Integer]\" -> [\"Some\" [\"String\" \"Integer\"]]; a name with no
+   type arguments -> [name nil]. nex.lower encodes a convert target's type
+   arguments this way, each as its base name (\"Any\" where it is not known)."
+  [target-type-name]
+  (if-let [[_ base args] (and (string? target-type-name)
+                              (re-matches #"([^\[]+)\[(.*)\]" target-type-name))]
+    [base (mapv str/trim (str/split args #","))]
+    [target-type-name nil]))
+
+(defn- compiled-value-type-args
+  "The type arguments a compiled generic object was created with, as base
+   type names, read from the `__generic_type_<param>` fields its class keeps
+   (\"Any\" where they were erased); nil for a non-generic value."
+  [state value runtime-name]
+  (when-let [class-def (and value (string? runtime-name)
+                            (.get ^HashMap @(:classes state) runtime-name))]
+    (when-let [params (seq (:generic-params class-def))]
+      (mapv (fn [{param-name :name}]
+              (or (when-let [[owner ^Field f] (deep-reflected-field value (str "__generic_type_" param-name))]
+                    (some-> (.get f owner) str))
+                  "Any"))
+            params))))
+
 (defn convert-value
   [state value target-type-name]
   (let [runtime-name (runtime-type-name state value)
+        [target-type-name target-args] (split-target-type-name target-type-name)
+        class-lookup (fn [n] (.get ^HashMap @(:classes state) n))
         ok? (and (some? value)
                  (string? target-type-name)
-                 (runtime-compatible-with? state runtime-name target-type-name))]
+                 (runtime-compatible-with? state runtime-name target-type-name)
+                 ;; The type arguments too, when the target names them
+                 ;; (Definition 4.7: Some[Integer] is not a Some[String]).
+                 (or (empty? target-args)
+                     (typeinfo/type-args-compatible?
+                      class-lookup
+                      (typeinfo/known-type-name-fn class-lookup)
+                      runtime-name
+                      (compiled-value-type-args state value runtime-name)
+                      target-type-name
+                      target-args)))]
     ;; A converted value may originate from a backend-agnostic helper (e.g.
     ;; nex.types.json/json-value->nex) that builds Maps/Sets via
     ;; nex.types.runtime's portable tagged representation. The compiled

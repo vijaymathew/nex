@@ -5521,6 +5521,31 @@
                         {:error (type-error
                                  (str class-name " is not a subclass of "
                                       base-type-name))})))
+      ;; A clause naming type arguments must instantiate the subject's class
+      ;; with the subject's own (generic arguments are invariant): with
+      ;; `o: Opt[Integer]`, `Some[String](...)` can never match. An argument
+      ;; that is a type parameter of the surrounding generic code is decided
+      ;; at run time instead.
+      (when (and (seq generic-args) (map? expr-type))
+        (let [subject-args (vec (or (:type-args expr-type) (:type-params expr-type)))
+              clause-args (ancestor-instantiation env class-name generic-args base-type-name #{})
+              generic-param? #(or (declared-generic-param? env %) (is-generic-type-param? env %))]
+          (when (and (seq subject-args)
+                     clause-args
+                     (= (count clause-args) (count subject-args))
+                     (some (fn [[c a]]
+                             (and (not (generic-param? c))
+                                  (not (generic-param? a))
+                                  (not (and (types-compatible? env c a)
+                                            (types-compatible? env a c)))))
+                           (map vector clause-args subject-args)))
+            (let [clause-type (display-type {:base-type class-name :type-args (vec generic-args)})]
+              (throw (ex-info (str "Match clause type " clause-type
+                                   " does not conform to " (display-type expr-type))
+                              {:error (type-error
+                                       (str clause-type " does not conform to "
+                                            (display-type expr-type)
+                                            ": its type arguments differ, so this clause can never match"))}))))))
       (let [clause-env (make-type-env env)
             ;; Carry the subject's type arguments onto the bound variable so
             ;; `o.field` resolves with the real element types. An explicit

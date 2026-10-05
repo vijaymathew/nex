@@ -2821,7 +2821,28 @@
         ;; predicate already ran, in the checker nex.walker wrapped the value in).
         target-type (or runtime-target-type target-type)
         target-name (if (map? target-type) (:base-type target-type) target-type)
-        target-runtime (runtime-type-token-ir env target-type)
+        type-args (when (map? target-type) (seq (generic-type-args target-type)))
+        target-runtime (if (and type-args
+                                (string? target-name)
+                                (not (contains? (:generic-param-names env) target-name)))
+                         ;; `Some[String]`: name the type arguments too, so the
+                         ;; runtime test can tell a Some[Integer] apart
+                         ;; (nex.compiler.jvm.runtime/convert-value). Each by
+                         ;; base name; a type parameter of the code here is not
+                         ;; known statically, and reads "Any" (matches anything).
+                         (ir/const-node (str target-name "["
+                                             (str/join ","
+                                                       (map (fn [a]
+                                                              (let [b (base-type-name a)]
+                                                                (if (or (not (string? b))
+                                                                        (contains? (:generic-param-names env) b))
+                                                                  "Any"
+                                                                  b)))
+                                                            type-args))
+                                             "]")
+                                        "String"
+                                        (string-jvm-type))
+                         (runtime-type-token-ir env target-type))
         binding (or (lookup-convert-binding env var-name)
                     (throw (ex-info "convert binding must exist before lowering expression"
                                     {:expr expr
