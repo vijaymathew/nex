@@ -138,7 +138,7 @@
 (declare supported-anonymous-function-in-ctx?)
 (declare supported-select-clause-in-ctx?)
 (declare merge-import-like-nodes)
-(declare class-def-in-ctx)
+(declare class-def-in-ctx compiled-class-in-ctx?)
 
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Comparable" "Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
@@ -377,7 +377,7 @@
                      (class-method-in-ctx ctx (:name class-def) (:method expr) (count (:args expr))))]
     (and (or class-target-def target-expr)
          (or class-target-def (supported-expr-in-ctx? ctx target-expr))
-         (contains? (:compiled-class-names ctx) base)
+         (compiled-class-in-ctx? ctx base)
          (or field-def method-def))))
 
 (defn- imported-java-target-call-in-ctx?
@@ -415,11 +415,22 @@
                             (class-constructors-in-ctx ctx cn))
                       (some #(lookup-ctor (:parent %) visited')
                             (:parents class-def))))))]
-      (lookup-ctor class-name #{}))))
+      ;; A qualified name (`time/Date_Time`) starts from the class it names.
+      (lookup-ctor (or (:name (class-def-in-ctx ctx class-name)) class-name) #{}))))
 
 (defn- class-def-in-ctx
+  "The class CLASS-NAME names, by its bare name or by its qualified one
+   (`time/Date_Time`, walked to \"time.Date_Time\"), which an interned class
+   carries as :qualified-name."
   [ctx class-name]
-  (get (into {} (map (juxt :name identity) (:classes ctx))) class-name))
+  (or (get (into {} (map (juxt :name identity) (:classes ctx))) class-name)
+      (some #(when (= class-name (:qualified-name %)) %) (:classes ctx))))
+
+(defn- compiled-class-in-ctx?
+  "Whether CLASS-NAME, bare or qualified, names a class compiled in this session."
+  [ctx class-name]
+  (or (contains? (:compiled-class-names ctx) class-name)
+      (some->> (class-def-in-ctx ctx class-name) :name (contains? (:compiled-class-names ctx)))))
 
 (defn- function-object-call-in-ctx?
   [ctx expr]
@@ -563,7 +574,7 @@
                   (if (:import class-def)
                     (and (nil? (:constructor expr))
                          (every? #(supported-expr-in-ctx? ctx %) (:args expr)))
-                    (and (contains? (:compiled-class-names ctx) (:class-name expr))
+                    (and (compiled-class-in-ctx? ctx (:class-name expr))
                          class-def
                          (not (:deferred? class-def))
                          (every? #(supported-expr-in-ctx? ctx %) (:args expr))
@@ -835,6 +846,22 @@
                     class-def)]))
           @(:class-asts session))))
 
+(defn- compiled-classes-for-lowering
+  "The session's compiled classes, plus a slot under each interned class's
+   qualified name (`time.Date_Time`) pointing at its bare one -- what
+   nex.compiler.jvm.file gives a whole program, so a qualified reference
+   (`create time/Date_Time.now`) lowers in a REPL cell too."
+  [session]
+  (let [compiled @(:compiled-classes session)]
+    (reduce (fn [m {:keys [name qualified-name]}]
+              (if-let [entry (and qualified-name
+                                  (not (contains? m qualified-name))
+                                  (get compiled name))]
+                (assoc m qualified-name entry)
+                m))
+            compiled
+            (vals @(:class-asts session)))))
+
 (defn- compile-and-register-classes!
   [session ast source-id]
   (let [actual-classes (vec (concat (user-class-defs ast)
@@ -1028,7 +1055,7 @@
           {:keys [unit]} (lower/lower-repl-cell compile-ast
                                                 {:name class-name
                                                  :source-file source-id
-                                                 :compiled-classes @(:compiled-classes session)
+                                                 :compiled-classes (compiled-classes-for-lowering session)
                                                  :functions other-functions
                                                  :var-types (session-var-types session)})
           bytecode (emit/compile-unit->bytes unit)
@@ -1143,6 +1170,14 @@
     (doseq [[alias-name {:keys [type-expr]}] @(:type-aliases session)]
       (when-let [real-class (and (string? type-expr) (get @(:classes ctx') type-expr))]
         (swap! (:classes ctx') assoc alias-name real-class)))
+    ;; Likewise an interned class's qualified name (`time.Date_Time`), which
+    ;; nex.interpreter/process-intern registers alongside the bare one; without
+    ;; it a cell run here could not `create time/Date_Time...`.
+    (doseq [{:keys [name qualified-name]} (vals @(:class-asts session))]
+      (when-let [real-class (and qualified-name
+                                 (not (contains? @(:classes ctx') qualified-name))
+                                 (get @(:classes ctx') name))]
+        (swap! (:classes ctx') assoc qualified-name real-class)))
     (doseq [[k v] @(:values (:state session))]
       (interp/env-define (:globals ctx') k v))
     {:ctx ctx'
@@ -1188,7 +1223,7 @@
                  _ (compile-and-register-classes! session prepared-ast source-id)
                  _ (remember-top-level-ast! session prepared-ast)
                  {:keys [unit]} (lower/lower-repl-cell prepared-ast {:name class-name
-                                                                     :compiled-classes @(:compiled-classes session)
+                                                                     :compiled-classes (compiled-classes-for-lowering session)
                                                                      :classes (vals @(:class-asts session))
                                                                      :functions (vals @(:function-asts session))
                                                                      :imports (:imports prepared-ast)

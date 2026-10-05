@@ -1840,8 +1840,13 @@
   ([ctx input source-id]
    (let [exec-ctx* (atom ctx)]
      (try
-       ;; Clear output from previous evaluation
+       ;; Clear output from previous evaluation -- the compiled session's
+       ;; buffer too: it is otherwise cleared only just before a compiled
+       ;; input runs, so an input failing earlier (an undefined name, while
+       ;; compiling) had the previous input's output flushed again ahead of
+       ;; its error (flush-compiled-output-on-error!).
        (reset! (:output ctx) [])
+       (some-> @*compiled-repl-session* :state compiled-runtime/clear-output!)
        (dbg/reset-run-state!)
        (let [exec-ctx (build-exec-ctx ctx source-id)]
          (reset! exec-ctx* exec-ctx)
