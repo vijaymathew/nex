@@ -4,6 +4,9 @@
             [nex.compiler.jvm.classloader :as loader]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
+            ;; Loaded for its side effect: installs the runtime's interpreter
+            ;; adapter, since this REPL mixes compiled and interpreted values.
+            [nex.compiler.jvm.interp-bridge]
             [nex.compiler.jvm.runtime :as rt]
             [nex.interpreter :as interp]
             [nex.intern :as intern]
