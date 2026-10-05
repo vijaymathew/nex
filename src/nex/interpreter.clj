@@ -688,6 +688,9 @@
     (-> generic-class-def
         (assoc :name spec-name)
         (assoc :template-name (:name generic-class-def))
+        ;; Kept for runtime type tests that name type arguments
+        ;; (generic-value-type-args-compatible?).
+        (assoc :type-args (vec type-args))
         (assoc :generic-params nil)
         (update :body #(substitute-in-body % type-map)))))
 
@@ -2698,6 +2701,27 @@
                             :has-parens true})))
         (nex-error-message e))))
 
+(defn- generic-value-type-args-compatible?
+  "Whether VALUE's type arguments agree with TARGET-ARGS, the type arguments a
+   `convert` target or `match` clause names for TARGET-CLASS (Definition 4.7:
+   a Some[Integer] is not a Some[String]). A generic instance is an object of a
+   specialized class (`Some[Integer]`) that records its arguments; an argument
+   that is not a known type (a type parameter of generic code) matches
+   anything. True when TARGET-ARGS is empty."
+  [ctx value target-class target-args]
+  (or (empty? target-args)
+      (not (nex-object? value))
+      (let [class-name (:class-name value)
+            spec (lookup-specialized-class ctx class-name)
+            lookup (fn [n] (get @(:classes ctx) n))]
+        (typeinfo/type-args-compatible?
+         lookup
+         (typeinfo/known-type-name-fn lookup)
+         (or (:template-name spec) class-name)
+         (:type-args spec)
+         target-class
+         target-args))))
+
 (defn eval-body-with-rescue
   "Execute body statements with rescue/retry support.
    If rescue contains retry, re-executes body.
@@ -2763,7 +2787,12 @@
              (and (some? v)
                   (string? target-name)
                   (or (convert-compatible-runtime? ctx runtime-name target-name)
-                      (convert-compatible-runtime? ctx runtime-base target-name))))]
+                      (convert-compatible-runtime? ctx runtime-base target-name))
+                  ;; ...and the type arguments, when the target names them.
+                  (generic-value-type-args-compatible?
+                   ctx v target-name
+                   (when (map? target-type)
+                     (or (:type-args target-type) (:type-params target-type))))))]
     (env-define (:current-env ctx) var-name (if ok? v nil))
     ok?))
 
@@ -2826,12 +2855,16 @@
                          (if-let [i (clojure.string/index-of val-class "[")]
                            (subs val-class 0 i)
                            val-class))
-        matched (some (fn [{:keys [class-name var-name bindings guard body]}]
+        matched (some (fn [{:keys [class-name var-name bindings guard body generic-args]}]
                         (when (and val-class
                                    (or (= val-class class-name)
                                        (= val-class-base class-name)
                                        (is-parent? ctx val-class class-name)
-                                       (is-parent? ctx val-class-base class-name)))
+                                       (is-parent? ctx val-class-base class-name))
+                                   ;; A clause naming type arguments matches only
+                                   ;; a value instantiated with them.
+                                   (generic-value-type-args-compatible?
+                                    ctx val class-name generic-args))
                           (let [match-env (make-env (:current-env ctx))
                                 match-ctx (assoc ctx :current-env match-env)]
                             (env-define match-env var-name val)
