@@ -2,6 +2,115 @@
 
 ## Unreleased
 
+## 0.5.6 - 2026-10-05
+
+- **Change: a failure the language raises reaches `rescue` as an object of a
+  built-in exception class.** `exception` used to hold the failure's message
+  string; it now holds an instance of `Division_by_Zero`,
+  `Precondition_Violation`, `Index_Out_Of_Bounds` and so on
+  (`lib/lang/exception.nex`, Definition of Nex Appendix B.7), so a handler can
+  tell failures apart with `convert` or `match`. Each has a `message`, and its
+  `to_string` is that message, so `"failed: " + exception` and
+  `exception.to_string` read as before; `print(exception)` now prints the
+  message without quotes. A contract violation carries the failed assertion's
+  `label`. A value raised with `raise` is not wrapped. A program may inherit
+  `Exception` for failures of its own. The library is interned automatically
+  into any program with a `rescue` or that names one of its classes. An
+  uncaught `raise` of an object is now reported through its `to_string`
+  rather than as a JVM identity (`Division_by_Zero@8b3c6622`).
+- **Change: `to_string` on a `String` is the text itself.** `String` had no
+  `to_string` of its own and fell back to `Any`'s, which quotes it, so
+  `"x: " + s.to_string` read `x: "abc"`. The same held for a `String` or `Char`
+  in an `Any`-typed value on the compiled backend, including a rescued
+  `exception`. Strings inside a collection are still shown quoted.
+- **Change: an object's class invariant is checked on creation and around
+  qualified calls only**, following Eiffel: when a constructor returns, and on
+  entry to and exit from `x.f` and `this.f`. An unqualified call `f` from
+  inside the class checks nothing, so a method may break the invariant while
+  it works, provided it holds again when the qualified call returns.
+- **Change: generic arguments are invariant.** `Box[Dog]` is no longer
+  accepted where a `Box[Animal]` is expected, and the same goes for `Array`.
+  A generic heir still conforms to its parent: `Labelled_Box[Dog]` is a
+  `Box[Dog]`. Assigning an `Any` to a concrete type now needs a `convert`
+  through generics too.
+- **Change: a `when` expression has the join type of its branches** — the
+  narrowest type both conform to (`Dog`/`Fish` gives `Animal`), or `Any` when
+  there is none (`1`/`"a"`, and `1`/`2.5`, so `+ 1` on the result is a type
+  error); a `nil` or optional branch makes it optional. This fixes the
+  unsound `when c then dog else animal end` being typed `Dog`.
+- **Change: the arguments of `f.call1(x)` and `adder(1)(x)` are type checked.**
+  Calling a function value through its call protocol, or calling the result of
+  a call, returned the declared result type but never compared the arguments
+  with the function's parameters, so a wrong type or count failed only at run
+  time. Both are now checked as a direct `f(x)` is, with the same messages.
+- **New: `convert` to a refinement type tests its predicate.** With
+  `declare type Quantity = Integer where n: n > 0`, `convert x to q: Quantity`
+  is `true` only for an `Integer` satisfying the predicate, and otherwise
+  `false` with `q` nil, as the Definition says; it used to be rejected. A
+  `field: Quantity` type pattern in a `match` now works the same way. In the
+  REPL, a `convert` to a refinement or plain alias declared in an earlier
+  input now resolves it too, instead of silently yielding `false`.
+- **Fix: `repeat` no longer loops forever on a negative or shrinking bound.**
+  It stopped only when its counter *equalled* the bound, so `repeat 0 - 1`, or
+  a body that lowered the bound below the counter, never ended. It now stops
+  when the counter reaches or passes the bound.
+- **Fix: a `match` guard can see the bindings of type tests and nested
+  patterns.** `Circle(radius: Real) if radius > 1.0` and
+  `Labelled(inner: Circle(radius as r)) if r > 1.0` failed with "Undefined
+  variable". Patterns nested two deep, which were rejected outright, now type
+  check and run.
+- **Fix: a closure can capture a name a condition binds.** On the compiled
+  backend, a closure using a variable bound by `convert e to x: T` or
+  `?e as x` — later in the same `and` chain, in the `then` branch, in a `when`,
+  or in a match guard or body — and a closure in a match body using a
+  destructured field, failed with "Unable to infer expression type during
+  lowering". The variable is captured at its narrowed type.
+- **Fix: a constructor may delegate to a grandparent's constructor on the
+  compiled backend** (`A.make(...)` from `C inherit B inherit A`), as the
+  Definition allows; it used to be refused as an unsupported construct.
+- **Fix: `f.call1(x)` on a function value compiles.**
+- **Fix: closures capture variables natively on the compiled backend.** A
+  closure that captured a variable used to run on the tree-walking
+  interpreter even in a compiled program; it now compiles to a class of its
+  own, and a compiled program never loads the interpreter. `--interpret` and
+  the debugger still use it.
+- **Fix: a program calling the http builtins gets their library classes.**
+  `http_get(...).status()` with no `intern net/Http_Client` failed to compile;
+  the library is now interned automatically, as for `net/Http_Server`.
+- **Fix: dispatch from inherited code.** On the compiled backend, an
+  unqualified call `f` made from a routine a subclass inherits now runs the
+  subclass's override, as `this.f` does and as the interpreter always did.
+- **Fix: `and` narrows every conjunct.** `if x /= nil and y /= nil then
+  x.v + y.v end` now type checks, in `if` and `when` and in longer chains. An
+  `or` still narrows nothing.
+- **Fix: a generic heir's constructor.** A class inheriting an instantiated
+  generic (`class Dog_Box inherit Box[Dog]`) can call `super.make(v)` or use
+  the inherited constructor.
+- **Fix: crashes in the compiled backend** when calling a grandparent's
+  routine by name (`Animal.name()` inside `Puppy`), when passing a `convert`
+  directly as an argument (`print(convert a to d: Dog)`), and in a closure
+  referring to `this`. A failed `convert` evaluates to `false`, not `nil`.
+- **Fix: `char_at` out of range raises `Index_Out_Of_Bounds`.** The
+  interpreter returned `nil` and the compiled backend leaked a JVM
+  null-pointer message.
+- **Fix: clearer errors.**
+  - `retry` outside a `rescue` in top-level code is a compile-time error
+    ("…found it elsewhere in top-level code"), not an internal error of the
+    compiled backend.
+  - An out-of-range `Integer` literal reports
+    `Integer literal out of range -9223372036854775808..9223372036854775807:
+    …` instead of the host's `For input string`.
+  - Messages about a free function name the function rather than its
+    internal `call0` (`Function 'f' uses Result but does not declare a return
+    type`), and an anonymous function is called one.
+  - Integer overflow on the compiled backend reports `Arithmetic overflow`
+    inside a `rescue` too, not the JVM's `long overflow`.
+- **Docs:** the Definition of Nex is brought up to date with the
+  implementation (field patterns, loop and `spawn` `rescue` clauses, generic
+  type aliases, `await_all`/`await_any` as free functions) and gains
+  Appendix B.7 on the built-in exceptions; the reference gains an Exception
+  Classes page.
+
 ## 0.5.5 - 2026-10-02
 
 - **Fix: a loop `variant` must now be non-negative.** The README always said
