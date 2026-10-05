@@ -3034,6 +3034,35 @@
                                       :var-types (merge (:var-types ctx) local-types)})
       "Any"))
 
+(defn- narrow-local-types-by-condition
+  "LOCAL-TYPES extended with the names a true CONDITION binds: each
+   `convert e to x: T` and `?e as x` in its `and` chain, read left to right so
+   a later conjunct's value may use an earlier one's name. Code that runs only
+   when the condition held (the rest of the chain, an `if`'s then branch, a
+   `when`'s consequent, a match clause's body) can only see these names
+   bound, so they get the narrowed, non-detachable type the typechecker gives
+   them there -- and a closure in that code captures them at that type."
+  [ctx local-types condition]
+  (cond
+    (not (map? condition))
+    local-types
+
+    (and (= :binary (:type condition)) (= "and" (:operator condition)))
+    (narrow-local-types-by-condition
+     ctx
+     (narrow-local-types-by-condition ctx local-types (:left condition))
+     (:right condition))
+
+    (= :convert (:type condition))
+    (assoc local-types (:var-name condition) (tc/attachable-type (:target-type condition)))
+
+    (= :attached-test (:type condition))
+    (assoc local-types (:var-name condition)
+           (tc/attachable-type (infer-prepass-type ctx local-types (:value condition))))
+
+    :else
+    local-types))
+
 ;; A closure is an ordinary compiled class (docs/md/COMPILED_CLOSURES.md): its
 ;; captures are fields, set at the creation site through a synthetic
 ;; constructor. Reserved (no Nex identifier starts with a double underscore):
@@ -3361,11 +3390,19 @@
   [ctx local-types captures expr]
   (assoc expr
          :condition (rewrite-expression-for-closures ctx local-types captures (:condition expr))
-         :then (first (rewrite-statements-for-closures* ctx local-types captures (:then expr)))
+         :then (first (rewrite-statements-for-closures*
+                       ctx
+                       (narrow-local-types-by-condition ctx local-types (:condition expr))
+                       captures
+                       (:then expr)))
          :elseif (mapv (fn [clause]
                          (assoc clause
                                 :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
-                                :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
+                                :then (first (rewrite-statements-for-closures*
+                                              ctx
+                                              (narrow-local-types-by-condition ctx local-types (:condition clause))
+                                              captures
+                                              (:then clause)))))
                        (:elseif expr))
          :else (first (rewrite-statements-for-closures* ctx local-types captures (:else expr)))))
 
@@ -3403,7 +3440,14 @@
     (= :binary (:type expr))
     (assoc expr
            :left (rewrite-expression-for-closures ctx local-types captures (:left expr))
-           :right (rewrite-expression-for-closures ctx local-types captures (:right expr)))
+           ;; The right of an `and` runs only once the left held.
+           :right (rewrite-expression-for-closures
+                   ctx
+                   (if (= "and" (:operator expr))
+                     (narrow-local-types-by-condition ctx local-types (:left expr))
+                     local-types)
+                   captures
+                   (:right expr)))
 
     (= :unary (:type expr))
     (assoc expr :expr (rewrite-expression-for-closures ctx local-types captures (:expr expr)))
@@ -3428,7 +3472,11 @@
     (= :when (:type expr))
     (assoc expr
            :condition (rewrite-expression-for-closures ctx local-types captures (:condition expr))
-           :consequent (rewrite-expression-for-closures ctx local-types captures (:consequent expr))
+           :consequent (rewrite-expression-for-closures
+                        ctx
+                        (narrow-local-types-by-condition ctx local-types (:condition expr))
+                        captures
+                        (:consequent expr))
            :alternative (rewrite-expression-for-closures ctx local-types captures (:alternative expr)))
 
     (= :old (:type expr))
@@ -3619,11 +3667,19 @@
   [ctx local-types captures stmt]
   [(assoc stmt
           :condition (rewrite-expression-for-closures ctx local-types captures (:condition stmt))
-          :then (first (rewrite-statements-for-closures* ctx local-types captures (:then stmt)))
+          :then (first (rewrite-statements-for-closures*
+                        ctx
+                        (narrow-local-types-by-condition ctx local-types (:condition stmt))
+                        captures
+                        (:then stmt)))
           :elseif (mapv (fn [clause]
                           (assoc clause
                                  :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
-                                 :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
+                                 :then (first (rewrite-statements-for-closures*
+                                               ctx
+                                               (narrow-local-types-by-condition ctx local-types (:condition clause))
+                                               captures
+                                               (:then clause)))))
                         (:elseif stmt))
           :else (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt))))
    local-types])
@@ -3647,9 +3703,19 @@
   [(assoc stmt
           :expr (rewrite-expression-for-closures ctx local-types captures (:expr stmt))
           :clauses (mapv (fn [clause]
-                           (let [clause-local-types (assoc local-types (:var-name clause) (:class-name clause))]
-                             (assoc clause
-                                    :body (first (rewrite-statements-for-closures* ctx clause-local-types captures (:body clause))))))
+                           ;; Scope as the clause runs: its bound variable,
+                           ;; then its destructured fields (:bindings), then
+                           ;; its guard, whose `convert`s the body sees narrowed.
+                           (let [clause-local-types (assoc local-types (:var-name clause) (:class-name clause))
+                                 [bindings' bound-local-types]
+                                 (rewrite-statements-for-closures* ctx clause-local-types captures (:bindings clause))
+                                 guard' (when (:guard clause)
+                                          (rewrite-expression-for-closures ctx bound-local-types captures (:guard clause)))
+                                 body-local-types (narrow-local-types-by-condition ctx bound-local-types (:guard clause))]
+                             (cond-> (assoc clause
+                                            :bindings bindings'
+                                            :body (first (rewrite-statements-for-closures* ctx body-local-types captures (:body clause))))
+                               (:guard clause) (assoc :guard guard'))))
                          (:clauses stmt))
           :else (when (:else stmt)
                   (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt)))))
