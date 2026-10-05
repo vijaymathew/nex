@@ -1643,7 +1643,9 @@
   [exec-ctx ast source-id]
   (let [classes (:classes ast)
         functions (:functions ast)
-        interns (:interns ast)
+        ;; An implied intern (a library an http builtin needs, see
+        ;; nex.walker/add-implied-interns) does not make a cell a definition.
+        interns (remove :implied (:interns ast))
         imports (:imports ast)
         statements (:statements ast)
         calls (:calls ast)

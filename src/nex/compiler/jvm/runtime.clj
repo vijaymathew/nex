@@ -29,12 +29,10 @@
 ;; Interpreter objects.
 ;;
 ;; Compiled code never creates one: every Nex class, closures included, is a
-;; generated JVM class. They can still reach compiled code in two ways — the
-;; REPL hands over values from a cell it evaluated on the tree-walker (e.g.
-;; under `:debug on`), and make-runtime-object falls back to an object map
-;; for a class the program never compiled. Recognising one is a shape test
-;; (an object map, which the interpreter's NexObject record also is) and
-;; needs no interpreter. Running Nex code on one does: that goes through the
+;; generated JVM class. They reach compiled code only from the REPL, which
+;; hands over values from a cell it evaluated on the tree-walker (e.g. under
+;; `:debug on`). Recognising one is a shape test (an object map, which the
+;; interpreter's NexObject record also is) and needs no interpreter. Running Nex code on one does: that goes through the
 ;; adapter the REPL installs (nex.compiler.jvm.interp-bridge), so this
 ;; namespace never loads nex.interpreter.
 ;; ---------------------------------------------------------------------------
@@ -968,11 +966,16 @@
         instance))))
 
 (defn- make-runtime-object
+  "An instance of the program's compiled CLASS-NAME, built by a builtin (the
+   http client and server hand the program Http_Response/Http_Request/
+   Http_Server_Response objects). A program that uses one of those builtins
+   always has its library's classes compiled in (nex.walker/add-implied-
+   interns), so a missing class is a compiler defect, reported as such."
   [state class-name field-values]
   (or (instantiate-compiled-object state class-name field-values)
-      ;; An object map: the interpreter's own object when one is loaded
-      ;; (bi's engine hook), else a plain map with the same shape.
-      (bi/make-object class-name field-values)))
+      (throw (ex-info (str "Internal error: class " class-name
+                           " is not compiled into this program")
+                      {:class-name class-name}))))
 
 (defn next-class-name!
   ([state prefix]

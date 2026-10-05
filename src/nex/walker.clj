@@ -1293,6 +1293,44 @@
 
 (declare transform-node)
 
+(def ^:private implied-library-interns
+  "Builtins that hand the program instances of a library class. `http_get`
+   returns an `Http_Response`; an http-server handler receives an
+   `Http_Request` and may get an `Http_Server_Response` back. Both backends
+   build those objects as instances of the library's own classes, so a
+   program using one of these builtins gets the library, as if it had written
+   the `intern` itself — otherwise the classes would not exist in it at all."
+  [{:builtins #{"http_get" "http_post"}
+    :path "net" :class-name "Http_Client"
+    :provides #{"Http_Response"}}
+   {:builtins #{"http_server_create" "http_server_get" "http_server_post"
+                "http_server_put" "http_server_delete" "http_server_start"}
+    :path "net" :class-name "Http_Server"
+    :provides #{"Http_Request" "Http_Server_Response"}}])
+
+(defn- add-implied-interns
+  "Append an `:implied` intern to PROGRAM for each library in
+   implied-library-interns whose builtins it calls, unless it already interns
+   that library, declares one of the classes the library provides (the
+   library's own file does), or defines a function of the builtin's name
+   (then the call is to that function, not the builtin)."
+  [program]
+  (let [called (into #{}
+                     (comp (filter map?)
+                           (filter #(and (= :call (:type %)) (nil? (:target %))))
+                           (map :method))
+                     (tree-seq coll? seq (select-keys program [:statements :functions :classes])))
+        declared-classes (set (map :name (:classes program)))
+        own-functions (set (map :name (:functions program)))
+        interned (set (map (juxt :path :class-name) (:interns program)))
+        implied (for [{:keys [builtins path class-name provides]} implied-library-interns
+                      :when (and (some #(and (called %) (not (own-functions %))) builtins)
+                                 (not (interned [path class-name]))
+                                 (not-any? declared-classes provides))]
+                  {:type :intern :path path :class-name class-name :alias nil :implied true})]
+    (cond-> program
+      (seq implied) (update :interns into implied))))
+
 (defn- handle-program
   [[_ & nodes]]
   (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
@@ -1348,6 +1386,7 @@
          :function-signature-conflicts signature-conflicts
          :statements (vec statements)
          :calls (vec calls)}
+        add-implied-interns
         resolve-convert-aliases
         inject-refinement-checks)))
 

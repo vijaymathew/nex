@@ -22,10 +22,8 @@
 ;; signatures and the inheritance/field structure — never executable bodies:
 ;; every method runs as compiled bytecode (closures included, see
 ;; docs/md/COMPILED_CLOSURES.md), so no Nex code in a whole-file program
-;; runs on the tree-walker. (The one remaining way an interpreter object can
-;; arise is runtime/make-runtime-object's fallback for a class this program
-;; did not compile — see there.) Dropping the bodies shrinks the blob to ~40% — which, ahead
-;; of the chunker, keeps most programs to a single LDC. This path is
+;; runs on the tree-walker. Dropping the bodies shrinks the blob to ~40% —
+;; which, ahead of the chunker, keeps most programs to a single LDC. This path is
 ;; whole-file only — the REPL compiles through its own entry point and never
 ;; reaches here.
 

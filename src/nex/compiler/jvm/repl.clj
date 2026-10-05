@@ -815,6 +815,26 @@
    :constructors (:constructors lowered-class)
    :methods (:methods lowered-class)})
 
+(defn- runtime-class-table
+  "The session's class-defs for the runtime state, each stamped with its
+   compiled class's names — what the runtime needs to build an instance
+   itself (make-runtime-object: the Http_Request and kin the http builtins
+   hand the program), the same stamping nex.compiler.jvm.file applies to a
+   whole file's table. Without it every such object fell back to an
+   interpreter object map."
+  [session]
+  (let [compiled @(:compiled-classes session)]
+    (into {}
+          (map (fn [[class-name class-def]]
+                 [class-name
+                  (if-let [{:keys [internal-name jvm-name binary-name]} (get compiled class-name)]
+                    (assoc class-def
+                           :internal-name internal-name
+                           :jvm-name jvm-name
+                           :binary-name binary-name)
+                    class-def)]))
+          @(:class-asts session))))
+
 (defn- compile-and-register-classes!
   [session ast source-id]
   (let [actual-classes (vec (concat (user-class-defs ast)
@@ -984,7 +1004,7 @@
                      (assoc acc name alias))
                    m
                    (:type-aliases ast))))
-  (rt/state-set-classes! (:state session) @(:class-asts session))
+  (rt/state-set-classes! (:state session) (runtime-class-table session))
   (rt/state-set-imports! (:state session) @(:import-asts session))
   session)
 
