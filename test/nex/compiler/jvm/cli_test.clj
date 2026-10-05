@@ -114,7 +114,7 @@ worker.await")
             subdirectory than account.nex.
 
             `nex <file>` (cmd_run_script) exports NEX_USER_DIR so
-            nex.interpreter/find-intern-file can fall back to the project
+            nex.intern/find-intern-file can fall back to the project
             root once a narrowing site is reached transitively — the
             interning file's own directory (lib/transaction) is the wrong
             root for a `lib/units/...` lookup. `nex compile jvm`

@@ -2082,7 +2082,7 @@
 (defn- visible-class-map
   "Name -> class-def, including every name an `intern ... as` alias resolves
    to. An aliased intern registers only a `*type-aliases*` entry pointing at
-   the real class (see `nex.interpreter/resolve-interned*`), not a second,
+   the real class (see `nex.intern/resolve-interned*`), not a second,
    nominally distinct class-def — so the alias name is added here as an extra
    key onto the *same* class-def value, keeping both names resolvable to one
    compiled class. Also keyed by every interned class-def's :qualified-name

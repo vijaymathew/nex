@@ -1359,13 +1359,7 @@
    classes into the builtin roots — no interpreter context needed."
   (delay (into {}
                (map (fn [class-def] [(:name class-def) class-def]))
-               (concat [(bootstrap/build-any-base-class)
-                        (bootstrap/build-function-base-class)
-                        (bootstrap/build-cursor-base-class)
-                        (bootstrap/build-comparable-base-class)
-                        (bootstrap/build-hashable-base-class)]
-                       (map bootstrap/build-builtin-scalar-class
-                            ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))))
+               (bootstrap/base-class-defs))))
 
 (defn- compiled-is-parent?
   [state class-name parent-name]
@@ -1545,6 +1539,66 @@
                    (.getDeclaredMethods (class value))))
     (let [simple (last (str/split (.getName (class value)) #"\."))]
       (or (second (re-matches #"(.+)_\d{4}" simple)) simple))))
+
+;; ---------------------------------------------------------------------------
+;; The context the compiled runtime calls the builtin library with.
+;; ---------------------------------------------------------------------------
+
+(defn- builtin-user-to-string
+  "`to_string` of an object a builtin is formatting (print, string concat,
+   Array/Map/Set rendering): a compiled object's own `to_string`, else its
+   `#<Class object>` placeholder; nil for anything that is not a Nex object,
+   so the builtin falls back to its own formatting."
+  [state value]
+  (cond
+    ;; An interpreter object, from a closure deoptimized onto the tree-walker.
+    (interp/nex-object? value)
+    (concat-string-value state value)
+
+    (or (nil? value) (string? value) (number? value) (boolean? value)
+        (char? value) (coll? value) (map? value))
+    nil
+
+    (compiled-object-has-to-string? value)
+    (let [result (invoke-user-method state value "to_string" [])]
+      (if (string? result) result (bi/nex-format-value result)))
+
+    :else
+    (when-let [class-name (compiled-object-class-name value)]
+      (str "#<" class-name " object>"))))
+
+(defn- builtin-equals-override
+  "A user `equals` between two objects, for a builtin's membership test. A
+   compiled object's `equals` override is already its JVM `equals`, which the
+   structural fallback reaches, so only interpreter objects need dispatching."
+  [state a b]
+  (when (and (interp/nex-object? a) (interp/nex-object? b))
+    (interp/object-equals-override (rebuild-interpreter-ctx state) a b)))
+
+(defn- builtin-ctx
+  "Context for calling nex.types.builtins from compiled code. It carries this
+   engine's own hooks (see nex.types.builtins/hook), so a builtin that calls
+   back into Nex code — a sort comparator, a user `to_string` or `equals`,
+   `print`, an http-server handler — dispatches on compiled objects directly,
+   and writes output to STATE, instead of going through the tree-walker.
+   :imports and :classes serve the builtins that resolve a Java class or
+   look up a class-def."
+  [state]
+  {:engine-hooks {:call-object-method (fn [_ target method-name args]
+                                        ;; A top-level function passed by name
+                                        ;; (function-value-for-name) is a plain fn.
+                                        (if (fn? target)
+                                          (apply target args)
+                                          (invoke-user-method state target method-name (vec args))))
+                  :user-to-string (fn [_ value] (builtin-user-to-string state value))
+                  :object-equals-override (fn [_ a b] (builtin-equals-override state a b))
+                  :add-output (fn [_ line] (add-output! state line))
+                  :is-parent? (fn [_ class-name parent-name]
+                                (boolean (compiled-is-parent? state class-name parent-name)))}
+   :compiled-state state
+   :imports (:imports state)
+   :classes (:classes state)
+   :specialized-classes (atom {})})
 
 (defn- format-value-with-state
   "Like format-value, but recurses into Array/Map/Set elements with state so a
@@ -2964,18 +3018,12 @@
       (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
 
       (str/starts-with? name "method:")
-      (let [ctx (rebuild-interpreter-ctx state)
-            method-name (subs name (count "method:"))
-            target (first args)
-            result (bi/call-builtin-method ctx target target method-name (rest args))]
-        (reset! (:output state) @(:output ctx))
-        result)
+      (let [target (first args)]
+        (bi/call-builtin-method (builtin-ctx state) target target
+                                (subs name (count "method:")) (rest args)))
 
       :else
-      (let [ctx (rebuild-interpreter-ctx state)
-            builtin-fn (get bi/builtins name)]
+      (let [builtin-fn (get bi/builtins name)]
         (when-not builtin-fn
           (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
-        (let [result (apply builtin-fn ctx args)]
-          (reset! (:output state) @(:output ctx))
-          result)))))
+        (apply builtin-fn (builtin-ctx state) args)))))

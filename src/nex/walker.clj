@@ -30,7 +30,7 @@
    Either way the result is one flat string: a bare `Account` stays exactly
    `\"Account\"` (unchanged from before qualified names existed), and a
    qualified `finance/Account` becomes `\"finance.Account\"` — the same
-   dot-joined form nex.interpreter/resolve-interned* stamps as a class-def's
+   dot-joined form nex.intern/resolve-interned* stamps as a class-def's
    :qualified-name, so a qualified reference and the class-def it targets
    compare equal as plain strings with no further parsing downstream."
   [node]
@@ -1052,7 +1052,7 @@
    an interned module name in another function or at top level.
 
    PROGRAM must already carry every reachable function's :qualified-name
-   (stamped by nex.interpreter/resolve-interned* on the intern-merged
+   (stamped by nex.intern/resolve-interned* on the intern-merged
    :functions list) — this only rewrites a call whose full dotted name
    matches one of those, so it is a no-op until this program interns
    something. Safe to call twice: a rewritten call has :target nil, which

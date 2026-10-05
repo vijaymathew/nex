@@ -8,7 +8,7 @@
             [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
-            [nex.interpreter :as interp]
+            [nex.intern :as intern]
             [nex.lower :as lower]
             [nex.parser :as p]
             [nex.typechecker :as tc]
@@ -130,10 +130,10 @@
      *bare*, still-ambiguous reference, at that call site, not the whole
      program merely for having interned both."
   [source-id ast]
-  (let [intern-classes (interp/resolve-interned-classes source-id ast)
-        intern-functions (interp/resolve-interned-functions source-id ast)
-        intern-imports (interp/resolve-interned-imports source-id ast)
-        intern-type-aliases (interp/resolve-interned-type-aliases source-id ast)
+  (let [intern-classes (intern/resolve-interned-classes source-id ast)
+        intern-functions (intern/resolve-interned-functions source-id ast)
+        intern-imports (intern/resolve-interned-imports source-id ast)
+        intern-type-aliases (intern/resolve-interned-type-aliases source-id ast)
         merged-imports (merge-import-like-nodes intern-imports (:imports ast))
         merged (assoc ast
                       :imports merged-imports
@@ -258,7 +258,7 @@
                    (comp (filter :qualified-name)
                          (map (fn [cd] [(:qualified-name cd) (entry-for cd)])))
                    emitted-classes)]
-    ;; An `intern ... as` alias (see nex.interpreter/resolve-interned*) adds a
+    ;; An `intern ... as` alias (see nex.intern/resolve-interned*) adds a
     ;; :type-aliases entry rather than a second, nominally distinct class-def,
     ;; so the alias name needs an entry here too, pointing at the SAME
     ;; metadata as the real class rather than a separately compiled
@@ -571,7 +571,7 @@
       (System/exit 0)
       (catch Exception e
         ;; A syntax error in a file input-file interns, not input-file itself
-        ;; (nex.interpreter/parse-interned-file) — arrives wrapped this way
+        ;; (nex.intern/parse-interned-file) — arrives wrapped this way
         ;; with the actually-broken file's own path/source/ParseError, rather
         ;; than as a bare ParseError misattributed to input-file.
         (let [data (ex-data e)]

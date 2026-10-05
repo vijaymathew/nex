@@ -1316,3 +1316,26 @@
 
 (defn nex-char? [v]
   (char? v))
+
+(defn nex-error-message
+  "A clean, Nex-level message for a Throwable raised during evaluation. Host
+   (Clojure/JVM or JS) exceptions whose own messages would leak interpreter
+   internals — integer overflow (\"long overflow\"), number parsing (\"For input
+   string\"), type casts (\"class java.lang.String cannot be cast to ...\"),
+   arity — are translated to Nex-facing wording; messages from the interpreter's
+   own ex-info (already user-level: contract violations, \"Method not found\",
+   \"Division by zero\", etc.) pass through unchanged."
+  [e]
+  (let [raw (or (ex-message e) "")]
+    (cond
+      (instance? java.lang.ArithmeticException e)
+      (cond
+        (re-find #"(?i)overflow" raw)                 "Arithmetic overflow"
+        (re-find #"(?i)divide by zero|/ by zero" raw) "Division by zero"
+        :else raw)
+      (instance? java.lang.NumberFormatException e)     "Not a valid number"
+      (instance? java.lang.ClassCastException e)        "Type error: a value was not of the expected type"
+      (instance? clojure.lang.ArityException e)         "Wrong number of arguments"
+      (instance? java.lang.NullPointerException e)      "Used a value that is void (nil)"
+      (instance? java.lang.IndexOutOfBoundsException e) (if (seq raw) raw "Index out of bounds")
+      :else (if (seq raw) raw (str e)))))

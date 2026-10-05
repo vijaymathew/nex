@@ -3,7 +3,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [nex.parser :as parser]
-            [nex.interpreter :as interp]
+            [nex.intern :as intern]
             [nex.typechecker :as tc]
             [nex.types.runtime :as rt]
             [nex.compiler.jvm.file :as jvm-file]
@@ -23,14 +23,14 @@
    regardless of qualification)."
   [source-id ast]
   (-> (assoc ast
-             :classes (vec (concat (interp/resolve-interned-classes source-id ast)
+             :classes (vec (concat (intern/resolve-interned-classes source-id ast)
                                    (:classes ast)))
              :functions (walker/qualify-interned-function-class-names
-                         (vec (concat (interp/resolve-interned-functions source-id ast)
+                         (vec (concat (intern/resolve-interned-functions source-id ast)
                                       (:functions ast))))
-             :imports (vec (concat (interp/resolve-interned-imports source-id ast)
+             :imports (vec (concat (intern/resolve-interned-imports source-id ast)
                                    (:imports ast)))
-             :type-aliases (vec (concat (interp/resolve-interned-type-aliases source-id ast)
+             :type-aliases (vec (concat (intern/resolve-interned-type-aliases source-id ast)
                                         (:type-aliases ast))))
       walker/resolve-qualified-function-calls))
 
@@ -53,12 +53,17 @@
   ;; Process.command_line() is process-wide state (see nex.types.runtime),
   ;; not threaded through ctx — set once, here, before the program runs.
   (rt/set-program-args! program-args)
-  (let [ctx (assoc (interp/make-context)
+  ;; Resolved lazily: the tree-walker is loaded only when a run actually
+  ;; needs it (--interpret, or the LinkageError fallback in run-ast), never
+  ;; just because nex.eval was.
+  (let [make-context (requiring-resolve 'nex.interpreter/make-context)
+        eval-node (requiring-resolve 'nex.interpreter/eval-node)
+        ctx (assoc (make-context)
                    :debug-source source-id
                    :skip-contracts? skip-contracts?)]
     ;; The program writes its own output as it runs, interleaved with `Console`
     ;; in the order the program produced it; nothing is echoed afterwards.
-    (interp/eval-node ctx ast)
+    (eval-node ctx ast)
     @(:output ctx)))
 
 (defn- warn-fallback!
@@ -263,7 +268,7 @@
           (parser/format-parse-errors e source 0))
         (System/exit 1))
       ;; A syntax error in a file `file` interns, not `file` itself
-      ;; (nex.interpreter/parse-interned-file) — arrives wrapped in an
+      ;; (nex.intern/parse-interned-file) — arrives wrapped in an
       ;; ex-info, not a bare ParseError, precisely so it does NOT match the
       ;; clause above: rendering it against `file`'s own source (which the
       ;; ParseError's line/column have nothing to do with) is what this
@@ -276,8 +281,8 @@
             (let [{:keys [file-path source parse-error]} data]
               (println (str "Syntax error in " file-path ":"))
               (parser/format-parse-errors parse-error source 0))
-            (println "Error:" (interp/nex-error-message e)))
+            (println "Error:" (rt/nex-error-message e)))
           (System/exit 1)))
       (catch Exception e
-        (println "Error:" (interp/nex-error-message e))
+        (println "Error:" (rt/nex-error-message e))
         (System/exit 1)))))

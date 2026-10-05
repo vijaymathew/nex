@@ -169,7 +169,7 @@
    as Billing_Account` — PROVIDED the intern is path-qualified. A *bare*
    alias resolves no better than the bare name itself did (nothing to
    qualify), and — subtler — an aliased intern's :type-expr points at the
-   qualified identity specifically (`nex.interpreter/resolve-interned*`), not
+   qualified identity specifically (`nex.intern/resolve-interned*`), not
    the bare one: earlier, before that fix, the alias fell through
    env-lookup-class's alias fallback to the SAME (still-ambiguous) bare name
    a direct reference would hit, leaving `intern X as Y` unable to resolve a
@@ -189,7 +189,7 @@
 
    Unlike a class, a function has no `intern ... as` escape hatch — the
    alias mechanism only ever matches against a file's :classes (see
-   nex.interpreter/resolve-interned* and process-intern) — so the only
+   nex.intern/resolve-interned* and process-intern) — so the only
    route out is the qualified call itself
    (nex.walker/resolve-qualified-function-calls): `trade.ship(x)`."
   [fn-name qualified-names]
@@ -386,7 +386,7 @@
 (defn- ambiguous-class-names
   "Bare names that resolve to more than one distinct interned class, from the
    same pre-dedup list class-defs-by-name-last-wins collapses. A class-def
-   carries :qualified-name (stamped by nex.interpreter/resolve-interned*)
+   carries :qualified-name (stamped by nex.intern/resolve-interned*)
    exactly when it came in through `intern`; one declared directly in this
    program, or already established by an earlier REPL cell, has no
    :qualified-name and always wins outright — so a bare name only counts as

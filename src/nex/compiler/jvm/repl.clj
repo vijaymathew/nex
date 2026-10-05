@@ -6,7 +6,10 @@
             [nex.compiler.jvm.emit :as emit]
             [nex.compiler.jvm.runtime :as rt]
             [nex.interpreter :as interp]
+            [nex.intern :as intern]
             [nex.lower :as lower]
+            [nex.types.bootstrap :as bootstrap]
+            [nex.types.builtins :as bi]
             [nex.typechecker :as tc])
   (:import [java.util HashMap]
            [java.lang.reflect InvocationTargetException]))
@@ -118,7 +121,7 @@
   #{"=" "/=" "==" "!=" "<" "<=" ">" ">="})
 
 (def ^:private builtin-function-names
-  (set (keys interp/builtins)))
+  (set (keys bi/builtins)))
 
 (declare supported-expr-in-ctx?)
 (declare supported-stmt-in-ctx?)
@@ -165,10 +168,10 @@
 
 (defn- builtin-class-defs
   []
-  (let [interp-builtins @(:classes (interp/make-context))
+  (let [base-classes (into {} (map (juxt :name identity)) (bootstrap/base-class-defs))
         env (tc/make-type-env)]
     (tc/register-builtin-methods env)
-    (vals (merge interp-builtins @(:classes env)))))
+    (vals (merge base-classes @(:classes env)))))
 
 (defn- import-placeholder-classes
   [imports]
@@ -464,22 +467,22 @@
         ;; They stay visible for typechecking/lowering regardless, via
         ;; `@(:class-asts session)`/`@(:function-asts session)`.
         intern-classes (remove #(contains? @(:class-asts session) (:name %))
-                               (interp/resolve-interned-classes source-id ast'))
+                               (intern/resolve-interned-classes source-id ast'))
         ;; A module's free functions come into scope alongside its classes; the
         ;; cell that runs the `intern` must carry them so remember-top-level-ast!
         ;; records them for later cells (the file path does the same).
         intern-functions (remove #(contains? @(:function-asts session) (:name %))
-                                 (interp/resolve-interned-functions source-id ast'))
-        intern-imports (interp/resolve-interned-imports source-id ast')
+                                 (intern/resolve-interned-functions source-id ast'))
+        intern-imports (intern/resolve-interned-imports source-id ast')
         merged-imports (merge-import-like-nodes
                         (merge-import-like-nodes @(:import-asts session) intern-imports)
                         (:imports ast'))
         ;; An aliased intern (`intern X as Y`) resolves to a :type-aliases
-        ;; entry, not a second class-def (see nex.interpreter/resolve-interned*)
+        ;; entry, not a second class-def (see nex.intern/resolve-interned*)
         ;; — carried forward the same way class-asts/function-asts are, so a
         ;; later cell that only *uses* the alias (declared by an earlier cell)
         ;; still sees it.
-        intern-type-aliases (interp/resolve-interned-type-aliases source-id ast')
+        intern-type-aliases (intern/resolve-interned-type-aliases source-id ast')
         merged-type-aliases (vec (concat (vals @(:type-aliases session))
                                          intern-type-aliases
                                          (:type-aliases ast')))]
@@ -1108,7 +1111,7 @@
     (doseq [fn-def (vals @(:function-asts session))]
       (interp/eval-node ctx' fn-def))
     ;; An `intern ... as` alias is a session :type-alias entry, not a second
-    ;; class-def (see nex.interpreter/resolve-interned*), so the classes just
+    ;; class-def (see nex.intern/resolve-interned*), so the classes just
     ;; re-registered above from :class-asts only cover the real names —
     ;; restore each alias as its own key onto the same class-def, matching
     ;; what nex.interpreter/process-intern does the first time an `intern`
