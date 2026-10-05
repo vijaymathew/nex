@@ -3166,13 +3166,25 @@
                                (str "Method sort expects 0 or 1 arguments, got " (count args)))})))))
 
 ;; Invoking a Function value that carries an explicit signature (e.g.
-;; `f.call1(x)` where `f: Function(n: Integer): Integer`): the declared
-;; return type is more precise than the generic callN result (Any).
+;; `f.call1(x)` where `f: Function(n: Integer): Integer`, or `adder(1)(x)`):
+;; the declared return type is more precise than the generic callN result
+;; (Any), and the arguments are held to the declared parameters -- their
+;; number and types -- exactly as a direct `f(x)` call is.
 (defn- check-typed-function-call
-  [env {:keys [args]} {:keys [target-type]}]
-  (doseq [arg args]
-    (check-expression env arg))
-  (:return-type target-type))
+  [env {:keys [method args]} {:keys [target-type]}]
+  (let [params (vec (map-indexed (fn [i p]
+                                   ;; A positional parameter has no name; give
+                                   ;; it one for the messages.
+                                   (let [p (if (and (map? p) (contains? p :type)) p {:type p})]
+                                     (cond-> p
+                                       (nil? (:name p)) (assoc :name (str "arg" (inc i))))))
+                                 (:param-types target-type)))]
+    (check-call-signature env
+                          (or method (str "call" (count args)))
+                          args
+                          {:params params :return-type (:return-type target-type)}
+                          {})
+    (:return-type target-type)))
 
 (defn- check-general-target-call
   [env {:keys [method args has-parens from-pattern from-across]}

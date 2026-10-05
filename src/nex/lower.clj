@@ -6740,7 +6740,13 @@
       ;; Function-valued identifier (`lower-call-without-target`'s
       ;; `function-object-call?` branch) — just with TARGET-EXPR's own IR in
       ;; place of an identifier lookup.
-      (and (nil? (:method expr)) (= "Function" (base-type-name target-type)))
+      ;;
+      ;; `f.call1(x)` -- the call protocol spelled out (Definition B.1) -- is
+      ;; the same call, as long as N is the argument count (the typechecker
+      ;; holds it to the function type's own arity).
+      (and (= "Function" (base-type-name target-type))
+           (or (nil? (:method expr))
+               (= (:method expr) (str "call" (count (:args expr))))))
       (let [nex-type (or (:return-type target-type) "Any")
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/call-function-node (lower-expression env target-expr) arg-irs nex-type jvm-type))
@@ -7302,7 +7308,7 @@
   ;; sibling constructor runs directly on `this` — no `_parent_X` field to
   ;; step through, and no generic-argument translation, since the callee is
   ;; the exact same (possibly generic) class as the caller.
-  (if-let [{:keys [owner own-class?]}
+  (if-let [{:keys [owner own-class? ancestor?]}
            (cond
              (and (:this-type env)
                   (string? (:target stmt))
@@ -7329,44 +7335,59 @@
                                          (count (:args stmt))))
              {:owner (:this-type env) :own-class? true}
 
-             ;; TARGET-NAME.ctor(...) where TARGET-NAME is a real ancestor
-             ;; (the typechecker's check-explicit-class-constructor-call
-             ;; already required that — class-subtype?, not "immediate
-             ;; parent") but not one of THIS-TYPE's own immediate parents, so
-             ;; none of the three cases above matches. Lowering has no
-             ;; `_parent_X` field to step through except for an immediate
-             ;; parent, and no generic-argument translation for anything
-             ;; further up — reported here, before falling into the generic
-             ;; lower-expression path below, which cannot type a bare
-             ;; ancestor class name as an expression at all and dies with
-             ;; the unmarked, unhelpful \"Unable to infer expression type
-             ;; during lowering\" instead of naming the real gap.
+             ;; TARGET-NAME.ctor(...) where TARGET-NAME is an ancestor further
+             ;; up than an immediate parent (the typechecker's
+             ;; check-explicit-class-constructor-call requires class-subtype?
+             ;; and that TARGET-NAME declares the constructor itself). Its part
+             ;; of this object is reached through the chain of `_parent_X`
+             ;; fields Definition 4.9 names (ancestor-carrier-path), the same
+             ;; path an `Ancestor.m(...)` call takes.
              (and (:this-type env)
                   (string? (:target stmt))
                   (class-constructor-def (get (visible-class-map env) (:target stmt))
                                          (:method stmt)
-                                         (count (:args stmt))))
-             (throw (unsupported
-                     (str "calling `" (:target stmt) "." (:method stmt)
-                          "(...)`, a constructor on a non-immediate ancestor of "
-                          (:this-type env) ": the compiled backend only supports "
-                          "qualifying a constructor call by an immediate parent's name.")
-                     {:stmt stmt}))
+                                         (count (:args stmt)))
+                  (ancestor-carrier-path env (:this-type env) (:target stmt)))
+             {:owner (:target stmt) :own-class? false :ancestor? true}
 
              :else nil)]
     (let [ctor-def (class-constructor-def (get (visible-class-map env) owner)
                                           (:method stmt)
                                           (count (:args stmt)))
           owner-meta (class-jvm-meta env owner)
-          runtime-args (if own-class?
+          this-ir (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+          runtime-args (cond
+                         own-class?
                          (own-class-generic-runtime-args env (current-class-def env))
+
+                         ;; The ancestor's type arguments as this class's
+                         ;; inherit chain binds them, in this class's own
+                         ;; generic parameters (whose runtime tokens `this`
+                         ;; carries).
+                         ancestor?
+                         (mapv #(runtime-type-token-ir env %)
+                               (or (lower-ancestor-instantiation
+                                    env
+                                    (:this-type env)
+                                    (mapv :name (:generic-params (current-class-def env)))
+                                    owner)
+                                   []))
+
+                         :else
                          (parent-generic-runtime-args env (current-class-def env) owner))
-          receiver-ir (if own-class?
-                        (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+          receiver-ir (cond
+                        own-class?
+                        this-ir
+
+                        ancestor?
+                        (carrier-path-target-ir env
+                                                (ancestor-carrier-path env (:this-type env) owner)
+                                                this-ir)
+
+                        :else
                         (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
                                            (parent-field-name owner)
-                                           (ir/this-node (:this-type env)
-                                                         (exact-class-jvm-type env (:this-type env)))
+                                           this-ir
                                            owner
                                            (exact-class-jvm-type env owner)))
           call-ir (ir/call-virtual-node (:internal-name owner-meta)
