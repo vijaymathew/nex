@@ -150,44 +150,72 @@ inc(4)")
 
 (deftest prepare-program-for-captured-closures-test
   (testing "closure preparation marks captured anonymous functions as runtime-backed and keeps metadata in sync"
-    (let [program (p/ast "function cf(): Function
-do
-  let x := 30
-  result := fn(i: Integer): Integer do
-    result := i + x
-  end
-end")
-          prepared (lower/prepare-program-for-closures program
-                                                       {:classes []
-                                                        :functions []
-                                                        :imports []
-                                                        :var-types {}})
-          anon-class (first (lower/collect-anonymous-class-defs prepared))
-          anon-expr (-> prepared :functions first :body second :value)]
-      (is (= [{:name "x" :type "Integer"}] (:captures anon-expr)))
-      (is (true? (:closure-runtime-object? (:class-def anon-expr))))
-      (is (true? (:closure-runtime-object? anon-class))))))
+    ;; The interpreter-backed path (lower/*native-closures* off).
+    (binding [lower/*native-closures* false]
+      (let [program (p/ast "function cf(): Function
+  do
+    let x := 30
+    result := fn(i: Integer): Integer do
+      result := i + x
+    end
+  end")
+            prepared (lower/prepare-program-for-closures program
+                                                         {:classes []
+                                                          :functions []
+                                                          :imports []
+                                                          :var-types {}})
+            anon-class (first (lower/collect-anonymous-class-defs prepared))
+            anon-expr (-> prepared :functions first :body second :value)]
+        (is (= [{:name "x" :type "Integer"}] (:captures anon-expr)))
+        (is (true? (:closure-runtime-object? (:class-def anon-expr))))
+        (is (true? (:closure-runtime-object? anon-class)))))))
 
 (deftest prepare-program-for-captured-call-target-closures-test
   (testing "closure preparation captures outer variables used as raw call targets"
-    (let [program (p/ast "function gradeUp[T -> Comparable](a: Array[T]): Array[Integer]
-do
-  result := []
-  result := result.sort(fn(i: Integer, j: Integer): Integer do
-    result := a.get(i).compare(a.get(j))
-  end)
+    ;; The interpreter-backed path (lower/*native-closures* off).
+    (binding [lower/*native-closures* false]
+      (let [program (p/ast "function gradeUp[T -> Comparable](a: Array[T]): Array[Integer]
+  do
+    result := []
+    result := result.sort(fn(i: Integer, j: Integer): Integer do
+      result := a.get(i).compare(a.get(j))
+    end)
+  end")
+            prepared (lower/prepare-program-for-closures program
+                                                         {:classes []
+                                                          :functions []
+                                                          :imports []
+                                                          :var-types {}})
+            anon-class (first (lower/collect-anonymous-class-defs prepared))
+            anon-expr (-> prepared :functions first :body second :value :args first)]
+        (is (= [{:name "a" :type {:base-type "Array" :type-args ["T"]}}]
+               (:captures anon-expr)))
+        (is (true? (:closure-runtime-object? (:class-def anon-expr))))
+        (is (true? (:closure-runtime-object? anon-class)))))))
+
+(deftest prepare-program-for-native-captured-closures-test
+  (testing "with native closures, a capturing closure stays a compiled class with a capture constructor"
+    (binding [lower/*native-closures* true]
+      (let [program (p/ast "class Box [T -> Comparable]
+feature
+  value: T
+  less(): Function(other: T): Boolean do
+    result := fn(other: T): Boolean do result := value.compare(other) < 0 end
+  end
 end")
-          prepared (lower/prepare-program-for-closures program
-                                                       {:classes []
-                                                        :functions []
-                                                        :imports []
-                                                        :var-types {}})
-          anon-class (first (lower/collect-anonymous-class-defs prepared))
-          anon-expr (-> prepared :functions first :body second :value :args first)]
-      (is (= [{:name "a" :type {:base-type "Array" :type-args ["T"]}}]
-             (:captures anon-expr)))
-      (is (true? (:closure-runtime-object? (:class-def anon-expr))))
-      (is (true? (:closure-runtime-object? anon-class))))))
+            prepared (lower/prepare-program-for-closures program
+                                                         {:classes (:classes program)
+                                                          :functions []
+                                                          :imports []
+                                                          :var-types {}})
+            anon-class (first (lower/collect-anonymous-class-defs prepared))
+            ctor (first (mapcat :constructors (filter #(= :constructors (:type %)) (:body anon-class))))]
+        (is (false? (:closure-runtime-object? anon-class)))
+        (is (= "Box" (:enclosing-class anon-class)))
+        (is (= [{:name "T" :constraint "Comparable" :detachable false}]
+               (:erased-generic-params anon-class)))
+        (is (= "__captures" (:name ctor)))
+        (is (= ["__c___closure_this__"] (mapv :name (:params ctor))))))))
 
 (deftest lower-collection-literals-test
   (testing "collection literals lower to explicit IR nodes"

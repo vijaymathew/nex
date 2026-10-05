@@ -124,33 +124,35 @@ print(a.name())")
             making it interpreter-reachable, so the structural trim is correctly
             skipped and the full (oversized) table is what gets chunked.
             Regression against 'UTF8 string too large'."
-    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-large-table-test")
-          nex-file (io/file tmp-dir "big.nex")
-          out-dir (io/file tmp-dir "out")
-          n 200
-          ;; The closure captures `base`, so it becomes a runtime object — the
-          ;; program can reach the tree-walker and the table must NOT be trimmed.
-          program (str (generate-classes "C" n)
-                       "\n\nlet base: Integer := 10"
-                       "\nlet data: Array[Integer] := [3, 1, 2]"
-                       "\nlet _ := data.sort(fn(a, b: Integer): Integer do result := (a + base).compare(b + base) end)"
-                       "\nlet c: C" (dec n) " := create C" (dec n)
-                       "\nprint(c.v())")]
-      (try
-        (.mkdirs tmp-dir)
-        (spit nex-file program)
-        (let [class-asts (prepared-class-asts (.getPath nex-file) program)]
-          (is (#'file/interpreter-reachable? class-asts)
-              "fixture must be interpreter-reachable so the trim is skipped")
-          (let [emitted-bytes (edn-utf8-bytes (#'file/maybe-trim-class-table class-asts))]
-            (is (> emitted-bytes 65535)
-                (str "emitted table must exceed the CONSTANT_Utf8 limit; got " emitted-bytes " bytes"))))
-        (let [result (file/compile-file (.getPath nex-file) (.getPath out-dir) {})]
-          (is (= (str (dec n))
-                 (str/trim (invoke-main! out-dir (:main-class result))))))
-        (finally
-          (when (.exists tmp-dir)
-            (delete-tree! tmp-dir)))))))
+    ;; Interpreter reachability only exists with lower/*native-closures* off.
+    (binding [lower/*native-closures* false]
+      (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") "nex-jvm-large-table-test")
+            nex-file (io/file tmp-dir "big.nex")
+            out-dir (io/file tmp-dir "out")
+            n 200
+            ;; The closure captures `base`, so it becomes a runtime object — the
+            ;; program can reach the tree-walker and the table must NOT be trimmed.
+            program (str (generate-classes "C" n)
+                         "\n\nlet base: Integer := 10"
+                         "\nlet data: Array[Integer] := [3, 1, 2]"
+                         "\nlet _ := data.sort(fn(a, b: Integer): Integer do result := (a + base).compare(b + base) end)"
+                         "\nlet c: C" (dec n) " := create C" (dec n)
+                         "\nprint(c.v())")]
+        (try
+          (.mkdirs tmp-dir)
+          (spit nex-file program)
+          (let [class-asts (prepared-class-asts (.getPath nex-file) program)]
+            (is (#'file/interpreter-reachable? class-asts)
+                "fixture must be interpreter-reachable so the trim is skipped")
+            (let [emitted-bytes (edn-utf8-bytes (#'file/maybe-trim-class-table class-asts))]
+              (is (> emitted-bytes 65535)
+                  (str "emitted table must exceed the CONSTANT_Utf8 limit; got " emitted-bytes " bytes"))))
+          (let [result (file/compile-file (.getPath nex-file) (.getPath out-dir) {})]
+            (is (= (str (dec n))
+                   (str/trim (invoke-main! out-dir (:main-class result))))))
+          (finally
+            (when (.exists tmp-dir)
+              (delete-tree! tmp-dir))))))))
 
 (deftest compile-file-trims-class-table-when-interpreter-unreachable
   (testing "a whole-file program with no runtime closures cannot reach the
