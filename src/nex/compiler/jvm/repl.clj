@@ -817,7 +817,7 @@
   (let [actual-classes (vec (concat (user-class-defs ast)
                                     (anonymous-class-defs ast)))]
     (when (seq actual-classes)
-      (let [compiled-class-defs (vec (remove :closure-runtime-object? actual-classes))
+      (let [compiled-class-defs actual-classes
             new-class-map (allocate-compiled-class-metadata session compiled-class-defs)
             compiled-map (merge @(:compiled-classes session) new-class-map)
             visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))

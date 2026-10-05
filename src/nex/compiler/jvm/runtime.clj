@@ -869,18 +869,6 @@
   (Thread/sleep 1)
   nil)
 
-(defn make-captured-function-object
-  [state class-name capture-args]
-  (when-not (even? (count capture-args))
-    (throw (ex-info "Captured closure args must be name/value pairs"
-                    {:class-name class-name
-                     :capture-args capture-args})))
-  (let [ctx (rebuild-interpreter-ctx state)
-        closure-env (interp/make-env (:current-env ctx))]
-    (doseq [[name value] (partition 2 capture-args)]
-      (interp/env-define closure-env name value))
-    (interp/make-object class-name {} closure-env)))
-
 (defn- compiled-class-binary-name
   [state class-name]
   (some-> (.get ^HashMap @(:classes state) class-name)
@@ -1031,9 +1019,12 @@
   "Build a fresh interpreter context from this compiled REPL session's own
    state — used whenever a call has to be dispatched back through the
    interpreter (see invoke-interpreter-object-method/invoke-function-object
-   below).
+   below). Compiled code never needs it for its own closures (they are
+   compiled classes); it serves values the interpreter itself created, in a
+   REPL cell evaluated interpretively (e.g. under `:debug on`).
 
-   KNOWN LIMITATION (accepted, not planned to be fixed — see
+   KNOWN LIMITATION (for those interpreter-created closures only; accepted —
+   see
    docs/md/SYNTAX.md's mutual-recursion section and definition-of-nex
    &sect;4.5): the `(:classes ctx)` merge below intentionally includes
    `@(:classes state)` so an interpreted closure can reach a function/class
@@ -2844,9 +2835,6 @@
 
    "shallow-copy-collection"
    (fn [_state args] (shallow-copy-collection (first args)))
-
-   "make-captured-function-object"
-   (fn [state args] (make-captured-function-object state (first args) (vec (rest args))))
 
    "create-console"
    (fn [_state _args] {:nex-builtin-type :Console})

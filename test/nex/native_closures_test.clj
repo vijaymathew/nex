@@ -1,17 +1,16 @@
 (ns nex.native-closures-test
-  "Closures that capture, compiled as ordinary classes (lower/*native-closures*,
-   docs/md/COMPILED_CLOSURES.md) rather than run on the tree-walking
-   interpreter. Each program must print the same as the interpreter-backed
-   path does, and must never enter the interpreter."
+  "Closures that capture compile to ordinary classes
+   (docs/md/COMPILED_CLOSURES.md); they used to run on the tree-walking
+   interpreter. Each program must print what that path printed, and must
+   never enter the interpreter."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [nex.eval :as e]
-            [nex.interpreter :as interp]
-            [nex.lower :as lower]))
+            [nex.interpreter :as interp]))
 
 (defn- run-native
-  "Printed lines of CODE run compiled with native closures, asserting that no
-   interpreter evaluation happened along the way."
+  "Printed lines of CODE run compiled, asserting that no interpreter
+   evaluation happened along the way."
   [code]
   (let [f (java.io.File/createTempFile "native_closures" ".nex")
         calls (atom 0)
@@ -20,8 +19,7 @@
       (spit f code)
       (let [err (java.io.StringWriter.)
             out (with-redefs [interp/eval-node (fn [& args] (swap! calls inc) (apply eval-node args))]
-                  (binding [lower/*native-closures* true
-                            *err* err]
+                  (binding [*err* err]
                     (with-out-str (e/eval-file (.getPath f) {}))))]
         (is (zero? @calls) "a compiled closure must not run on the interpreter")
         (is (not (str/includes? (str err) "falling back")) (str err))
@@ -66,9 +64,9 @@ print(a.count)")))))
 
 (deftest private-features-through-captured-this-test
   (testing "a closure reaches its enclosing class's private fields and routines"
-    ;; The interpreter-backed path fails this program with
-    ;; \"Undefined field: secret\": the interpreted closure body cannot read a
-    ;; private field of a compiled object.
+    ;; The old interpreter-backed path failed this program with
+    ;; \"Undefined field: secret\": the interpreted closure body could not
+    ;; read a private field of a compiled object.
     (is (= ["\"secret=6 bumps=3\""]
            (run-native "class Counter
 create

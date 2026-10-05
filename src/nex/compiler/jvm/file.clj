@@ -18,21 +18,16 @@
 
 ;; --- Structural trim of the embedded class table -------------------------
 ;; A whole-file artifact embeds every class's AST as `classes-edn` (below) so
-;; the runtime can (a) answer reflection/subtype/field queries and (b) on the
-;; deopt path, run a method on an interpreter-produced object through the
-;; tree-walker. Only (b) needs executable bodies; (a) needs just signatures and
-;; the inheritance/field structure. Dropping the bodies shrinks the blob to
-;; ~40% — which, ahead of the chunker, keeps most programs to a single LDC.
-;;
-;; Soundness (see `interpreter-reachable?`): the ONLY seed of an interpreter
-;; object in a whole-file compile is a closure that becomes a runtime object
-;; (compiled code mints it via runtime/make-captured-function-object). Every
-;; other deopt site is gated on an already-existing interpreter object. So if
-;; the program has no runtime-closure class, the tree-walker never runs and the
-;; bodies are dead metadata; if it has one, the interpreter can construct and
-;; dispatch objects of ANY user class, so trimming must be all-or-nothing. This
-;; path is whole-file only — the REPL compiles through its own entry point and
-;; never reaches here.
+;; the runtime can answer reflection/subtype/field queries, which need just
+;; signatures and the inheritance/field structure — never executable bodies:
+;; every method runs as compiled bytecode (closures included, see
+;; docs/md/COMPILED_CLOSURES.md), so no Nex code in a whole-file program
+;; runs on the tree-walker. (The one remaining way an interpreter object can
+;; arise is runtime/make-runtime-object's fallback for a class this program
+;; did not compile — see there.) Dropping the bodies shrinks the blob to ~40% — which, ahead
+;; of the chunker, keeps most programs to a single LDC. This path is
+;; whole-file only — the REPL compiles through its own entry point and never
+;; reaches here.
 
 (defn- trim-class-member [m]
   (case (:type m)
@@ -57,24 +52,6 @@
   (-> c
       (dissoc :invariant :note :dbg/line :dbg/col)
       (update :body #(mapv trim-class-body-item %))))
-
-(defn- interpreter-reachable?
-  "True when the whole-file program can spin up the tree-walking interpreter at
-   runtime, which happens iff some class in the table is a closure that becomes
-   a runtime object. When false, no interpreter object can ever exist, so every
-   embedded method body is unreachable and the table can be trimmed to
-   structural metadata."
-  [class-asts]
-  (boolean (some :closure-runtime-object? class-asts)))
-
-(defn- maybe-trim-class-table
-  "Trim the embedded class table to structural metadata when it is provably
-   safe (no interpreter reachability). Applied before serialization so the
-   chunker only has to split whatever remains oversized."
-  [class-asts]
-  (if (interpreter-reachable? class-asts)
-    class-asts
-    (mapv structural-trim-class class-asts)))
 
 (defn- sanitize-stem
   [path]
@@ -198,7 +175,7 @@
 
 (defn- emitted-anonymous-class-defs
   [ast]
-  (vec (remove :closure-runtime-object? (lower/collect-anonymous-class-defs ast))))
+  (vec (lower/collect-anonymous-class-defs ast)))
 
 (defn- class-metadata-entry
   "class-def is embedded on the returned metadata (docs/proposals/namespaces.md,
@@ -331,9 +308,7 @@
            ;; a real instance of the compiled class; without :binary-name
            ;; that lookup always failed, silently downgrading every such
            ;; object to an interpreter-only NexObject with no method bodies
-           ;; to run (see interpreter-reachable? below — it never knew this
-           ;; fallback path existed, so it trimmed bodies a program with no
-           ;; closures at all could still end up needing).
+           ;; to run (the embedded table is trimmed of bodies, below).
            ;; :qualified-name over the bare :name when present — the bare
            ;; slot in compiled-classes (docs/proposals/namespaces.md, Phase
            ;; 3/4) holds whichever class won the bare-name collapse when two
@@ -353,10 +328,10 @@
                                        :binary-name binary-name)
                                 c))
                             class-asts)
-           ;; Shrink the embedded table to structural metadata when the program
-           ;; cannot reach the interpreter, then let the chunker (emit-string-
-           ;; constant!) split whatever is still over the 65535-byte LDC cap.
-           classes-edn (pr-str (maybe-trim-class-table class-asts))
+           ;; Shrink the embedded table to structural metadata, then let the
+           ;; chunker (emit-string-constant!) split whatever is still over the
+           ;; 65535-byte LDC cap.
+           classes-edn (pr-str (mapv structural-trim-class class-asts))
            imports-edn (pr-str (:imports prepared-ast))
            ;; Every class this compilation itself emits, mapped to its super
            ;; internal name — consulted by the emitted ClassWriters'
