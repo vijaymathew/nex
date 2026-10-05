@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Fix: a runtime type test checks type arguments.** `convert x to s:
+  Some[String]`, a `match` clause `Some[String](...)`, and a field pattern
+  `content: Some[String](...)` used to test the class alone, so a
+  `Some[Integer]` passed them: the interpreter then bound the `Integer` as a
+  `String` and carried on, and the compiled backend failed later with "a value
+  was not of the expected type". The test now also requires the value's type
+  arguments to match, mapped through its `inherit` clauses (so a heir that
+  reorders them is handled), as the Definition says (a `Some[Integer]` is not
+  a `Some[String]`). An argument erased in generic code — an object made by
+  `create Some[T]` inside a generic function — is not known, and still matches
+  any argument.
+- **New: a `match` clause that can never match is a type error.** With
+  `o: Opt[Integer]`, a clause `Some[String](...)` is rejected ("Some[String]
+  does not conform to Opt[Integer]: its type arguments differ, so this clause
+  can never match"). In generic code, where the subject's argument is a type
+  parameter, the clause is accepted and decided at run time.
+
 ## 0.5.6 - 2026-10-05
 
 - **Change: a failure the language raises reaches `rescue` as an object of a
