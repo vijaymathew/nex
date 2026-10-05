@@ -148,8 +148,15 @@ inc(4)")
       (is (= "inc" (-> unit :body last :expr :target :name)))
       (is (= 4 (-> unit :body last :expr :args first :value))))))
 
+(defn- closure-constructor-names
+  [class-def]
+  (->> (:body class-def)
+       (filter #(= :constructors (:type %)))
+       (mapcat :constructors)
+       (mapv :name)))
+
 (deftest prepare-program-for-captured-closures-test
-  (testing "closure preparation marks captured anonymous functions as runtime-backed and keeps metadata in sync"
+  (testing "closure preparation gives captured anonymous functions a capture constructor and keeps metadata in sync"
     (let [program (p/ast "function cf(): Function
 do
   let x := 30
@@ -165,8 +172,8 @@ end")
           anon-class (first (lower/collect-anonymous-class-defs prepared))
           anon-expr (-> prepared :functions first :body second :value)]
       (is (= [{:name "x" :type "Integer"}] (:captures anon-expr)))
-      (is (true? (:closure-runtime-object? (:class-def anon-expr))))
-      (is (true? (:closure-runtime-object? anon-class))))))
+      (is (= ["__captures"] (closure-constructor-names (:class-def anon-expr))))
+      (is (= ["__captures"] (closure-constructor-names anon-class))))))
 
 (deftest prepare-program-for-captured-call-target-closures-test
   (testing "closure preparation captures outer variables used as raw call targets"
@@ -186,8 +193,30 @@ end")
           anon-expr (-> prepared :functions first :body second :value :args first)]
       (is (= [{:name "a" :type {:base-type "Array" :type-args ["T"]}}]
              (:captures anon-expr)))
-      (is (true? (:closure-runtime-object? (:class-def anon-expr))))
-      (is (true? (:closure-runtime-object? anon-class))))))
+      (is (= ["__captures"] (closure-constructor-names (:class-def anon-expr))))
+      (is (= ["__captures"] (closure-constructor-names anon-class))))))
+
+(deftest prepare-program-for-closure-capturing-this-test
+  (testing "a closure capturing `this` in a generic class records its enclosing class and erased generics"
+    (let [program (p/ast "class Box [T -> Comparable]
+feature
+  value: T
+  less(): Function(other: T): Boolean do
+    result := fn(other: T): Boolean do result := value.compare(other) < 0 end
+  end
+end")
+          prepared (lower/prepare-program-for-closures program
+                                                       {:classes (:classes program)
+                                                        :functions []
+                                                        :imports []
+                                                        :var-types {}})
+          anon-class (first (lower/collect-anonymous-class-defs prepared))
+          ctor (first (mapcat :constructors (filter #(= :constructors (:type %)) (:body anon-class))))]
+      (is (= "Box" (:enclosing-class anon-class)))
+      (is (= [{:name "T" :constraint "Comparable" :detachable false}]
+             (:erased-generic-params anon-class)))
+      (is (= "__captures" (:name ctor)))
+      (is (= ["__c___closure_this__"] (mapv :name (:params ctor)))))))
 
 (deftest lower-collection-literals-test
   (testing "collection literals lower to explicit IR nodes"

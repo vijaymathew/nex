@@ -3,6 +3,7 @@
   (:require [nex.parser :as p]
             [nex.walker :as walker]
             [nex.interpreter :as interp]
+            [nex.intern :as intern]
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as compiled-runtime]
             [nex.types.builtins :as bi]
@@ -1483,7 +1484,7 @@
    populated from it."
   [exec-ctx source-id ast]
   (sync-compiled-session-into-interpreter! exec-ctx)
-  (doseq [alias (concat (interp/resolve-interned-type-aliases source-id ast)
+  (doseq [alias (concat (intern/resolve-interned-type-aliases source-id ast)
                         (:type-aliases ast))]
     (swap! *repl-type-aliases* assoc (:name alias) alias)))
 
@@ -1510,8 +1511,8 @@
                                     (and (synthetic-anonymous-class-name? (str (:name %)))
                                          (not (contains? referenced-anonymous-class-names (:name %)))))
                                (vals @(:classes ctx)))
-          intern-classes (interp/resolve-interned-classes source-id ast)
-          intern-functions (interp/resolve-interned-functions source-id ast)
+          intern-classes (intern/resolve-interned-classes source-id ast)
+          intern-functions (intern/resolve-interned-functions source-id ast)
           prev-imports @(:imports ctx)
           augmented-ast (cond
                           (and (seq prev-classes) (seq prev-imports) (seq intern-classes))
@@ -1642,7 +1643,9 @@
   [exec-ctx ast source-id]
   (let [classes (:classes ast)
         functions (:functions ast)
-        interns (:interns ast)
+        ;; An implied intern (a library an http builtin needs, see
+        ;; nex.walker/add-implied-interns) does not make a cell a definition.
+        interns (remove :implied (:interns ast))
         imports (:imports ast)
         statements (:statements ast)
         calls (:calls ast)
@@ -1879,7 +1882,7 @@
          (let [e (unwrap-and-flush-error! e)
                data (ex-data e)]
            ;; A syntax error in a file THIS input interns, not the input
-           ;; itself (nex.interpreter/parse-interned-file) — arrives wrapped
+           ;; itself (nex.intern/parse-interned-file) — arrives wrapped
            ;; this way, not as a bare ParseError, precisely so it does NOT
            ;; match the `catch ParseError` clause above: rendering it against
            ;; `input`'s own text (which the wrapped ParseError's line/column

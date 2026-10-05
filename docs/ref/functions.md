@@ -96,7 +96,9 @@ Rules:
 - `timeout_ms`, when provided, must be a non-negative integer
 - network failures are raised as runtime errors
 
-This primitive is intended to support `lib/net/http_client.nex`.
+This primitive is intended to support `lib/net/http_client.nex`. A program
+that calls it gets `Http_Response` from that library automatically, as if it
+had written `intern net/Http_Client`.
 
 ## `json_parse`
 
@@ -132,7 +134,10 @@ This primitive is intended to support `lib/data/json.nex`.
 http_server_create(port: Integer)
 ```
 
-Creates an opaque HTTP server handle used by `lib/net/http_server.nex`.
+Creates an opaque HTTP server handle used by `lib/net/http_server.nex`. A
+program that calls this or any other `http_server_*` builtin gets
+`Http_Request` and `Http_Server_Response` from that library automatically,
+as if it had written `intern net/Http_Server`.
 
 ## `http_server_get`
 
@@ -206,7 +211,9 @@ Rules:
 - `timeout_ms`, when provided, must be a non-negative integer
 - network failures are raised as runtime errors
 
-This primitive is intended to support `lib/net/http_client.nex`.
+This primitive is intended to support `lib/net/http_client.nex`. A program
+that calls it gets `Http_Response` from that library automatically, as if it
+had written `intern net/Http_Client`.
 
 ## `await_any`
 

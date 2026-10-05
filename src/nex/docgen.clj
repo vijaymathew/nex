@@ -248,7 +248,7 @@
   (let [ast (p/ast source-code)
         classes (:classes ast)
         imports (:imports ast)
-        interns (:interns ast)]
+        interns (remove :implied (:interns ast))]
     (str/join "\n\n"
               (remove empty?
                       [(when (seq imports)

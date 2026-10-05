@@ -105,6 +105,20 @@
     (tc/register-builtin-methods env)
     (vals (merge interp-builtins @(:classes env)))))
 
+(defn- class-generic-params
+  "Generic parameters (`{:name .. :constraint ..}`) in scope inside CLASS-DEF:
+   its own, plus — for a compiled closure — those of the scope it was written
+   in (`:erased-generic-params`), which its captures and body may mention (a
+   `T` captured inside a method of `Box[T]` or a generic function). All are
+   lowered as erased (JVM Object) type parameters."
+  [class-def]
+  (concat (:generic-params class-def)
+          (:erased-generic-params class-def)))
+
+(defn- class-generic-param-name-seq
+  [class-def]
+  (map :name (class-generic-params class-def)))
+
 (defn- merge-visible-classes
   [& class-groups]
   (->> class-groups
@@ -467,9 +481,6 @@
       (ir/object-jvm-type "java/lang/Object")
 
       (if-let [compiled (get (:compiled-classes env) base)] true false)
-      (ir/object-jvm-type "java/lang/Object")
-
-      (true? (:closure-runtime-object? (get (visible-class-map env) base)))
       (ir/object-jvm-type "java/lang/Object")
 
       (imported-java-qualified-name env base)
@@ -2082,7 +2093,7 @@
 (defn- visible-class-map
   "Name -> class-def, including every name an `intern ... as` alias resolves
    to. An aliased intern registers only a `*type-aliases*` entry pointing at
-   the real class (see `nex.interpreter/resolve-interned*`), not a second,
+   the real class (see `nex.intern/resolve-interned*`), not a second,
    nominally distinct class-def — so the alias name is added here as an extra
    key onto the *same* class-def value, keeping both names resolvable to one
    compiled class. Also keyed by every interned class-def's :qualified-name
@@ -2249,10 +2260,19 @@
   [member]
   (not= :private (-> member :visibility :type)))
 
+(defn- enclosing-class-of-closure?
+  "True when the class being lowered is a compiled closure written inside
+   CLASS-NAME: its body is lexically part of that class, so it may use that
+   class's non-public features (through the captured `this`)."
+  [env class-name]
+  (and class-name
+       (= class-name (:enclosing-class (current-class-def env)))))
+
 (defn- member-visible?
   [env member declaring-class-name]
   (or (= (:this-type env) declaring-class-name)
-      (public-member? member)))
+      (public-member? member)
+      (enclosing-class-of-closure? env declaring-class-name)))
 
 (defn- class-methods
   [class-def]
@@ -3014,6 +3034,35 @@
                                       :var-types (merge (:var-types ctx) local-types)})
       "Any"))
 
+;; A closure is an ordinary compiled class (docs/md/COMPILED_CLOSURES.md): its
+;; captures are fields, set at the creation site through a synthetic
+;; constructor. Reserved (no Nex identifier starts with a double underscore):
+;; that constructor's name, and the names of its parameters — distinct from
+;; the capture fields they initialize.
+(def ^:private capture-constructor-name "__captures")
+
+(defn- capture-param-name
+  [capture-name]
+  (str "__c_" capture-name))
+
+(defn- synthetic-capture-constructor
+  "`__captures(__c_a: A, ...) do a := __c_a ... end` for CAPTURES, in order."
+  [captures]
+  {:type :constructor
+   :name capture-constructor-name
+   :params (mapv (fn [{:keys [name type]}]
+                   {:name (capture-param-name name) :type type})
+                 captures)
+   :require nil
+   :ensure nil
+   :rescue nil
+   :synthetic? true
+   :body (mapv (fn [{:keys [name]}]
+                 {:type :assign
+                  :target name
+                  :value {:type :identifier :name (capture-param-name name)}})
+               captures)})
+
 (defn- synthetic-capture-field
   [{:keys [name type]}]
   {:type :field
@@ -3068,13 +3117,22 @@
      :class-def class-def}))
 
 (defn- attach-capture-fields
-  [class-def captures runtime-object?]
+  "Add CAPTURES to CLASS-DEF as fields, with the constructor that sets them.
+   Also record the class the closure was written in (ENCLOSING-CLASS, nil
+   outside a class), whose non-public features its body may use through the
+   captured `this`, and the generic parameters in scope there
+   (SCOPE-GENERIC-PARAMS), which its captures and body may mention."
+  [class-def captures enclosing-class scope-generic-params]
   (let [capture-members (mapv synthetic-capture-field captures)
         feature-sections (filter #(= :feature-section (:type %)) (:body class-def))
-        first-section (first feature-sections)]
+        first-section (first feature-sections)
+        native-captures? (seq captures)]
     (cond-> class-def
-      true
-      (assoc :closure-runtime-object? (boolean runtime-object?))
+      native-captures?
+      (assoc :enclosing-class enclosing-class)
+
+      (and native-captures? (seq scope-generic-params))
+      (assoc :erased-generic-params (vec scope-generic-params))
 
       (seq captures)
       (assoc :body
@@ -3087,7 +3145,12 @@
                (vec (cons {:type :feature-section
                            :visibility {:type :public}
                            :members capture-members}
-                          (:body class-def))))))))
+                          (:body class-def)))))
+
+      ;; After the fields: the step above rebuilds :body from CLASS-DEF's.
+      native-captures?
+      (update :body #(conj (vec %) {:type :constructors
+                                     :constructors [(synthetic-capture-constructor captures)]})))))
 
 (declare rewrite-expression-for-closures)
 (declare rewrite-statement-for-closures)
@@ -3106,15 +3169,12 @@
 ;; a spawn/anonymous-function body that references `this` (bare field/method
 ;; access or an explicit `this.` prefix). Reserved: no Nex identifier can
 ;; start with a double underscore, so this can never collide with a real
-;; capture. A spawn/anonymous-function body with any capture (this one
-;; included) is dispatched to the tree-walking interpreter at runtime rather
-;; than running as compiled bytecode (nex.compiler.jvm.runtime/make-captured-
-;; function-object) — so every reference to `this` inside such a body is
-;; rewritten here into an ordinary field/method access on this captured
-;; identifier, the same shape an outer captured *other* object's field/method
-;; access already uses, rather than left as `this` (which the interpreter
-;; would resolve against the closure's own synthesized class, not the
-;; enclosing one).
+;; capture. A spawn/anonymous-function body runs as a method of the closure's
+;; own synthesized class, where `this` is the closure object — so every
+;; reference to the enclosing `this` inside such a body is rewritten here
+;; into an ordinary field/method access on this captured identifier (a field
+;; of the closure), the same shape an outer captured *other* object's
+;; field/method access already uses.
 (def ^:private closure-this-capture-name "__closure_this__")
 
 (defn- ctx-class-def
@@ -3150,13 +3210,11 @@
                 (accessible-method-def ctx (ctx-class-def ctx (:this-type ctx)) name arity))))
 
 ;; A bare field read of one of the enclosing method's own fields (`count`,
-;; meaning `this.count`): a spawn/anonymous-function body is dispatched to
-;; the tree-walking interpreter at runtime (nex.compiler.jvm.runtime/make-
-;; captured-function-object), with `this` captured like any other outer
-;; variable under closure-this-capture-name. Rewriting the bare read into
-;; an explicit field-get on that captured identifier — the same shape an
-;; ordinary captured *other* object's field read already uses — means the
-;; interpreter needs no special "this" handling for it at all.
+;; meaning `this.count`): inside a spawn/anonymous-function body `this` is
+;; the closure object, with the enclosing instance captured like any other
+;; outer variable under closure-this-capture-name. The bare read becomes an
+;; explicit field-get on that captured identifier — the same shape an
+;; ordinary captured *other* object's field read already uses.
 (defn- rewrite-identifier-for-closures
   [ctx local-types captures expr]
   (if (and (not (contains? local-types (:name expr)))
@@ -3204,7 +3262,7 @@
       ;; method's `this` would fail to propagate that capture outward:
       ;; the enclosing closure wouldn't capture __closure_this__ either,
       ;; and at runtime the nested closure's construction (inside the
-      ;; enclosing closure's interpreted body) can't resolve it —
+      ;; enclosing closure's body) can't resolve it —
       ;; "Undefined variable: __closure_this__". capture-closure-this!
       ;; performs the equivalent propagation for this name, gated on the
       ;; enclosing scope's own :this-type/:inside-closure?.
@@ -3212,18 +3270,15 @@
             (if (= name closure-this-capture-name)
               (capture-closure-this! captures ctx)
               (capture-reference! captures local-types (:var-types ctx) name)))
-        runtime-object? (seq capture-vec)
       ;; (:class-def expr) still holds the call<N> method's *original*
       ;; body — attach-capture-fields only adds capture fields, it never
       ;; touches method bodies. Ordinarily that staleness is harmless (a
       ;; plain captured-variable reference rewrites to itself, unchanged),
       ;; but a `this` reference above rewrites into a genuinely different
-      ;; node shape. interp/make-object (nex.compiler.jvm.runtime/make-
-      ;; captured-function-object) runs *this* class-def's method body at
-      ;; call time — so without this sync, the interpreter would still see
-      ;; the pre-rewrite `this`/bare field or method reference and try to
-      ;; resolve it against the closure's own (fieldless, methodless)
-      ;; class instead of the captured original.
+      ;; node shape. The closure class is compiled from *this* class-def's
+      ;; method body — so without this sync, it would still hold the
+      ;; pre-rewrite `this`/bare field or method reference and resolve it
+      ;; against the closure's own class instead of the captured original.
         call-method-name (str "call" (count params))
         original-call-method (some #(when (and (= call-method-name (:name %))
                                                (= (count params) (count (or (:params %) []))))
@@ -3236,7 +3291,8 @@
                        (sync-callable-into-class-def
                         (:class-def expr)
                         (assoc original-call-method :body rewritten-body))
-                       capture-vec runtime-object?))))
+                       capture-vec (:this-type ctx)
+                       (:scope-generic-params ctx)))))
 
 ;; A method call or explicit field access reaching `this` — bare
 ;; (`bump()`/`count` as a no-parens access), or via an explicit `this.`
@@ -3455,6 +3511,39 @@
 
     :else node))
 
+;; An `across x as i` loop desugars to a synthetic cursor let
+;; (`__across_c_N__ := x.cursor`) and, in the body, `i := __across_c_N__.item`.
+;; Inferred on its own, `item` on a bare `Cursor` is Any; a closure capturing
+;; `i` needs its real element type (a compiled capture is a typed field), so
+;; the cursor let records the element type of `x` in LOCAL-TYPES under a key
+;; no identifier can collide with, and the item let reads it back — the same
+;; rule nex.typechecker applies through env-add-across-cursor.
+(defn- across-cursor-let?
+  [stmt]
+  (and (:synthetic stmt)
+       (string? (:name stmt))
+       (str/starts-with? (:name stmt) "__across_c_")
+       (= :call (get-in stmt [:value :type]))
+       (= "cursor" (get-in stmt [:value :method]))
+       (empty? (get-in stmt [:value :args]))))
+
+(defn- across-item-cursor-name
+  "The cursor name when STMT is an across loop's synthetic `item` let."
+  [stmt]
+  (let [value (:value stmt)
+        target (:target value)
+        target-name (if (map? target) (:name target) target)]
+    (when (and (:synthetic stmt)
+               (= :call (:type value))
+               (= "item" (:method value))
+               (string? target-name)
+               (str/starts-with? target-name "__across_c_"))
+      target-name)))
+
+(defn- across-item-type-key
+  [cursor-name]
+  (str cursor-name "#item"))
+
 (defn- rewrite-let-stmt-for-closures
   [ctx local-types captures stmt]
   (let [value (if (and (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
@@ -3480,19 +3569,23 @@
       ;; downstream (a REPL session persisting this var-type across
       ;; cells), a "Method not found" call dispatched against the
       ;; erased "Any" type in a later, separate cell.
+        across-item-type (when-let [cursor-name (across-item-cursor-name stmt)]
+                           (get local-types (across-item-type-key cursor-name)))
         var-type (or (:var-type stmt)
+                     across-item-type
                      (anonymous-function-signature-type value)
                      (infer-prepass-type ctx local-types value'))]
-    [stmt' (assoc local-types (:name stmt) var-type)]))
+    [stmt' (cond-> (assoc local-types (:name stmt) var-type)
+             (across-cursor-let? stmt)
+             (assoc (across-item-type-key (:name stmt))
+                    (tc/cursor-item-type (infer-prepass-type ctx local-types
+                                                             (:target (:value stmt))))))]))
 
 ;; A bare `count := v` inside a spawn/anonymous-function body means
-;; `this.count := v`. Since the closure body runs on the interpreter (see
-;; the :identifier case above), rewrite it into an explicit member-assign
-;; through the captured `this` identifier — the same shape an ordinary
-;; captured *other* object's field write already uses (`other.count := v`,
-;; unlike the untouched form, does not depend on `this` being resolvable
-;; inside a class the interpreter never sees as the original enclosing
-;; class).
+;; `this.count := v`. Since the closure body runs as a method of the closure's
+;; own class (see the :identifier case above), rewrite it into an explicit
+;; member-assign through the captured `this` identifier — the same shape an
+;; ordinary captured *other* object's field write already uses.
 (defn- rewrite-assign-stmt-for-closures
   [ctx local-types captures stmt]
   (if (and (not (contains? local-types (:target stmt)))
@@ -3623,8 +3716,7 @@
     ;; fn-expr's :captures/:class-def unset. Any outer variable the body
     ;; referenced (e.g. `ch.send(i)` capturing `ch`) then reached lowering
     ;; as an anonymous-function node nobody had prepared — lower-expr-
-    ;; anonymous-function found no compiled class for it and no captures
-    ;; to dispatch through the interpreter bridge either, crashing with
+    ;; anonymous-function found no compiled class for it, crashing with
     ;; "internal error in the compiled backend: Anonymous function class
     ;; has not been compiled during lowering".
     :spawn
@@ -3700,6 +3792,17 @@
                         section))
                     sections)))))
 
+(defn- function-scope-generic-params
+  "Generic parameters in scope in free function FN-DEF's body: its declared
+   ones (with constraints) and any implicit ones its signature mentions."
+  [visible-classes fn-def]
+  (let [declared (vec (:generic-params fn-def))
+        declared-names (set (map :name declared))]
+    (into declared
+          (comp (remove declared-names)
+                (map (fn [n] {:name n :constraint nil})))
+          (sort (free-function-generic-param-names visible-classes fn-def)))))
+
 (defn- rewrite-callable-for-closures
   [ctx callable initial-var-types]
   (let [params (or (:params callable) [])
@@ -3730,7 +3833,9 @@
   ;; instead of a live reference to the enclosing object, silently dropping
   ;; mutations the moment the closure ran (spawn/anonymous-function bodies
   ;; could read a field but never durably write one).
-  (let [ctx (assoc ctx :this-type (:name class-def))]
+  (let [ctx (assoc ctx
+                   :this-type (:name class-def)
+                   :scope-generic-params (vec (class-generic-params class-def)))]
     (update class-def :body
             (fn [sections]
               (mapv (fn [section]
@@ -3875,10 +3980,18 @@
   [params]
   (into {} (map (juxt :name :type)) (or params [])))
 
+(defn- routine-var-types
+  "INITIAL-VAR-TYPES for a routine, plus `result` at its declared return
+   type, so `result := fn(...)` in a routine returning a Function type (or
+   an alias of one) gets that signature too."
+  [routine]
+  (cond-> (initial-var-types (:params routine))
+    (:return-type routine) (assoc "result" (:return-type routine))))
+
 (defn- resolve-functions-anonymous-function-context-types
   [fns]
   (mapv (fn [f] (update f :body #(first (resolve-anonymous-function-types-in-stmts
-                                         % (initial-var-types (:params f))))))
+                                         % (routine-var-types f)))))
         fns))
 
 (defn- resolve-class-anonymous-function-context-types
@@ -3892,7 +4005,7 @@
                       (mapv (fn [m]
                               (if (= :method (:type m))
                                 (update m :body #(first (resolve-anonymous-function-types-in-stmts
-                                                         % (initial-var-types (:params m)))))
+                                                         % (routine-var-types m))))
                                 m))
                             members)))
             :constructors
@@ -3917,7 +4030,7 @@
 ;; --- Shared mutable captures ---
 ;;
 ;; A closure's captures are ordinary VALUE snapshots taken at construction
-;; time (see lower-expr-anonymous-function/make-captured-function-object):
+;; time (see lower-expr-anonymous-function and its capture constructor):
 ;; each `fn(...)` literal gets its own private copy of whatever an outer
 ;; variable currently holds. That is correct for a captured variable no
 ;; closure ever reassigns, and even for ONE closure that both reads and
@@ -4461,7 +4574,10 @@
         boxed-functions (mapv (fn [f]
                                 (update f :body #(box (initial-var-types (:params f)) %)))
                               (:functions program))
-        rewritten-functions (mapv #(rewrite-callable-for-closures ctx % (:var-types opts))
+        rewritten-functions (mapv #(rewrite-callable-for-closures
+                                    (assoc ctx :scope-generic-params
+                                           (function-scope-generic-params (:classes ctx) %))
+                                    % (:var-types opts))
                                   boxed-functions)
         boxed-statements (box (:var-types opts) (:statements program))
         [rewritten-statements _ _]
@@ -4509,16 +4625,7 @@
                           class-name (:name class-def)]
                       (when-not (contains? @found class-name)
                         (swap! seen-order conj class-name))
-                      (swap! found
-                             (fn [m]
-                               (let [existing (get m class-name)]
-                                 (assoc m
-                                        class-name
-                                        (if (and existing
-                                                 (not (:closure-runtime-object? class-def))
-                                                 (:closure-runtime-object? existing))
-                                          existing
-                                          class-def)))))))
+                      (swap! found assoc class-name class-def)))
                   (doseq [v (vals x)]
                     (walk v)))
 
@@ -5012,32 +5119,44 @@
   [env expr]
   (second (lower-attached-test-expression env expr)))
 
+(defn- closure-this-in-scope?
+  "True while lowering the body of a compiled closure that captured its
+   enclosing instance: there `this` is the closure object itself, and the
+   enclosing instance is the closure's own `__closure_this__` field."
+  [env]
+  (boolean (accessible-field-def env (current-class-def env) closure-this-capture-name)))
+
 (defn- lower-expr-anonymous-function
   [env expr]
   (let [class-name (:class-name expr)
         compiled (get (:compiled-classes env) class-name)
         nex-type (infer-type env expr)
         captures (:captures expr)]
-    (if (seq captures)
-      (ir/call-runtime-node "make-captured-function-object"
-                            (into [(ir/const-node class-name
-                                                  "String"
-                                                  (ir/object-jvm-type "java/lang/String"))]
-                                  (mapcat (fn [{:keys [name]}]
-                                            [(ir/const-node name
-                                                            "String"
-                                                            (ir/object-jvm-type "java/lang/String"))
-                                             ;; The closure-this capture has no
-                                             ;; identifier of its own at the
-                                             ;; instantiation site — it names
-                                             ;; the enclosing method's `this`.
-                                             (lower-expression env (if (= name closure-this-capture-name)
-                                                                     {:type :this}
-                                                                     {:type :identifier
-                                                                      :name name}))])
-                                          captures))
-                            nex-type
-                            (ir/object-jvm-type "java/lang/Object"))
+    (cond
+      ;; Create the closure's own class through its synthetic capture
+      ;; constructor, handing it each captured value. The value's Nex type is
+      ;; the closure's Function type, as for a capture-free closure below,
+      ;; not its synthetic class.
+      (seq captures)
+      (assoc (lower-expression env {:type :create
+                             :class-name class-name
+                             :generic-args nil
+                             :constructor capture-constructor-name
+                             :args (mapv (fn [{:keys [name]}]
+                                           (if (and (= name closure-this-capture-name)
+                                                    (not (closure-this-in-scope? env)))
+                                             ;; Created directly in a method:
+                                             ;; the enclosing instance is `this`.
+                                             {:type :this}
+                                             ;; Otherwise (including the enclosing
+                                             ;; instance, when created inside
+                                             ;; another closure that captured it)
+                                             ;; the value is the identifier in scope.
+                                             {:type :identifier :name name}))
+                                         captures)})
+             :nex-type nex-type)
+
+      :else
       (do
         (when-not compiled
           (throw (ex-info "Anonymous function class has not been compiled during lowering"
@@ -7076,17 +7195,11 @@
 
       field-def
       (if (or (= (:current-class env) (:declaring-class field-def))
-              ;; A spawn/anonymous-function body with captures never actually
-              ;; runs as this lowered bytecode — it is re-dispatched to the
-              ;; tree-walking interpreter via make-captured-function-object
-              ;; (nex.compiler.jvm.runtime), and this class's IR is discarded
-              ;; before emission (see emitted-anonymous-classes). The
-              ;; encapsulation check below exists to keep *real* compiled
-              ;; classes honest; applying it to a body that will never run as
-              ;; this bytecode only turns an ordinary captured-object field
-              ;; write (`other.count := v`, `this.count := v` once `this` is
-              ;; rewritten to a capture) into a hard compile failure.
-              (:closure-runtime-object? (current-class-def env)))
+              ;; A closure's body is lexically inside the class it was written
+              ;; in, so it may assign that class's fields — through the
+              ;; captured `this` (`count := v` is rewritten to
+              ;; `__closure_this__.count := v`).
+              (enclosing-class-of-closure? env (:declaring-class field-def)))
         [env (ir/call-runtime-node (str "user-field-set:" field-name)
                                    [(lower-expression env target-expr) value-ir]
                                    "Void"
@@ -7430,9 +7543,9 @@
                                      [(:class-def fn-def)]
                                      (keep :class-def visible-functions)))
         current-class (:class-name fn-def)
-        generic-param-names (set (concat (map :name (:generic-params (:class-def fn-def)))
+        generic-param-names (set (concat (class-generic-param-name-seq (:class-def fn-def))
                                          (free-function-generic-param-names visible-classes fn-def)))
-        generic-param-constraints (generic-param-constraint-map (:generic-params (:class-def fn-def)))]
+        generic-param-constraints (generic-param-constraint-map (class-generic-params (:class-def fn-def)))]
     (make-lowering-env {:classes visible-classes
                         :functions visible-functions
                         :imports visible-imports
@@ -7634,8 +7747,8 @@
                                    :functions visible-functions
                                    :imports visible-imports
                                    :compiled-classes compiled-classes
-                                   :generic-param-names (set (map :name (:generic-params class-def)))
-                                   :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
+                                   :generic-param-names (set (class-generic-param-name-seq class-def))
+                                   :generic-param-constraints (generic-param-constraint-map (class-generic-params class-def))
                                    :this-type (:name class-def)
                                    :top-level? false
                                    :repl? true
@@ -7732,8 +7845,8 @@
   [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
   (let [ctor-def (strip-java-super-ctor-call visible-classes class-def ctor-def)
         class-name (:name class-def)
-        generic-param-names (set (map :name (:generic-params class-def)))
-        generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
+        generic-param-names (set (class-generic-param-name-seq class-def))
+        generic-param-constraints (generic-param-constraint-map (class-generic-params class-def))
         env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports
@@ -7801,8 +7914,8 @@
 (defn- lower-generic-init-method
   [unit-name visible-functions visible-imports visible-classes class-def compiled-classes]
   (let [class-name (:name class-def)
-        generic-param-names (set (map :name (:generic-params class-def)))
-        generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
+        generic-param-names (set (class-generic-param-name-seq class-def))
+        generic-param-constraints (generic-param-constraint-map (class-generic-params class-def))
         env0 (make-lowering-env {:classes visible-classes
                                  :functions visible-functions
                                  :imports visible-imports
@@ -7982,7 +8095,7 @@
    self-recursion."
   [unit-name visible-functions visible-imports visible-classes class-def compiled-classes]
   (let [class-name (:name class-def)
-        generic-param-names (set (map :name (:generic-params class-def)))
+        generic-param-names (set (class-generic-param-name-seq class-def))
         env (make-lowering-env {:classes visible-classes
                                 :functions visible-functions
                                 :imports visible-imports
@@ -7990,7 +8103,7 @@
                                 :compiled-classes compiled-classes
                                 :current-class class-name
                                 :generic-param-names generic-param-names
-                                :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
+                                :generic-param-constraints (generic-param-constraint-map (class-generic-params class-def))
                                 :generic-runtime-values (generic-runtime-field-bindings
                                                          {:compiled-classes compiled-classes}
                                                          class-name
@@ -8257,8 +8370,8 @@
                                                  :functions visible-functions
                                                  :imports visible-imports
                                                  :compiled-classes compiled-classes
-                                                 :generic-param-names (set (map :name (:generic-params class-def)))
-                                                 :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))
+                                                 :generic-param-names (set (class-generic-param-name-seq class-def))
+                                                 :generic-param-constraints (generic-param-constraint-map (class-generic-params class-def))
                                                  :current-class class-name
                                                  :this-type class-name
                                                  :top-level? false
@@ -8389,8 +8502,8 @@
                                 :functions (:functions opts)
                                 :imports (:imports opts)
                                 :compiled-classes compiled-classes
-                                :generic-param-names (set (map :name (:generic-params class-def)))
-                                :generic-param-constraints (generic-param-constraint-map (:generic-params class-def))})
+                                :generic-param-names (set (class-generic-param-name-seq class-def))
+                                :generic-param-constraints (generic-param-constraint-map (class-generic-params class-def))})
         visible-functions (vec (:functions opts))
         visible-imports (vec (:imports opts))
         own-ctor-names (set (map :name (class-constructors class-def)))
@@ -8531,7 +8644,6 @@
     (let [unit-name (or (:name opts) "nex/repl/Cell_0001")
           actual-classes (vec (user-class-defs program))
           anonymous-classes (vec (collect-anonymous-class-defs program))
-          emitted-anonymous-classes (vec (remove :closure-runtime-object? anonymous-classes))
           visible-imports (vec (or (:imports opts) (:imports program)))
           imported-classes (->> visible-imports
                                 (keep (fn [{:keys [qualified-name source]}]
@@ -8580,7 +8692,7 @@
                                                              :functions visible-functions
                                                              :imports visible-imports
                                                              :source-file (:source-file opts)})
-                                        (concat actual-classes emitted-anonymous-classes))
+                                        (concat actual-classes anonymous-classes))
                          :functions (mapv #(lower-function unit-name
                                                            visible-functions
                                                            visible-imports

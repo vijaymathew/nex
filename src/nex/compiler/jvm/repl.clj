@@ -4,9 +4,15 @@
             [nex.compiler.jvm.classloader :as loader]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
+            ;; Loaded for its side effect: installs the runtime's interpreter
+            ;; adapter, since this REPL mixes compiled and interpreted values.
+            [nex.compiler.jvm.interp-bridge]
             [nex.compiler.jvm.runtime :as rt]
             [nex.interpreter :as interp]
+            [nex.intern :as intern]
             [nex.lower :as lower]
+            [nex.types.bootstrap :as bootstrap]
+            [nex.types.builtins :as bi]
             [nex.typechecker :as tc])
   (:import [java.util HashMap]
            [java.lang.reflect InvocationTargetException]))
@@ -118,7 +124,7 @@
   #{"=" "/=" "==" "!=" "<" "<=" ">" ">="})
 
 (def ^:private builtin-function-names
-  (set (keys interp/builtins)))
+  (set (keys bi/builtins)))
 
 (declare supported-expr-in-ctx?)
 (declare supported-stmt-in-ctx?)
@@ -165,10 +171,10 @@
 
 (defn- builtin-class-defs
   []
-  (let [interp-builtins @(:classes (interp/make-context))
+  (let [base-classes (into {} (map (juxt :name identity)) (bootstrap/base-class-defs))
         env (tc/make-type-env)]
     (tc/register-builtin-methods env)
-    (vals (merge interp-builtins @(:classes env)))))
+    (vals (merge base-classes @(:classes env)))))
 
 (defn- import-placeholder-classes
   [imports]
@@ -464,22 +470,22 @@
         ;; They stay visible for typechecking/lowering regardless, via
         ;; `@(:class-asts session)`/`@(:function-asts session)`.
         intern-classes (remove #(contains? @(:class-asts session) (:name %))
-                               (interp/resolve-interned-classes source-id ast'))
+                               (intern/resolve-interned-classes source-id ast'))
         ;; A module's free functions come into scope alongside its classes; the
         ;; cell that runs the `intern` must carry them so remember-top-level-ast!
         ;; records them for later cells (the file path does the same).
         intern-functions (remove #(contains? @(:function-asts session) (:name %))
-                                 (interp/resolve-interned-functions source-id ast'))
-        intern-imports (interp/resolve-interned-imports source-id ast')
+                                 (intern/resolve-interned-functions source-id ast'))
+        intern-imports (intern/resolve-interned-imports source-id ast')
         merged-imports (merge-import-like-nodes
                         (merge-import-like-nodes @(:import-asts session) intern-imports)
                         (:imports ast'))
         ;; An aliased intern (`intern X as Y`) resolves to a :type-aliases
-        ;; entry, not a second class-def (see nex.interpreter/resolve-interned*)
+        ;; entry, not a second class-def (see nex.intern/resolve-interned*)
         ;; — carried forward the same way class-asts/function-asts are, so a
         ;; later cell that only *uses* the alias (declared by an earlier cell)
         ;; still sees it.
-        intern-type-aliases (interp/resolve-interned-type-aliases source-id ast')
+        intern-type-aliases (intern/resolve-interned-type-aliases source-id ast')
         merged-type-aliases (vec (concat (vals @(:type-aliases session))
                                          intern-type-aliases
                                          (:type-aliases ast')))]
@@ -809,12 +815,32 @@
    :constructors (:constructors lowered-class)
    :methods (:methods lowered-class)})
 
+(defn- runtime-class-table
+  "The session's class-defs for the runtime state, each stamped with its
+   compiled class's names — what the runtime needs to build an instance
+   itself (make-runtime-object: the Http_Request and kin the http builtins
+   hand the program), the same stamping nex.compiler.jvm.file applies to a
+   whole file's table. Without it every such object fell back to an
+   interpreter object map."
+  [session]
+  (let [compiled @(:compiled-classes session)]
+    (into {}
+          (map (fn [[class-name class-def]]
+                 [class-name
+                  (if-let [{:keys [internal-name jvm-name binary-name]} (get compiled class-name)]
+                    (assoc class-def
+                           :internal-name internal-name
+                           :jvm-name jvm-name
+                           :binary-name binary-name)
+                    class-def)]))
+          @(:class-asts session))))
+
 (defn- compile-and-register-classes!
   [session ast source-id]
   (let [actual-classes (vec (concat (user-class-defs ast)
                                     (anonymous-class-defs ast)))]
     (when (seq actual-classes)
-      (let [compiled-class-defs (vec (remove :closure-runtime-object? actual-classes))
+      (let [compiled-class-defs actual-classes
             new-class-map (allocate-compiled-class-metadata session compiled-class-defs)
             compiled-map (merge @(:compiled-classes session) new-class-map)
             visible-functions (vec (concat (vals @(:function-asts session)) (:functions ast)))
@@ -978,7 +1004,7 @@
                      (assoc acc name alias))
                    m
                    (:type-aliases ast))))
-  (rt/state-set-classes! (:state session) @(:class-asts session))
+  (rt/state-set-classes! (:state session) (runtime-class-table session))
   (rt/state-set-imports! (:state session) @(:import-asts session))
   session)
 
@@ -1108,7 +1134,7 @@
     (doseq [fn-def (vals @(:function-asts session))]
       (interp/eval-node ctx' fn-def))
     ;; An `intern ... as` alias is a session :type-alias entry, not a second
-    ;; class-def (see nex.interpreter/resolve-interned*), so the classes just
+    ;; class-def (see nex.intern/resolve-interned*), so the classes just
     ;; re-registered above from :class-asts only cover the real names —
     ;; restore each alias as its own key onto the same class-def, matching
     ;; what nex.interpreter/process-intern does the first time an `intern`

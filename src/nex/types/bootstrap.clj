@@ -111,3 +111,19 @@
    :parents [{:parent "Any"} {:parent "Comparable"} {:parent "Hashable"}]
    :body []
    :invariant nil})
+
+(def builtin-scalar-class-names
+  ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])
+
+(defn base-class-defs
+  "The standard environment's base classes, in registration order (each
+   class's parents precede it): Any, Function, Cursor, Comparable, Hashable,
+   then the builtin scalars. Shared by every engine that needs the builtin
+   roots of the class hierarchy."
+  []
+  (into [(build-any-base-class)
+         (build-function-base-class)
+         (build-cursor-base-class)
+         (build-comparable-base-class)
+         (build-hashable-base-class)]
+        (map build-builtin-scalar-class builtin-scalar-class-names)))

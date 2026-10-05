@@ -30,7 +30,7 @@
    Either way the result is one flat string: a bare `Account` stays exactly
    `\"Account\"` (unchanged from before qualified names existed), and a
    qualified `finance/Account` becomes `\"finance.Account\"` — the same
-   dot-joined form nex.interpreter/resolve-interned* stamps as a class-def's
+   dot-joined form nex.intern/resolve-interned* stamps as a class-def's
    :qualified-name, so a qualified reference and the class-def it targets
    compare equal as plain strings with no further parsing downstream."
   [node]
@@ -1052,7 +1052,7 @@
    an interned module name in another function or at top level.
 
    PROGRAM must already carry every reachable function's :qualified-name
-   (stamped by nex.interpreter/resolve-interned* on the intern-merged
+   (stamped by nex.intern/resolve-interned* on the intern-merged
    :functions list) — this only rewrites a call whose full dotted name
    matches one of those, so it is a no-op until this program interns
    something. Safe to call twice: a rewritten call has :target nil, which
@@ -1293,6 +1293,44 @@
 
 (declare transform-node)
 
+(def ^:private implied-library-interns
+  "Builtins that hand the program instances of a library class. `http_get`
+   returns an `Http_Response`; an http-server handler receives an
+   `Http_Request` and may get an `Http_Server_Response` back. Both backends
+   build those objects as instances of the library's own classes, so a
+   program using one of these builtins gets the library, as if it had written
+   the `intern` itself — otherwise the classes would not exist in it at all."
+  [{:builtins #{"http_get" "http_post"}
+    :path "net" :class-name "Http_Client"
+    :provides #{"Http_Response"}}
+   {:builtins #{"http_server_create" "http_server_get" "http_server_post"
+                "http_server_put" "http_server_delete" "http_server_start"}
+    :path "net" :class-name "Http_Server"
+    :provides #{"Http_Request" "Http_Server_Response"}}])
+
+(defn- add-implied-interns
+  "Append an `:implied` intern to PROGRAM for each library in
+   implied-library-interns whose builtins it calls, unless it already interns
+   that library, declares one of the classes the library provides (the
+   library's own file does), or defines a function of the builtin's name
+   (then the call is to that function, not the builtin)."
+  [program]
+  (let [called (into #{}
+                     (comp (filter map?)
+                           (filter #(and (= :call (:type %)) (nil? (:target %))))
+                           (map :method))
+                     (tree-seq coll? seq (select-keys program [:statements :functions :classes])))
+        declared-classes (set (map :name (:classes program)))
+        own-functions (set (map :name (:functions program)))
+        interned (set (map (juxt :path :class-name) (:interns program)))
+        implied (for [{:keys [builtins path class-name provides]} implied-library-interns
+                      :when (and (some #(and (called %) (not (own-functions %))) builtins)
+                                 (not (interned [path class-name]))
+                                 (not-any? declared-classes provides))]
+                  {:type :intern :path path :class-name class-name :alias nil :implied true})]
+    (cond-> program
+      (seq implied) (update :interns into implied))))
+
 (defn- handle-program
   [[_ & nodes]]
   (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
@@ -1348,6 +1386,7 @@
          :function-signature-conflicts signature-conflicts
          :statements (vec statements)
          :calls (vec calls)}
+        add-implied-interns
         resolve-convert-aliases
         inject-refinement-checks)))
 

@@ -914,7 +914,7 @@ print(trade.ship(\"not a number\"))")
   (testing "`intern billing/Account as Billing_Account` DOES resolve a
             same-named collision, on both backends — Billing_Account's
             :type-expr points at the qualified identity \"billing.Account\"
-            (nex.interpreter/resolve-interned*), not the bare, still-ambiguous
+            (nex.intern/resolve-interned*), not the bare, still-ambiguous
             \"Account\", so referencing only the alias never touches the bare
             name at all"
     (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-ns-alias-fix-" (System/nanoTime)))
@@ -1692,7 +1692,7 @@ print(a.value)")
             test for exactly this: `nex ds.nex` reported a syntax error 60
             lines into an interned library as \"Line 7\" of ds.nex itself (ds.nex
             is 7 lines long), pointing a caret at the END of an unrelated
-            assert statement — nex.interpreter/parse-interned-file now wraps
+            assert statement — nex.intern/parse-interned-file now wraps
             the ParseError with the file/source it actually came from, on
             both backends (type-checking runs first regardless), checked here
             via the raw exception rather than captured stdout, since the
@@ -1750,7 +1750,7 @@ print(o.check(0))")
             above, one layer later: `nex ds.nex` reported \"Type error at
             line 65, column 39: Undefined variable: xs\" with no indication
             that line 65 belonged to a library ds.nex interned, not ds.nex
-            itself (7 lines long). nex.interpreter/resolve-interned* now
+            itself (7 lines long). nex.intern/resolve-interned* now
             stamps :source-file onto every class/function it returns
             (alongside :qualified-name), and check-program wraps each one's
             processing in nex.typechecker/with-source-file, which — unlike
@@ -1840,7 +1840,7 @@ let t := create Thing")
             This exercises the real `bin/nex` CLI path specifically: it
             exports the project root via the NEX_USER_DIR env var and never
             sets the `nex.user.dir` system property (that's REPL-only), so
-            it has to run as a subprocess — nex.interpreter/find-intern-file
+            it has to run as a subprocess — nex.intern/find-intern-file
             reads System/getenv directly, which this JVM's in-process tests
             can't fake (see examples-smoke-test's run-failure-with-nex-user-dir
             for the same constraint). Before the fix, intern-search-roots only

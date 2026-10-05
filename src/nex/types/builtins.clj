@@ -191,14 +191,26 @@
   (swap! engine-hooks merge m)
   nil)
 
+(defn- hook
+  "Engine hook K for a call made with CTX. A context may carry its own
+   `:engine-hooks` map, which wins over the globally registered set: more than
+   one engine can live in a process (the REPL runs compiled cells, and its
+   debugger runs the tree-walker), so the compiled runtime passes its hooks
+   on the context it calls the library with (see
+   nex.compiler.jvm.runtime/builtin-ctx) instead of registering them
+   globally. The ctx-free hooks (:nex-object?, :make-object) stay global."
+  [ctx k]
+  (or (when (map? ctx) (get (:engine-hooks ctx) k))
+      (get @engine-hooks k)))
+
 (defn nex-object? [v] ((:nex-object? @engine-hooks) v))
 (defn make-object
   ([class-name field-values] (make-object class-name field-values nil))
   ([class-name field-values closure-env]
    ((:make-object @engine-hooks) class-name field-values closure-env)))
-(defn object-equals-override [ctx a b] ((:object-equals-override @engine-hooks) ctx a b))
-(defn- eval-call [ctx obj method args] ((:call-object-method @engine-hooks) ctx obj method args))
-(defn- user-to-string [ctx value] ((:user-to-string @engine-hooks) ctx value))
+(defn object-equals-override [ctx a b] ((hook ctx :object-equals-override) ctx a b))
+(defn- eval-call [ctx obj method args] ((hook ctx :call-object-method) ctx obj method args))
+(defn- user-to-string [ctx value] ((hook ctx :user-to-string) ctx value))
 
 (declare nex-format-value)
 (declare call-builtin-method)
@@ -1644,12 +1656,12 @@
   "Record one line of program output through the engine hook (the interpreter
    accumulates it on the context; the default writes to the console)."
   [ctx line]
-  ((:add-output @engine-hooks) ctx line))
+  ((hook ctx :add-output) ctx line))
 
 (defn is-parent?
   "Class-hierarchy query through the engine hook."
   [ctx class-name parent-name]
-  ((:is-parent? @engine-hooks) ctx class-name parent-name))
+  ((hook ctx :is-parent?) ctx class-name parent-name))
 
 (defn format-value-with-ctx
   "Like nex-format-value, but recurses into Array/Map/Set elements with a

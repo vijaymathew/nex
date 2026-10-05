@@ -8,7 +8,7 @@
             [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
-            [nex.interpreter :as interp]
+            [nex.intern :as intern]
             [nex.lower :as lower]
             [nex.parser :as p]
             [nex.typechecker :as tc]
@@ -18,21 +18,14 @@
 
 ;; --- Structural trim of the embedded class table -------------------------
 ;; A whole-file artifact embeds every class's AST as `classes-edn` (below) so
-;; the runtime can (a) answer reflection/subtype/field queries and (b) on the
-;; deopt path, run a method on an interpreter-produced object through the
-;; tree-walker. Only (b) needs executable bodies; (a) needs just signatures and
-;; the inheritance/field structure. Dropping the bodies shrinks the blob to
-;; ~40% — which, ahead of the chunker, keeps most programs to a single LDC.
-;;
-;; Soundness (see `interpreter-reachable?`): the ONLY seed of an interpreter
-;; object in a whole-file compile is a closure that becomes a runtime object
-;; (compiled code mints it via runtime/make-captured-function-object). Every
-;; other deopt site is gated on an already-existing interpreter object. So if
-;; the program has no runtime-closure class, the tree-walker never runs and the
-;; bodies are dead metadata; if it has one, the interpreter can construct and
-;; dispatch objects of ANY user class, so trimming must be all-or-nothing. This
-;; path is whole-file only — the REPL compiles through its own entry point and
-;; never reaches here.
+;; the runtime can answer reflection/subtype/field queries, which need just
+;; signatures and the inheritance/field structure — never executable bodies:
+;; every method runs as compiled bytecode (closures included, see
+;; docs/md/COMPILED_CLOSURES.md), so no Nex code in a whole-file program
+;; runs on the tree-walker. Dropping the bodies shrinks the blob to ~40% —
+;; which, ahead of the chunker, keeps most programs to a single LDC. This path is
+;; whole-file only — the REPL compiles through its own entry point and never
+;; reaches here.
 
 (defn- trim-class-member [m]
   (case (:type m)
@@ -57,24 +50,6 @@
   (-> c
       (dissoc :invariant :note :dbg/line :dbg/col)
       (update :body #(mapv trim-class-body-item %))))
-
-(defn- interpreter-reachable?
-  "True when the whole-file program can spin up the tree-walking interpreter at
-   runtime, which happens iff some class in the table is a closure that becomes
-   a runtime object. When false, no interpreter object can ever exist, so every
-   embedded method body is unreachable and the table can be trimmed to
-   structural metadata."
-  [class-asts]
-  (boolean (some :closure-runtime-object? class-asts)))
-
-(defn- maybe-trim-class-table
-  "Trim the embedded class table to structural metadata when it is provably
-   safe (no interpreter reachability). Applied before serialization so the
-   chunker only has to split whatever remains oversized."
-  [class-asts]
-  (if (interpreter-reachable? class-asts)
-    class-asts
-    (mapv structural-trim-class class-asts)))
 
 (defn- sanitize-stem
   [path]
@@ -130,10 +105,10 @@
      *bare*, still-ambiguous reference, at that call site, not the whole
      program merely for having interned both."
   [source-id ast]
-  (let [intern-classes (interp/resolve-interned-classes source-id ast)
-        intern-functions (interp/resolve-interned-functions source-id ast)
-        intern-imports (interp/resolve-interned-imports source-id ast)
-        intern-type-aliases (interp/resolve-interned-type-aliases source-id ast)
+  (let [intern-classes (intern/resolve-interned-classes source-id ast)
+        intern-functions (intern/resolve-interned-functions source-id ast)
+        intern-imports (intern/resolve-interned-imports source-id ast)
+        intern-type-aliases (intern/resolve-interned-type-aliases source-id ast)
         merged-imports (merge-import-like-nodes intern-imports (:imports ast))
         merged (assoc ast
                       :imports merged-imports
@@ -198,7 +173,7 @@
 
 (defn- emitted-anonymous-class-defs
   [ast]
-  (vec (remove :closure-runtime-object? (lower/collect-anonymous-class-defs ast))))
+  (vec (lower/collect-anonymous-class-defs ast)))
 
 (defn- class-metadata-entry
   "class-def is embedded on the returned metadata (docs/proposals/namespaces.md,
@@ -258,7 +233,7 @@
                    (comp (filter :qualified-name)
                          (map (fn [cd] [(:qualified-name cd) (entry-for cd)])))
                    emitted-classes)]
-    ;; An `intern ... as` alias (see nex.interpreter/resolve-interned*) adds a
+    ;; An `intern ... as` alias (see nex.intern/resolve-interned*) adds a
     ;; :type-aliases entry rather than a second, nominally distinct class-def,
     ;; so the alias name needs an entry here too, pointing at the SAME
     ;; metadata as the real class rather than a separately compiled
@@ -331,9 +306,7 @@
            ;; a real instance of the compiled class; without :binary-name
            ;; that lookup always failed, silently downgrading every such
            ;; object to an interpreter-only NexObject with no method bodies
-           ;; to run (see interpreter-reachable? below — it never knew this
-           ;; fallback path existed, so it trimmed bodies a program with no
-           ;; closures at all could still end up needing).
+           ;; to run (the embedded table is trimmed of bodies, below).
            ;; :qualified-name over the bare :name when present — the bare
            ;; slot in compiled-classes (docs/proposals/namespaces.md, Phase
            ;; 3/4) holds whichever class won the bare-name collapse when two
@@ -353,10 +326,10 @@
                                        :binary-name binary-name)
                                 c))
                             class-asts)
-           ;; Shrink the embedded table to structural metadata when the program
-           ;; cannot reach the interpreter, then let the chunker (emit-string-
-           ;; constant!) split whatever is still over the 65535-byte LDC cap.
-           classes-edn (pr-str (maybe-trim-class-table class-asts))
+           ;; Shrink the embedded table to structural metadata, then let the
+           ;; chunker (emit-string-constant!) split whatever is still over the
+           ;; 65535-byte LDC cap.
+           classes-edn (pr-str (mapv structural-trim-class class-asts))
            imports-edn (pr-str (:imports prepared-ast))
            ;; Every class this compilation itself emits, mapped to its super
            ;; internal name — consulted by the emitted ClassWriters'
@@ -571,7 +544,7 @@
       (System/exit 0)
       (catch Exception e
         ;; A syntax error in a file input-file interns, not input-file itself
-        ;; (nex.interpreter/parse-interned-file) — arrives wrapped this way
+        ;; (nex.intern/parse-interned-file) — arrives wrapped this way
         ;; with the actually-broken file's own path/source/ParseError, rather
         ;; than as a bare ParseError misattributed to input-file.
         (let [data (ex-data e)]

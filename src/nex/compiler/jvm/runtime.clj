@@ -2,7 +2,6 @@
   "Small runtime support for the future JVM bytecode compiler."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [nex.interpreter :as interp]
             [nex.types.builtins :as bi]
             [nex.types.concurrency :as conc]
             [nex.types.bootstrap :as bootstrap]
@@ -19,13 +18,53 @@
            [java.util.concurrent CompletableFuture TimeUnit TimeoutException ExecutionException CancellationException]
            [java.util.concurrent.atomic AtomicBoolean AtomicInteger AtomicLong AtomicReference]))
 
-(declare rebuild-interpreter-ctx)
 (declare lowered-instance-method-name)
 (declare reflected-field)
 (declare runtime-type-name)
 (declare runtime-compatible-with?)
 (declare invoke-user-method)
 (declare runtime-compare-values)
+
+;; ---------------------------------------------------------------------------
+;; Interpreter objects.
+;;
+;; Compiled code never creates one: every Nex class, closures included, is a
+;; generated JVM class. They reach compiled code only from the REPL, which
+;; hands over values from a cell it evaluated on the tree-walker (e.g. under
+;; `:debug on`). Recognising one is a shape test (an object map, which the
+;; interpreter's NexObject record also is) and needs no interpreter. Running Nex code on one does: that goes through the
+;; adapter the REPL installs (nex.compiler.jvm.interp-bridge), so this
+;; namespace never loads nex.interpreter.
+;; ---------------------------------------------------------------------------
+
+(defn- interp-object?
+  [v]
+  (and (map? v) (contains? v :class-name) (contains? v :fields)))
+
+(defonce ^:private interpreter-adapter (atom nil))
+
+(defn install-interpreter-adapter!
+  "Install the operations that run Nex code on an interpreter object:
+   :call-method (fn [state target method-name args has-parens?]),
+   :concat-string (fn [state value]) — its string-concatenation form, and
+   :equals-override (fn [state a b]) — its user `equals` against B, or nil."
+  [adapter]
+  (reset! interpreter-adapter adapter)
+  nil)
+
+(defn- interpreter-op
+  [k target]
+  (or (get @interpreter-adapter k)
+      (throw (ex-info (str "Cannot run Nex code on an interpreted "
+                           (or (:class-name target) "value")
+                           " object: no interpreter is attached to this program")
+                      {:op k :class-name (:class-name target)}))))
+
+(defn- invoke-interpreter-object-method
+  ([state target method-name args]
+   (invoke-interpreter-object-method state target method-name args true))
+  ([state target method-name args has-parens?]
+   ((interpreter-op :call-method target) state target method-name (vec args) has-parens?)))
 
 (def ^:dynamic *validating-object-state* false)
 
@@ -129,10 +168,11 @@
     (catch InvocationTargetException e
       (throw (or (.getCause e) e)))))
 
-(defn- registered-fn-callable
-  "Wrap a registered top-level function as a plain callable so the interpreter
-   (which runs deoptimized closures) can invoke it by name. The registry stores
-   either a reflective `Method` or an `{:owner :method}` descriptor."
+(defn registered-fn-callable
+  "Wrap a registered top-level function as a plain callable, so that code the
+   interpreter runs (see nex.compiler.jvm.interp-bridge) can invoke it by
+   name. The registry stores either a reflective `Method` or an
+   `{:owner :method}` descriptor."
   [state entry]
   (cond
     (instance? Method entry)
@@ -157,10 +197,11 @@
    expected, e.g. `filter_items(is_rare_or_legendary)`. Reuses the same
    registry (`state`'s `:functions` map, populated by `emit-register-repl-fn!`
    for every top-level function) and wrapping (`registered-fn-callable`)
-   already used to make a compiled top-level function callable by name from a
-   deoptimized closure running on the interpreter — see
-   `rebuild-interpreter-ctx`. Returns a plain Clojure fn; `invoke-function-object`
-   below knows to just call one of those directly."
+   already used to make a compiled top-level function callable by name from
+   code running on the interpreter — see
+   nex.compiler.jvm.interp-bridge/rebuild-interpreter-ctx. Returns a plain
+   Clojure fn; `invoke-function-object` below knows to just call one of those
+   directly."
   [state name]
   (when-let [entry (state-get-fn state name)]
     (registered-fn-callable state entry)))
@@ -172,14 +213,8 @@
                     {:target target
                      :args args})))
   (cond
-    (interp/nex-object? target)
-    (let [ctx (rebuild-interpreter-ctx state)
-          call-method (str "call" (count args))
-          literal-args (mapv (fn [v] {:type :literal :value v}) args)]
-      (interp/eval-node ctx {:type :call
-                             :target {:type :literal :value target}
-                             :method call-method
-                             :args literal-args}))
+    (interp-object? target)
+    (invoke-interpreter-object-method state target (str "call" (count args)) args false)
 
     ;; A top-level function passed by name (`function-value-for-name` above).
     (ifn? target)
@@ -803,20 +838,11 @@
   (loop []
     (let [^AtomicReference state (:state target)
           current (.get state)]
-      (if (value/nex-deep-equals? interp/nex-object? current expected)
+      (if (value/nex-deep-equals? interp-object? current expected)
         (if (.compareAndSet state current update)
           true
           (recur))
         false))))
-
-(defn- invoke-interpreter-object-method
-  [state target method-name args]
-  (let [ctx (rebuild-interpreter-ctx state)]
-    (interp/eval-node ctx {:type :call
-                           :target {:type :literal :value target}
-                           :method method-name
-                           :args (mapv (fn [v] {:type :literal :value v}) args)
-                           :has-parens true})))
 
 (defn call-compiled-user-method
   [state target method-name args]
@@ -827,7 +853,7 @@
   (let [runtime-name (runtime-type-name state target)]
     (if (and (string? runtime-name)
              (runtime-compatible-with? state runtime-name "Cursor"))
-      (if (interp/nex-object? target)
+      (if (interp-object? target)
         (invoke-interpreter-object-method state target method-name args)
         (invoke-user-method state target method-name args))
       (bi/call-builtin-method nil target target method-name args))))
@@ -868,18 +894,6 @@
   []
   (Thread/sleep 1)
   nil)
-
-(defn make-captured-function-object
-  [state class-name capture-args]
-  (when-not (even? (count capture-args))
-    (throw (ex-info "Captured closure args must be name/value pairs"
-                    {:class-name class-name
-                     :capture-args capture-args})))
-  (let [ctx (rebuild-interpreter-ctx state)
-        closure-env (interp/make-env (:current-env ctx))]
-    (doseq [[name value] (partition 2 capture-args)]
-      (interp/env-define closure-env name value))
-    (interp/make-object class-name {} closure-env)))
 
 (defn- compiled-class-binary-name
   [state class-name]
@@ -952,9 +966,16 @@
         instance))))
 
 (defn- make-runtime-object
+  "An instance of the program's compiled CLASS-NAME, built by a builtin (the
+   http client and server hand the program Http_Response/Http_Request/
+   Http_Server_Response objects). A program that uses one of those builtins
+   always has its library's classes compiled in (nex.walker/add-implied-
+   interns), so a missing class is a compiler defect, reported as such."
   [state class-name field-values]
   (or (instantiate-compiled-object state class-name field-values)
-      (interp/make-object class-name field-values)))
+      (throw (ex-info (str "Internal error: class " class-name
+                           " is not compiled into this program")
+                      {:class-name class-name}))))
 
 (defn next-class-name!
   ([state prefix]
@@ -1026,66 +1047,6 @@
     (println line))
   (swap! (:output state) conj line)
   nil)
-
-(defn- rebuild-interpreter-ctx
-  "Build a fresh interpreter context from this compiled REPL session's own
-   state — used whenever a call has to be dispatched back through the
-   interpreter (see invoke-interpreter-object-method/invoke-function-object
-   below).
-
-   KNOWN LIMITATION (accepted, not planned to be fixed — see
-   docs/md/SYNTAX.md's mutual-recursion section and definition-of-nex
-   &sect;4.5): the `(:classes ctx)` merge below intentionally includes
-   `@(:classes state)` so an interpreted closure can reach a function/class
-   defined in a LATER REPL input (that IS this merge's whole point) — but
-   `@(:classes state)` also holds nex.lower/prepare-program-for-closures'
-   own REWRITTEN synthetic closure classes (its Closure_Mut_Box handling for
-   mutually recursive `let`-bound closures — see box-forward-referenced-
-   closures there), registered under the SAME synthetic name
-   (\"AnonymousFunction_N\") the ORIGINAL, correctly-working interpreter
-   object was itself built from when its OWN defining input ran. If that
-   object's value later has to be re-dispatched through THIS rebuilt ctx —
-   which happens for any interpreter-native value, exactly the case here —
-   it runs under the REWRITTEN class-def instead of the one it was actually
-   built with, expecting a captured field to be boxed when the real captured
-   value never was: \"Method not found: value\"/\"call1\", even though the
-   interpreter handles the very same mutual recursion correctly natively,
-   with no box involved at all, when it isn't relayed through this bridge.
-   A single self-recursive closure, or a whole mutually-recursive group
-   invoked from within the SAME input that defined it, never hits this path
-   this way and is unaffected — only a later, separate input calling into a
-   mutually-recursive PAIR defined earlier does. Fixing it for real means
-   keeping the rewritten, box-aware class-defs available for compiling NEW
-   code that references such a closure, while never substituting them in
-   when re-executing an EXISTING interpreter-native object's own method —
-   which is a change to this shared bridge, not to the closure code alone,
-   so it's deliberately left as documented behavior rather than patched
-   here."
-  [state]
-  (let [ctx (interp/make-context)]
-    (reset! (:bindings (:globals ctx)) {})
-    (reset! (:output ctx) @(:output state))
-    (reset! (:imports ctx) (vec @(:imports state)))
-    (when-let [compiled-state-slot (:compiled-state ctx)]
-      (reset! compiled-state-slot state))
-    ;; A plain Clojure map, not a java.util.HashMap: register-class (called
-    ;; whenever this rebuilt ctx's own interpreted code registers a further
-    ;; nested closure's class-def, e.g. a closure inside a closure) does
-    ;; `(swap! (:classes ctx) assoc ...)`, which needs a real Associative —
-    ;; the mutable HashMap this used to build let reads through `get` work
-    ;; (Clojure's `get` accepts any java.util.Map) but broke that swap! with
-    ;; a ClassCastException the first time it actually fired.
-    (swap! (:classes ctx)
-           (fn [builtins]
-             (into builtins @(:classes state))))
-    (doseq [[k v] @(:values state)]
-      (interp/env-define (:globals ctx) k v))
-    ;; Make top-level functions resolvable by name from interpreted (deoptimized)
-    ;; closures, e.g. a helper called inside an `fn` stored in a collection.
-    (doseq [[k v] @(:functions state)]
-      (when-let [callable (registered-fn-callable state v)]
-        (interp/env-define (:globals ctx) k callable)))
-    ctx))
 
 (defn- lowered-instance-method-name
   [method-name arity]
@@ -1176,7 +1137,7 @@
     ;; raw JVM NullPointerException from the reflective dispatch below.
     (throw (ex-info "Used a value that is void (nil)"
                     {:method method-name :arity (count args)})))
-  (if (interp/nex-object? target)
+  (if (interp-object? target)
     ;; The target was produced by the interpreter (e.g. returned from a function
     ;; that fell back to the tree-walker) and stored in the compiled session. The
     ;; compiled runtime cannot reflect user methods off an interpreter object, so
@@ -1226,7 +1187,7 @@
 
 (defn- get-user-field
   [target field-name]
-  (if (interp/nex-object? target)
+  (if (interp-object? target)
     ;; The target was produced by the interpreter (e.g. a value constructed inside
     ;; a deoptimized closure) and stored in the compiled session. Its fields live in
     ;; the object's :fields map, not as reflectable JVM fields, so read them
@@ -1317,7 +1278,7 @@
 (defn- runtime-type-name
   [state value]
   (or (compiled-runtime-class-name state value)
-      (typeinfo/runtime-type-name interp/nex-object? typeinfo/get-type-name value)))
+      (typeinfo/runtime-type-name interp-object? typeinfo/get-type-name value)))
 
 (defn convert-value
   [state value target-type-name]
@@ -1359,13 +1320,7 @@
    classes into the builtin roots — no interpreter context needed."
   (delay (into {}
                (map (fn [class-def] [(:name class-def) class-def]))
-               (concat [(bootstrap/build-any-base-class)
-                        (bootstrap/build-function-base-class)
-                        (bootstrap/build-cursor-base-class)
-                        (bootstrap/build-comparable-base-class)
-                        (bootstrap/build-hashable-base-class)]
-                       (map bootstrap/build-builtin-scalar-class
-                            ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))))
+               (bootstrap/base-class-defs))))
 
 (defn- compiled-is-parent?
   [state class-name parent-name]
@@ -1433,7 +1388,7 @@
    their own invariants when constructed, so they are skipped."
   [value]
   (and (some? value)
-       (not (interp/nex-object? value))
+       (not (interp-object? value))
        (let [^java.util.concurrent.ConcurrentHashMap cache invariant-method-present-cache
              cls (.getClass ^Object value)]
          ;; A plain `.get` first: this runs on exit from every checked call,
@@ -1484,8 +1439,8 @@
 
     ;; An interpreter object (e.g. created inside a deoptimized closure) renders
     ;; through the interpreter so a user-defined `to_string` is honored.
-    (interp/nex-object? value)
-    (bi/concat-string-value (rebuild-interpreter-ctx state) value)
+    (interp-object? value)
+    ((interpreter-op :concat-string value) state value)
 
     (nil? value) "nil"
 
@@ -1546,6 +1501,67 @@
     (let [simple (last (str/split (.getName (class value)) #"\."))]
       (or (second (re-matches #"(.+)_\d{4}" simple)) simple))))
 
+;; ---------------------------------------------------------------------------
+;; The context the compiled runtime calls the builtin library with.
+;; ---------------------------------------------------------------------------
+
+(defn- builtin-user-to-string
+  "`to_string` of an object a builtin is formatting (print, string concat,
+   Array/Map/Set rendering): a compiled object's own `to_string`, else its
+   `#<Class object>` placeholder; nil for anything that is not a Nex object,
+   so the builtin falls back to its own formatting."
+  [state value]
+  (cond
+    ;; An interpreter object, from a closure deoptimized onto the tree-walker.
+    (interp-object? value)
+    (concat-string-value state value)
+
+    (or (nil? value) (string? value) (number? value) (boolean? value)
+        (char? value) (coll? value) (map? value))
+    nil
+
+    (compiled-object-has-to-string? value)
+    (let [result (invoke-user-method state value "to_string" [])]
+      (if (string? result) result (bi/nex-format-value result)))
+
+    :else
+    (when-let [class-name (compiled-object-class-name value)]
+      (str "#<" class-name " object>"))))
+
+(defn- builtin-equals-override
+  "A user `equals` between two objects, for a builtin's membership test. A
+   compiled object's `equals` override is already its JVM `equals`, which the
+   structural fallback reaches, so only interpreter objects need dispatching."
+  [state a b]
+  (when (and (interp-object? a) (interp-object? b))
+    (when-let [equals-override (:equals-override @interpreter-adapter)]
+      (equals-override state a b))))
+
+(defn- builtin-ctx
+  "Context for calling nex.types.builtins from compiled code. It carries this
+   engine's own hooks (see nex.types.builtins/hook), so a builtin that calls
+   back into Nex code — a sort comparator, a user `to_string` or `equals`,
+   `print`, an http-server handler — dispatches on compiled objects directly,
+   and writes output to STATE, instead of going through the tree-walker.
+   :imports and :classes serve the builtins that resolve a Java class or
+   look up a class-def."
+  [state]
+  {:engine-hooks {:call-object-method (fn [_ target method-name args]
+                                        ;; A top-level function passed by name
+                                        ;; (function-value-for-name) is a plain fn.
+                                        (if (fn? target)
+                                          (apply target args)
+                                          (invoke-user-method state target method-name (vec args))))
+                  :user-to-string (fn [_ value] (builtin-user-to-string state value))
+                  :object-equals-override (fn [_ a b] (builtin-equals-override state a b))
+                  :add-output (fn [_ line] (add-output! state line))
+                  :is-parent? (fn [_ class-name parent-name]
+                                (boolean (compiled-is-parent? state class-name parent-name)))}
+   :compiled-state state
+   :imports (:imports state)
+   :classes (:classes state)
+   :specialized-classes (atom {})})
+
 (defn- format-value-with-state
   "Like format-value, but recurses into Array/Map/Set elements with state so a
    nested object's to_string override is honored (compiled or, via
@@ -1561,7 +1577,7 @@
     (rt/nex-map? value) (rt/nex-map-str (partial format-value-with-state state) value)
     (rt/nex-array? value) (rt/nex-array-str (partial format-value-with-state state) value)
 
-    (or (interp/nex-object? value)
+    (or (interp-object? value)
         (has-user-to-string? value))
     (concat-string-value state value)
 
@@ -1583,7 +1599,7 @@
   (when (and value
              (not (compiled-closure-object? value))
              (or (rt/nex-array? value) (rt/nex-map? value) (rt/nex-set? value)
-                 (interp/nex-object? value)
+                 (interp-object? value)
                  (has-user-to-string? value)))
     (format-value-with-state state value)))
 
@@ -1600,7 +1616,7 @@
 (defn- object-field-value
   [value field-name]
   (cond
-    (interp/nex-object? value)
+    (interp-object? value)
     (let [fields (:fields value)]
       (or (get fields field-name)
           (get fields (keyword field-name))))
@@ -2384,7 +2400,7 @@
 
 (defn deep-equals
   [a b]
-  (value/nex-deep-equals? interp/nex-object? a b))
+  (value/nex-deep-equals? interp-object? a b))
 
 (declare value-equals)
 
@@ -2394,14 +2410,14 @@
    structural comparison; everything else is handled by `deep-equals`."
   [state value]
   (and (some? value)
-       (not (interp/nex-object? value))
+       (not (interp-object? value))
        (some? (compiled-runtime-class-name state value))))
 
 (defn- object-like?
   "True when value is a Nex object of either model: an interpreter object map or
    a compiled generated-class instance."
   [state value]
-  (or (interp/nex-object? value)
+  (or (interp-object? value)
       (compiled-object? state value)))
 
 (defn- structural-equals
@@ -2546,7 +2562,7 @@
 
 (defn clone-value
   [value]
-  (value/nex-clone-value interp/nex-object? interp/make-object value))
+  (value/nex-clone-value interp-object? bi/make-object value))
 
 (defn shallow-copy-collection
   "A new, independent Array/Map container holding the SAME elements/entries —
@@ -2671,7 +2687,7 @@
                      (runtime-compatible-with? state runtime-name "Comparable"))
         (throw (ex-info "Array.sort requires Comparable elements"
                         {:left a :right b})))
-      (let [result (if (interp/nex-object? a)
+      (let [result (if (interp-object? a)
                      (invoke-interpreter-object-method state a "compare" [b])
                      (invoke-user-method state a "compare" [b]))]
         (if (integer? result)
@@ -2790,9 +2806,6 @@
 
    "shallow-copy-collection"
    (fn [_state args] (shallow-copy-collection (first args)))
-
-   "make-captured-function-object"
-   (fn [state args] (make-captured-function-object state (first args) (vec (rest args))))
 
    "create-console"
    (fn [_state _args] {:nex-builtin-type :Console})
@@ -2964,18 +2977,12 @@
       (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
 
       (str/starts-with? name "method:")
-      (let [ctx (rebuild-interpreter-ctx state)
-            method-name (subs name (count "method:"))
-            target (first args)
-            result (bi/call-builtin-method ctx target target method-name (rest args))]
-        (reset! (:output state) @(:output ctx))
-        result)
+      (let [target (first args)]
+        (bi/call-builtin-method (builtin-ctx state) target target
+                                (subs name (count "method:")) (rest args)))
 
       :else
-      (let [ctx (rebuild-interpreter-ctx state)
-            builtin-fn (get bi/builtins name)]
+      (let [builtin-fn (get bi/builtins name)]
         (when-not builtin-fn
           (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
-        (let [result (apply builtin-fn ctx args)]
-          (reset! (:output state) @(:output ctx))
-          result)))))
+        (apply builtin-fn (builtin-ctx state) args)))))
