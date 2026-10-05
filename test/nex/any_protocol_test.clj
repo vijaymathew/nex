@@ -347,10 +347,10 @@ print(a /= b)")))))
 
 (deftest to-string-on-unconstrained-generic-parameter
   (testing "a generic field with no constraint still gets to_string via Any"
-    ;; String's own to_string quotes itself (matching `print`'s quoting), so
-    ;; the concatenated result quotes "age" too — this is Nex's normal
-    ;; to_string behavior for String, not an artifact of the generic dispatch.
-    (is (= ["\"(\"age\", 30)\""]
+    ;; A String's to_string is the text itself (string_to_string_test), so
+    ;; "age" joins unquoted, the same through the generic dispatch as on a
+    ;; statically typed String.
+    (is (= ["\"(age, 30)\""]
            (both "class Pair [F, S]
   create make(a: F, b: S) do first := a  second := b end
   feature

@@ -33,6 +33,79 @@ rescue
 end
 assert read_config("missing.cfg") = "default-config"
 
+-- Built-in exceptions: a failure the language raises is an object of a
+-- built-in exception class, told apart with convert or match.
+do
+  print(10 / 0)
+rescue
+  print(exception)
+end
+
+let divided := ""
+do
+  print(10 / 0)
+rescue
+  if convert exception to e: Division_by_Zero then
+    divided := "cannot divide: " + e.message
+  end
+end
+print(divided)
+assert divided = "cannot divide: Division by zero"
+
+function half(n: Integer): Integer
+require
+  even: n % 2 = 0
+do
+  result := n / 2
+end
+
+let refused := ""
+do
+  print(half(7))
+rescue
+  if convert exception to v: Precondition_Violation then
+    refused := "refused: " + v.message
+  end
+end
+print(refused)
+assert refused = "refused: Precondition violation: even"
+
+let scores := [90, 85]
+let lookup := ""
+do
+  print(scores.get(5))
+rescue
+  match exception of
+    Division_by_Zero then lookup := "nothing to divide by"
+    Index_Out_Of_Bounds as e then lookup := "no such score: " + e.message
+  else
+    raise exception
+  end
+end
+print(lookup)
+assert lookup = "no such score: Index 5 out of bounds for length 2"
+
+class Config_Error
+inherit Exception
+create
+  make(m: String) do
+    Exception.make(m)
+  end
+end
+
+let config_problem := ""
+do
+  raise create Config_Error.make("missing setting: port")
+rescue
+  if convert exception to c: Config_Error then
+    config_problem := "config problem: " + c.message
+  else
+    raise exception
+  end
+end
+print(config_problem)
+assert config_problem = "config problem: missing setting: port"
+
 function connect_with_retry(): String
 do
   let attempts := 0
