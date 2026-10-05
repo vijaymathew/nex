@@ -604,7 +604,13 @@
    "replicate"   ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "String"}]}
    (fn [s n & _] (apply str (repeat (nex-int->number n) s)))
    "char_at"     ^{:signatures [{:params [{:name "index" :type "Integer"}] :return-type "Char"}]}
-   (fn [s idx & _] (get s (nex-int->number idx)))
+   (fn [s idx & _]
+     (let [i (nex-int->number idx)]
+       ;; Out of range is an error, as for an Array, not a nil Char.
+       (if (and (<= 0 i) (< i (count s)))
+         (get s i)
+         (throw (ex-info (str "Index " i " out of bounds for length " (count s))
+                         {:builtin-kind "Index_Out_Of_Bounds"})))))
    "chars"       ^{:signatures [{:params []
                                  :return-type {:base-type "Array" :type-params ["Char"]}}]}
    (fn [s & _]
@@ -890,7 +896,7 @@
      (fn [x & _]
        (let [v (val x)]
          (when (= v min-value)
-           (throw (ex-info (str type-name ".abs: " v " has no positive counterpart") {:value v})))
+           (throw (ex-info (str type-name ".abs: " v " has no positive counterpart") {:value v :builtin-kind "Arithmetic_Overflow"})))
          (wrap (Math/abs v))))
      "min"               ^{:signatures [{:params [{:name "other" :type type-name}] :return-type type-name}]}
      (fn [x other & _] (wrap (min (val x) (val other))))

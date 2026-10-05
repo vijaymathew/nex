@@ -352,11 +352,17 @@
    :nex-type "Void"
    :jvm-type :void})
 
-(defn raise-node [expr]
-  {:op :raise
-   :expr expr
-   :nex-type "Void"
-   :jvm-type :void})
+(defn raise-node
+  ([expr] (raise-node expr nil))
+  ([expr builtin]
+   ;; BUILTIN, when present, is a failure the language raises itself (a match
+   ;; no clause matched, a refinement's predicate): "Kind" or "Kind/label",
+   ;; Kind naming its lib/lang/exception.nex class.
+   (cond-> {:op :raise
+            :expr expr
+            :nex-type "Void"
+            :jvm-type :void}
+     builtin (assoc :builtin builtin))))
 
 (defn retry-node []
   {:op :retry

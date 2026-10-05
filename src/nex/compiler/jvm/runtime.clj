@@ -1136,7 +1136,7 @@
     ;; A nil receiver must surface as the language's void-call error, not as a
     ;; raw JVM NullPointerException from the reflective dispatch below.
     (throw (ex-info "Used a value that is void (nil)"
-                    {:method method-name :arity (count args)})))
+                    {:method method-name :arity (count args) :builtin-kind "Void_Access"})))
   (if (interp-object? target)
     ;; The target was produced by the interpreter (e.g. returned from a function
     ;; that fell back to the tree-walker) and stored in the compiled session. The
@@ -1214,6 +1214,14 @@
   [value]
   (ex-info (str value) {:type :nex-exception :value value}))
 
+(defn make-builtin-failure
+  "A failure the language raises itself through a generated `raise` (see
+   nex.ir/raise-node): MESSAGE, classified by BUILTIN, \"Kind\" or
+   \"Kind/label\" (nex.types.runtime/builtin-failure)."
+  [message builtin]
+  (let [[kind label] (str/split (str builtin) #"/" 2)]
+    (ex-info (str message) {:builtin-kind kind :label label})))
+
 (defn make-retry-signal
   []
   (ex-info "retry" {:type :nex-retry}))
@@ -1260,6 +1268,23 @@
         (if (str/blank? msg)
           (.getName (class throwable))
           msg)))))
+
+(defn rescue-exception-value
+  "What a `rescue` block's `exception` holds for THROWABLE: a value the program
+   raised is that value; a built-in failure is an instance of its
+   lib/lang/exception.nex class (Definition B.7), built by that library's
+   `__builtin_exception`. A program with a `rescue` has the library
+   (nex.walker/add-implied-interns), so the message is only a fallback for one
+   that declared a colliding class of its own instead."
+  [state throwable]
+  (let [throwable (unwrap-reflective-exception throwable)]
+    (if (and (instance? clojure.lang.ExceptionInfo throwable)
+             (= :nex-exception (:type (ex-data throwable))))
+      (:value (ex-data throwable))
+      (or (when-let [[kind message label] (rt/builtin-failure throwable)]
+            (when-let [make (function-value-for-name state "__builtin_exception")]
+              (make kind message label)))
+          (rt/nex-error-message throwable)))))
 
 (defn- compiled-runtime-class-name
   [state value]
@@ -1561,6 +1586,16 @@
    :imports (:imports state)
    :classes (:classes state)
    :specialized-classes (atom {})})
+
+
+(defn make-raised-exception-in
+  "The throwable for `raise VALUE`. Its message -- what an uncaught raise is
+   reported with -- is VALUE as `print` renders it, so an object reads through
+   its own `to_string` (a re-raised built-in exception, a user Exception heir)
+   rather than as a JVM identity; a string stays unquoted."
+  [state value]
+  (ex-info (if (string? value) value (bi/print-output-value (builtin-ctx state) value))
+           {:type :nex-exception :value value}))
 
 (defn- format-value-with-state
   "Like format-value, but recurses into Array/Map/Set elements with state so a

@@ -100,13 +100,12 @@
 
    A marked gap (`:nex/unsupported`) is a valid program the backend cannot yet
    handle: --interpret is a real workaround. A walker rejection (`:error` —
-   nex.walker's own convention, e.g. `resolve-convert-alias` rejecting a
-   refinement used as a runtime type test) is a deliberate diagnosis of the
-   program itself, already phrased for the user; report it verbatim, the same
-   way the same rejection reads when it fires at parse time for a same-file
-   case instead of here (a cross-file one, reached via
-   nex.compiler.jvm.file/augment-ast-with-interns re-running the walker pass
-   post-intern-resolution). Anything else reaching here is a genuine compiler
+   nex.walker's own convention, e.g. a removed literal field pattern) is a
+   deliberate diagnosis of the program itself, already phrased for the user;
+   report it verbatim, the same way it reads when it fires at parse time
+   rather than here (a walker pass re-run by
+   nex.compiler.jvm.file/augment-ast-with-interns after intern merging).
+   Anything else reaching here is a genuine compiler
    defect — the typechecker already accepted this program — so asking the
    user to work around it silently would be wrong; it should be reported.
    All three name the construct and the line where they can."

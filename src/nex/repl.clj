@@ -1371,8 +1371,8 @@
   (re-matches #"^\s*[a-zA-Z_][a-zA-Z0-9_]*\s*$" input))
 
 (defn- inject-session-refinements
-  "Re-run refinement-check injection on a freshly parsed REPL cell for refinements
-   declared in EARLIER cells. Refinement narrowing checks are injected at parse
+  "Re-run convert-alias resolution and refinement-check injection on a freshly
+   parsed REPL cell for aliases and refinements declared in EARLIER cells. Refinement narrowing checks are injected at parse
    time (nex.walker), which only sees the current cell's `declare type ... where`;
    a `let x: R := v` whose refinement R was declared on a previous line would
    otherwise carry no check. The current cell's own refinements are already
@@ -1381,17 +1381,24 @@
    cells' aliases (the current cell's are recorded afterwards)."
   [ast prior-aliases]
   (let [current-names (set (map :name (:type-aliases ast)))
-        prior-refinements (->> (vals prior-aliases)
-                               (filter :refinement)
-                               (remove #(contains? current-names (:name %)))
-                               vec)]
-    (if (empty? prior-refinements)
-      ast
-      (let [orig-aliases (:type-aliases ast)]
-        (-> ast
-            (assoc :type-aliases prior-refinements)
-            walker/inject-refinement-checks
-            (assoc :type-aliases orig-aliases))))))
+        prior (->> (vals prior-aliases)
+                   (remove #(contains? current-names (:name %)))
+                   vec)
+        prior-refinements (filterv :refinement prior)
+        orig-aliases (:type-aliases ast)]
+    (cond-> ast
+      ;; A `convert` to an alias or refinement declared in an earlier cell:
+      ;; resolved here for the same reason (the parser's pass only saw this
+      ;; cell's aliases), which also adds a refinement's checker function.
+      (seq prior)
+      (-> (assoc :type-aliases (vec (concat prior orig-aliases)))
+          walker/resolve-convert-aliases
+          (assoc :type-aliases orig-aliases))
+
+      (seq prior-refinements)
+      (-> (assoc :type-aliases prior-refinements)
+          walker/inject-refinement-checks
+          (assoc :type-aliases orig-aliases)))))
 
 (defn- build-exec-ctx
   "The context this input actually evaluates against: `ctx` plus debug-source/

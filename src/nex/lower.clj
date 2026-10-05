@@ -2816,8 +2816,11 @@
                    :jvm-type (:jvm-type local)}]))))))
 
 (defn- lower-convert-expression
-  [env {:keys [value var-name target-type] :as expr}]
-  (let [target-name (if (map? target-type) (:base-type target-type) target-type)
+  [env {:keys [value var-name target-type runtime-target-type] :as expr}]
+  (let [;; A refinement target is tested at runtime as its base class (its
+        ;; predicate already ran, in the checker nex.walker wrapped the value in).
+        target-type (or runtime-target-type target-type)
+        target-name (if (map? target-type) (:base-type target-type) target-type)
         target-runtime (runtime-type-token-ir env target-type)
         binding (or (lookup-convert-binding env var-name)
                     (throw (ex-info "convert binding must exist before lowering expression"
@@ -3033,6 +3036,35 @@
                                       :imports (:imports ctx)
                                       :var-types (merge (:var-types ctx) local-types)})
       "Any"))
+
+(defn- narrow-local-types-by-condition
+  "LOCAL-TYPES extended with the names a true CONDITION binds: each
+   `convert e to x: T` and `?e as x` in its `and` chain, read left to right so
+   a later conjunct's value may use an earlier one's name. Code that runs only
+   when the condition held (the rest of the chain, an `if`'s then branch, a
+   `when`'s consequent, a match clause's body) can only see these names
+   bound, so they get the narrowed, non-detachable type the typechecker gives
+   them there -- and a closure in that code captures them at that type."
+  [ctx local-types condition]
+  (cond
+    (not (map? condition))
+    local-types
+
+    (and (= :binary (:type condition)) (= "and" (:operator condition)))
+    (narrow-local-types-by-condition
+     ctx
+     (narrow-local-types-by-condition ctx local-types (:left condition))
+     (:right condition))
+
+    (= :convert (:type condition))
+    (assoc local-types (:var-name condition) (tc/attachable-type (:target-type condition)))
+
+    (= :attached-test (:type condition))
+    (assoc local-types (:var-name condition)
+           (tc/attachable-type (infer-prepass-type ctx local-types (:value condition))))
+
+    :else
+    local-types))
 
 ;; A closure is an ordinary compiled class (docs/md/COMPILED_CLOSURES.md): its
 ;; captures are fields, set at the creation site through a synthetic
@@ -3361,11 +3393,19 @@
   [ctx local-types captures expr]
   (assoc expr
          :condition (rewrite-expression-for-closures ctx local-types captures (:condition expr))
-         :then (first (rewrite-statements-for-closures* ctx local-types captures (:then expr)))
+         :then (first (rewrite-statements-for-closures*
+                       ctx
+                       (narrow-local-types-by-condition ctx local-types (:condition expr))
+                       captures
+                       (:then expr)))
          :elseif (mapv (fn [clause]
                          (assoc clause
                                 :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
-                                :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
+                                :then (first (rewrite-statements-for-closures*
+                                              ctx
+                                              (narrow-local-types-by-condition ctx local-types (:condition clause))
+                                              captures
+                                              (:then clause)))))
                        (:elseif expr))
          :else (first (rewrite-statements-for-closures* ctx local-types captures (:else expr)))))
 
@@ -3403,7 +3443,14 @@
     (= :binary (:type expr))
     (assoc expr
            :left (rewrite-expression-for-closures ctx local-types captures (:left expr))
-           :right (rewrite-expression-for-closures ctx local-types captures (:right expr)))
+           ;; The right of an `and` runs only once the left held.
+           :right (rewrite-expression-for-closures
+                   ctx
+                   (if (= "and" (:operator expr))
+                     (narrow-local-types-by-condition ctx local-types (:left expr))
+                     local-types)
+                   captures
+                   (:right expr)))
 
     (= :unary (:type expr))
     (assoc expr :expr (rewrite-expression-for-closures ctx local-types captures (:expr expr)))
@@ -3428,7 +3475,11 @@
     (= :when (:type expr))
     (assoc expr
            :condition (rewrite-expression-for-closures ctx local-types captures (:condition expr))
-           :consequent (rewrite-expression-for-closures ctx local-types captures (:consequent expr))
+           :consequent (rewrite-expression-for-closures
+                        ctx
+                        (narrow-local-types-by-condition ctx local-types (:condition expr))
+                        captures
+                        (:consequent expr))
            :alternative (rewrite-expression-for-closures ctx local-types captures (:alternative expr)))
 
     (= :old (:type expr))
@@ -3619,11 +3670,19 @@
   [ctx local-types captures stmt]
   [(assoc stmt
           :condition (rewrite-expression-for-closures ctx local-types captures (:condition stmt))
-          :then (first (rewrite-statements-for-closures* ctx local-types captures (:then stmt)))
+          :then (first (rewrite-statements-for-closures*
+                        ctx
+                        (narrow-local-types-by-condition ctx local-types (:condition stmt))
+                        captures
+                        (:then stmt)))
           :elseif (mapv (fn [clause]
                           (assoc clause
                                  :condition (rewrite-expression-for-closures ctx local-types captures (:condition clause))
-                                 :then (first (rewrite-statements-for-closures* ctx local-types captures (:then clause)))))
+                                 :then (first (rewrite-statements-for-closures*
+                                               ctx
+                                               (narrow-local-types-by-condition ctx local-types (:condition clause))
+                                               captures
+                                               (:then clause)))))
                         (:elseif stmt))
           :else (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt))))
    local-types])
@@ -3647,9 +3706,19 @@
   [(assoc stmt
           :expr (rewrite-expression-for-closures ctx local-types captures (:expr stmt))
           :clauses (mapv (fn [clause]
-                           (let [clause-local-types (assoc local-types (:var-name clause) (:class-name clause))]
-                             (assoc clause
-                                    :body (first (rewrite-statements-for-closures* ctx clause-local-types captures (:body clause))))))
+                           ;; Scope as the clause runs: its bound variable,
+                           ;; then its destructured fields (:bindings), then
+                           ;; its guard, whose `convert`s the body sees narrowed.
+                           (let [clause-local-types (assoc local-types (:var-name clause) (:class-name clause))
+                                 [bindings' bound-local-types]
+                                 (rewrite-statements-for-closures* ctx clause-local-types captures (:bindings clause))
+                                 guard' (when (:guard clause)
+                                          (rewrite-expression-for-closures ctx bound-local-types captures (:guard clause)))
+                                 body-local-types (narrow-local-types-by-condition ctx bound-local-types (:guard clause))]
+                             (cond-> (assoc clause
+                                            :bindings bindings'
+                                            :body (first (rewrite-statements-for-closures* ctx body-local-types captures (:body clause))))
+                               (:guard clause) (assoc :guard guard'))))
                          (:clauses stmt))
           :else (when (:else stmt)
                   (first (rewrite-statements-for-closures* ctx local-types captures (:else stmt)))))
@@ -6671,7 +6740,13 @@
       ;; Function-valued identifier (`lower-call-without-target`'s
       ;; `function-object-call?` branch) — just with TARGET-EXPR's own IR in
       ;; place of an identifier lookup.
-      (and (nil? (:method expr)) (= "Function" (base-type-name target-type)))
+      ;;
+      ;; `f.call1(x)` -- the call protocol spelled out (Definition B.1) -- is
+      ;; the same call, as long as N is the argument count (the typechecker
+      ;; holds it to the function type's own arity).
+      (and (= "Function" (base-type-name target-type))
+           (or (nil? (:method expr))
+               (= (:method expr) (str "call" (count (:args expr))))))
       (let [nex-type (or (:return-type target-type) "Any")
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/call-function-node (lower-expression env target-expr) arg-irs nex-type jvm-type))
@@ -7027,14 +7102,15 @@
         else-stmts (if-let [else-body (:else stmt)]
                      else-body
                      [{:type :raise
-                       :value {:type :string :value "No matching clause in match"}}])
+                       :value {:type :string :value "No matching clause in match"}
+                       :builtin "No_Matching_Clause"}])
         [env'' lowered-clauses] (lower-match-clauses env' tmp-name (:clauses stmt) else-stmts)]
     [(scoped-env env env'')
      (ir/block-node (into [init-local] lowered-clauses))]))
 
 (defn- lower-stmt-raise
   [env stmt]
-  [env (ir/raise-node (lower-expression env (:value stmt)))])
+  [env (ir/raise-node (lower-expression env (:value stmt)) (:builtin stmt))])
 
 (defn- lower-stmt-retry
   [env stmt]
@@ -7232,7 +7308,7 @@
   ;; sibling constructor runs directly on `this` — no `_parent_X` field to
   ;; step through, and no generic-argument translation, since the callee is
   ;; the exact same (possibly generic) class as the caller.
-  (if-let [{:keys [owner own-class?]}
+  (if-let [{:keys [owner own-class? ancestor?]}
            (cond
              (and (:this-type env)
                   (string? (:target stmt))
@@ -7259,44 +7335,59 @@
                                          (count (:args stmt))))
              {:owner (:this-type env) :own-class? true}
 
-             ;; TARGET-NAME.ctor(...) where TARGET-NAME is a real ancestor
-             ;; (the typechecker's check-explicit-class-constructor-call
-             ;; already required that — class-subtype?, not "immediate
-             ;; parent") but not one of THIS-TYPE's own immediate parents, so
-             ;; none of the three cases above matches. Lowering has no
-             ;; `_parent_X` field to step through except for an immediate
-             ;; parent, and no generic-argument translation for anything
-             ;; further up — reported here, before falling into the generic
-             ;; lower-expression path below, which cannot type a bare
-             ;; ancestor class name as an expression at all and dies with
-             ;; the unmarked, unhelpful \"Unable to infer expression type
-             ;; during lowering\" instead of naming the real gap.
+             ;; TARGET-NAME.ctor(...) where TARGET-NAME is an ancestor further
+             ;; up than an immediate parent (the typechecker's
+             ;; check-explicit-class-constructor-call requires class-subtype?
+             ;; and that TARGET-NAME declares the constructor itself). Its part
+             ;; of this object is reached through the chain of `_parent_X`
+             ;; fields Definition 4.9 names (ancestor-carrier-path), the same
+             ;; path an `Ancestor.m(...)` call takes.
              (and (:this-type env)
                   (string? (:target stmt))
                   (class-constructor-def (get (visible-class-map env) (:target stmt))
                                          (:method stmt)
-                                         (count (:args stmt))))
-             (throw (unsupported
-                     (str "calling `" (:target stmt) "." (:method stmt)
-                          "(...)`, a constructor on a non-immediate ancestor of "
-                          (:this-type env) ": the compiled backend only supports "
-                          "qualifying a constructor call by an immediate parent's name.")
-                     {:stmt stmt}))
+                                         (count (:args stmt)))
+                  (ancestor-carrier-path env (:this-type env) (:target stmt)))
+             {:owner (:target stmt) :own-class? false :ancestor? true}
 
              :else nil)]
     (let [ctor-def (class-constructor-def (get (visible-class-map env) owner)
                                           (:method stmt)
                                           (count (:args stmt)))
           owner-meta (class-jvm-meta env owner)
-          runtime-args (if own-class?
+          this-ir (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+          runtime-args (cond
+                         own-class?
                          (own-class-generic-runtime-args env (current-class-def env))
+
+                         ;; The ancestor's type arguments as this class's
+                         ;; inherit chain binds them, in this class's own
+                         ;; generic parameters (whose runtime tokens `this`
+                         ;; carries).
+                         ancestor?
+                         (mapv #(runtime-type-token-ir env %)
+                               (or (lower-ancestor-instantiation
+                                    env
+                                    (:this-type env)
+                                    (mapv :name (:generic-params (current-class-def env)))
+                                    owner)
+                                   []))
+
+                         :else
                          (parent-generic-runtime-args env (current-class-def env) owner))
-          receiver-ir (if own-class?
-                        (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
+          receiver-ir (cond
+                        own-class?
+                        this-ir
+
+                        ancestor?
+                        (carrier-path-target-ir env
+                                                (ancestor-carrier-path env (:this-type env) owner)
+                                                this-ir)
+
+                        :else
                         (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
                                            (parent-field-name owner)
-                                           (ir/this-node (:this-type env)
-                                                         (exact-class-jvm-type env (:this-type env)))
+                                           this-ir
                                            owner
                                            (exact-class-jvm-type env owner)))
           call-ir (ir/call-virtual-node (:internal-name owner-meta)

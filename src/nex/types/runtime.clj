@@ -412,7 +412,7 @@
   [v]
   (let [n (long v)]
     (when-not (<= 0 n 255)
-      (throw (ex-info (str "Byte value must be in range 0..255, got " n) {:value n})))
+      (throw (ex-info (str "Byte value must be in range 0..255, got " n) {:value n :builtin-kind "Conversion_Error"})))
     (aget byte-box-cache (int n))))
 
 (defn java->nex
@@ -454,7 +454,7 @@
   [v]
   (let [n (long v)]
     (when-not (<= -32768 n 32767)
-      (throw (ex-info (str "Integer16 value must be in range -32768..32767, got " n) {:value n})))
+      (throw (ex-info (str "Integer16 value must be in range -32768..32767, got " n) {:value n :builtin-kind "Conversion_Error"})))
     (NexInt16. n)))
 
 (defn ->nex-int32
@@ -463,7 +463,7 @@
   (let [n (long v)]
     (when-not (<= -2147483648 n 2147483647)
       (throw (ex-info (str "Integer32 value must be in range -2147483648..2147483647, got " n)
-                      {:value n})))
+                      {:value n :builtin-kind "Conversion_Error"})))
     (NexInt32. n)))
 
 (defn nex-sized?
@@ -534,7 +534,7 @@
    entry point for Nex `/` on Integers in every backend."
   [a b]
   (when (nex-int-zero? b)
-    (throw (ex-info "Division by zero" {:left a :right b})))
+    (throw (ex-info "Division by zero" {:left a :right b :builtin-kind "Division_by_Zero"})))
   (if (and (= a Long/MIN_VALUE) (= b -1))
     (throw (ArithmeticException. "long overflow"))
     (quot a b)))
@@ -546,7 +546,7 @@
   "Checked Integer remainder: raises on a zero divisor; truncated semantics."
   [a b]
   (when (nex-int-zero? b)
-    (throw (ex-info "Division by zero" {:left a :right b})))
+    (throw (ex-info "Division by zero" {:left a :right b :builtin-kind "Division_by_Zero"})))
   (rem a b))
 
 (defn nex-real-rem
@@ -832,7 +832,7 @@
     (try
       (str (.decode decoder (java.nio.ByteBuffer/wrap bs)))
       (catch java.nio.charset.CharacterCodingException _
-        (throw (ex-info "bytes are not valid UTF-8" {}))))))
+        (throw (ex-info "bytes are not valid UTF-8" {:builtin-kind "Conversion_Error"}))))))
 
 (defn string-from-bytes
   "Decode a Nex Array[Byte] as UTF-8 text (see utf8-decode-strict)."
@@ -841,7 +841,7 @@
     (utf8-decode-strict (byte-array->bytes values))
     (catch clojure.lang.ExceptionInfo e
       (if (= "bytes are not valid UTF-8" (ex-message e))
-        (throw (ex-info "String.from_bytes: bytes are not valid UTF-8" {}))
+        (throw (ex-info "String.from_bytes: bytes are not valid UTF-8" {:builtin-kind "Conversion_Error"}))
         (throw e)))))
 
 (defn- byte-array-check-index
@@ -1339,3 +1339,61 @@
       (instance? java.lang.NullPointerException e)      "Used a value that is void (nil)"
       (instance? java.lang.IndexOutOfBoundsException e) (if (seq raw) raw "Index out of bounds")
       :else (if (seq raw) raw (str e)))))
+
+(def ^:private contract-kind->exception-class
+  "A contract violation's kind, as both backends record it in ex-data
+   (:contract-type, or :kind on the compiled runtime's own), to the built-in
+   exception class lib/lang/exception.nex defines for it."
+  {"Precondition"       "Precondition_Violation"
+   "Postcondition"      "Postcondition_Violation"
+   "Class invariant"    "Invariant_Violation"
+   "Loop invariant"     "Loop_Invariant_Violation"
+   "Loop variant"       "Variant_Violation"
+   "Loop variant bound" "Variant_Violation"
+   "Assertion"          "Assertion_Violation"
+   "Refinement"         "Refinement_Violation"})
+
+(defn builtin-failure
+  "Classify a Throwable caught by a `rescue` as a built-in failure:
+   [class-name message label], naming the lib/lang/exception.nex class its
+   `exception` value should be (Definition B.7), the Nex-level message, and the
+   label (a contract's assertion label, or the host class for a
+   Host_Exception). nil for a value the program raised itself with `raise`,
+   which reaches `exception` unchanged.
+
+   A failure the runtime raises itself carries its class in ex-data
+   (:builtin-kind) or, for a contract, its kind; a host exception is classified
+   by its type; anything else is a Host_Exception."
+  [^Throwable e]
+  (let [data (ex-data e)
+        message (nex-error-message e)
+        contract-kind (or (:contract-type data)
+                          (when (= :nex-contract-violation (:type data)) (:kind data)))]
+    (cond
+      (:builtin-kind data)
+      [(:builtin-kind data) message (:label data)]
+
+      (= :nex-exception (:type data))
+      nil
+
+      (contract-kind->exception-class contract-kind)
+      [(contract-kind->exception-class contract-kind)
+       message
+       ;; A variant clause has no label of its own; the compiled runtime's
+       ;; :label there is a description of the failure, not an assertion name.
+       (when-not (#{"Loop variant" "Loop variant bound"} contract-kind) (:label data))]
+
+      (instance? java.lang.ArithmeticException e)
+      [(if (= message "Division by zero") "Division_by_Zero" "Arithmetic_Overflow") message nil]
+
+      (instance? java.lang.NumberFormatException e)
+      ["Conversion_Error" message nil]
+
+      (instance? java.lang.NullPointerException e)
+      ["Void_Access" message nil]
+
+      (instance? java.lang.IndexOutOfBoundsException e)
+      ["Index_Out_Of_Bounds" message nil]
+
+      :else
+      ["Host_Exception" message (.getName (class e))])))

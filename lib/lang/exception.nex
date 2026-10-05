@@ -1,0 +1,147 @@
+-- The built-in exceptions (Definition, Appendix B.7): what a `rescue` block's
+-- `exception` holds when the language itself raised the failure -- a failed
+-- contract, integer division by zero, an index out of range, and so on. A
+-- value raised with `raise` reaches `exception` unchanged, whatever it is.
+--
+-- A program that has a `rescue`, or names one of these classes, gets this
+-- library as if it had written `intern lang/Exception` itself.
+
+class Exception
+  note "Root of the built-in exceptions. A program may inherit it for its own."
+create
+  make(m: String) do
+    message := m
+  end
+feature
+  message: String
+
+  to_string(): String
+    note "The message, as the failure is reported."
+  do
+    result := message
+  end
+end
+
+class Contract_Violation
+  note "A failed assertion: precondition, postcondition, invariant, variant, assert, or refinement."
+inherit Exception
+create
+  make(m: String) do
+    Exception.make(m)
+  end
+
+  with_label(m: String, l: ?String) do
+    Exception.make(m)
+    label := l
+  end
+feature
+  label: ?String
+    note "The failed assertion's label; nil for a bare `assert`. For a refinement, the refinement's name."
+end
+
+class Precondition_Violation
+inherit Contract_Violation
+end
+
+class Postcondition_Violation
+inherit Contract_Violation
+end
+
+class Invariant_Violation
+  note "A class invariant that does not hold."
+inherit Contract_Violation
+end
+
+class Loop_Invariant_Violation
+inherit Contract_Violation
+end
+
+class Variant_Violation
+  note "A loop variant that went negative or did not decrease."
+inherit Contract_Violation
+end
+
+class Assertion_Violation
+inherit Contract_Violation
+end
+
+class Refinement_Violation
+  note "A value that does not satisfy a refinement type's predicate."
+inherit Contract_Violation
+end
+
+class Division_by_Zero
+  note "Integer division or remainder by zero."
+inherit Exception
+end
+
+class Arithmetic_Overflow
+  note "An Integer operation whose result lies outside the 64-bit range."
+inherit Exception
+end
+
+class Void_Access
+  note "A call or field access on nil."
+inherit Exception
+end
+
+class Index_Out_Of_Bounds
+  note "A collection or string position outside its range."
+inherit Exception
+end
+
+class Conversion_Error
+  note "A value that cannot be converted: out of a fixed-width type's range, not a number, not UTF-8."
+inherit Exception
+end
+
+class No_Matching_Clause
+  note "A match with no else that no clause matched."
+inherit Exception
+end
+
+class Channel_Closed
+  note "A send on, or receive from, a closed and drained channel."
+inherit Exception
+end
+
+class Host_Exception
+  note "A failure raised by the host platform that has no more specific class."
+inherit Exception
+create
+  with_host(m: String, h: String) do
+    Exception.make(m)
+    host_class := h
+  end
+feature
+  host_class: String
+    note "The host's own name for the failure, e.g. java.lang.StackOverflowError."
+end
+
+-- Called by the runtime, never by programs: the exception object for a
+-- built-in failure of class KIND. LABEL is the assertion label for a contract
+-- violation, or the host class for a Host_Exception.
+function __builtin_exception(kind: String, message: String, label: ?String): Exception
+do
+  result := create Exception.make(message)
+  case kind of
+    "Precondition_Violation" then result := create Precondition_Violation.with_label(message, label)
+    "Postcondition_Violation" then result := create Postcondition_Violation.with_label(message, label)
+    "Invariant_Violation" then result := create Invariant_Violation.with_label(message, label)
+    "Loop_Invariant_Violation" then result := create Loop_Invariant_Violation.with_label(message, label)
+    "Variant_Violation" then result := create Variant_Violation.with_label(message, label)
+    "Assertion_Violation" then result := create Assertion_Violation.with_label(message, label)
+    "Refinement_Violation" then result := create Refinement_Violation.with_label(message, label)
+    "Division_by_Zero" then result := create Division_by_Zero.make(message)
+    "Arithmetic_Overflow" then result := create Arithmetic_Overflow.make(message)
+    "Void_Access" then result := create Void_Access.make(message)
+    "Index_Out_Of_Bounds" then result := create Index_Out_Of_Bounds.make(message)
+    "Conversion_Error" then result := create Conversion_Error.make(message)
+    "No_Matching_Clause" then result := create No_Matching_Clause.make(message)
+    "Channel_Closed" then result := create Channel_Closed.make(message)
+    "Host_Exception" then
+      if ?label as host then
+        result := create Host_Exception.with_host(message, host)
+      end
+  end
+end
