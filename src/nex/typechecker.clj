@@ -5,6 +5,7 @@
             [nex.field-shadowing :as field-shadowing]
             [nex.fmt :as fmt]
             [nex.redeclare :as redeclare]
+            [nex.contracts :as contracts]
             [nex.types.builtins :as bi]))
 
 ;;
@@ -6154,7 +6155,8 @@
 (defn check-method
   "Check a method definition"
   [env class-name {:keys [name params return-type require body ensure rescue] :as method}]
-  (let [[kind routine-name :as described] (routine-description class-name method)
+  (let [deferred? (:declaration-only? method)
+        [kind routine-name :as described] (routine-description class-name method)
         routine (describe-routine described)
         Routine (str (str/upper-case (subs routine 0 1)) (subs routine 1))]
   (check-distinct-parameters! params kind routine-name)
@@ -6202,34 +6204,37 @@
                           {:error (type-error
                                    (str "Precondition must be Boolean, got " cond-type))})))))
 
-    ;; Check method body
-    (check-statements method-env body)
-    ;; A REPL cell is run as `__ReplTemp__.__eval__` and may end in a bare
-    ;; expression, whose value the REPL shows.
-    (when-not (and (= class-name "__ReplTemp__") (= name "__eval__"))
-      (check-no-discarded-tail! method-env body (some? return-type)))
+    ;; A deferred routine has no body: only its signature and the contract
+    ;; its implementations inherit are checked.
+    (when-not deferred?
+      ;; Check method body
+      (check-statements method-env body)
+      ;; A REPL cell is run as `__ReplTemp__.__eval__` and may end in a bare
+      ;; expression, whose value the REPL shows.
+      (when-not (and (= class-name "__ReplTemp__") (= name "__eval__"))
+        (check-no-discarded-tail! method-env body (some? return-type)))
 
-    ;; Check rescue clause
-    (when rescue
-      (let [rescue-env (make-type-env method-env)]
-        (env-add-var rescue-env "exception" "Any")
-        (doseq [stmt rescue]
-          (check-statement rescue-env stmt))))
+      ;; Check rescue clause
+      (when rescue
+        (let [rescue-env (make-type-env method-env)]
+          (env-add-var rescue-env "exception" "Any")
+          (doseq [stmt rescue]
+            (check-statement rescue-env stmt))))
 
-    (let [normal-path-returns? (body-may-complete-normally? body)
-          rescue-path-returns? (when rescue (body-may-complete-normally? rescue))
-          normal-path-inits? (result-definitely-assigned-in-body? body false)
-          rescue-path-inits? (when rescue (result-definitely-assigned-in-body? rescue false))]
-      (when (and return-type
-                 (attached-non-scalar-type? return-type)
-                 (or (and normal-path-returns? (not normal-path-inits?))
-                     (and rescue-path-returns? (not rescue-path-inits?))))
-        (throw (ex-info (str Routine " does not initialize result")
-                        {:error (type-error
-                                 (str Routine " declares return type "
-                                      (display-type return-type)
-                                      " but does not definitely assign result on all returning paths. "
-                                      "Use 'result :=' or declare the return type detachable."))}))))
+      (let [normal-path-returns? (body-may-complete-normally? body)
+            rescue-path-returns? (when rescue (body-may-complete-normally? rescue))
+            normal-path-inits? (result-definitely-assigned-in-body? body false)
+            rescue-path-inits? (when rescue (result-definitely-assigned-in-body? rescue false))]
+        (when (and return-type
+                   (attached-non-scalar-type? return-type)
+                   (or (and normal-path-returns? (not normal-path-inits?))
+                       (and rescue-path-returns? (not rescue-path-inits?))))
+          (throw (ex-info (str Routine " does not initialize result")
+                          {:error (type-error
+                                   (str Routine " declares return type "
+                                        (display-type return-type)
+                                        " but does not definitely assign result on all returning paths. "
+                                        "Use 'result :=' or declare the return type detachable."))})))))
 
 ;; Check postconditions
     (doseq [assertion ensure]
@@ -6768,6 +6773,85 @@
                                 (:parents class-def))))))]
     (set (mapcat #(walk (:parent %) #{}) parents))))
 
+(defn- inherited-contract-declarations
+  "Every public ancestor declaration of METHOD-NAME/ARITY, each class once:
+   the declarations whose contracts an override inherits (as both backends
+   assemble them). `:seed?` marks one that overrides nothing -- the routine's
+   first declaration on that inheritance path."
+  [env parents method-name arity]
+  (let [declares (fn [class-def]
+                   (some (fn [member]
+                           (when (and (= (:type member) :method)
+                                      (= (:name member) method-name)
+                                      (= (count (or (:params member) [])) arity)
+                                      (public-member? member))
+                             member))
+                         (feature-members class-def)))]
+    (letfn [;; SEEN maps each class walked to whether it, or an ancestor of
+            ;; it, declares the routine, so a diamond's shared ancestor is
+            ;; reported once and still tells each heir it is not a seed.
+            (walk [cn seen]
+              (if (contains? seen cn)
+                [[] seen (get seen cn)]
+                (let [class-def (when (string? cn) (env-lookup-class env cn))
+                      [found seen' parents-declare?]
+                      (reduce (fn [[acc seen-so-far any?] {:keys [parent]}]
+                                (let [[decls seen-next declares?] (walk parent seen-so-far)]
+                                  [(into acc decls) seen-next (or any? declares?)]))
+                              [[] seen false]
+                              (when class-def (:parents class-def)))
+                      own (when class-def (declares class-def))
+                      declares? (boolean (or parents-declare? own))]
+                  [(cond-> found
+                     own (conj {:class-name cn :member own :seed? (not parents-declare?)}))
+                   (assoc seen' cn declares?)
+                   declares?])))]
+      (first (reduce (fn [[acc seen] {:keys [parent]}]
+                       (let [[decls seen'] (walk parent seen)]
+                         [(into acc decls) seen']))
+                     [[] {}]
+                     parents)))))
+
+(defn- check-override-contracts
+  "An override inherits every ancestor's contract. Its own `require` can only
+   widen the inherited precondition (the two are OR-ed), so one added below a
+   first declaration that has no precondition -- and so admits every call --
+   would never be checked; it is rejected rather than silently ignored.
+   Inherited assertions are read under the override's parameter names, which
+   must not capture any other name those assertions use."
+  [env class-name parents member]
+  (when (and (= (:type member) :method) (seq parents))
+    (let [m-name (:name member)
+          params (:params member)
+          decls (inherited-contract-declarations env parents m-name (count (or params [])))]
+      (when (seq (:require member))
+        (when-let [{seed-class :class-name} (first (filter #(and (:seed? %)
+                                                                 (empty? (:require (:member %))))
+                                                           decls))]
+          (throw (ex-info (str "Precondition on '" m-name "' in class '" class-name "' can never be checked")
+                          {:error (type-error
+                                   (str "Precondition on '" m-name "' in class '" class-name
+                                        "' can never be checked: '" m-name "' is first declared in '"
+                                        seed-class "' with no precondition, so it accepts every call, "
+                                        "and an override can only widen what its ancestors accept. "
+                                        "State the precondition on '" seed-class "." m-name
+                                        "' (a deferred routine may carry one: `" m-name
+                                        "(...) require ... deferred`), or remove it."))}))))
+      (doseq [{decl-class :class-name decl :member} decls]
+        (let [captured (contracts/captured-names (concat (:require decl) (:ensure decl))
+                                                 (:params decl)
+                                                 params)]
+          (when (seq captured)
+            (let [n (first captured)]
+              (throw (ex-info (str "Parameter '" n "' of '" m-name "' in class '" class-name
+                                   "' hides a name its inherited contract reads")
+                              {:error (type-error
+                                       (str "Parameter '" n "' of '" m-name "' in class '" class-name
+                                            "' takes a name the contract inherited from '" decl-class "."
+                                            m-name "' already uses for something else. That contract "
+                                            "is checked here under this routine's parameter names, so '"
+                                            n "' would then mean the parameter. Rename the parameter."))})))))))))
+
 (defn- check-attribute-redeclaration
   "An inherited attribute may not be redeclared as a routine: the ancestor's
    own code (and its contracts) keeps reading and writing the stored value,
@@ -6980,9 +7064,9 @@
               member
               (fn []
                 (check-attribute-redeclaration env name parents member)
-                (check-override-conformance env name parents member)))
-            (when-not (:declaration-only? member)
-              (check-method class-env name member)))
+                (check-override-conformance env name parents member)
+                (check-override-contracts env name parents member)))
+            (check-method class-env name member))
           (= (:type member) :field)
           (when-not (:constant? member)
             (with-type-error-location

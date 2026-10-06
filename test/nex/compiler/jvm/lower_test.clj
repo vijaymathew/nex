@@ -358,7 +358,7 @@ end")
   (testing "class lowering carries deferred and parent metadata for later compiler phases"
     (let [program (p/ast "deferred class Shape
 feature
-  area(): Real do end
+  area(): Real deferred
 end
 
 class Square inherit Shape
@@ -414,7 +414,7 @@ end")
   (testing "compiled lowering rejects direct instantiation of deferred classes"
     (let [program (p/ast "deferred class Shape
 feature
-  area(): Real do end
+  area(): Real deferred
 end
 
 create Shape")

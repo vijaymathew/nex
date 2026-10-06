@@ -19,6 +19,7 @@
             [nex.ir :as ir]
             [nex.parser :as parser]
             [nex.redeclare :as redeclare]
+            [nex.contracts :as contracts]
             [nex.typechecker :as tc])
   (:import [org.objectweb.asm Type]))
 
@@ -2520,39 +2521,43 @@
       (lookup-method (:parents class-def) #{}))))
 
 (defn- collect-inherited-method-contract-sources
+  "Every ancestor declaration of METHOD-NAME/ARITY whose contract the routine
+   inherits, ancestors first, each once. `:seed?` marks a declaration that
+   overrides nothing: the routine's first declaration on that path."
   [env class-def method-name arity]
   (let [class-map (visible-class-map env)]
-    (letfn [(collect [cls seen]
-              (let [class-name (:name cls)
-                    already-seen? (and class-name (contains? seen class-name))
-                    seen' (if class-name (conj seen class-name) seen)]
-                (if already-seen?
-                  [[] seen]
-                  (let [[parent-sources seen'']
-                        (if-let [parents (:parents cls)]
-                          (reduce (fn [[acc seen-so-far] {:keys [parent]}]
-                                    (if-let [parent-def (get class-map parent)]
-                                      (let [[sources seen-next] (collect parent-def seen-so-far)]
-                                        [(into acc sources) seen-next])
-                                      [acc seen-so-far]))
-                                  [[] seen']
-                                  parents)
-                          [[] seen'])
+    (letfn [;; SEEN maps each class already walked to whether it, or an
+            ;; ancestor of it, declares the routine -- so a class reached a
+            ;; second time (a diamond) still tells its heir it is not a seed.
+            (collect [cls seen]
+              (let [class-name (:name cls)]
+                (if (and class-name (contains? seen class-name))
+                  [[] seen (get seen class-name)]
+                  (let [[parent-sources seen' parents-declare?]
+                        (reduce (fn [[acc seen-so-far declares?] {:keys [parent]}]
+                                  (if-let [parent-def (get class-map parent)]
+                                    (let [[sources seen-next found?] (collect parent-def seen-so-far)]
+                                      [(into acc sources) seen-next (or declares? found?)])
+                                    [acc seen-so-far declares?]))
+                                [[] seen false]
+                                (:parents cls))
                         local-method (class-method-def cls method-name arity)
                         local-source (when (and local-method
                                                 (public-member? local-method))
                                        [{:source-class class-name
-                                         :method-def local-method}])]
-                    [(vec (concat parent-sources local-source)) seen'']))))]
-      (if-let [parents (:parents class-def)]
-        (first (reduce (fn [[acc seen] {:keys [parent]}]
-                         (if-let [parent-def (get class-map parent)]
-                           (let [[sources seen'] (collect parent-def seen)]
-                             [(into acc sources) seen'])
-                           [acc seen]))
-                       [[] #{}]
-                       parents))
-        []))))
+                                         :method-def local-method
+                                         :seed? (not parents-declare?)}])
+                        declares? (boolean (or parents-declare? local-source))]
+                    [(vec (concat parent-sources local-source))
+                     (if class-name (assoc seen' class-name declares?) seen')
+                     declares?]))))]
+      (first (reduce (fn [[acc seen] {:keys [parent]}]
+                       (if-let [parent-def (get class-map parent)]
+                         (let [[sources seen'] (collect parent-def seen)]
+                           [(into acc sources) seen'])
+                         [acc seen]))
+                     [[] {}]
+                     (:parents class-def))))))
 
 (defn- assertions->condition
   [assertions]
@@ -2593,18 +2598,25 @@
                            groups)}])))
 
 (defn- effective-method-contracts
+  "The routine's own contract with every inherited one, each inherited
+   assertion renamed to read the routine's own parameter names. Preconditions
+   are OR-ed, postconditions AND-ed. A first declaration with no `require`
+   accepts every call, so then the effective precondition is empty."
   [env class-def method-def]
-  (let [inherited-sources (collect-inherited-method-contract-sources env
+  (let [params (:params method-def)
+        inherited-sources (collect-inherited-method-contract-sources env
                                                                      class-def
                                                                      (:name method-def)
-                                                                     (count (or (:params method-def) [])))]
-    {:effective-require (combine-precondition-groups
-                         (mapv (fn [{:keys [method-def]}] (:require method-def))
-                               inherited-sources)
-                         (:require method-def))
-     :effective-ensure (vec (concat (mapcat (fn [{:keys [method-def]}]
-                                              (or (:ensure method-def) []))
-                                            inherited-sources)
+                                                                     (count (or params [])))
+        renamed (fn [k {source :method-def}]
+                  (contracts/rename-params (get source k) (:params source) params))]
+    {:effective-require (when-not (some (fn [{:keys [seed?] source :method-def}]
+                                          (and seed? (empty? (:require source))))
+                                        inherited-sources)
+                          (combine-precondition-groups
+                           (mapv (partial renamed :require) inherited-sources)
+                           (:require method-def)))
+     :effective-ensure (vec (concat (mapcat (partial renamed :ensure) inherited-sources)
                                     (or (:ensure method-def) [])))}))
 
 (defn- method-override?
@@ -2631,11 +2643,12 @@
                     value-expr))))
 
 (defn- lowered-deferred-method?
-  [class-def method-def]
-  (or (:deferred? method-def)
-      (:declaration-only? method-def)
-      (and (:deferred? class-def)
-           (empty? (vec (:body method-def))))))
+  "Only a routine declared `deferred` is. An empty `do end` body is an ordinary
+   routine that does nothing, in a deferred class as anywhere else: the type
+   checker lets a heir inherit it, so it must exist to be called."
+  [_class-def method-def]
+  (boolean (or (:deferred? method-def)
+               (:declaration-only? method-def))))
 
 (defn- field-info-map
   [env class-def]
@@ -7721,8 +7734,16 @@
             [(env-add-local-alias env' "Result" local) local])
           [env-with-params nil])
         result-init-stmt (result-local-init-stmt result-local)
-        effective-require (or (:effective-require fn-def) (:require fn-def))
-        effective-ensure (or (:effective-ensure fn-def) (:ensure fn-def))
+        ;; A class method arrives with its effective contract (inherited ones
+        ;; folded in). An empty effective precondition is meaningful there --
+        ;; a first declaration without `require` admits every call -- so only
+        ;; a routine without one falls back to its own clauses.
+        effective-require (if (contains? fn-def :effective-require)
+                            (:effective-require fn-def)
+                            (:require fn-def))
+        effective-ensure (if (contains? fn-def :effective-ensure)
+                           (:effective-ensure fn-def)
+                           (:ensure fn-def))
         [env-with-old old-snapshot-stmts old-field-locals]
         (add-old-field-snapshots env-with-result effective-ensure)
         env-with-old (assoc env-with-old :old-field-locals old-field-locals)

@@ -402,7 +402,7 @@
   (testing "deferred classes emit as concrete JVM classes (no ACC_ABSTRACT); deferred methods are not emitted"
     (let [program (p/ast "deferred class Shape
 feature
-  area(): Real do end
+  area(): Real deferred
 end")
           shape (first (:classes program))
           lowered (lower/lower-class-def shape {:compiled-classes {"Shape" {:name "Shape"

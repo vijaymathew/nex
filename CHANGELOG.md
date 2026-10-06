@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **New: a deferred routine can carry a contract.** `f(x: Integer) require
+  positive: x > 0 deferred`, with an optional `ensure ... end` after
+  `deferred`. Every implementation inherits it, on both backends.
+- **Change: a precondition added below a first declaration that has none is a
+  type error.** Such a declaration accepts every call, and an override's
+  `require` is OR-ed with what it inherits, so the added precondition could
+  never be checked. Until now it was enforced, which broke substitutability:
+  a call that was valid through the parent type failed on the heir. State it
+  on the first declaration instead, which may be a deferred one. At run time
+  the effective precondition is now empty in this case.
+- **Fix: inherited contracts read the override's parameter names.** An
+  override that renamed a parameter (`f(n: Integer)` for an inherited `f(x:
+  Integer) require x > 0`) failed with "Undefined variable: x" in the
+  interpreter, and with an internal lowering error in the compiled backend. A
+  parameter that would capture another name the inherited contract reads,
+  such as a field, is now a type error.
+- **Fix: an empty `do end` routine in a deferred class is an ordinary
+  routine.** The compiled backend treated it as deferred, while the type
+  checker let a heir inherit it. Calling it then failed to link and the
+  program fell back to the interpreter.
+- **Fix: `nex format` keeps deferred routines and classes deferred.** It
+  printed `f() deferred` as `f() do end` and dropped the `sealed`/`deferred`
+  class prefixes.
+
 - **Fix: a runtime type test checks type arguments.** `convert x to s:
   Some[String]`, a `match` clause `Some[String](...)`, and a field pattern
   `content: Some[String](...)` used to test the class alone, so a
