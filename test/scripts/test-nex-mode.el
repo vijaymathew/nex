@@ -477,6 +477,36 @@ comment-start flags, so the string scanner mis-read quotes in comments."
     (should (nth 3 (syntax-ppss (point))))        ; in string
     (should-not (nth 4 (syntax-ppss (point))))))  ; not in comment
 
+(ert-deftest nex-indent-deferred-routine-body ()
+  "A `deferred' standing in for a routine's body aligns with the routine, as
+its `do' would: after a `require' clause, with or without an `ensure' clause
+after it, and directly after the signature.  A `deferred class' header is
+unaffected."
+  (let ((expected '("deferred class Shape"
+                    "feature"
+                    "  scale(x: Integer): Integer"
+                    "  require"
+                    "    positive: x > 0"
+                    "  deferred"
+                    "  ensure"
+                    "    bigger: result > x"
+                    "  end"
+                    ""
+                    "  area(): Real"
+                    "  deferred"
+                    ""
+                    "  grow(x: Integer): Integer"
+                    "  require"
+                    "    ok: x > 0"
+                    "  do"
+                    "    result := x + 1"
+                    "  end"
+                    "end")))
+    (should (string=
+             (nex-test--reindent
+              (string-join (mapcar #'string-trim-left expected) "\n"))
+             (string-join expected "\n")))))
+
 (ert-deftest nex-indent-multiline-array-literal ()
   "Elements of a multi-line array literal indent one level past the line that
 opens \"[\"; the closing \"]\" aligns with that line; lines after return to the

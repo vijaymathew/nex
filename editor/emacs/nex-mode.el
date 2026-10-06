@@ -613,8 +613,8 @@ method/feature/constructor signature, not a same-shaped body statement.
 call statement ending a line -- `print()' -- has exactly the shape of a
 parameterless feature declaration.  The two are told apart by what follows:
 a real signature is always directly followed (skipping blank and `note'
-lines) by its `require' or `do' clause, whereas a body statement's next line
-is more of the body, `ensure', or `end'."
+lines) by its `require' or `do' clause (or `deferred'), whereas a body
+statement's next line is more of the body, `ensure', or `end'."
   (and (looking-at nex-method-signature-re)
        (save-excursion
          (forward-line 1)
@@ -626,14 +626,16 @@ is more of the body, `ensure', or `end'."
            (forward-line 1))
          (beginning-of-line)
          (skip-chars-forward " \t")
-         (looking-at "\\b\\(do\\|require\\)\\b"))))
+         (looking-at "\\b\\(do\\|require\\|deferred\\)\\b"))))
 
 (defun nex-is-contract-after-method ()
-  "Return t if current line is require/ensure/do after a method name."
+  "Return t if current line is require/ensure/do after a method name.
+A `deferred' standing in for a routine's body counts as its `do'."
   (save-excursion
     (beginning-of-line)
     (skip-chars-forward " \t")
-    (when (looking-at "\\b\\(require\\|ensure\\|do\\)\\b")
+    (when (and (looking-at "\\b\\(require\\|ensure\\|do\\|deferred\\)\\b")
+               (not (looking-at "\\bdeferred\\s-+class\\b")))
       (let ((cur-kw (match-string 1)))
         (if (string= cur-kw "ensure")
             ;; 'ensure' is only ever a routine postcondition. It follows the
@@ -674,7 +676,7 @@ CUR-KW is the contract keyword on the current line."
         ;; that opens a nested scoped block follows the enclosing body 'do',
         ;; and must indent one level deeper instead of aligning to the method.
         (and (looking-at "\\bdo\\b")
-             (not (string= cur-kw "do"))))))
+             (not (member cur-kw '("do" "deferred")))))))
 
 (defun nex-find-method-indent ()
   "Find the indentation of the method that owns the current contract."

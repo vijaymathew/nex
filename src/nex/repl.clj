@@ -222,9 +222,26 @@
 ;; share the `then` keyword, they are told apart by context: a `when` is a
 ;; clause when its innermost enclosing construct is a `match`/`select`
 ;; guard. Only when-expressions count toward the open-block balance.
+(def ^:private deferred-ensure-pattern
+  "A deferred routine's `ensure` clause, which `end` closes (a bare
+   `deferred` has none)."
+  #"(?<![.\w])deferred\s+ensure\b")
+
+(def ^:private union-decl-pattern
+  "The start of a `union` or `enum union` declaration, which `end` closes.
+   `union` is a soft keyword, so only its declaration position counts
+   (`s.union(t)` is a call)."
+  #"(?m)^\s*(?:enum\s+)?union\s+[A-Za-z_]")
+
 (defn- count-when-expressions
   [text]
-  (let [tokens (re-seq #"\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)]
+  (let [tokens (->> (re-seq #"(?m)(?<![.\w])deferred\s+ensure\b|^\s*(?:enum\s+)?union\s+[A-Za-z_]|\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)
+                    ;; A deferred routine's ensure clause and a union
+                    ;; declaration are blocks like the rest.
+                    (map #(if (or (re-matches deferred-ensure-pattern %)
+                                  (re-matches union-decl-pattern %))
+                            "class"
+                            %)))]
     (loop [tokens tokens
            stack '()
            count 0]
@@ -307,13 +324,16 @@
         case-count (keyword-count text "case")
         match-count (keyword-count text "match")
         select-count (keyword-count text "select")
+        deferred-ensure-count (count (re-seq deferred-ensure-pattern text))
+        union-count (count (re-seq union-decl-pattern text))
         end-count (keyword-count text "end")
         ;; In loops, 'do' is part of 'from...until...do...end', 'repeat...do...end', or 'across...do...end'
         ;; So subtract from-count, repeat-count, and across-count from do-count to avoid double-counting
         standalone-do-count (max 0 (- do-count from-count repeat-count across-count))
         ;; Total blocks that need closing
         open-blocks (+ class-count standalone-do-count from-count repeat-count
-                       across-count if-count when-count case-count match-count select-count)
+                       across-count if-count when-count case-count match-count select-count
+                       deferred-ensure-count union-count)
         lines (vec (str/split-lines text))
         bare-function-header?
         (boolean
