@@ -6,7 +6,9 @@
       it, and an Animal could then be put into the Box[Dog].
    2. After `a and b`, the narrowings of both a and b apply in the then
       branch (nex.typechecker/guarded-non-nil-vars). Only a bare `x /= nil`
-      narrowed.
+      narrowed. The right operand of every `and`, not only one in an `if` or
+      `when` condition, is checked with the left's narrowings in effect, so
+      `require ok: x /= nil and x.v > 0` type-checks.
    3. `when c then a else b end` has the join of the branch types: the
       narrowest type both conform to, or Any when there is no single one
       (nex.typechecker/join-type). The compiler rejected unrelated branch
@@ -133,6 +135,65 @@ let y: ?P := create P.make(2)
 if x /= nil or y /= nil then
   print(x.v)
 end"))))))
+
+(deftest and-narrows-its-right-operand-everywhere-test
+  (testing "in contracts, assignments, arguments and results, on both backends"
+    (is (= ["1" "Precondition violation: big" "Precondition violation: big"
+            "false" "true" "false" "true" "true" "false" "true" "false" "true"]
+           (both (str point "class Q
+feature
+  f(p: ?P): Integer
+  require
+    big: p /= nil and p.v > 10
+  do
+    result := 1
+  ensure
+    still: p /= nil and p.v > 10
+  end
+end
+class Dog
+create
+  make(a: Integer) do age := a end
+feature
+  age: Integer
+end
+function big(p: ?P): Boolean do
+  result := p /= nil and p.v > 10
+end
+function over(x: ?Integer): Boolean do
+  result := x /= nil and x > 5
+end
+function old_dog(a: Any): Boolean do
+  result := convert a to d: Dog and d.age > 10
+end
+function attached_big(p: ?P): Boolean do
+  result := ?p as q and q.v > 10
+end
+let q := create Q
+print(q.f(create P.make(20)))
+do q.f(create P.make(3)) rescue print(exception) end
+do q.f(nil) rescue print(exception) end
+print(big(nil))
+print(big(create P.make(30)))
+print(over(nil))
+print(over(9))
+print(old_dog(create Dog.make(12)))
+print(old_dog(\"x\"))
+print(attached_big(create P.make(11)))
+let n: ?P := nil
+print(n /= nil and n.v > 1)
+let y: ?Integer := 7
+let ok := y /= nil and y + 1 = 8
+assert ok and y /= nil and y = 7
+print(ok)")))))
+  (testing "the narrowing ends with the `and`, and `or` still narrows nothing"
+    (is (re-find #"Cannot call feature 'v' on detachable \?P"
+                 (type-error (str point "let x: ?P := create P.make(1)
+let ok := x /= nil and x.v > 0
+print(x.v)"))))
+    (is (re-find #"Cannot call feature 'v' on detachable \?P"
+                 (type-error (str point "let x: ?P := create P.make(1)
+print(x = nil or x.v > 0)"))))))
 
 (deftest when-has-the-join-of-its-branches-test
   (testing "unrelated scalar branches join to Any"

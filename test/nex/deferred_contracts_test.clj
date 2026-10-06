@@ -15,7 +15,10 @@
       An override with no `require` of its own keeps the inherited one.
    4. Inherited assertions are read under the override's own parameter names.
       Both backends used to evaluate them under the ancestor's names, which
-      failed when the override renamed a parameter."
+      failed when the override renamed a parameter.
+   5. A violation names the assertion that failed. An OR-ed precondition is
+      broken only when every alternative is, so it names the failing assertion
+      of each, `positive or is_neg`, rather than a synthetic label."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [clojure.walk :as walk]
@@ -233,7 +236,7 @@ try_scale(create Square.make, -4)
 try_scale(create Square.make, 5)")))))
 
 (deftest override-may-widen-a-deferred-precondition
-  (is (= ["-40" "\"Precondition violation: inherited_or_local_require\"" "6"]
+  (is (= ["-40" "\"Precondition violation: positive or very_negative\"" "6"]
          (both (str "deferred class Shape
 feature
   scale(x: Integer): Integer require positive: x > 0 deferred
@@ -642,3 +645,112 @@ end"
     (is (str/includes? formatted "d(x: Integer) deferred"))
     (is (= (no-pos (strip (members src))) (no-pos (strip (members formatted)))))
     (is (= formatted (fmt/format-code formatted)) "formatting is idempotent")))
+
+(deftest violations-name-the-failing-assertions
+  (testing "an OR-ed precondition names each alternative's first failing assertion,
+            ancestor first, read under the override's parameter names; inherited
+            postconditions and invariants name their own assertion"
+    (is (= ["Precondition violation: positive or is_neg"
+            "Precondition violation: small or is_neg"
+            "Precondition violation: positive or not_tiny"
+            "Postcondition violation: p_nonneg"
+            "Postcondition violation: p_ge_x"
+            "Precondition violation: positive or not_tiny or is_zero"
+            "Precondition violation: small or is_neg or is_zero"
+            "Postcondition violation: c_small"
+            "Class invariant violation: base_nonneg"
+            "Class invariant violation: derived_small"
+            "Class invariant violation: m_pos"]
+           (both "class P
+feature
+  f(x: Integer): Integer
+  require
+    positive: x > 0
+    small: x < 100
+  do
+    result := x
+  ensure
+    p_nonneg: result >= 0
+  end
+  g(x: Integer): Integer
+  do
+    result := x
+  ensure
+    p_ge_x: result >= x
+  end
+end
+
+class C
+inherit P
+feature
+  f(y: Integer): Integer
+  require
+    is_neg: y < 0
+    not_tiny: y > -50
+  do
+    result := y
+  ensure
+    c_small: result < 1000
+  end
+  g(y: Integer): Integer
+  do
+    result := y - 1
+  ensure
+    c_ok: result /= 99
+  end
+end
+
+class D
+inherit C
+feature
+  f(z: Integer): Integer
+  require
+    is_zero: z = 0
+  do
+    result := z + 5000
+  end
+end
+
+let p: P := create C
+-- group1: positive fails; group2: is_neg fails
+do p.f(0) rescue print(exception) end
+-- group1: small fails; group2: is_neg fails
+do p.f(200) rescue print(exception) end
+-- group1: positive fails; group2: not_tiny fails
+do p.f(-60) rescue print(exception) end
+-- passes via C, then inherited ensure p_nonneg fails
+do p.f(-5) rescue print(exception) end
+-- inherited postcondition p_ge_x fails
+do p.g(3) rescue print(exception) end
+
+let q: P := create D
+do q.f(-60) rescue print(exception) end
+do q.f(150) rescue print(exception) end
+-- passes via D's is_zero; then C's c_small ensure fails (z + 5000)
+do q.f(0) rescue print(exception) end
+
+class Base
+feature
+  n: Integer
+  set_n(v: Integer) do n := v end
+invariant
+  base_nonneg: n >= 0
+end
+
+class Derived
+inherit Base
+feature
+  m: Integer
+  set_m(v: Integer) do m := v end
+invariant
+  derived_small: n < 10
+  m_pos: m >= 0
+end
+
+let d := create Derived
+do d.set_n(-1) rescue print(exception) end
+let d2 := create Derived
+do d2.set_n(20) rescue print(exception) end
+let d3 := create Derived
+do d3.set_m(-1) rescue print(exception) end
+")))))

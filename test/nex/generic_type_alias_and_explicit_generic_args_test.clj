@@ -136,6 +136,64 @@ print(add(6, 7))"]
       (is (= ["2" "4" "6"] (run code)))
       (is (= ["2" "4" "6"] (run-compiled code))))))
 
+(def ^:private shapes
+  "deferred class Shape
+feature
+  area(): Real deferred
+end
+
+function total_area[T -> Shape](xs: Array[T]): Real do
+  across xs as s do
+    result := result + s.area()
+  end
+end
+
+class Circle
+inherit Shape
+create
+  make(r: Real) do radius := r end
+feature
+  radius: Real
+  area(): Real do result := radius * 3.0 end
+end
+
+class Square
+inherit Shape
+create
+  make(w: Real) do width := w end
+feature
+  width: Real
+  area(): Real do result := width * width end
+end
+
+let shapes: Array[Shape] := [create Circle.make(1.0), create Square.make(2.0)]
+let circles: Array[Circle] := [create Circle.make(1.0)]
+")
+
+(deftest explicit-generic-args-are-not-overridden-by-inference
+  (testing "an argument must conform to the parameter as instantiated by the written
+            type arguments; inference from the argument used to re-bind T, so
+            `total_area[Circle]` accepted an Array[Shape]"
+    (doseq [call ["total_area[Circle](shapes)"
+                  "total_area[Square](circles)"]]
+      (let [{:keys [success errors]} (type-check (str shapes "print(" call ")"))]
+        (is (false? success) call)
+        (is (str/includes? (:message (first errors)) "Expected Array[") call)
+        (is (some? (:line (first errors))) call)))
+    (testing "through a pinned function value too"
+      (let [{:keys [success errors]}
+            (type-check (str shapes "let f := total_area[Circle]\nprint(f(shapes))"))]
+        (is (false? success))
+        (is (str/includes? (:message (first errors)) "Expected Array[Circle], got Array[Shape]")))))
+  (testing "matching explicit type arguments, and plain inference, still work"
+    (let [code (str shapes "print(total_area[Shape](shapes))
+print(total_area[Circle](circles))
+print(total_area(shapes))
+print(total_area(circles))")]
+      (is (:success (type-check code)))
+      (is (= ["7.0" "3.0" "7.0" "3.0"] (run code)))
+      (is (= ["7.0" "3.0" "7.0" "3.0"] (run-compiled code))))))
+
 (deftest explicit-generic-args-on-non-generic-identifier-is-rejected
   (testing "[...] on a value that isn't generic is a clear, located error rather than
             silently producing a bogus parameterized type"
