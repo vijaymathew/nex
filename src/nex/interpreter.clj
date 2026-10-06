@@ -2126,7 +2126,9 @@
           written (some-> (:modified-fields ctx) deref)
           shadowed (remove #(contains? written %) (:param-names ctx))]
       (if (seq shadowed)
-        (update live :fields merge (select-keys (:fields obj) (map keyword shadowed)))
+        (let [view (or (:current-view ctx) {})]
+          (update live :fields merge
+                  (select-keys (:fields obj) (map #(get view % (keyword %)) shadowed))))
         live))))
 
 (defn- invoke-on-this!
@@ -2304,7 +2306,7 @@
     (if field
       (let [field-val (if (and (map? target) (= :this (:type target)) (:current-object ctx))
                         ;; `this.f`: the copy of f the running code's path sees.
-                        (get (:fields (refresh-object-fields-from-env ctx (:current-object ctx)))
+                        (get (:fields (live-current-object ctx))
                              (get (or (:current-view ctx) {}) method (keyword method)))
                         (get (:fields obj) (keyword method)))]
         (if (and has-parens (nex-object? field-val))

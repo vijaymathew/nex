@@ -317,3 +317,37 @@ class Named_Square
   create make() do Square.make() end
 end
 print((create Named_Square.make()).name())")))))
+
+(deftest a-shadowing-parameter-on-the-second-path
+  (testing "`this.count` beside a parameter named count reads, and `this.count :=`
+            writes, Right's copy"
+    (is (= ["\"was 20\"" "\"10 5\""]
+           (both "class Counter
+  create make(start: Integer) do count := start end
+feature
+  count: Integer
+  reset(count: Integer) do
+    print(\"was \" + this.count.to_string)
+    this.count := count
+  end
+end
+class Left
+  inherit Counter
+  create make() do Counter.make(10) end
+feature
+  left_count(): Integer do result := count end
+end
+class Right
+  inherit Counter
+  create make() do Counter.make(20) end
+feature
+  reset_right(v: Integer) do reset(v) end
+  right_count(): Integer do result := count end
+end
+class Both
+  inherit Left, Right
+  create make() do Left.make() Right.make() end
+end
+let b := create Both.make()
+b.reset_right(5)
+print(b.left_count.to_string + \" \" + b.right_count.to_string)")))))
