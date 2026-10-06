@@ -5630,13 +5630,18 @@
                                     class-name
                                     created-type
                                     (exact-class-jvm-type env class-name)))]
-          (ir/call-virtual-node (:internal-name compiled)
-                                (lowered-constructor-method-name ctor-def)
-                                (desc/repl-instance-method-descriptor)
-                                new-ir
-                                (into lowered-args runtime-generic-args)
-                                created-type
-                                (resolve-jvm-type env created-type))))
+          ;; The invariant is checked once, when the outermost constructor
+          ;; returns, after every constructor it delegated to has run.
+          (validate-object-state-ir env
+                                    class-name
+                                    (ir/call-virtual-node (:internal-name compiled)
+                                                          (lowered-constructor-method-name ctor-def)
+                                                          (desc/repl-instance-method-descriptor)
+                                                          new-ir
+                                                          (into lowered-args runtime-generic-args)
+                                                          created-type
+                                                          (resolve-jvm-type env created-type))
+                                    created-type)))
       (do
         (when (seq (:args expr))
           (throw (unsupported "Only create ClassName or create ClassName.ctor(...) is supported in compiled lowering"
@@ -7972,12 +7977,14 @@
                                   (map #(assertion-ir require-env :require %) (:require ctor-def))
                                   core-body
                                   (map #(assertion-ir ensure-env :ensure %) (:ensure ctor-def))
+                                  ;; No invariant check here: a constructor is
+                                  ;; also run by delegation (`super.make`,
+                                  ;; `Parent.make`, a sibling constructor), on an
+                                  ;; object still being built. The outermost
+                                  ;; `create` checks it (lower-user-create).
                                   [(ir/return-node
-                                    (validate-object-state-ir {:compiled-classes compiled-classes}
-                                                              class-name
-                                                              (ir/this-node class-name
-                                                                            (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                                              class-name)
+                                    (ir/this-node class-name
+                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
                                     class-name
                                     (ir/object-jvm-type "java/lang/Object"))]))}))
 

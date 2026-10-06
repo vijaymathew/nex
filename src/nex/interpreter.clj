@@ -1088,23 +1088,28 @@
                 (get-parent-classes ctx class-def))))
 
 (defn check-object-invariant
-  "Check CLASS-DEF's invariant on an object holding FIELDS. Every clause is
-   checked on the copies along each field's home path, as check-class-
-   invariant does; then an ancestor reached along another path, whose copy
-   of its fields is a different one, has its own clauses checked again on
-   that copy."
-  [ctx class-def fields]
-  (let [env (make-env (:current-env ctx))]
-    (bind-fields! env fields {})
-    (check-class-invariant (assoc ctx :current-env env :current-path [] :current-view {}) class-def))
-  (doseq [[path ancestor] (rest (class-paths ctx class-def))
-          :when (seq (:invariant ancestor))
-          :let [view (frame-view ctx class-def path)]
-          :when (seq view)]
+  "Check CLASS-DEF's invariant on OBJ. Every clause is checked on the copies
+   along each field's home path, as check-class-invariant does; then an
+   ancestor reached along another path, whose copy of its fields is a
+   different one, has its own clauses checked again on that copy. A clause
+   may call the object's queries, so OBJ is the current object meanwhile."
+  [ctx class-def obj]
+  (let [fields (:fields obj)
+        inv-ctx (-> ctx
+                    (assoc :current-object obj)
+                    (dissoc :current-target :param-names :modified-fields :in-constructor?))]
     (let [env (make-env (:current-env ctx))]
-      (bind-fields! env fields view)
-      (check-assertions (assoc ctx :current-env env :current-path path :current-view view)
-                        (:invariant ancestor) Class-invariant))))
+      (bind-fields! env fields {})
+      (check-class-invariant (assoc inv-ctx :current-env env :current-path [] :current-view {})
+                             class-def))
+    (doseq [[path ancestor] (rest (class-paths ctx class-def))
+            :when (seq (:invariant ancestor))
+            :let [view (frame-view ctx class-def path)]
+            :when (seq view)]
+      (let [env (make-env (:current-env ctx))]
+        (bind-fields! env fields view)
+        (check-assertions (assoc inv-ctx :current-env env :current-path path :current-view view)
+                          (:invariant ancestor) Class-invariant)))))
 
 (defn feature-members
   "Return feature members with section visibility copied onto each member."
@@ -2289,7 +2294,7 @@
           ;; invariant on exit; an unqualified one (`f`) runs mid-routine,
           ;; where the invariant may be broken for a moment.
           (when-not (:unchecked-call? ctx)
-            (check-object-invariant new-ctx class-def updated-fields))
+            (check-object-invariant new-ctx class-def updated-obj))
           (write-back-target! ctx target updated-obj source-obj)
           (annotate-reference-result target obj result)
           (catch Exception e
@@ -3590,7 +3595,7 @@
     ;; Check class invariant with object fields in scope
     (if class-def
       (do
-        (check-object-invariant ctx class-def final-field-map)
+        (check-object-invariant ctx class-def obj)
         ;; Return the object
         obj)
       ;; Java interop fallback (CLJ only)
