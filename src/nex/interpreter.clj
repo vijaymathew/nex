@@ -13,6 +13,7 @@
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap]
             [nex.redeclare :as redeclare]
+            [nex.contracts :as contracts]
             [nex.intern :as intern])
   (:import [clj_antlr ParseError]
            [java.lang.reflect Field]
@@ -986,34 +987,38 @@
        first))
 
 (defn- collect-inherited-method-contract-sources
+  "Every ancestor declaration of METHOD-NAME/ARG-COUNT whose contract the
+   routine inherits, ancestors first, each once. `:seed?` marks a declaration
+   that overrides nothing: the routine's first declaration on that path."
   [ctx class-def method-name arg-count caller-class-name]
-  (letfn [(collect [cls seen]
-            (let [class-name (:name cls)
-                  already-seen? (and class-name (contains? seen class-name))
-                  seen' (if class-name (conj seen class-name) seen)]
-              (if already-seen?
-                [[] seen]
-                (let [[parent-sources seen'']
-                      (if-let [parents (get-parent-classes ctx cls)]
-                        (reduce (fn [[acc seen-so-far] {parent-class-def :class-def}]
-                                  (let [[sources seen-next] (collect parent-class-def seen-so-far)]
-                                    [(into acc sources) seen-next]))
-                                [[] seen']
-                                parents)
-                        [[] seen'])
+  (letfn [;; SEEN maps each class already walked to whether it, or an ancestor
+          ;; of it, declares the routine -- so a class reached a second time
+          ;; (a diamond) still tells its heir it is not a seed.
+          (collect [cls seen]
+            (let [class-name (:name cls)]
+              (if (and class-name (contains? seen class-name))
+                [[] seen (get seen class-name)]
+                (let [[parent-sources seen' parents-declare?]
+                      (reduce (fn [[acc seen-so-far declares?] {parent-class-def :class-def}]
+                                (let [[sources seen-next found?] (collect parent-class-def seen-so-far)]
+                                  [(into acc sources) seen-next (or declares? found?)]))
+                              [[] seen false]
+                              (get-parent-classes ctx cls))
                       local-method (lookup-method-in-class cls method-name arg-count)
                       local-source (when (and local-method
                                               (member-visible? local-method class-name caller-class-name))
                                      [{:method local-method
-                                       :source-class cls}])]
-                  [(vec (concat parent-sources local-source)) seen'']))))]
-    (if-let [parents (get-parent-classes ctx class-def)]
-      (first (reduce (fn [[acc seen] {parent-class-def :class-def}]
-                       (let [[sources seen'] (collect parent-class-def seen)]
-                         [(into acc sources) seen']))
-                     [[] #{}]
-                     parents))
-      [])))
+                                       :source-class cls
+                                       :seed? (not parents-declare?)}])
+                      declares? (boolean (or parents-declare? local-source))]
+                  [(vec (concat parent-sources local-source))
+                   (if class-name (assoc seen' class-name declares?) seen')
+                   declares?]))))]
+    (first (reduce (fn [[acc seen] {parent-class-def :class-def}]
+                     (let [[sources seen'] (collect parent-class-def seen)]
+                       [(into acc sources) seen']))
+                   [[] {}]
+                   (get-parent-classes ctx class-def)))))
 
 (defn lookup-method-with-inheritance
   "Look up a method in a class, searching parent classes if needed."
@@ -1029,13 +1034,18 @@
                                                                           method-name
                                                                           arg-count
                                                                           caller-class-name)
-             effective-require (combine-precondition-groups
-                                (mapv (fn [{:keys [method]}] (:require method))
-                                      inherited-sources)
-                                (:require method))
-             effective-ensure (vec (concat (mapcat (fn [{:keys [method]}]
-                                                     (or (:ensure method) []))
-                                                   inherited-sources)
+             ;; Inherited assertions read this routine's parameter names.
+             ;; Preconditions are OR-ed, postconditions AND-ed; a first
+             ;; declaration with no `require` admits every call.
+             renamed (fn [k {source :method}]
+                       (contracts/rename-params (get source k) (:params source) (:params method)))
+             effective-require (when-not (some (fn [{:keys [seed?] source :method}]
+                                                 (and seed? (empty? (:require source))))
+                                               inherited-sources)
+                                 (combine-precondition-groups
+                                  (mapv (partial renamed :require) inherited-sources)
+                                  (:require method)))
+             effective-ensure (vec (concat (mapcat (partial renamed :ensure) inherited-sources)
                                            (or (:ensure method) [])))]
          {:method method
           :source-class class-def

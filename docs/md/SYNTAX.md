@@ -907,6 +907,57 @@ assert                             -- several at once, like require
 A failed `assert` raises the same contract violation as a failed `require` or
 `ensure`. Assertions always run; there is no mode that strips them.
 
+### Contracts and inheritance
+
+An override inherits every ancestor's contract. Its own `require` is OR-ed with
+the inherited precondition, so it can only accept *more* calls. Its own `ensure`
+is AND-ed with the inherited postcondition, so it can only promise *more*. An
+override with no `require` keeps the precondition it inherits.
+
+A deferred routine can state the contract that every implementation inherits.
+Put `require` before `deferred` and `ensure` after it. An `ensure` is closed by
+`end`:
+
+```nex
+deferred class Shape
+  feature
+    scale(x: Integer): Integer
+      require
+        positive: x > 0
+      deferred
+      ensure
+        bigger: result > x
+      end
+
+    area(): Real deferred ensure non_negative: result >= 0.0 end
+end
+```
+
+A routine's first declaration with no `require` accepts every call. Since an
+override can only widen that, a `require` added further down could never be
+checked, and the type checker rejects it. The precondition belongs on the
+first declaration, which may be a deferred one:
+
+```nex
+class Parent
+  feature
+    f(x: Integer) do ... end
+end
+
+class Child
+  inherit Parent
+  feature
+    f(x: Integer)
+      require positive: x > 0   -- error: Parent.f accepts every call
+      do ... end
+end
+```
+
+Inherited assertions are checked under the override's own parameter names, so
+an implementation may rename its parameters. It may not take a name that the
+inherited contract already uses for something else, such as a field: that
+name would then mean the parameter.
+
 ## Error Handling
 
 ```nex

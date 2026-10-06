@@ -124,9 +124,14 @@ constructorDecl
     : IDENTIFIER ('(' paramList? ')')? requireClause? DO block ensureClause? rescueClause? END
     ;
 
+// A deferred routine may state the contract every implementation inherits:
+// `require` before `deferred`, `ensure` after it. An `ensure` needs a closing
+// `end`, since otherwise a following `name: Type` field would read as one more
+// labelled postcondition; `deferred` already ends a `require`.
+//
 methodDecl
     : IDENTIFIER ('(' paramList? ')')? (':' type)? aliasClause? noteClause? requireClause? DO block ensureClause? rescueClause? END
-    | IDENTIFIER '(' paramList? ')' (':' type)? aliasClause? noteClause? DEFERRED?
+    | IDENTIFIER '(' paramList? ')' (':' type)? aliasClause? noteClause? (requireClause? DEFERRED (ensureClause END)?)?
     ;
 
 // Binds an operator symbol to this feature, e.g. `alias "-"`. The operator is

@@ -276,22 +276,24 @@ end"))
             `compare` (contracts included) and show a type like `=` does"
     ;; Typechecking used to route every non-builtin ordering to the interpreter,
     ;; which cannot dispatch `compare` on a compiled object: it ordered by the
-    ;; printed form instead, skipping the precondition, and that path printed
-    ;; no type for an expression statement.
+    ;; printed form instead, skipping the contract, and that path printed
+    ;; no type for an expression statement. (The contract is a postcondition:
+    ;; Comparable.compare admits every pair, so an override may not narrow
+    ;; that with a `require`.)
     (binding [repl/*type-checking-enabled* (atom true)
               repl/*repl-var-types* (atom {})
               repl/*repl-backend* (atom :compiled)
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx (repl/init-repl-context)]
         (with-out-str
-          (repl/eval-code ctx "class C inherit Comparable create make(v: Integer) do x := v end feature x: Integer compare(c: C): Integer require valid_c: c.x > 10 do if x < c.x then result := -1 elseif x > c.x then result := 1 else result := 0 end end end")
+          (repl/eval-code ctx "class C inherit Comparable create make(v: Integer) do x := v end feature x: Integer compare(c: C): Integer do if x < c.x then result := -1 elseif x > c.x then result := 1 else result := 0 end ensure valid_c: c.x > 10 end end")
           (repl/eval-code ctx "let c1 := create C.make(10)")
           (repl/eval-code ctx "let c2 := create C.make(100)"))
         (is (= "Boolean true" (str/trim (with-out-str (repl/eval-code ctx "c1 < c2")))))
         (is (= "Boolean false" (str/trim (with-out-str (repl/eval-code ctx "c1 > c2")))))
         (is (= "Boolean false" (str/trim (with-out-str (repl/eval-code ctx "c1 = c2")))))
         (is (str/includes? (with-out-str (repl/eval-code ctx "c2 < c1"))
-                           "Precondition violation: valid_c"))))))
+                           "Postcondition violation: valid_c"))))))
 
 (deftest repl-compiled-backend-private-field-is-not-publicly-readable-test
   (testing "compiled backend rejects top-level access to private fields while keeping public methods callable"
@@ -2456,7 +2458,7 @@ end"))
           deferred-result (compiled-repl/compile-and-eval! session
                                                            (p/ast "deferred class Shape
 feature
-  area(): Real do end
+  area(): Real deferred
 end"))
           child-result (compiled-repl/compile-and-eval! session
                                                         (p/ast "class Square inherit Shape
@@ -2491,7 +2493,7 @@ end"))
           _ (compiled-repl/compile-and-eval! session
                                              (p/ast "deferred class Shape
 feature
-  area(): Real do end
+  area(): Real deferred
 end"))
           result (compiled-repl/compile-and-eval! session
                                                   (p/ast "let s := create Shape"))]
@@ -2503,7 +2505,7 @@ end"))
           _ (compiled-repl/compile-and-eval! session
                                              (p/ast "deferred class Shape
 feature
-  area(): Real do end
+  area(): Real deferred
 end"))
           _ (compiled-repl/compile-and-eval! session
                                              (p/ast "class Square inherit Shape

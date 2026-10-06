@@ -206,26 +206,39 @@
                   ;; do aligns with method name, not with note
                   (str ind "do")
                   (str signature " do"))
-        first-line (if has-contracts-or-note? signature do-line)]
-    (str/join "\n"
-              (remove empty?
-                      [first-line
-                       alias-line
-                       note-line
-                       (when require
-                         ;; require aligns with method name, conditions indented under it
-                         (str ind "require\n"
-                              (str/join "\n" (map #(format-assertion % (inc level)) require))))
-                       (when has-contracts-or-note?
-                         ;; do aligns with method name
-                         (str ind "do"))
-                       ;; Body indented under do
-                       (str/join "\n" (map #(format-statement % (inc level)) body))
-                       (when ensure
-                         ;; ensure aligns with method name, conditions indented under it
-                         (str ind "ensure\n"
-                              (str/join "\n" (map #(format-assertion % (inc level)) ensure))))
-                       (str ind "end")]))))
+        first-line (if has-contracts-or-note? signature do-line)
+        require-lines (when require
+                        ;; require aligns with method name, conditions indented under it
+                        (str ind "require\n"
+                             (str/join "\n" (map #(format-assertion % (inc level)) require))))
+        ensure-lines (when ensure
+                       ;; ensure aligns with method name, conditions indented under it
+                       (str ind "ensure\n"
+                            (str/join "\n" (map #(format-assertion % (inc level)) ensure))))]
+    (if (:declaration-only? method)
+      ;; A deferred routine: `deferred` stands where the body would, and only
+      ;; an `ensure` needs a closing `end`.
+      (if has-contracts-or-note?
+        (str/join "\n"
+                  (remove empty?
+                          [signature alias-line note-line require-lines
+                           (str ind "deferred")
+                           ensure-lines
+                           (when ensure (str ind "end"))]))
+        (str signature " deferred"))
+      (str/join "\n"
+                (remove empty?
+                        [first-line
+                         alias-line
+                         note-line
+                         require-lines
+                         (when has-contracts-or-note?
+                           ;; do aligns with method name
+                           (str ind "do"))
+                         ;; Body indented under do
+                         (str/join "\n" (map #(format-statement % (inc level)) body))
+                         ensure-lines
+                         (str ind "end")])))))
 
 (defn format-field
   "Format a field declaration"
@@ -307,7 +320,7 @@
 
 (defn format-class
   "Format a class declaration"
-  [{:keys [name generic-params note parents body invariant]}]
+  [{:keys [name generic-params note parents body invariant sealed? deferred?]}]
   (let [generic-str (when generic-params
                       (str " [" (str/join ", " (map format-generic-param generic-params)) "]"))
         note-str (when note
@@ -316,7 +329,8 @@
                      (str " inherit " (str/join ", " (map :parent parents))))]
     (str/join "\n"
               (remove empty?
-                      [(str "class " name generic-str note-str)
+                      [(str (when sealed? "sealed ") (when deferred? "deferred ")
+                            "class " name generic-str note-str)
                        parent-str
                        (str/join "\n\n"
                                  (map (fn [section]
