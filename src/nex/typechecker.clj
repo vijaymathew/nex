@@ -2085,8 +2085,19 @@
                                  (str "Operator " operator " requires numeric operands, got "
                                       (display-type left-type) " and " (display-type right-type)))})))))
 
+(declare check-condition check-binary-op*)
+
 (defn check-binary-op
   "Check the type of a binary operation"
+  [env {:keys [operator left right] :as expr}]
+  (if (= "and" operator)
+    ;; Wherever it appears, the right operand of an `and` is checked with the
+    ;; left's narrowings in effect (`b /= nil and b.n > 10`): `and`
+    ;; short-circuits, so the right side runs only when the left held.
+    (check-condition env expr)
+    (check-binary-op* env expr)))
+
+(defn- check-binary-op*
   [env {:keys [operator left right] :as expr}]
   (let [;; Expand aliases (incl. refinement types) so a `Quantity` operand is
         ;; seen as its base `Integer` for arithmetic/comparison.

@@ -205,9 +205,10 @@ Maps iterate as `Map_Entry[K, V]` values, read-only key/value pairs with typed `
 across {"name": "Alice", "age": "10"} as entry do
   print(entry.key + ": " + entry.value)
 end
+-- prints "name: Alice"  "age: 10"
 ```
 
-An entry prints as `"name": "Alice"`. For compatibility with earlier code, `entry.get(0)` and `entry.get(1)` still return the key and value, typed `Any`; prefer `key` and `value`.
+An entry itself prints as `"name": "Alice"` (that is, `print(entry)`). For compatibility with earlier code, `entry.get(0)` and `entry.get(1)` still return the key and value, typed `Any`; prefer `key` and `value`.
 
 ## Functions
 
@@ -1319,6 +1320,20 @@ end
 
 The same goes for `x /= nil`: after `if x /= nil and y /= nil then`, both `x`
 and `y` are attached in the branch.
+
+The right side of an `and` sees the left side's narrowing wherever the `and`
+appears, not only in an `if`, since it runs only when the left side held. So a
+contract can guard its own access:
+
+```nex
+f(b: ?Box): Integer
+  require
+    big: b /= nil and b.n > 10
+  do ... end
+```
+
+The narrowing ends with the `and`: after `let ok := b /= nil and b.n > 10`, `b`
+is still `?Box`. An `or` narrows nothing.
 
 ## Anonymous Functions
 
