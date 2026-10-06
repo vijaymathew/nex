@@ -914,6 +914,12 @@ the inherited precondition, so it can only accept *more* calls. Its own `ensure`
 is AND-ed with the inherited postcondition, so it can only promise *more*. An
 override with no `require` keeps the precondition it inherits.
 
+A call that breaks such a combined precondition has broken every alternative,
+so the violation names the failing assertion of each, ancestor first:
+`Precondition violation: positive or is_neg_one`. Postconditions and class
+invariants are AND-ed, so a violation names the one assertion that failed,
+wherever it was declared.
+
 A deferred routine can state the contract that every implementation inherits.
 Put `require` before `deferred` and `ensure` after it. An `ensure` is closed by
 `end`:

@@ -12,7 +12,8 @@
    else the inherited contract reads (a field, say): the reference would then
    see the parameter. `captured-names` reports such names so the type checker
    can reject the override."
-  (:require [clojure.set :as set]))
+  (:require [clojure.set :as set]
+            [clojure.string :as str]))
 
 (defn- param-renames
   "from-name -> to-name for each position where the two parameter lists differ."
@@ -112,3 +113,62 @@
          (filter read-elsewhere)
          distinct
          vec)))
+
+(defn- assertions->condition
+  "ASSERTIONS AND-ed into one condition."
+  [assertions]
+  (reduce (fn [acc {:keys [condition]}]
+            (if acc
+              {:type :binary :operator "and" :left acc :right condition}
+              condition))
+          nil
+          assertions))
+
+(defn- failing-label
+  "The label of GROUP's first false assertion, given that GROUP as a whole is
+   false: a string when the group has one assertion, otherwise an expression
+   that tests each assertion but the last in turn. The last is never
+   evaluated -- if every earlier one held, it must be the one that failed."
+  [group]
+  (reduce (fn [acc {:keys [label condition]}]
+            {:type :when
+             :condition condition
+             :consequent acc
+             :alternative {:type :string :value label}})
+          {:type :string :value (:label (peek group))}
+          (rseq (pop group))))
+
+(defn combine-precondition-groups
+  "A routine's effective precondition from its inherited precondition groups
+   and its own: each group's assertions AND-ed, the groups OR-ed (an
+   override can only weaken what callers must establish).
+
+   When more than one group applies, the result is a single assertion. A call
+   that breaks it broke every group, so it names the failing assertion of
+   each, `positive or is_neg_one`. That name is a plain `:label` when each
+   group has one assertion; otherwise it depends on which assertion of a group
+   failed, and the assertion carries `:label-expr`, an expression a backend
+   evaluates for the name only once the condition has failed."
+  [inherited-groups local-assertions]
+  (let [groups (vec (concat (keep (comp not-empty vec) inherited-groups)
+                            (when (seq local-assertions)
+                              [(vec local-assertions)])))]
+    (case (count groups)
+      0 nil
+      1 (first groups)
+      (let [condition (reduce (fn [acc group]
+                                {:type :binary :operator "or"
+                                 :left acc :right (assertions->condition group)})
+                              (assertions->condition (first groups))
+                              (rest groups))
+            labels (map failing-label groups)]
+        [(if (every? #(= :string (:type %)) labels)
+           {:label (str/join " or " (map :value labels))
+            :condition condition}
+           {:label-expr (reduce (fn [acc label]
+                                  {:type :binary :operator "+"
+                                   :left {:type :binary :operator "+"
+                                          :left acc :right {:type :string :value " or "}}
+                                   :right label})
+                                labels)
+            :condition condition})]))))

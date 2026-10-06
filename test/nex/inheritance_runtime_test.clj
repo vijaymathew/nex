@@ -574,7 +574,7 @@ end"
                                                :args [{:type :integer :value 0}]})))
         (is (thrown-with-msg?
              Exception
-             #"Precondition violation: inherited_or_local_require"
+             #"Precondition violation: a_ok or c_ok or d_ok"
              (interp/eval-node ctx-with-d {:type :call
                                            :target "d"
                                            :method "f"

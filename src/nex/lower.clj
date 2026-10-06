@@ -1637,10 +1637,13 @@
    :assert) is never elided here — per spec, \"there is no mode that strips
    them\" — callers for it pass a distinct kind precisely so this guard
    leaves it alone."
-  [env kind {:keys [label condition]}]
+  [env kind {:keys [label label-expr condition]}]
   (if (and (:skip-contracts? env) (not= kind :assert))
     (ir/block-node [])
-    (ir/assert-node kind label (lower-expression env condition))))
+    (cond-> (ir/assert-node kind label (lower-expression env condition))
+      ;; Named only once the condition has failed (see
+      ;; contracts/combine-precondition-groups).
+      label-expr (assoc :label-expr (lower-expression env label-expr)))))
 
 (defn- function-root-class?
   [env class-name]
@@ -2559,44 +2562,6 @@
                      [[] {}]
                      (:parents class-def))))))
 
-(defn- assertions->condition
-  [assertions]
-  (when (seq assertions)
-    (reduce (fn [acc {:keys [condition]}]
-              (if acc
-                {:type :binary
-                 :operator "and"
-                 :left acc
-                 :right condition}
-                condition))
-            nil
-            assertions)))
-
-(defn- combine-precondition-groups
-  [inherited-groups local-assertions]
-  (let [groups (vec (concat (keep seq inherited-groups)
-                            (when (seq local-assertions)
-                              [(vec local-assertions)])))]
-    (cond
-      (empty? groups)
-      nil
-
-      (= 1 (count groups))
-      (vec (first groups))
-
-      :else
-      [{:label "inherited_or_local_require"
-        :condition (reduce (fn [acc group]
-                             (let [group-condition (assertions->condition group)]
-                               (if acc
-                                 {:type :binary
-                                  :operator "or"
-                                  :left acc
-                                  :right group-condition}
-                                 group-condition)))
-                           nil
-                           groups)}])))
-
 (defn- effective-method-contracts
   "The routine's own contract with every inherited one, each inherited
    assertion renamed to read the routine's own parameter names. Preconditions
@@ -2613,7 +2578,7 @@
     {:effective-require (when-not (some (fn [{:keys [seed?] source :method-def}]
                                           (and seed? (empty? (:require source))))
                                         inherited-sources)
-                          (combine-precondition-groups
+                          (contracts/combine-precondition-groups
                            (mapv (partial renamed :require) inherited-sources)
                            (:require method-def)))
      :effective-ensure (vec (concat (mapcat (partial renamed :ensure) inherited-sources)

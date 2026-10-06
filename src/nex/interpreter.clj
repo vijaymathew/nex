@@ -775,8 +775,6 @@
 (declare lookup-constructor)
 (declare get-parent-classes)
 (declare combine-assertions)
-(declare combine-preconditions)
-(declare combine-precondition-groups)
 (declare get-type-name)
 
 (defn- select-op-call
@@ -872,10 +870,12 @@
    them\")."
   [ctx assertions contract-type]
   (when-not (:skip-contracts? ctx)
-    (doseq [{:keys [label condition]} assertions]
+    (doseq [{:keys [label label-expr condition]} assertions]
       (let [result (eval-node ctx condition)]
         (when-not result
-          (report-contract-violation contract-type label condition))))))
+          (report-contract-violation contract-type
+                                     (if label-expr (eval-node ctx label-expr) label)
+                                     condition))))))
 
 (defn check-class-invariant
   "Check the class invariant for an object or class context."
@@ -1042,7 +1042,7 @@
              effective-require (when-not (some (fn [{:keys [seed?] source :method}]
                                                  (and seed? (empty? (:require source))))
                                                inherited-sources)
-                                 (combine-precondition-groups
+                                 (contracts/combine-precondition-groups
                                   (mapv (partial renamed :require) inherited-sources)
                                   (:require method)))
              effective-ensure (vec (concat (mapcat (partial renamed :ensure) inherited-sources)
@@ -1187,53 +1187,6 @@
   "Combine assertions from parent and child methods (for contracts)."
   [parent-assertions child-assertions]
   (vec (concat (or parent-assertions []) (or child-assertions []))))
-
-(defn assertions->condition
-  "Collapse a list of assertions into a single condition using logical AND."
-  [assertions]
-  (when (seq assertions)
-    (reduce (fn [acc {:keys [condition]}]
-              (if acc
-                {:type :binary
-                 :operator "and"
-                 :left acc
-                 :right condition}
-                condition))
-            nil
-            assertions)))
-
-(defn combine-precondition-groups
-  "Combine inherited and local preconditions by OR-ing assertion groups, where
-   each group's assertions are AND-ed together."
-  [inherited-groups local-assertions]
-  (let [groups (vec (concat (keep seq inherited-groups)
-                            (when (seq local-assertions)
-                              [(vec local-assertions)])))]
-    (cond
-      (empty? groups)
-      nil
-
-      (= 1 (count groups))
-      (vec (first groups))
-
-      :else
-      [{:label "inherited_or_local_require"
-        :condition (reduce (fn [acc group]
-                             (let [group-condition (assertions->condition group)]
-                               (if acc
-                                 {:type :binary
-                                  :operator "or"
-                                  :left acc
-                                  :right group-condition}
-                                 group-condition)))
-                           nil
-                           groups)}])))
-
-(defn combine-preconditions
-  "Combine parent and child preconditions as:
-   (parent-require) OR (child-require)."
-  [parent-assertions child-assertions]
-  (combine-precondition-groups [parent-assertions] child-assertions))
 
 (def nex-format-value bi/nex-format-value)
 (def nex-clone-value bi/nex-clone-value)

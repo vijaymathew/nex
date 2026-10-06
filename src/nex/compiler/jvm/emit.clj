@@ -2595,7 +2595,7 @@
   (.visitInsn mv Opcodes/ATHROW))
 
 (defn- emit-assert!
-  [^MethodVisitor mv {:keys [kind label expr] :as stmt} state-slot]
+  [^MethodVisitor mv {:keys [kind label label-expr expr] :as stmt} state-slot]
   (let [ok-label (Label.)
         expr-type (emit-expr! mv expr state-slot)
         kind-label (case kind
@@ -2617,9 +2617,10 @@
     (.visitJumpInsn mv Opcodes/IFNE ok-label)
     (emit-runtime-call! mv "make-contract-violation"
                         [(fn [] (.visitLdcInsn mv ^String kind-label))
-                         (fn [] (if label
-                                  (.visitLdcInsn mv ^String label)
-                                  (.visitInsn mv Opcodes/ACONST_NULL)))
+                         (fn [] (cond
+                                  label-expr (emit-expr! mv label-expr state-slot)
+                                  label (.visitLdcInsn mv ^String label)
+                                  :else (.visitInsn mv Opcodes/ACONST_NULL)))
                          (fn [] (if line
                                   (.visitLdcInsn mv ^String line)
                                   (.visitInsn mv Opcodes/ACONST_NULL)))])
