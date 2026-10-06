@@ -2,9 +2,29 @@
 
 ## Unreleased
 
-- **New: a deferred routine can carry a contract.** `f(x: Integer) require
-  positive: x > 0 deferred`, with an optional `ensure ... end` after
-  `deferred`. Every implementation inherits it, on both backends.
+## 0.5.7 - 2026-10-06
+
+- **Change: repeated inheritance follows the Definition.** A class that
+  reaches a common ancestor along two paths (`Both inherit Left, Right`, both
+  inheriting `Counter`) holds one copy of that ancestor's fields per path.
+  A bare call or `this.f` made by inherited code runs the override nearest the
+  object along that code's own path, and otherwise stays on that path, so
+  `bump_right` calling an inherited `bump` changes `Right`'s copy. It used to
+  change `Left`'s on the compiled backend, and the interpreter kept a single
+  shared copy. A client, and an unqualified reference in the heir, still use
+  the first path in `inherit` order; `Right.count` and `Right.bump()` pick
+  `Right`'s. The class invariant is checked on every copy, and `=` compares
+  every copy. Definition of Nex §5.4 has the rule.
+- **Change: the right operand of every `and` sees the left's narrowing**, not
+  only in an `if` or `when` condition. `require ok: b /= nil and b.n > 10`,
+  `result := x /= nil and x > 5` and `print(x /= nil and x.v > 0)` now type
+  check. The narrowing ends with the `and`, and `or` still narrows nothing.
+- **Change: a broken precondition that combines an override's `require` with
+  inherited ones names the failing assertion of each alternative**,
+  `Precondition violation: positive or is_neg_one`, ancestor first, instead
+  of the synthetic `inherited_or_local_require`. Within an alternative of
+  several assertions it names the first that failed. The exception's `label`
+  is that same text.
 - **Change: a precondition added below a first declaration that has none is a
   type error.** Such a declaration accepts every call, and an override's
   `require` is OR-ed with what it inherits, so the added precondition could
@@ -12,6 +32,25 @@
   a call that was valid through the parent type failed on the heir. State it
   on the first declaration instead, which may be a deferred one. At run time
   the effective precondition is now empty in this case.
+- **New: a deferred routine can carry a contract.** `f(x: Integer) require
+  positive: x > 0 deferred`, with an optional `ensure ... end` after
+  `deferred`. Every implementation inherits it, on both backends.
+- **New: a `match` clause that can never match is a type error.** With
+  `o: Opt[Integer]`, a clause `Some[String](...)` is rejected ("Some[String]
+  does not conform to Opt[Integer]: its type arguments differ, so this clause
+  can never match"). In generic code, where the subject's argument is a type
+  parameter, the clause is accepted and decided at run time.
+- **Fix: a runtime type test checks type arguments.** `convert x to s:
+  Some[String]`, a `match` clause `Some[String](...)`, and a field pattern
+  `content: Some[String](...)` used to test the class alone, so a
+  `Some[Integer]` passed them: the interpreter then bound the `Integer` as a
+  `String` and carried on, and the compiled backend failed later with "a value
+  was not of the expected type". The test now also requires the value's type
+  arguments to match, mapped through its `inherit` clauses (so a heir that
+  reorders them is handled), as the Definition says (a `Some[Integer]` is not
+  a `Some[String]`). An argument erased in generic code — an object made by
+  `create Some[T]` inside a generic function — is not known, and still matches
+  any argument.
 - **Fix: inherited contracts read the override's parameter names.** An
   override that renamed a parameter (`f(n: Integer)` for an inherited `f(x:
   Integer) require x > 0`) failed with "Undefined variable: x" in the
@@ -25,23 +64,31 @@
 - **Fix: `nex format` keeps deferred routines and classes deferred.** It
   printed `f() deferred` as `f() do end` and dropped the `sealed`/`deferred`
   class prefixes.
-
-- **Fix: a runtime type test checks type arguments.** `convert x to s:
-  Some[String]`, a `match` clause `Some[String](...)`, and a field pattern
-  `content: Some[String](...)` used to test the class alone, so a
-  `Some[Integer]` passed them: the interpreter then bound the `Integer` as a
-  `String` and carried on, and the compiled backend failed later with "a value
-  was not of the expected type". The test now also requires the value's type
-  arguments to match, mapped through its `inherit` clauses (so a heir that
-  reorders them is handled), as the Definition says (a `Some[Integer]` is not
-  a `Some[String]`). An argument erased in generic code — an object made by
-  `create Some[T]` inside a generic function — is not known, and still matches
-  any argument.
-- **New: a `match` clause that can never match is a type error.** With
-  `o: Opt[Integer]`, a clause `Some[String](...)` is rejected ("Some[String]
-  does not conform to Opt[Integer]: its type arguments differ, so this clause
-  can never match"). In generic code, where the subject's argument is a type
-  parameter, the clause is accepted and decided at run time.
+- **Fix: type arguments written at a call fix the instantiation.**
+  `total_area[Circle](xs)` with `xs: Array[Shape]` type-checked, because the
+  binding inferred from the argument replaced the written one. The argument
+  must now conform to the parameter as the written type arguments instantiate
+  it, through a function value pinned with them too (`let f :=
+  total_area[Circle]`).
+- **Fix: a constructor that delegates no longer checks the invariant early on
+  the compiled backend.** Every constructor checked it before returning, so
+  `super.make(b)` checked the object's invariant before the delegating
+  constructor had set its own fields. It is now checked once, when the
+  outermost `create` returns, as the Definition says and the interpreter
+  already did. In the interpreter, an invariant that calls one of the
+  object's queries (`a < limit()`) failed with "Undefined function" when
+  checked on creation.
+- **Fix: the REPL reads a deferred routine with an `ensure` clause, and a
+  multi-line `union` or `enum union`, as one input.** Their closing `end`
+  was not counted, so the REPL evaluated the input one line early and
+  reported a syntax error. `s.union(t)` is still a call.
+- **Fix: a qualified class name works in REPL inputs after its `intern`**
+  (`create time/Date_Time.now`, or a field or `let` typed `time/Date_Time`);
+  it failed with "Undefined class: time.Date_Time". An input that failed
+  before it ran no longer prints the previous input's output again ahead of
+  its error.
+- **Fix: the Emacs mode indents a `deferred` routine body like `do`**, level
+  with `require` and the routine's signature, rather than one level in.
 
 ## 0.5.6 - 2026-10-05
 
