@@ -157,6 +157,14 @@
                 :descriptor "Ljava/lang/Object;"
                 :flags Opcodes/ACC_PUBLIC
                 :jvm-type (ir/object-jvm-type "java/lang/Object")}
+               ;; The object this one is a composition carrier of, one level
+               ;; up (nil on an object inside no other). Set by set_outer. A
+               ;; self-call walks these up to the outer object to find an
+               ;; override on its own path (runtime/dispatch-path-call).
+               {:name "__container__"
+                :descriptor "Ljava/lang/Object;"
+                :flags Opcodes/ACC_PUBLIC
+                :jvm-type (ir/object-jvm-type "java/lang/Object")}
               ;; The state that created this object, so the emitted `equals`/
               ;; `hashCode` below can reach Nex semantics. Java hands those two
               ;; methods nothing but the receiver, yet answering them means
@@ -281,7 +289,12 @@
                        (when-not (:deferred? fn-node)
                          {:name (:emitted-name fn-node)
                           :descriptor (repl-fn-method-descriptor)
-                          :flags Opcodes/ACC_PUBLIC
+                          ;; A stub forwarding an inherited routine is marked
+                          ;; synthetic, so the runtime can tell it from a
+                          ;; routine the class declares itself.
+                          :flags (if (:inherited-stub? fn-node)
+                                   (+ Opcodes/ACC_PUBLIC Opcodes/ACC_SYNTHETIC)
+                                   Opcodes/ACC_PUBLIC)
                           :kind :instance-fn
                           :fn-node fn-node}))
                      (:methods class-spec))
@@ -560,7 +573,12 @@
       (.visitVarInsn mv Opcodes/ALOAD 0)
       (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
       (.visitVarInsn mv Opcodes/ALOAD 1)
-      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL (second jvm-type) "set_outer" "(Ljava/lang/Object;)V" false))
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL (second jvm-type) "set_outer" "(Ljava/lang/Object;)V" false)
+      ;; child.__container__ = this
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitFieldInsn mv Opcodes/GETFIELD owner name (desc/jvm-type->descriptor jvm-type))
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitFieldInsn mv Opcodes/PUTFIELD (second jvm-type) "__container__" "Ljava/lang/Object;"))
     (.visitInsn mv Opcodes/RETURN)
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
@@ -1035,6 +1053,7 @@
    "java-get-static-field"                   ["java-get-static-field" [:state :b0 :b1]]
    "validate-object-state"                   ["validate-object-state" [:state :b0 :b1]]
    "dispatch-self-call"                      ["dispatch-self-call" [:state :b0 :b1 :b2 :args-drop3]]
+   "dispatch-path-call"                      ["dispatch-path-call" [:state :b0 :b1 :b2 :args-drop3]]
    "op:string-concat"                        ["string-concat" [:state :args]]
    "op:div-int"                              ["div-int" [:b0 :b1]]
    "op:div-long"                             ["div-long" [:b0 :b1]]

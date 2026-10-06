@@ -28,6 +28,7 @@
 (declare lower-statements)
 (declare lower-create-expr)
 (declare lower-call-expr)
+(declare dispatch-path-call-ir lower-expr-identifier*)
 (declare lower-member-assign-stmt)
 (declare lower-call-stmt)
 (declare lower-loop-stmt)
@@ -3427,7 +3428,8 @@
     (= :this (:type expr))
     (if (and (:this-type ctx) (:inside-closure? ctx))
       (do (capture-closure-this! captures ctx)
-          {:type :identifier :name closure-this-capture-name})
+          ;; The capture is the carrier; `this` is the object it is in.
+          {:type :identifier :name closure-this-capture-name :outer? true})
       expr)
 
     (= :identifier (:type expr))
@@ -4737,20 +4739,22 @@
   [env target-expr method args target-ir method-def type-map]
   (let [nex-type (tc/resolve-generic-type (function-return-type method-def) type-map)
         jvm-type (resolve-jvm-type env nex-type)]
-    (if (= (:type target-expr) :this)
-      ;; Dispatch self-calls through __outer__ for proper dynamic dispatch.
-      ;; When this object is a composition parent, __outer__ points to the
-      ;; child that contains it, so overridden methods are called correctly.
-      (let [outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                        "__outer__"
-                                        (ir/this-node (:this-type env)
-                                                      (exact-class-jvm-type env (:this-type env)))
-                                        "Any"
-                                        (ir/object-jvm-type "java/lang/Object"))]
-        (ir/call-runtime-node (str "user-method:" method)
-                              (into [outer-ir] (mapv #(lower-expression env %) args))
-                              nex-type
-                              jvm-type))
+    (cond
+      (= (:type target-expr) :this)
+      ;; `this.f` runs on the carrier this text belongs to, so an override
+      ;; between it and the outer object wins, and otherwise the call stays
+      ;; on this carrier's path. Qualified, so the invariant is checked.
+      (dispatch-path-call-ir env method-def (mapv #(lower-expression env %) args)
+                             nex-type jvm-type true)
+
+      ;; The same call made from a closure, on the carrier it captured.
+      (and (= :identifier (:type target-expr))
+           (= closure-this-capture-name (:name target-expr))
+           (not (:outer? target-expr)))
+      (dispatch-path-call-ir env method-def (mapv #(lower-expression env %) args)
+                             nex-type jvm-type true target-ir)
+
+      :else
       (ir/call-runtime-node (str "user-method:" method)
                             (into [target-ir] (mapv #(lower-expression env %) args))
                             nex-type
@@ -4915,6 +4919,18 @@
 
 (defn- lower-expr-identifier
   [env expr]
+  (if (:outer? expr)
+    ;; A closure's captured carrier, read as `this`: the object it is in.
+    (let [carrier (lower-expr-identifier env (dissoc expr :outer?))]
+      (ir/field-get-node (:internal-name (class-jvm-meta env (base-type-name (:nex-type carrier))))
+                         "__outer__"
+                         carrier
+                         (:nex-type carrier)
+                         (ir/object-jvm-type "java/lang/Object")))
+    (lower-expr-identifier* env expr)))
+
+(defn- lower-expr-identifier*
+  [env expr]
   (if-let [{:keys [slot nex-type jvm-type]} (get (:locals env) (:name expr))]
     (ir/local-node (:name expr) slot nex-type jvm-type)
     (if-let [{:keys [owner field carrier-path nex-type jvm-type]}
@@ -4996,7 +5012,7 @@
     (throw (ex-info "this is only valid in instance-method lowering"
                     {:expr expr}))
 
-    (function-root-class? env (:this-type env))
+    (or (:carrier? expr) (function-root-class? env (:this-type env)))
     (ir/this-node (:this-type env)
                   (exact-class-jvm-type env (:this-type env)))
 
@@ -5214,8 +5230,11 @@
                                            (if (and (= name closure-this-capture-name)
                                                     (not (closure-this-in-scope? env)))
                                              ;; Created directly in a method:
-                                             ;; the enclosing instance is `this`.
-                                             {:type :this}
+                                             ;; the enclosing instance is the
+                                             ;; carrier this method's text runs
+                                             ;; on, so the closure reads and
+                                             ;; writes that path's fields.
+                                             {:type :this :carrier? true}
                                              ;; Otherwise (including the enclosing
                                              ;; instance, when created inside
                                              ;; another closure that captured it)
@@ -5694,28 +5713,39 @@
             base-type (base-type-name target-type)]
         (boolean (:import (get (visible-class-map env) base-type)))))))
 
-(defn- dispatch-self-call-ir
-  "An unqualified call to METHOD-DEF dispatched at run time on TARGET-IR (the
-   heir's object a carrier's `__outer__` points to): its unchecked twin when
-   the heir's class has one, else its ordinary routine (see
-   nex.compiler.jvm.runtime/dispatch-self-call)."
-  [target-ir method-def arg-irs nex-type jvm-type]
-  (let [name-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
-    (ir/call-runtime-node "dispatch-self-call"
-                          (into [target-ir
-                                 (name-const (unchecked-instance-method-name method-def))
-                                 (name-const (lowered-instance-method-name method-def))]
-                                arg-irs)
-                          nex-type
-                          jvm-type)))
+(defn- dispatch-path-call-ir
+  "A call on the current object made by this class's text running on its
+   carrier: the override nearest the outer object along the carrier's own
+   path runs it, else the carrier does (see
+   nex.compiler.jvm.runtime/dispatch-path-call). QUALIFIED? (`this.f`)
+   calls the checked routine, so the invariant is checked; an unqualified
+   one prefers the unchecked twin."
+  ([env method-def arg-irs nex-type jvm-type]
+   (dispatch-path-call-ir env method-def arg-irs nex-type jvm-type false))
+  ([env method-def arg-irs nex-type jvm-type qualified?]
+   (dispatch-path-call-ir env method-def arg-irs nex-type jvm-type qualified?
+                          (ir/this-node (:this-type env)
+                                        (exact-class-jvm-type env (:this-type env)))))
+  ([env method-def arg-irs nex-type jvm-type qualified? carrier-ir]
+   (let [name-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))
+         checked (lowered-instance-method-name method-def)]
+     (ir/call-runtime-node "dispatch-path-call"
+                           (into [carrier-ir
+                                  (name-const (if qualified?
+                                                checked
+                                                (unchecked-instance-method-name method-def)))
+                                  (name-const checked)]
+                                 arg-irs)
+                           nex-type
+                           jvm-type))))
 
 (defn- overridable-self-call-ir
   "An unqualified call to an own or inherited routine an heir may override.
    Inherited code runs on a composition carrier, whose `__outer__` points at
    the heir's object it lives in (an object not inside another has
    `__outer__` = `this`). DIRECT-IR, the call on `this`'s own routine, is
-   right only in the second case; in the first the call dispatches on
-   `__outer__` at run time, as `this.f` does, so the heir's override runs."
+   right only in the second case; in the first the call goes through
+   dispatch-path-call-ir, as `this.f` does, so a heir's override runs."
   [env method-def arg-irs nex-type jvm-type direct-ir]
   (let [this-ir (ir/this-node (:this-type env) (exact-class-jvm-type env (:this-type env)))
         outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
@@ -5728,7 +5758,7 @@
         branch-jvm-type (if (= :void jvm-type) (ir/object-jvm-type "java/lang/Object") jvm-type)]
     (ir/if-node (ir/compare-node :ref-eq outer-ir this-ir "Boolean" :boolean)
                 [direct-ir]
-                [(dispatch-self-call-ir outer-ir method-def arg-irs nex-type branch-jvm-type)]
+                [(dispatch-path-call-ir env method-def arg-irs nex-type branch-jvm-type)]
                 nex-type
                 branch-jvm-type)))
 
@@ -5759,13 +5789,7 @@
       ;; method to link to, so dispatch through __outer__/reflection instead,
       ;; the same way an explicit `this.` call resolves an overridden method.
       own-method-def
-      (let [outer-ir (ir/field-get-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                        "__outer__"
-                                        (ir/this-node (:this-type env)
-                                                      (exact-class-jvm-type env (:this-type env)))
-                                        "Any"
-                                        (ir/object-jvm-type "java/lang/Object"))]
-        (dispatch-self-call-ir outer-ir method-def arg-irs nex-type jvm-type))
+      (dispatch-path-call-ir env method-def arg-irs nex-type jvm-type)
 
       :else
       (let [{:keys [owner-internal-name carrier-path source-class]}
@@ -6867,6 +6891,23 @@
                               {:expr expr
                                :target-type target-type}))))))
 
+(defn- lower-ancestor-field-read
+  "`Ancestor.field` from inside the current class: FIELD-NAME as ANCESTOR
+   sees it, reached through ANCESTOR's carrier and then, if ANCESTOR only
+   inherits it, along ANCESTOR's own path to the class that declares it."
+  [env ancestor field-name]
+  (let [{:keys [nex-type jvm-type]} (get (:fields env) field-name)
+        info (get (field-info-map env (get (visible-class-map env) ancestor)) field-name)]
+    (ir/field-get-node (:internal-name (class-jvm-meta env (:owner info)))
+                       (:field info)
+                       (carrier-path-target-ir env
+                                               (into (ancestor-carrier-path env (:this-type env) ancestor)
+                                                     (:carrier-path info))
+                                               (ir/this-node (:this-type env)
+                                                             (exact-class-jvm-type env (:this-type env))))
+                       nex-type
+                       jvm-type)))
+
 (defn- lower-call-with-target
   [env expr target-expr class-target-name arg-irs]
   (cond
@@ -6877,15 +6918,16 @@
          (ancestor-qualified-method-def env class-target-name (:method expr) (count (:args expr))))
     (lower-parent-qualified-call env expr class-target-name arg-irs)
 
-    ;; `Ancestor.field`: an object has one field of each name, whichever
-    ;; class in its chain declares it, so this reads that field.
+    ;; `Ancestor.field`: the copy of the field reached through ANCESTOR's
+    ;; carrier. It differs from the plain field when ANCESTOR is on another
+    ;; path to a common ancestor than the first one (a diamond).
     (and class-target-name
          (false? (:has-parens expr))
          (:this-type env)
          (ancestor-carrier-path env (:this-type env) class-target-name)
          (get (:fields env) (:method expr))
          (not (lookup-class-constant env class-target-name (:method expr))))
-    (lower-expression env {:type :identifier :name (:method expr)})
+    (lower-ancestor-field-read env class-target-name (:method expr))
 
     (and class-target-name (false? (:has-parens expr)))
     (lower-class-constant-or-static-field env expr class-target-name)
@@ -8569,7 +8611,9 @@
          (mapcat (fn [entry]
                    (cond-> [(make-delegation-method-node env class-meta class-name compiled-classes entry)]
                      twins? (conj (unchecked-delegation-method-node env class-meta class-name compiled-classes entry)))))
-         vec)))
+         ;; Emitted synthetic: the class does not declare these itself (see
+         ;; runtime/dispatch-path-call).
+         (mapv #(assoc % :inherited-stub? true)))))
 
 (defn lower-class-def
   [class-def opts]

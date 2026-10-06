@@ -1185,6 +1185,56 @@
         (throw (ex-info (str "Method not found: " checked-name)
                         {:method checked-name :class (.getName cls)}))))))
 
+(def ^:private container-field-cache (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- container-of
+  "The object CARRIER is a composition carrier of, one level up, or nil."
+  [carrier]
+  (let [^Class cls (.getClass ^Object carrier)
+        ^Field field (or (.get ^java.util.concurrent.ConcurrentHashMap container-field-cache cls)
+                         (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap container-field-cache
+                                           cls
+                                           (reify java.util.function.Function
+                                             (apply [_ c] (.getField ^Class c "__container__")))))]
+    (.get field carrier)))
+
+(defn- own-user-method
+  "The routine NAME that X's class declares itself, as opposed to a stub
+   forwarding one it inherits (emitted synthetic), or nil."
+  ^Method [x ^String name]
+  (when-let [^Method m (declared-user-method (.getClass ^Object x) name)]
+    (when-not (.isSynthetic m) m)))
+
+(defn dispatch-path-call
+  "A call on the current object made by code running on CARRIER, the nested
+   object of the class whose text makes the call. Between CARRIER and the
+   outer object there is one path of containers; the outermost of them whose
+   class itself declares the routine (an override) runs it. With none, the
+   call stays on CARRIER's own path, so a shared ancestor's routine acts on
+   that path's copy of its fields. A routine CARRIER cannot run (deferred
+   all along its path) is dispatched on the outer object.
+
+   UNCHECKED-NAME is the routine's unchecked twin, preferred where a class
+   has one, CHECKED-NAME its ordinary routine; a qualified call passes the
+   checked name for both."
+  [state carrier ^String unchecked-name ^String checked-name ^objects args]
+  (let [call-args (object-array [state args])
+        overrider (loop [x (container-of carrier) found nil]
+                    (if (nil? x)
+                      found
+                      (recur (container-of x)
+                             (if-let [m (or (own-user-method x unchecked-name)
+                                            (own-user-method x checked-name))]
+                               [x m]
+                               found))))]
+    (if-let [[target ^Method method] overrider]
+      (invoke-reflective! method target call-args)
+      (if-let [[target ^Method method] (or (find-user-method carrier unchecked-name)
+                                           (find-user-method carrier checked-name))]
+        (invoke-reflective! method target call-args)
+        (dispatch-self-call state (.get (.getField (.getClass ^Object carrier) "__outer__") carrier)
+                            unchecked-name checked-name args)))))
+
 (defn- get-user-field
   [target field-name]
   (if (interp-object? target)

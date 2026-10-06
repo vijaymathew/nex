@@ -769,7 +769,7 @@
 (def channel-close conc/channel-close)
 
 (declare eval-node)
-(declare get-all-fields)
+(declare get-all-fields get-default-field-value lookup-method-in-class)
 (declare get-all-constants)
 (declare eval-body-with-rescue)
 (declare lookup-constructor)
@@ -917,6 +917,195 @@
                    (assoc parent-info :class-def parent-class)))
                parents))))
 
+;;
+;; Repeated inheritance: an object holds one copy of an ancestor's fields for
+;; every path to that ancestor (Definition §4.9). A copy is named by its
+;; *path*: the parent names leading from the object's class to the class that
+;; declares the field. The copy along the field's home path (the first one,
+;; in `inherit` order) is stored under the field's own name, so an object
+;; without a repeated ancestor looks as it always did; any other copy is
+;; stored under `Right>Counter>count`. Code runs along a path too
+;; (:current-path in ctx): the text of the class at that path, which sees the
+;; fields through a *view* naming the copies on its own path.
+;;
+
+(defn- own-fields
+  [class-def]
+  (->> (:body class-def)
+       (mapcat (fn [section]
+                 (when (= (:type section) :feature-section)
+                   (:members section))))
+       (filter #(and (= (:type %) :field) (not (:constant? %))))))
+
+(defn- own-field-names
+  [class-def]
+  (set (map :name (own-fields class-def))))
+
+(defn- field-home
+  "The path from CLASS-DEF to the class declaring field F, through the first
+   parent that reaches it: [] when CLASS-DEF declares F, nil when it has no F."
+  [ctx class-def f]
+  (if (contains? (own-field-names class-def) f)
+    []
+    (some (fn [{:keys [parent] parent-def :class-def}]
+            (when-let [home (field-home ctx parent-def f)]
+              (into [parent] home)))
+          (get-parent-classes ctx class-def))))
+
+(defn- ancestor-path
+  "The path from CLASS-DEF to its ancestor ANCESTOR, through the first parent
+   that reaches it: [] for CLASS-DEF itself, nil for a class that is not one."
+  [ctx class-def ancestor]
+  (if (= (:name class-def) ancestor)
+    []
+    (some (fn [{:keys [parent] parent-def :class-def}]
+            (when-let [path (ancestor-path ctx parent-def ancestor)]
+              (into [parent] path)))
+          (get-parent-classes ctx class-def))))
+
+(defn- class-at-path
+  [ctx class-def path]
+  (if (seq path) (lookup-class ctx (peek path)) class-def))
+
+(defn- field-storage-key
+  "The key under which an object of class OBJ-CLASS stores the copy of field
+   F that PATH leads to."
+  [ctx obj-class path f]
+  (if (= path (field-home ctx obj-class f))
+    (keyword f)
+    (keyword (str (str/join ">" path) ">" f))))
+
+(defn- field-slots
+  "[path field] for every copy of every field an object of CLASS-DEF holds."
+  [ctx class-def]
+  (concat (mapcat (fn [{:keys [parent] parent-def :class-def}]
+                    (map (fn [[path field]] [(into [parent] path) field])
+                         (field-slots ctx parent-def)))
+                  (get-parent-classes ctx class-def))
+          (map (fn [field] [[] field]) (own-fields class-def))))
+
+(def ^:private field-layout-cache (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- initial-field-map
+  "Every field copy of a new CLASS-DEF object, at its zero value."
+  [ctx class-def]
+  (let [layout (or (.get ^java.util.concurrent.ConcurrentHashMap field-layout-cache class-def)
+                   (let [layout (mapv (fn [[path field]]
+                                        [(field-storage-key ctx class-def path (:name field))
+                                         (:field-type field)])
+                                      (field-slots ctx class-def))]
+                     (.put ^java.util.concurrent.ConcurrentHashMap field-layout-cache class-def layout)
+                     layout))]
+    (reduce (fn [m [k field-type]]
+              (assoc m k (get-default-field-value field-type)))
+            {}
+            layout)))
+
+(def ^:private frame-view-cache (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- frame-view
+  "How the text of the class PATH leads to, running on an object of class
+   OBJ-CLASS, names the object's fields: field name -> storage key, for the
+   names that do not simply mean the field's own key. Empty along the home
+   path of every field, so for almost all code."
+  [ctx obj-class path]
+  (if (empty? path)
+    {}
+    (let [cache-key [obj-class path]]
+      (or (.get ^java.util.concurrent.ConcurrentHashMap frame-view-cache cache-key)
+          (let [class-def (class-at-path ctx obj-class path)
+                view (into {}
+                           (keep (fn [f]
+                                   (let [k (field-storage-key ctx obj-class
+                                                              (into path (field-home ctx class-def f))
+                                                              f)]
+                                     (when (not= k (keyword f)) [f k]))))
+                           (distinct (map :name (get-all-fields ctx class-def))))]
+            (.put ^java.util.concurrent.ConcurrentHashMap frame-view-cache cache-key view)
+            view)))))
+
+(defn- env-name-for-key
+  "The name a frame with VIEW binds the field copy stored at K under: the name
+   its text uses, or, for a copy its text cannot name (another path's, or
+   one its view hides), a name no identifier can spell."
+  [view k]
+  (or (some (fn [[f vk]] (when (= vk k) f)) view)
+      (if (contains? view (name k)) (str ">" (name k)) (name k))))
+
+(defn- bind-fields!
+  [env fields view]
+  (doseq [[k v] fields]
+    (env-define env (env-name-for-key view k) v)))
+
+(defn- read-fields
+  "FIELDS with each copy's value read back from ENV, as a frame with VIEW
+   bound them (bind-fields!)."
+  [env fields view]
+  (reduce (fn [m [k _]]
+            (let [v (try (env-lookup env (env-name-for-key view k))
+                         (catch Exception _ ::not-found))]
+              (if (= v ::not-found) m (assoc m k v))))
+          fields
+          fields))
+
+(defn- sync-fields!
+  "Set the bindings of a frame with VIEW to FIELDS' values, for the copies
+   whose value differs from BEFORE (every copy when BEFORE is nil)."
+  [env fields view before]
+  (doseq [[k v] fields
+          :when (or (nil? before) (not= v (get before k)))]
+    (try (env-set! env (env-name-for-key view k) v)
+         (catch Exception _))))
+
+(defn- fields-as-seen
+  "FIELDS keyed by the names a frame with VIEW reads them under."
+  [fields view]
+  (into {} (map (fn [[k v]] [(keyword (env-name-for-key view k)) v])) fields))
+
+(defn- self-call-base
+  "Where an unqualified or `this.` call of METHOD/ARITY, made by code running
+   along the current path, is looked up: [class-name path-to-it]. An override
+   between the object's own class and the running code wins, the outermost
+   first; with none, the call stays on the running code's own path."
+  [ctx obj-class method arity]
+  (let [path (or (:current-path ctx) [])]
+    (or (some (fn [i]
+                (let [prefix (subvec path 0 i)
+                      class-def (class-at-path ctx obj-class prefix)]
+                  (when (lookup-method-in-class class-def method arity)
+                    [(:name class-def) prefix])))
+              (range (count path)))
+        [(:name (class-at-path ctx obj-class path)) path])))
+
+(defn- class-paths
+  "[path class-def] for every path from CLASS-DEF to one of its ancestors,
+   CLASS-DEF itself at []. An ancestor reached twice is listed twice."
+  [ctx class-def]
+  (cons [[] class-def]
+        (mapcat (fn [{:keys [parent] parent-def :class-def}]
+                  (map (fn [[path cd]] [(into [parent] path) cd])
+                       (class-paths ctx parent-def)))
+                (get-parent-classes ctx class-def))))
+
+(defn check-object-invariant
+  "Check CLASS-DEF's invariant on an object holding FIELDS. Every clause is
+   checked on the copies along each field's home path, as check-class-
+   invariant does; then an ancestor reached along another path, whose copy
+   of its fields is a different one, has its own clauses checked again on
+   that copy."
+  [ctx class-def fields]
+  (let [env (make-env (:current-env ctx))]
+    (bind-fields! env fields {})
+    (check-class-invariant (assoc ctx :current-env env :current-path [] :current-view {}) class-def))
+  (doseq [[path ancestor] (rest (class-paths ctx class-def))
+          :when (seq (:invariant ancestor))
+          :let [view (frame-view ctx class-def path)]
+          :when (seq view)]
+    (let [env (make-env (:current-env ctx))]
+      (bind-fields! env fields view)
+      (check-assertions (assoc ctx :current-env env :current-path path :current-view view)
+                        (:invariant ancestor) Class-invariant))))
+
 (defn feature-members
   "Return feature members with section visibility copied onto each member."
   [class-def]
@@ -1049,15 +1238,18 @@
                                            (or (:ensure method) [])))]
          {:method method
           :source-class class-def
+          ;; The path from the class looked in to SOURCE-CLASS.
+          :path []
           :effective-require effective-require
           :effective-ensure effective-ensure})
        (when-let [parents (get-parent-classes ctx class-def)]
          (some (fn [parent-info]
-                 (lookup-method-with-inheritance ctx
-                                                 (:class-def parent-info)
-                                                 method-name
-                                                 arg-count
-                                                 caller-class-name))
+                 (some-> (lookup-method-with-inheritance ctx
+                                                         (:class-def parent-info)
+                                                         method-name
+                                                         arg-count
+                                                         caller-class-name)
+                         (update :path #(into [(:parent parent-info)] %))))
                parents))))))
 
 (defn- lookup-field-with-inheritance
@@ -1655,6 +1847,7 @@
     ;; env, which holds the routine's live bindings.
     (:current-object ctx)
     (assoc :enclosing (assoc (select-keys ctx [:current-object :current-class-name :current-target
+                                               :current-path :current-view
                                                :param-names :modified-fields])
                              :in-closure? true))))
 
@@ -1777,27 +1970,21 @@
    the object as it was when the routine was entered. Called at each such
    call site rather than inside dispatch-parent-call itself."
   [ctx obj]
-  (let [class-def (lookup-class-if-exists ctx (:class-name obj))
-        all-fields (when class-def (get-all-fields ctx class-def))
-        env (:current-env ctx)]
-    (if-not all-fields
-      obj
-      (update obj :fields
-              (fn [fields]
-                (reduce (fn [m field]
-                          (let [field-name (:name field)
-                                val (try
-                                      (env-lookup env field-name)
-                                      (catch Exception _ ::not-found))]
-                            (if (not= val ::not-found)
-                              (assoc m (keyword field-name) val)
-                              m)))
-                        fields
-                        all-fields))))))
+  (if (lookup-class-if-exists ctx (:class-name obj))
+    (update obj :fields #(read-fields (:current-env ctx) % (or (:current-view ctx) {})))
+    obj))
 
 (defn dispatch-parent-call
-  "Dispatch a call to a specific parent class's method/constructor on the current object."
-  [ctx current-obj parent-class-name method arg-values]
+  "Dispatch a call to a specific parent class's method/constructor on the
+   current object. BASE-PATH is the path from the object's class to
+   PARENT-CLASS-NAME; by default the one the running code reaches it by."
+  ([ctx current-obj parent-class-name method arg-values]
+   (let [obj-class (lookup-class ctx (:class-name current-obj))
+         path (vec (or (:current-path ctx) []))]
+     (dispatch-parent-call ctx current-obj parent-class-name method arg-values
+                           (into path (ancestor-path ctx (class-at-path ctx obj-class path)
+                                                    parent-class-name)))))
+  ([ctx current-obj parent-class-name method arg-values base-path]
   (let [parent-class-def (lookup-class ctx parent-class-name)
         ;; Try method first
         method-lookup (lookup-method-with-inheritance ctx parent-class-def method (count arg-values))
@@ -1807,13 +1994,13 @@
     (if-let [callable (or (:method method-lookup) ctor-def)]
       (let [class-def (lookup-class ctx (:class-name current-obj))
             all-fields (get-all-fields ctx class-def)
-            ;; Track which fields belong to the parent class (for selective propagation)
-            parent-fields (get-all-fields ctx parent-class-def)
-            parent-field-names (set (map :name parent-fields))
+            ;; The callee's text runs along this path into the object.
+            path (into (vec base-path) (:path method-lookup))
+            view (frame-view ctx class-def path)
+            caller-view (or (:current-view ctx) {})
             method-env (make-env (:current-env ctx))
             ;; Define fields first, then params (so params shadow fields with same name)
-            _ (doseq [[field-name field-val] (:fields current-obj)]
-                (env-define method-env (name field-name) field-val))
+            _ (bind-fields! method-env (:fields current-obj) view)
             params (:params callable)
             _ (ensure-callable-defined! callable)
             _ (when params
@@ -1828,7 +2015,10 @@
                         (assoc :current-object current-obj)
                         (assoc :param-names (set (map :name params)))
                         (assoc :current-target (:current-target ctx))
-                        (assoc :current-class-name parent-class-name)
+                        (assoc :current-class-name (:name (or (:source-class method-lookup)
+                                                              parent-class-def)))
+                        (assoc :current-path path)
+                        (assoc :current-view view)
                         (assoc :current-method-name method)
                         (update :debug-stack (fnil conj [])
                                 {:class parent-class-name
@@ -1842,17 +2032,7 @@
                 (eval-body-with-rescue new-ctx (:body callable) rescue)
                 (doseq [stmt (:body callable)]
                   (eval-node new-ctx stmt)))
-            updated-fields (reduce (fn [m field]
-                                     (let [field-name (:name field)
-                                           field-key (keyword field-name)
-                                           val (try
-                                                 (env-lookup method-env field-name)
-                                                 (catch Exception _ ::not-found))]
-                                       (if (not= val ::not-found)
-                                         (assoc m field-key val)
-                                         m)))
-                                   (:fields current-obj)
-                                   all-fields)
+            updated-fields (read-fields method-env (:fields current-obj) view)
             updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
             result (let [res (try
                                (env-lookup method-env "result")
@@ -1865,15 +2045,19 @@
           (try
             (env-set! (:current-env ctx) tgt updated-obj)
             (catch Exception _)))
-        ;; Only update field env vars that belong to the parent class
-        (doseq [[field-name field-val] (:fields updated-obj)]
-          (when (contains? parent-field-names (name field-name))
-            (try
-              (env-set! (:current-env ctx) (name field-name) field-val)
-              (catch Exception _))))
+        ;; Copy what the call changed into the caller's own bindings.
+        (sync-fields! (:current-env ctx) updated-fields caller-view (:fields current-obj))
         result)
       (throw (ex-info (str "Method not found in parent " parent-class-name ": " method)
-                      {:parent parent-class-name :method method})))))
+                      {:parent parent-class-name :method method}))))))
+
+(defn- dispatch-self-call-mid-construction
+  "An unqualified or `this.` call on the object a constructor is building,
+   looked up as any self-call is (self-call-base)."
+  [ctx live-obj method arg-values]
+  (let [[base-class base-path] (self-call-base ctx (lookup-class ctx (:class-name live-obj))
+                                               method (count arg-values))]
+    (dispatch-parent-call ctx live-obj base-class method arg-values base-path)))
 
 (defn- resolve-interp-call-target
   "Classify `target` once for `eval-call-with-target`'s dispatch below: what
@@ -1963,7 +2147,7 @@
         after (env-lookup call-env slot)]
     (doseq [[field-key value] (:fields after)
             :when (not= value (get (:fields obj) field-key))]
-      (let [field-name (name field-key)]
+      (let [field-name (env-name-for-key (or (:current-view ctx) {}) field-key)]
         ;; A field hidden by a parameter is written through it, as
         ;; `this.field :=` does, and marked so the read-back keeps it.
         (when (contains? (:param-names ctx) field-name)
@@ -1990,14 +2174,13 @@
         (rt/java->nex (.get field nil))))))
 
 (defn- read-back-method-fields
-  "Collect the object's fields back out of METHOD-ENV after the body ran. A
-   field shadowed by a same-named parameter is kept at its original value
-   unless the body explicitly wrote it via `this.field := ...` (tracked in
-   MODIFIED-FIELDS)."
-  [method-env fields all-fields param-names modified-fields]
-  (reduce (fn [m field]
-            (let [field-name (:name field)
-                  field-key (keyword field-name)]
+  "Collect the object's fields back out of METHOD-ENV after the body ran,
+   through the frame's VIEW (see bind-fields!). A field shadowed by a
+   same-named parameter is kept at its original value unless the body
+   explicitly wrote it via `this.field := ...` (tracked in MODIFIED-FIELDS)."
+  [method-env fields view param-names modified-fields]
+  (reduce (fn [m [field-key _]]
+            (let [field-name (env-name-for-key view field-key)]
               (if (and (contains? param-names field-name)
                        (not (contains? @modified-fields field-name)))
                 m
@@ -2008,7 +2191,7 @@
                     (assoc m field-key val)
                     m)))))
           fields
-          all-fields))
+          fields))
 
 (defn- method-result-value
   "The routine's `result` value after the body ran — honouring an explicit
@@ -2040,17 +2223,19 @@
       (throw (ex-info (str method " requires arguments")
                       {:method method :params (mapv :name params)})))
     (let [source-class (:source-class method-lookup)
-          all-fields (get-all-fields ctx class-def)
+          ;; The path from the object's class to SOURCE-CLASS, whose text runs.
+          path (vec (or (:path method-lookup) []))
+          view (frame-view ctx class-def path)
           effective-require (:effective-require method-lookup)
           effective-ensure (:effective-ensure method-lookup)
           has-postconditions? (seq effective-ensure)
-          old-values (when has-postconditions? (snapshot-old-field-values (:fields obj)))
+          old-values (when has-postconditions?
+                       (snapshot-old-field-values (fields-as-seen (:fields obj) view)))
           source-obj (or (-> obj meta write-back-source-key) obj)]
       (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
             param-names (set (map :name params))
             ;; Define fields first, then params — so params shadow fields
-            _ (doseq [[field-name field-val] (:fields obj)]
-                (env-define method-env (name field-name) field-val))
+            _ (bind-fields! method-env (:fields obj) view)
             _ (bind-class-constants! ctx method-env class-def)
             _ (when params
                 (doseq [[param arg-val] (map vector params arg-values)]
@@ -2069,6 +2254,8 @@
                         (assoc :current-object obj)
                         (assoc :current-target target-name)
                         (assoc :current-class-name (:name source-class))
+                        (assoc :current-path path)
+                        (assoc :current-view view)
                         (assoc :current-method-name method)
                         (assoc :old-values old-values)
                         (assoc :modified-fields modified-fields)
@@ -2089,7 +2276,7 @@
                 (eval-body-with-rescue new-ctx (:body method-def) rescue)
                 (doseq [stmt (:body method-def)]
                   (eval-node new-ctx stmt)))
-            updated-fields (read-back-method-fields method-env (:fields obj) all-fields
+            updated-fields (read-back-method-fields method-env (:fields obj) view
                                                     param-names modified-fields)
             updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
             result (method-result-value method-env)]
@@ -2100,7 +2287,7 @@
           ;; invariant on exit; an unqualified one (`f`) runs mid-routine,
           ;; where the invariant may be broken for a moment.
           (when-not (:unchecked-call? ctx)
-            (check-class-invariant new-ctx class-def))
+            (check-object-invariant new-ctx class-def updated-fields))
           (write-back-target! ctx target updated-obj source-obj)
           (annotate-reference-result target obj result)
           (catch Exception e
@@ -2115,7 +2302,11 @@
   [ctx target target-name class-def method obj has-parens arg-values]
   (let [field (lookup-field-with-inheritance ctx class-def method (:current-class-name ctx))]
     (if field
-      (let [field-val (get (:fields obj) (keyword method))]
+      (let [field-val (if (and (map? target) (= :this (:type target)) (:current-object ctx))
+                        ;; `this.f`: the copy of f the running code's path sees.
+                        (get (:fields (refresh-object-fields-from-env ctx (:current-object ctx)))
+                             (get (or (:current-view ctx) {}) method (keyword method)))
+                        (get (:fields obj) (keyword method)))]
         (if (and has-parens (nex-object? field-val))
           ;; Function field with parens: invoke callN on it
           (let [call-method (str "call" (count arg-values))
@@ -2140,9 +2331,23 @@
         ;; A call on the current object — unqualified (re-dispatched here by
         ;; eval-call-without-target) or `this.m` (invoke-on-this!) — may
         ;; reach the class's private routines.
-        method-lookup (lookup-method-with-inheritance ctx class-def method (count arg-values)
-                                                      (when (or (:unchecked-call? ctx) (:self-call? ctx))
-                                                        (:current-class-name ctx)))]
+        self? (or (:unchecked-call? ctx) (:self-call? ctx))
+        ;; A call on the current object from code running along a path into
+        ;; it: an override between the object's class and that code wins,
+        ;; else the call stays on the code's own path (self-call-base).
+        ;; A routine still deferred all along that path is the object's own.
+        client-lookup #(lookup-method-with-inheritance ctx class-def method (count arg-values)
+                                                       (when self? (:current-class-name ctx)))
+        method-lookup (if (and self? (seq (:current-path ctx)))
+                        (let [[base-class base-path] (self-call-base ctx class-def method (count arg-values))
+                              on-path (some-> (lookup-method-with-inheritance ctx (lookup-class ctx base-class)
+                                                                              method (count arg-values)
+                                                                              (:current-class-name ctx))
+                                              (update :path #(into base-path %)))]
+                          (if (and on-path (not (:declaration-only? (:method on-path))))
+                            on-path
+                            (client-lookup)))
+                        (client-lookup))]
     (if method-lookup
       (invoke-found-nex-method ctx target target-name class-def method method-lookup obj has-parens arg-values)
       (resolve-nex-object-field-or-any-protocol ctx target target-name class-def method obj has-parens arg-values))))
@@ -2245,7 +2450,16 @@
            (false? has-parens)
            (empty? arg-values)
            (some #(= (:name %) method) (get-all-fields ctx parent-class)))
-      (get (:fields (:current-object ctx)) (keyword method))
+      ;; The copy of the field the ancestor's own path leads to.
+      (let [obj (refresh-object-fields-from-env ctx (:current-object ctx))
+            obj-class (lookup-class ctx (:class-name obj))
+            path (vec (or (:current-path ctx) []))
+            to-ancestor (into path (ancestor-path ctx (class-at-path ctx obj-class path)
+                                                  (:name parent-class)))]
+        (get (:fields obj)
+             (field-storage-key ctx obj-class
+                                (into to-ancestor (field-home ctx parent-class method))
+                                method)))
 
       ;; Parent-qualified call: A.method() where A is a parent class, or
       ;; super.method()/super.make(...), where the parent is resolved from
@@ -2259,7 +2473,7 @@
 
       this-method-mid-construction?
       (let [live-obj (refresh-object-fields-from-env ctx (:current-object ctx))]
-        (dispatch-parent-call ctx live-obj (:class-name live-obj) method arg-values))
+        (dispatch-self-call-mid-construction ctx live-obj method arg-values))
 
       (and (map? target)
            (= :this (:type target))
@@ -2353,7 +2567,7 @@
    ;; the call mutates — a field it sets would vanish the moment it returns.
    (if (and own-method-sig (:in-constructor? ctx))
      (let [live-obj (refresh-object-fields-from-env ctx current-obj)]
-       (dispatch-parent-call ctx live-obj (:class-name live-obj) method arg-values))
+       (dispatch-self-call-mid-construction ctx live-obj method arg-values))
      (let [fn-obj (if own-method-sig
                     ::not-found
                     (try
@@ -2394,19 +2608,9 @@
                                                             (count args)
                                                             (:current-class-name ctx))]
           (if method-lookup
-            (let [all-fields (get-all-fields ctx class-def)
-                  current-env (:current-env ctx)
-                  updated-fields (reduce (fn [m field]
-                                           (let [field-name (:name field)
-                                                 field-key (keyword field-name)
-                                                 val (try
-                                                       (env-lookup current-env field-name)
-                                                       (catch Exception _ ::not-found))]
-                                             (if (not= val ::not-found)
-                                               (assoc m field-key val)
-                                               m)))
-                                         (:fields current-obj)
-                                         all-fields)
+            (let [current-env (:current-env ctx)
+                  view (or (:current-view ctx) {})
+                  updated-fields (read-fields current-env (:fields current-obj) view)
                   updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
                   target-name (:current-target ctx)
                   ;; Still an unqualified call, so exempt from the invariant
@@ -2429,8 +2633,7 @@
                                                   :args literal-args})
                       called-obj (env-lookup (-> ctx :current-env :parent) target-name)
                       _ (when called-obj
-                          (doseq [[field-name field-val] (:fields called-obj)]
-                            (env-set! current-env (name field-name) field-val)))]
+                          (sync-fields! current-env (:fields called-obj) view nil))]
                   result)
               ;; The enclosing method was invoked on a non-variable target
               ;; (e.g. `a.b.m()`), so there is no caller variable to route
@@ -3314,14 +3517,16 @@
   "Execute CLASS-DEF's CONSTRUCTOR against ARGS in a fresh constructor env
    (fields bound first, then params so they shadow), checking pre/post
    conditions, and return the resulting field map."
-  [ctx class-def class-name effective-class-name constructor args initial-field-map all-fields]
+  [ctx class-def class-name effective-class-name constructor args initial-field-map]
   (let [ctor-def (lookup-constructor-with-inheritance ctx class-def constructor)]
     (when-not ctor-def
       (throw (ex-info (str "Constructor not found: " class-name "." constructor)
                       {:class-name class-name :constructor constructor})))
     (let [ctor-env (make-env (:current-env ctx))
-          _ (doseq [[field-name field-val] initial-field-map]
-              (env-define ctor-env (name field-name) field-val))
+          ;; An inherited constructor runs along the path to its class.
+          path (or (ancestor-path ctx class-def (:name (:source-class ctor-def))) [])
+          view (frame-view ctx class-def path)
+          _ (bind-fields! ctor-env initial-field-map view)
           _ (bind-class-constants! ctx ctor-env class-def)
           ;; Params bound after fields so a param shadows a same-named field.
           params (:params ctor-def)
@@ -3335,6 +3540,8 @@
                       (assoc :current-env ctor-env)
                       (assoc :current-object temp-obj)
                       (assoc :current-class-name source-class-name)
+                      (assoc :current-path path)
+                      (assoc :current-view view)
                       (assoc :current-method-name constructor)
                       (assoc :in-constructor? true)
                       (update :debug-stack (fnil conj [])
@@ -3352,17 +3559,7 @@
               (doseq [stmt (:body ctor-def)]
                 (eval-node new-ctx stmt)))
           ;; Read the (possibly mutated) field values back out of the env.
-          updated-fields (reduce (fn [m field]
-                                   (let [field-name (:name field)
-                                         field-key (keyword field-name)
-                                         val (try
-                                               (env-lookup ctor-env field-name)
-                                               (catch Exception _ ::not-found))]
-                                     (if (not= val ::not-found)
-                                       (assoc m field-key val)
-                                       m)))
-                                 initial-field-map
-                                 all-fields)
+          updated-fields (read-fields ctor-env initial-field-map view)
           _ (when-let [ensure-assertions (:ensure ctor-def)]
               (check-assertions new-ctx ensure-assertions Postcondition))]
       updated-fields)))
@@ -3375,20 +3572,13 @@
             (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
                             {:class-name class-name
                              :deferred? true})))
-        ;; Get all fields (including inherited)
-        all-fields (when class-def (get-all-fields ctx class-def))
-        ;; Initialize fields with default values
-        initial-field-map (when class-def
-                            (reduce (fn [m field]
-                                      (assoc m (keyword (:name field))
-                                             (get-default-field-value (:field-type field))))
-                                    {}
-                                    all-fields))
+        ;; Every field, one copy per path to its class, at its zero value
+        initial-field-map (when class-def (initial-field-map ctx class-def))
         ;; If a constructor is specified, call it and update fields
         final-field-map (when class-def
                           (if constructor
                             (run-user-constructor ctx class-def class-name effective-class-name
-                                                  constructor args initial-field-map all-fields)
+                                                  constructor args initial-field-map)
                             ;; No constructor: use default initialization
                             initial-field-map))
         ;; Create the final object
@@ -3398,11 +3588,7 @@
     ;; Check class invariant with object fields in scope
     (if class-def
       (do
-        (let [inv-env (make-env (:current-env ctx))
-              _ (doseq [[field-name field-val] final-field-map]
-                  (env-define inv-env (name field-name) field-val))
-              inv-ctx (assoc ctx :current-env inv-env)]
-          (check-class-invariant inv-ctx class-def))
+        (check-object-invariant ctx class-def final-field-map)
         ;; Return the object
         obj)
       ;; Java interop fallback (CLJ only)
