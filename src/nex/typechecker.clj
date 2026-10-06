@@ -3867,8 +3867,27 @@
                                         env generic-names (:type param) arg-type)))
                                     {}
                                     (map vector arg-types effective-params))
+          ;; Type arguments written at the call (`total_area[Circle](xs)`)
+          ;; fix the binding: an argument must then conform to the
+          ;; instantiated parameter, not re-bind it. Without them,
+          ;; build-generic-type-map defaults every parameter to Any and the
+          ;; bindings inferred from the arguments take over.
+          ;; A $Unknown placeholder is not a written argument, so it must not
+          ;; displace an inferred binding with build-generic-type-map's Any.
+          explicit-type-map (when (map? var-type)
+                              (let [written (or (:type-args var-type) (:type-params var-type))]
+                                (when (seq written)
+                                  (into {}
+                                        (keep (fn [[param arg]]
+                                                (when (and arg (not= arg unknown-type-arg))
+                                                  [(:name param) arg])))
+                                        (map vector
+                                             (:generic-params
+                                              (env-lookup-class env (:base-type var-type)))
+                                             written)))))
           type-map (merge (build-generic-type-map env var-type)
-                          inferred-type-map)]
+                          inferred-type-map
+                          explicit-type-map)]
           ;; An inferred binding must itself satisfy its generic parameter's
           ;; own declared constraint (`[G -> Animal]`) -- validate-generic-args
           ;; already does this for an EXPLICIT type argument (`Box[Dog]`), but
