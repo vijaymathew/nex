@@ -2,7 +2,8 @@
 --
 -- Nex has no built-in cryptographic hash, so this reaches into the host
 -- platform with `with "java"` and calls java.security.MessageDigest
--- directly -- see docs/design/chapter_4.md section 4.4.
+-- directly -- see the design book, section 4.4:
+-- https://schemer.in/nex/docs/design/chapter_4.html#platform-specific-code
 --
 -- Two things make the host boundary a little fiddly here, and both are
 -- worked around below rather than fought:

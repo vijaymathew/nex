@@ -1,7 +1,7 @@
 (ns nex.short-circuit-test
   "The logical operators `and` and `or` must short-circuit in the interpreter,
    matching the JVM compiler's `emit-boolean-short-circuit!` and the design docs
-   (docs/design/appendix_a.md)."
+   (https://schemer.in/nex/docs/design/appendix_a.html#short-circuit-boolean-operators)."
   (:require [clojure.test :refer [deftest is testing]]
             [nex.parser :as p]
             [nex.interpreter :as interp]))

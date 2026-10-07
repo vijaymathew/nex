@@ -474,7 +474,7 @@ nex/
 | [Tutorial](docs/md/TUTORIAL.md) | Step-by-step introduction to the language |
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |
-| [JVM Bytecode Translation Reference](docs/design/chapter_5.md) | How the current JVM backend lowers and emits Nex programs |
+| [JVM Bytecode Translation Reference](https://schemer.in/nex/docs/design/chapter_5.html) | How the current JVM backend lowers and emits Nex programs |
 | [Library Reference Index](docs/ref/index.md) | Standard library reference (collections, I/O, networking, time, ...) |
 
 ### Library Reference
