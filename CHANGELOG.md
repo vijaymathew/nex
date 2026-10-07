@@ -13,6 +13,20 @@
   Narrowing a user ancestor's `Any` parameter (or `?Any`) is rejected too.
   An `enum`'s generated `compare` now takes `Any` to match, and raises when
   given something other than a member of that enum.
+- **Fix: four more variance holes closed.**
+  - A function value with an `Any` parameter or return no longer conforms
+    by wildcard: `fn (x: Integer)` is not a `Function(x: Any)`, and
+    `fn (): Any` is not a `Function(): Integer`. (A `Void` return still
+    accepts any function, since its result is discarded.)
+  - `?` inside a function type is no longer ignored: `fn (x: Dog)` is not a
+    `Function(x: ?Dog)` (it could be passed `nil`), and `fn (): ?Dog` is not
+    a `Function(): Dog`.
+  - Under multiple inheritance an override must conform to the routine
+    inherited along every `inherit` clause; only the first was checked.
+  - An override naming the heir's own generic parameter is checked instead of
+    skipped: `Stack[E] inherit Container[E]` can no longer redefine
+    `store(x: E)` as `store(x: Integer)`, and `take(x: E)` cannot redefine
+    `take(x: Any)`.
 
 ## 0.5.7 - 2026-10-06
 

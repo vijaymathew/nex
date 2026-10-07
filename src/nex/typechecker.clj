@@ -1079,6 +1079,18 @@
          (and (= (count inst) (count args2))
               (every? true? (map #(type-args-match? env %1 %2) inst args2))))))))
 
+(declare narrows-any?)
+
+(defn- attachable-outer-type
+  "attachable-type, except that a Function signature only loses its own `?`:
+   its parameter and return types keep theirs, since `Function(x: ?Dog)` and
+   `Function(x: Dog)` are different types (the first may be passed nil)."
+  [t]
+  (let [n (normalize-type t)]
+    (if (and (map? n) (= "Function" (:base-type n)) (:param-types n))
+      (dissoc n :detachable)
+      (attachable-type n))))
+
 (defn types-compatible?
   "Check if two types are compatible (including inheritance)."
   [env type1 type2]
@@ -1088,8 +1100,8 @@
         t2 (normalize-type type2) ;; target type
         d1 (detachable-type? t1)
         d2 (detachable-type? t2)
-        a1 (attachable-type t1)
-        a2 (attachable-type t2)]
+        a1 (attachable-outer-type t1)
+        a2 (attachable-outer-type t2)]
     (cond
       ;; Nil can only flow into detachable/reference-like targets.
       (= t1 "Nil")
@@ -1188,14 +1200,20 @@
                                           (and (:return-type a2) (:return-type a1))
                                           (conj [(:return-type a2) (:return-type a1)]))))
                      a2' (if (seq type-map) (resolve-generic-type a2 type-map) a2)]
+                 ;; Any is a wildcard to types-compatible?, so each direction
+                 ;; also refuses an Any that would be narrowed implicitly:
+                 ;; `fn (x: Integer)` is no Function(x: Any), and `fn (): Any`
+                 ;; no Function(): Integer.
                  (and (every? true?
                               (map (fn [p1 p2]
                                      ;; contravariant: target param must conform to source param
-                                     (types-compatible? env (:type p2) (:type p1)))
+                                     (and (not (narrows-any? env (:type p1) (:type p2)))
+                                          (types-compatible? env (:type p2) (:type p1))))
                                    (:param-types a1) (:param-types a2')))
                       (or (nil? (:return-type a1)) (nil? (:return-type a2'))
                           ;; covariant: source return must conform to target return
-                          (types-compatible? env (:return-type a1) (:return-type a2'))))))
+                          (and (not (narrows-any? env (:return-type a2') (:return-type a1)))
+                               (types-compatible? env (:return-type a1) (:return-type a2')))))))
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
           ;; Conformance to a parameterized target through an instantiated
@@ -4965,6 +4983,30 @@
               (not= tt "Any")
               (not (and (string? tt) (is-generic-type-param? env tt)))))))
 
+(defn narrows-any?
+  "Whether a slot of type FROM, when it is Any or ?Any, is narrowed into TO,
+   for conforming one signature to another (an override to the routine it
+   redefines, a function value to a Function type). Unlike
+   any-into-concrete-without-convert?, which governs binding a value, a
+   generic parameter or a Function type counts as narrower than Any here:
+   `take(x: E)` cannot redefine `take(x: Any)`, since E may be Integer. The
+   outer `?` on both sides is ignored, because whether nil may flow is
+   types-compatible?'s question, so `?Any` into `?Integer` is caught as well
+   as `Any` into `Integer`. A Void target narrows nothing: a procedure-style
+   `fn (x: Integer) do ... end` (typed as returning Any) is a
+   Function(Integer): Void, whose result is discarded."
+  [env to from]
+  (let [base #(let [t (normalize-type (expand-type-aliases env %))]
+                (if (and (map? t) (:detachable t) (not (:param-types t))
+                         (empty? (or (:type-params t) (:type-args t))))
+                  (:base-type t)
+                  t))
+        to (base to)]
+    (boolean (and (not (env-lookup-var env "__with_java__"))
+                  (= (base from) "Any")
+                  (not= to "Any")
+                  (not= to "Void")))))
+
 (defn- throw-any-narrowing-error!
   [what target-type]
   (throw (ex-info (str "Cannot implicitly narrow Any to " what)
@@ -6729,6 +6771,17 @@
    every class's implicit root; the other two are reached through `inherit`."
   #{"Any" "Comparable" "Hashable"})
 
+(defn- inherited-method-members
+  "Every routine named METHOD-NAME of ARITY that the heir redefines: the
+   nearest one along each `inherit` clause, deduplicated (a diamond reaches the
+   same declaration twice). An override must conform to all of them, not just
+   the first parent's, or `Both inherit L, R` may narrow R's parameter."
+  [env parents method-name arity]
+  (->> parents
+       (keep #(inherited-method-member env [%] method-name arity))
+       distinct
+       vec))
+
 (defn- inherited-protocol-method-member
   "The signature of a builtin protocol routine (Any.equals, Comparable.compare,
    Hashable.hash, ...) that a method named METHOD-NAME of ARITY redefines, or
@@ -6752,10 +6805,13 @@
    overrides an inherited routine of the same name and arity. The inherited
    signature is first substituted into the heir's type context (so a method
    inherited from, say, Container[Integer] is compared with T resolved to
-   Integer). A comparison is skipped only when, after that substitution, a type
-   is still an unresolved generic parameter of the heir itself.
+   Integer). A type still naming one of the heir's own generic parameters after
+   that substitution is compared like any other: `Stack[E] inherit
+   Container[E]` cannot take `store(x: Integer)`, since E may be String. ENV
+   must therefore be the class env, where those parameters are registered.
 
-   A builtin protocol routine counts as inherited too: every class has Any's
+   The override must conform to the routine inherited along every `inherit`
+   clause, not only the first. A builtin protocol routine counts as inherited too: every class has Any's
    `equals(other: Any)`, so `equals(other: Rational)` narrows a parameter
    exactly as an override of a user ancestor's routine would."
   [env class-name parents member]
@@ -6763,20 +6819,9 @@
     (let [m-name (:name member)
           m-params (or (:params member) [])
           arity (count m-params)
-          parent-m (or (inherited-method-member env parents m-name arity)
-                       (inherited-protocol-method-member env parents m-name arity))
-          concrete? (fn [t] (and t (not (is-generic-type-param? env t))))
-          ;; Whether an Any (or ?Any) FROM would be narrowed into TO. Attachment
-          ;; is types-compatible?'s business; this compares only the base types,
-          ;; so `?Any` -> `?Integer` is caught as well as `Any` -> `Integer`.
-          narrows-any? (fn [to from]
-                         (let [base #(let [t (normalize-type %)]
-                                       (if (and (map? t) (:detachable t)
-                                                (empty? (or (:type-params t) (:type-args t))))
-                                         (:base-type t)
-                                         t))]
-                           (any-into-concrete-without-convert? env (base to) (base from))))]
-      (when parent-m
+          parent-ms (or (seq (inherited-method-members env parents m-name arity))
+                        (some-> (inherited-protocol-method-member env parents m-name arity) list))]
+      (doseq [parent-m parent-ms]
         ;; Parameters are contravariant: each inherited parameter type must
         ;; conform to the overriding parameter type (the override must accept at
         ;; least what the inherited routine accepted).
@@ -6784,8 +6829,8 @@
           (let [pt (:type pp) ct (:type cp)]
             ;; types-compatible? lets Any stand for any type, so an
             ;; inherited `Any` parameter would pass for any narrowing of it.
-            (when (and pt ct (concrete? pt) (concrete? ct)
-                       (or (narrows-any? ct pt)
+            (when (and pt ct
+                       (or (narrows-any? env ct pt)
                            (not (types-compatible? env pt ct))))
               (throw (ex-info (str "Invalid override of '" m-name "'")
                               {:error (type-error
@@ -6798,8 +6843,8 @@
         ;; Return is covariant: the overriding return type must conform to the
         ;; inherited return type.
         (let [pr (:return-type parent-m) cr (:return-type member)]
-          (when (and pr cr (concrete? pr) (concrete? cr)
-                     (or (narrows-any? pr cr)
+          (when (and pr cr
+                     (or (narrows-any? env pr cr)
                          (not (types-compatible? env cr pr))))
             (throw (ex-info (str "Invalid override of '" m-name "'")
                             {:error (type-error
@@ -7137,7 +7182,7 @@
               member
               (fn []
                 (check-attribute-redeclaration env name parents member)
-                (check-override-conformance env name parents member)
+                (check-override-conformance class-env name parents member)
                 (check-override-contracts env name parents member)))
             (check-method class-env name member))
           (= (:type member) :field)
