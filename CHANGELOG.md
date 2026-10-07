@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Fix: overrides of builtin protocol routines are checked for variance.**
+  `equals(other: Rational)` narrows `Any`'s `equals(other: Any)`, and
+  `compare(other: Box)` in a class inheriting `Comparable` narrows
+  `compare(a: Any)`, but both were accepted: the override check only walked
+  user-declared ancestors, never the implicit `Any` or the builtin
+  `Comparable`/`Hashable`, and it let an inherited `Any` parameter pass for
+  any narrower type. Both are now rejected at the definition. Keep the `Any`
+  parameter and narrow inside with `convert other to r: Rational then ... end`.
+  Narrowing a user ancestor's `Any` parameter (or `?Any`) is rejected too.
+  An `enum`'s generated `compare` now takes `Any` to match, and raises when
+  given something other than a member of that enum.
+
 ## 0.5.7 - 2026-10-06
 
 - **Change: repeated inheritance follows the Definition.** A class that

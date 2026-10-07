@@ -62,8 +62,10 @@
       this.value := value
     end
   feature
-    compare(other: Box): Integer do
-      result := value.compare(other.value)
+    compare(other: Any): Integer do
+      if convert other to b: Box then
+        result := value.compare(b.value)
+      end
     end
 end")
                    (repl/eval-code ctx "let boxes := [create Box.make(7), create Box.make(2), create Box.make(5)]")

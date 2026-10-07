@@ -6723,28 +6723,70 @@
                                       m-name "'. Provide a body for '" m-name
                                       "', or declare '" class-name "' itself 'deferred'."))}))))))
 
+(def ^:private builtin-protocol-classes
+  "The builtin classes whose routines live only in the method table (their
+   `:body` is empty), so `inherited-method-member` never sees them. Any is
+   every class's implicit root; the other two are reached through `inherit`."
+  #{"Any" "Comparable" "Hashable"})
+
+(defn- inherited-protocol-method-member
+  "The signature of a builtin protocol routine (Any.equals, Comparable.compare,
+   Hashable.hash, ...) that a method named METHOD-NAME of ARITY redefines, or
+   nil. Explicit protocol ancestors are tried before the implicit Any."
+  [env parents method-name arity]
+  (letfn [(ancestors [class-name visited]
+            (if (or (not (string? class-name)) (contains? visited class-name))
+              visited
+              (reduce (fn [seen pe] (ancestors (:parent pe) seen))
+                      (conj visited class-name)
+                      (:parents (env-lookup-class env class-name)))))]
+    (let [reached (reduce (fn [seen pe] (ancestors (:parent pe) seen)) #{} parents)]
+      (some (fn [cn]
+              (when (or (= cn "Any") (contains? reached cn))
+                (when-let [sig (env-lookup-method env cn method-name arity)]
+                  (assoc sig :name method-name))))
+            ["Comparable" "Hashable" "Any"]))))
+
 (defn- check-override-conformance
   "Enforce CONTRAVARIANT parameters and COVARIANT return for a method that
    overrides an inherited routine of the same name and arity. The inherited
    signature is first substituted into the heir's type context (so a method
    inherited from, say, Container[Integer] is compared with T resolved to
    Integer). A comparison is skipped only when, after that substitution, a type
-   is still an unresolved generic parameter of the heir itself."
+   is still an unresolved generic parameter of the heir itself.
+
+   A builtin protocol routine counts as inherited too: every class has Any's
+   `equals(other: Any)`, so `equals(other: Rational)` narrows a parameter
+   exactly as an override of a user ancestor's routine would."
   [env class-name parents member]
-  (when (and (= (:type member) :method) (seq parents))
+  (when (= (:type member) :method)
     (let [m-name (:name member)
           m-params (or (:params member) [])
           arity (count m-params)
-          parent-m (inherited-method-member env parents m-name arity)
-          concrete? (fn [t] (and t (not (is-generic-type-param? env t))))]
+          parent-m (or (inherited-method-member env parents m-name arity)
+                       (inherited-protocol-method-member env parents m-name arity))
+          concrete? (fn [t] (and t (not (is-generic-type-param? env t))))
+          ;; Whether an Any (or ?Any) FROM would be narrowed into TO. Attachment
+          ;; is types-compatible?'s business; this compares only the base types,
+          ;; so `?Any` -> `?Integer` is caught as well as `Any` -> `Integer`.
+          narrows-any? (fn [to from]
+                         (let [base #(let [t (normalize-type %)]
+                                       (if (and (map? t) (:detachable t)
+                                                (empty? (or (:type-params t) (:type-args t))))
+                                         (:base-type t)
+                                         t))]
+                           (any-into-concrete-without-convert? env (base to) (base from))))]
       (when parent-m
         ;; Parameters are contravariant: each inherited parameter type must
         ;; conform to the overriding parameter type (the override must accept at
         ;; least what the inherited routine accepted).
         (doseq [[idx pp cp] (map vector (range) (or (:params parent-m) []) m-params)]
           (let [pt (:type pp) ct (:type cp)]
+            ;; types-compatible? lets Any stand for any type, so an
+            ;; inherited `Any` parameter would pass for any narrowing of it.
             (when (and pt ct (concrete? pt) (concrete? ct)
-                       (not (types-compatible? env pt ct)))
+                       (or (narrows-any? ct pt)
+                           (not (types-compatible? env pt ct))))
               (throw (ex-info (str "Invalid override of '" m-name "'")
                               {:error (type-error
                                        (str "Override of '" m-name "' in class '" class-name
@@ -6757,7 +6799,8 @@
         ;; inherited return type.
         (let [pr (:return-type parent-m) cr (:return-type member)]
           (when (and pr cr (concrete? pr) (concrete? cr)
-                     (not (types-compatible? env cr pr)))
+                     (or (narrows-any? pr cr)
+                         (not (types-compatible? env cr pr))))
             (throw (ex-info (str "Invalid override of '" m-name "'")
                             {:error (type-error
                                      (if (:synthesized-getter? member)

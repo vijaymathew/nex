@@ -142,3 +142,92 @@
   (testing "a generic-preserving override (Stack[E] over Container[E]) is not falsely rejected"
     (is (accepts? (str container
                        "class Stack[E] inherit Container[E] feature store(x: E) do end create make do end end")))))
+
+;; ---------------------------------------------------------------------------
+;; Builtin protocol routines. Any's `equals`/`clone`, Comparable's `compare`
+;; and Hashable's `hash` live only in the method table, never in a class body,
+;; so the ancestor walk used to miss them, and every class inherits Any
+;; without naming it. An `Any` parameter also passed for any narrowing,
+;; because types-compatible? treats Any as a wildcard.
+;; ---------------------------------------------------------------------------
+
+(deftest any-equals-param-narrowing-rejected
+  (testing "equals(other: Rational) narrows Any's equals(other: Any)"
+    (is (rejects? "class Rational
+                     feature n: Integer
+                     create make(x: Integer) do n := x end
+                     feature
+                       equals(other: Rational): Boolean do result := n = other.n end
+                   end"))))
+
+(deftest any-equals-same-signature-accepts
+  (testing "equals(other: Any) narrowing inside the body with convert conforms"
+    (is (accepts? "class Rational
+                     feature n: Integer
+                     create make(x: Integer) do n := x end
+                     feature
+                       equals(other: Any): Boolean do
+                         result := false
+                         if convert other to r: Rational then result := n = r.n end
+                       end
+                   end"))))
+
+(deftest any-clone-covariant-return-accepts
+  (testing "clone: M narrows Any's clone: Any return, which is covariant"
+    (is (accepts? "class M
+                     feature v: Integer
+                     create make(x: Integer) do v := x end
+                     feature clone: M do result := create M.make(v) end
+                   end"))))
+
+(deftest any-to-string-nonconforming-return-rejected
+  (testing "to_string: Integer does not conform to Any's to_string: String"
+    (is (rejects? "class M feature to_string: Integer do result := 1 end end"))))
+
+(deftest comparable-compare-param-narrowing-rejected
+  (testing "compare(other: Box) narrows Comparable's compare(a: Any)"
+    (is (rejects? "class Box inherit Comparable
+                     feature v: Integer
+                     create make(x: Integer) do v := x end
+                     feature compare(other: Box): Integer do result := v.compare(other.v) end
+                   end"))))
+
+(deftest comparable-compare-any-param-accepts
+  (testing "compare(other: Any) with a convert inside conforms"
+    (is (accepts? "class Box inherit Comparable
+                     feature v: Integer
+                     create make(x: Integer) do v := x end
+                     feature
+                       compare(other: Any): Integer do
+                         if convert other to b: Box then result := v.compare(b.v) end
+                       end
+                   end"))))
+
+(deftest user-any-param-narrowing-rejected
+  (testing "narrowing a user ancestor's Any parameter is rejected like any other narrowing"
+    (is (rejects? "class Base feature take(x: Any) do end create make do end end
+                   class Sub inherit Base feature take(x: Integer) do end create make do end end"))))
+
+(deftest protocol-name-at-other-arity-is-not-an-override
+  (testing "a routine sharing a protocol name but not its arity is a new routine"
+    (is (accepts? "class Tools
+                     feature
+                       clone(p: Array[String]): Array[String] do result := p end
+                       equals(a, b: Integer): Boolean do result := a = b end
+                   end"))))
+
+(deftest user-any-param-narrowing-through-intermediate-rejected
+  (testing "a grandparent's Any parameter is still Any to the override"
+    (is (rejects? "class Base feature take(x: Any) do end create make do end end
+                   class Mid inherit Base create make do end end
+                   class Sub inherit Mid feature take(x: Integer) do end create make do end end"))))
+
+(deftest user-detachable-any-param-narrowing-rejected
+  (testing "?Any narrowed to ?Integer is rejected like Any to Integer"
+    (is (rejects? "class Base feature take(x: ?Any) do end create make do end end
+                   class Sub inherit Base feature take(x: ?Integer) do end create make do end end"))))
+
+(deftest user-any-param-widening-to-detachable-accepts
+  (testing "Any widened to ?Any conforms"
+    (is (accepts? "class Base feature take(x: Any) do end create make do end end
+                   class Sub inherit Base feature take(x: ?Any) do end create make do end end"))))
