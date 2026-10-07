@@ -1682,8 +1682,7 @@ end
 
 class B
   feature
-    a: ?A
-    demo() do
+    demo(a: ?A) do
       if a /= nil then
         a.show()
       end
@@ -1705,8 +1704,7 @@ end
 
 class B
   feature
-    a: ?A
-    demo() do
+    demo(a: ?A) do
       if a = nil then
         print(\"nil\")
       else

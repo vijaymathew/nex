@@ -1335,6 +1335,29 @@ f(b: ?Box): Integer
 The narrowing ends with the `and`: after `let ok := b /= nil and b.n > 10`, `b`
 is still `?Box`. An `or` narrows nothing.
 
+`x /= nil` narrows a local or a parameter, and only while nothing can have made
+it `nil` again:
+
+- Assigning it a value that may be `nil` (`x := nil`, `x := find()` returning
+  `?T`) ends the narrowing for the rest of every enclosing block. Assigning an
+  attached value keeps it. In one branch of an `if` or `match`, the other
+  branches are unaffected.
+- A loop body that assigns `x` ends a narrowing made before the loop, since
+  the next iteration sees the assignment.
+- A local that some closure or `spawn` body assigns is never narrowed: any
+  call may run that closure. A closure reading a narrowed local sees it
+  narrowed only if nothing in the routine assigns that local.
+- A **field** is never narrowed by `x /= nil`, since any call (or another
+  task) may reset it. Bind it to a local with the object test instead; the
+  local stays attached whatever happens to the field:
+
+```nex
+if ?socket as s then
+  close_all()
+  s.close()
+end
+```
+
 ## Anonymous Functions
 
 ```nex
