@@ -24,10 +24,12 @@
   create
     with_value(v: Real) do value := v end
   feature
-    compare(m: Money): Integer do
-      if value > m.value then result := 1
-      elseif value < m.value then result := -1
-      else result := 0 end
+    compare(other: Any): Integer do
+      if convert other to m: Money then
+        if value > m.value then result := 1
+        elseif value < m.value then result := -1
+        else result := 0 end
+      end
     end
     minus(m: Money): Money alias \"-\" do
       result := create Money.with_value(value - m.value)
@@ -118,10 +120,12 @@ print(acc.balance.value)"))))))
   create
     with_value(v: Real) do value := v end
   feature
-    compare(m: Money): Integer do
-      if value > m.value then result := 1
-      elseif value < m.value then result := -1
-      else result := 0 end
+    compare(other: Any): Integer do
+      if convert other to m: Money then
+        if value > m.value then result := 1
+        elseif value < m.value then result := -1
+        else result := 0 end
+      end
     end
     minus(m: Money): Money alias \"-\" do
       result := create Money.with_value(value - m.value)

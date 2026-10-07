@@ -59,6 +59,19 @@
     ;; expand-type-aliases and validate-generic-args need this.
     :type-alias-generic-params (atom {})
     :non-nil-vars (atom #{})
+    ;; Names bound in this env's :vars that are fields of the enclosing class
+    ;; (see bind-visible-class-fields!). A field is never narrowed by a nil
+    ;; check: any call may reset it, so env-var-non-nil? ignores its marks.
+    :field-names (atom #{})
+    ;; Set on a routine's (or the top level's) statement env by
+    ;; register-assigned-names!: every name assigned anywhere in it, and the
+    ;; subset assigned inside a closure or spawn body.
+    :assigned-names (atom #{})
+    :closure-assigned-names (atom #{})
+    ;; Set on the env a closure or spawn body is checked in: names whose
+    ;; narrowing from outside the closure does not carry in (see
+    ;; narrowing-barrier-env).
+    :narrowing-barrier (atom nil)
     :across-cursors (atom {})
     ;; Names this env's block has declared with `let` (per-env, not inherited), so
     ;; a second `let` of the same name in the *same* block is rejected while a
@@ -439,13 +452,139 @@
   (when-let [nn (:non-nil-vars env)]
     (swap! nn conj var-name)))
 
-(defn env-var-non-nil?
-  "Check whether a variable is proven non-nil in this env chain."
+(defn- env-binding-env
+  "The env in ENV's chain whose own :vars binds VAR-NAME, or nil."
   [env var-name]
-  (or (and (:non-nil-vars env)
-           (contains? @(:non-nil-vars env) var-name))
-      (when (:parent env)
-        (env-var-non-nil? (:parent env) var-name))))
+  (loop [e env]
+    (cond
+      (nil? e) nil
+      (contains? @(:vars e) var-name) e
+      :else (recur (:parent e)))))
+
+(defn field-var?
+  "Whether VAR-NAME, as resolved from ENV, is a field of the enclosing class
+   rather than a local (a `let`, parameter, or binding shadowing it)."
+  [env var-name]
+  (boolean (some-> (env-binding-env env var-name) :field-names deref (contains? var-name))))
+
+(defn- closure-assigned?
+  "Whether VAR-NAME is assigned inside a closure or spawn body somewhere in a
+   routine enclosing ENV. Such a local may change whenever any call runs the
+   closure, so no nil check narrows it."
+  [env var-name]
+  (loop [e env]
+    (cond
+      (nil? e) false
+      (some-> (:closure-assigned-names e) deref (contains? var-name)) true
+      :else (recur (:parent e)))))
+
+(defn env-var-non-nil?
+  "Check whether a variable is proven non-nil in this env chain. A mark only
+   counts up to the env that binds the variable (above that it belongs to a
+   different, shadowed variable of the same name) and not across a closure
+   barrier for a name the routine reassigns. Fields and locals that a
+   closure assigns are never narrowed."
+  [env var-name]
+  (and (not (field-var? env var-name))
+       (not (closure-assigned? env var-name))
+       (loop [e env]
+         (cond
+           (nil? e) false
+           (some-> (:non-nil-vars e) deref (contains? var-name)) true
+           (contains? @(:vars e) var-name) false
+           (some-> (:narrowing-barrier e) deref (contains? var-name)) false
+           :else (recur (:parent e))))))
+
+(defn env-kill-non-nil!
+  "Forget that VAR-NAME is non-nil, in ENV and every enclosing env up to the
+   one binding it: after `d := nil`, d may be nil for the rest of every block
+   that contains the assignment, not just the innermost."
+  [env var-name]
+  (loop [e env]
+    (when e
+      (some-> (:non-nil-vars e) (swap! disj var-name))
+      (when-not (contains? @(:vars e) var-name)
+        (recur (:parent e))))))
+
+(defn- closure-node? [n]
+  (and (map? n) (contains? #{:anonymous-function :spawn} (:type n))))
+
+(defn- let-names-in
+  "Names declared by a `let` anywhere in NODES, descending into closures only
+   when INTO-CLOSURES?."
+  [nodes into-closures?]
+  (->> (tree-seq #(and (coll? %) (or into-closures? (not (closure-node? %))))
+                 #(if (map? %) (vals %) (seq %))
+                 nodes)
+       (keep #(when (and (map? %) (= :let (:type %)) (string? (:name %))) (:name %)))
+       set))
+
+(defn- assigned-names-in
+  "{:all names assigned anywhere in NODES, :in-closure those a closure or
+   spawn body assigns while capturing them}. A write inside a closure to its
+   own parameter, or to its own `let` that shadows nothing OUTER? names, is
+   not a capture. Otherwise by name, ignoring scopes, which errs on the side
+   of counting a write as a capture."
+  ([nodes] (assigned-names-in nodes (constantly true)))
+  ([nodes outer?]
+   (let [all (transient #{}) in-closure (transient #{})]
+     (letfn [(walk [n closure? own]
+               (cond
+                 (map? n)
+                 (let [entering? (closure-node? n)
+                       own (if entering?
+                             (into own (concat (keep :name (:params n))
+                                               (remove outer? (let-names-in (:body n) true))))
+                             own)
+                       closure? (or closure? entering?)]
+                   (when (and (= :assign (:type n)) (string? (:target n)))
+                     (conj! all (:target n))
+                     (when (and closure? (not (contains? own (:target n))))
+                       (conj! in-closure (:target n))))
+                   (doseq [v (vals n)] (walk v closure? own)))
+                 (sequential? n) (doseq [v n] (walk v closure? own))
+                 :else nil))]
+       (walk nodes false #{})
+       {:all (persistent! all) :in-closure (persistent! in-closure)}))))
+
+(defn register-assigned-names!
+  "Record on ENV, a routine's or the top level's statement env, the names
+   STMTS assign, for closure-assigned? and narrowing-barrier-env."
+  [env stmts]
+  (let [root-lets (let-names-in stmts false)
+        outer? #(or (contains? root-lets %) (some? (env-lookup-var env %)))
+        {:keys [all in-closure]} (assigned-names-in stmts outer?)]
+    (swap! (:assigned-names env) into all)
+    (swap! (:closure-assigned-names env) into in-closure)))
+
+(defn- narrowing-barrier-env
+  "A child of ENV to check a closure or spawn body in. The body may run after
+   any later statement of the enclosing routine, so a local narrowed outside
+   stays narrowed inside only if nothing in the routine reassigns it."
+  [env]
+  (let [child (make-type-env env)
+        assigned (loop [e env acc #{}]
+                   (if e
+                     (recur (:parent e) (into acc (some-> (:assigned-names e) deref)))
+                     acc))]
+    (reset! (:narrowing-barrier child) assigned)
+    child))
+
+(defn- check-exclusive-branches!
+  "Run BRANCHES (thunks checking the alternatives of an if or match) so that a
+   nil-check mark one branch kills does not vanish for its siblings, then
+   keep, in ENV's chain, only the marks that every path leaves standing."
+  [env branches]
+  (let [atoms (->> env (iterate :parent) (take-while some?) (keep :non-nil-vars) vec)
+        before (mapv deref atoms)
+        afters (mapv (fn [branch]
+                       (dorun (map reset! atoms before))
+                       (branch)
+                       (mapv deref atoms))
+                     branches)]
+    (dorun (map-indexed (fn [i a]
+                          (reset! a (reduce set/intersection (before i) (map #(% i) afters))))
+                        atoms))))
 
 (defn env-add-across-cursor
   "Associate a synthetic across cursor binding with its iterated item type."
@@ -1079,6 +1218,18 @@
          (and (= (count inst) (count args2))
               (every? true? (map #(type-args-match? env %1 %2) inst args2))))))))
 
+(declare narrows-any?)
+
+(defn- attachable-outer-type
+  "attachable-type, except that a Function signature only loses its own `?`:
+   its parameter and return types keep theirs, since `Function(x: ?Dog)` and
+   `Function(x: Dog)` are different types (the first may be passed nil)."
+  [t]
+  (let [n (normalize-type t)]
+    (if (and (map? n) (= "Function" (:base-type n)) (:param-types n))
+      (dissoc n :detachable)
+      (attachable-type n))))
+
 (defn types-compatible?
   "Check if two types are compatible (including inheritance)."
   [env type1 type2]
@@ -1088,8 +1239,8 @@
         t2 (normalize-type type2) ;; target type
         d1 (detachable-type? t1)
         d2 (detachable-type? t2)
-        a1 (attachable-type t1)
-        a2 (attachable-type t2)]
+        a1 (attachable-outer-type t1)
+        a2 (attachable-outer-type t2)]
     (cond
       ;; Nil can only flow into detachable/reference-like targets.
       (= t1 "Nil")
@@ -1188,14 +1339,20 @@
                                           (and (:return-type a2) (:return-type a1))
                                           (conj [(:return-type a2) (:return-type a1)]))))
                      a2' (if (seq type-map) (resolve-generic-type a2 type-map) a2)]
+                 ;; Any is a wildcard to types-compatible?, so each direction
+                 ;; also refuses an Any that would be narrowed implicitly:
+                 ;; `fn (x: Integer)` is no Function(x: Any), and `fn (): Any`
+                 ;; no Function(): Integer.
                  (and (every? true?
                               (map (fn [p1 p2]
                                      ;; contravariant: target param must conform to source param
-                                     (types-compatible? env (:type p2) (:type p1)))
+                                     (and (not (narrows-any? env (:type p1) (:type p2)))
+                                          (types-compatible? env (:type p2) (:type p1))))
                                    (:param-types a1) (:param-types a2')))
                       (or (nil? (:return-type a1)) (nil? (:return-type a2'))
                           ;; covariant: source return must conform to target return
-                          (types-compatible? env (:return-type a1) (:return-type a2'))))))
+                          (and (not (narrows-any? env (:return-type a2') (:return-type a1)))
+                               (types-compatible? env (:return-type a1) (:return-type a2')))))))
           (and (string? a1) (string? a2) (class-subtype? env a1 a2))
           (and (map? a1) (string? a2) (class-subtype? env (:base-type a1) a2))
           ;; Conformance to a parameterized target through an instantiated
@@ -1933,6 +2090,7 @@
                                (not (:constant? member))
                                (or (not inherited?)
                                    (public-member? member)))
+                      (swap! (:field-names target-env) conj (:name member))
                       (env-add-var target-env (:name member)
                                    (if (seq subst)
                                      (substitute-type-params (:field-type member) subst)
@@ -1972,10 +2130,8 @@
       var-type)
     (if-let [current-class (env-lookup-var env "__current_class__")]
       (if-let [field-type (lookup-class-field env current-class name)]
-        (if (and (env-var-non-nil? env name)
-                 (detachable-type? field-type))
-          (attachable-type field-type)
-          field-type)
+        ;; A field is never narrowed by a nil check (see env-var-non-nil?).
+        field-type
         (if-let [constant (lookup-class-constant env current-class name)]
           (:field-type constant)
           (if-let [method-sig (lookup-class-method env current-class name)]
@@ -2701,7 +2857,7 @@
 
 (defn check-spawn
   [env {:keys [body]}]
-  (let [spawn-env (make-type-env env)]
+  (let [spawn-env (narrowing-barrier-env env)]
     (env-add-var spawn-env "result" "Any")
     (env-add-var spawn-env "__spawn_result_type__" "Void")
     (doseq [stmt body]
@@ -3022,13 +3178,22 @@
                         {:error (type-error (str "Undefined variable: " target))}))))))
 
 (defn- reject-unguarded-detachable-target!
-  [_env {:keys [method]} {:keys [class-target target-detachable? guarded? normalized-target]}]
+  [env {:keys [method]} {:keys [class-target target-detachable? guarded? normalized-target target-name]}]
   (when (and (not class-target) target-detachable? (not guarded?))
     (throw (ex-info (str "Feature access on detachable target requires nil-check: " method)
                     {:error (type-error
-                             (str "Cannot call feature '" method "' on detachable "
-                                  (display-type normalized-target)
-                                  ". Wrap with: if <obj> /= nil then <obj>." method "(...) end"))}))))
+                             (if (and target-name
+                                      (or (field-var? env target-name)
+                                          (not (env-lookup-var env target-name))))
+                               ;; A field: `/= nil` cannot narrow it.
+                               (str "Cannot call feature '" method "' on detachable field '" target-name
+                                    "' of type " (display-type normalized-target)
+                                    ". A nil check does not narrow a field, since any call may reset it. "
+                                    "Bind it to a local first: if ?" target-name " as " target-name
+                                    "_ then " target-name "_." method "(...) end")
+                               (str "Cannot call feature '" method "' on detachable "
+                                    (display-type normalized-target)
+                                    ". Wrap with: if <obj> /= nil then <obj>." method "(...) end")))}))))
 
 (declare self-type-with-own-generic-params)
 
@@ -4559,12 +4724,12 @@
     ;; Register the dynamic class definition in the type environment
     (collect-class-info env class-def)
     (if enclosing-class
-      (check-method env enclosing-class
+      (check-method (narrowing-barrier-env env) enclosing-class
                     (some #(when (= :method (:type %)) %)
                           (feature-members class-def)))
       ;; No enclosing class (a top-level anonymous function): check the class
       ;; as before.
-      (check-class env class-def))
+      (check-class (narrowing-barrier-env env) class-def))
     ;; Anonymous functions have distinct generated runtime classes, but their
     ;; stable static type is structural Function -- carrying the literal's own
     ;; param/return types (falling back to Any for anything left unannotated
@@ -4965,6 +5130,30 @@
               (not= tt "Any")
               (not (and (string? tt) (is-generic-type-param? env tt)))))))
 
+(defn narrows-any?
+  "Whether a slot of type FROM, when it is Any or ?Any, is narrowed into TO,
+   for conforming one signature to another (an override to the routine it
+   redefines, a function value to a Function type). Unlike
+   any-into-concrete-without-convert?, which governs binding a value, a
+   generic parameter or a Function type counts as narrower than Any here:
+   `take(x: E)` cannot redefine `take(x: Any)`, since E may be Integer. The
+   outer `?` on both sides is ignored, because whether nil may flow is
+   types-compatible?'s question, so `?Any` into `?Integer` is caught as well
+   as `Any` into `Integer`. A Void target narrows nothing: a procedure-style
+   `fn (x: Integer) do ... end` (typed as returning Any) is a
+   Function(Integer): Void, whose result is discarded."
+  [env to from]
+  (let [base #(let [t (normalize-type (expand-type-aliases env %))]
+                (if (and (map? t) (:detachable t) (not (:param-types t))
+                         (empty? (or (:type-params t) (:type-args t))))
+                  (:base-type t)
+                  t))
+        to (base to)]
+    (boolean (and (not (env-lookup-var env "__with_java__"))
+                  (= (base from) "Any")
+                  (not= to "Any")
+                  (not= to "Void")))))
+
 (defn- throw-any-narrowing-error!
   [what target-type]
   (throw (ex-info (str "Cannot implicitly narrow Any to " what)
@@ -5034,6 +5223,12 @@
                       {:error (type-error
                                (str "Cannot assign " (display-type val-type)
                                     " to variable of type " (display-type var-type)))})))
+    ;; Keep nil-check narrowing in step with the assignment: a value that may
+    ;; be nil undoes it for every block containing this one. One that cannot
+    ;; be nil leaves it standing.
+    (when (and (detachable-type? (normalize-type var-type))
+               (or (= val-type "Nil") (detachable-type? (normalize-type val-type))))
+      (env-kill-non-nil! env target))
     (when (= target "result")
       (maybe-update-spawn-result! env val-type))))
 
@@ -5154,6 +5349,7 @@
    let behavior rather than widening this change to every call site."
   [env stmts]
   (register-closure-let-signatures! env stmts)
+  (register-assigned-names! env stmts)
   (doseq [stmt stmts]
     (check-statement env stmt)))
 
@@ -5201,6 +5397,9 @@
                                     " to variable '" name "' of type "
                                     (display-type inferred-type)))})))
     (env-add-var env name inferred-type)
+    ;; A mark already in this env for NAME was about the variable this one
+    ;; shadows.
+    (swap! (:non-nil-vars env) disj name)
     (when (and synthetic
                (string? name)
                (str/starts-with? name "__across_c_")
@@ -5219,31 +5418,41 @@
       (throw (ex-info "If condition must be Boolean"
                       {:error (type-error
                                (str "If condition must be Boolean, got " cond-type))}))))
-  (let [then-env (make-type-env env)]
-    (apply-condition-branch-refinement! then-env condition :then)
-    (doseq [stmt then]
-      (check-statement then-env stmt)))
+  ;; The branches are alternatives: check-exclusive-branches! keeps an
+  ;; assignment in one from undoing a nil check for the others.
   (let [else-chain-env (doto (make-type-env env)
                          (apply-condition-branch-refinement! condition :else))
-        final-else-env
+        then-branch (fn []
+                      (let [then-env (make-type-env env)]
+                        (apply-condition-branch-refinement! then-env condition :then)
+                        (doseq [stmt then]
+                          (check-statement then-env stmt))))
+        ;; Each elseif's condition is checked in the env left by the ones
+        ;; before it failing; its body, and the final else, are branches.
+        [elseif-branches final-else-env]
         (reduce
-         (fn [residual-env clause]
+         (fn [[branches residual-env] clause]
            (let [ei-cond-type (check-expression residual-env (:condition clause))]
              (when-not (= ei-cond-type "Boolean")
                (throw (ex-info "Elseif condition must be Boolean"
                                {:error (type-error
                                         (str "Elseif condition must be Boolean, got " ei-cond-type))}))))
-           (let [elseif-env (make-type-env residual-env)]
-             (apply-condition-branch-refinement! elseif-env (:condition clause) :then)
-             (doseq [stmt (:then clause)]
-               (check-statement elseif-env stmt)))
-           (doto (make-type-env residual-env)
-             (apply-condition-branch-refinement! (:condition clause) :else)))
-         else-chain-env
+           [(conj branches
+                  (fn []
+                    (let [elseif-env (make-type-env residual-env)]
+                      (apply-condition-branch-refinement! elseif-env (:condition clause) :then)
+                      (doseq [stmt (:then clause)]
+                        (check-statement elseif-env stmt)))))
+            (doto (make-type-env residual-env)
+              (apply-condition-branch-refinement! (:condition clause) :else))])
+         [[] else-chain-env]
          elseif)]
-    (when else
-      (doseq [stmt else]
-        (check-statement final-else-env stmt)))))
+    (check-exclusive-branches!
+     env
+     (cond-> (into [then-branch] elseif-branches)
+       else (conj (fn []
+                    (doseq [stmt else]
+                      (check-statement final-else-env stmt))))))))
 
 (defn check-loop
   "Check a `from ... until ... [invariant ...] [variant ...] do ... end`
@@ -5264,6 +5473,10 @@
   [env {:keys [init until variant invariant body] :as stmt}]
   (let [loop-env (make-type-env env)]
     (doseq [s init] (check-statement loop-env s))
+    ;; The body runs again after its own assignments, so a nil check from
+    ;; before the loop no longer holds for anything the body assigns.
+    (doseq [n (:all (assigned-names-in body))]
+      (env-kill-non-nil! loop-env n))
     (when until
       (let [cond-type (check-expression loop-env until)]
         (when-not (or (= cond-type "Boolean") (= cond-type "Void"))
@@ -5544,7 +5757,13 @@
         base-type-name (if (map? expr-type) (:base-type expr-type) expr-type)
         class-def (env-lookup-class env base-type-name)
         sealed? (and class-def (:sealed? class-def))]
-    (doseq [{:keys [class-name var-name bindings guard body generic-args]} clauses]
+    ;; Clauses (and the else) are alternatives; see check-exclusive-branches!.
+    (check-exclusive-branches!
+     env
+     (cond->
+      (mapv
+       (fn [{:keys [class-name var-name bindings guard body generic-args]}]
+        (fn []
       (when-not (or (= class-name base-type-name)
                     (class-subtype? env class-name base-type-name))
         (throw (ex-info (str "Match clause type " class-name
@@ -5605,9 +5824,9 @@
             ;; (this is what lets a nested pattern narrow a field).
             (apply-condition-branch-refinement! clause-env guard :then)))
         (doseq [s body]
-          (check-statement clause-env s))))
-    (when else
-      (doseq [s else] (check-statement env s)))
+          (check-statement clause-env s)))))
+       clauses)
+      else (conj (fn [] (doseq [s else] (check-statement env s))))))
     (when (and sealed? (not else))
       ;; A clause that may not fire does not cover its variant -- see
       ;; clause-may-not-fire? for what that means once a field-type pattern
@@ -6723,28 +6942,73 @@
                                       m-name "'. Provide a body for '" m-name
                                       "', or declare '" class-name "' itself 'deferred'."))}))))))
 
+(def ^:private builtin-protocol-classes
+  "The builtin classes whose routines live only in the method table (their
+   `:body` is empty), so `inherited-method-member` never sees them. Any is
+   every class's implicit root; the other two are reached through `inherit`."
+  #{"Any" "Comparable" "Hashable"})
+
+(defn- inherited-method-members
+  "Every routine named METHOD-NAME of ARITY that the heir redefines: the
+   nearest one along each `inherit` clause, deduplicated (a diamond reaches the
+   same declaration twice). An override must conform to all of them, not just
+   the first parent's, or `Both inherit L, R` may narrow R's parameter."
+  [env parents method-name arity]
+  (->> parents
+       (keep #(inherited-method-member env [%] method-name arity))
+       distinct
+       vec))
+
+(defn- inherited-protocol-method-member
+  "The signature of a builtin protocol routine (Any.equals, Comparable.compare,
+   Hashable.hash, ...) that a method named METHOD-NAME of ARITY redefines, or
+   nil. Explicit protocol ancestors are tried before the implicit Any."
+  [env parents method-name arity]
+  (letfn [(ancestors [class-name visited]
+            (if (or (not (string? class-name)) (contains? visited class-name))
+              visited
+              (reduce (fn [seen pe] (ancestors (:parent pe) seen))
+                      (conj visited class-name)
+                      (:parents (env-lookup-class env class-name)))))]
+    (let [reached (reduce (fn [seen pe] (ancestors (:parent pe) seen)) #{} parents)]
+      (some (fn [cn]
+              (when (or (= cn "Any") (contains? reached cn))
+                (when-let [sig (env-lookup-method env cn method-name arity)]
+                  (assoc sig :name method-name))))
+            ["Comparable" "Hashable" "Any"]))))
+
 (defn- check-override-conformance
   "Enforce CONTRAVARIANT parameters and COVARIANT return for a method that
    overrides an inherited routine of the same name and arity. The inherited
    signature is first substituted into the heir's type context (so a method
    inherited from, say, Container[Integer] is compared with T resolved to
-   Integer). A comparison is skipped only when, after that substitution, a type
-   is still an unresolved generic parameter of the heir itself."
+   Integer). A type still naming one of the heir's own generic parameters after
+   that substitution is compared like any other: `Stack[E] inherit
+   Container[E]` cannot take `store(x: Integer)`, since E may be String. ENV
+   must therefore be the class env, where those parameters are registered.
+
+   The override must conform to the routine inherited along every `inherit`
+   clause, not only the first. A builtin protocol routine counts as inherited too: every class has Any's
+   `equals(other: Any)`, so `equals(other: Rational)` narrows a parameter
+   exactly as an override of a user ancestor's routine would."
   [env class-name parents member]
-  (when (and (= (:type member) :method) (seq parents))
+  (when (= (:type member) :method)
     (let [m-name (:name member)
           m-params (or (:params member) [])
           arity (count m-params)
-          parent-m (inherited-method-member env parents m-name arity)
-          concrete? (fn [t] (and t (not (is-generic-type-param? env t))))]
-      (when parent-m
+          parent-ms (or (seq (inherited-method-members env parents m-name arity))
+                        (some-> (inherited-protocol-method-member env parents m-name arity) list))]
+      (doseq [parent-m parent-ms]
         ;; Parameters are contravariant: each inherited parameter type must
         ;; conform to the overriding parameter type (the override must accept at
         ;; least what the inherited routine accepted).
         (doseq [[idx pp cp] (map vector (range) (or (:params parent-m) []) m-params)]
           (let [pt (:type pp) ct (:type cp)]
-            (when (and pt ct (concrete? pt) (concrete? ct)
-                       (not (types-compatible? env pt ct)))
+            ;; types-compatible? lets Any stand for any type, so an
+            ;; inherited `Any` parameter would pass for any narrowing of it.
+            (when (and pt ct
+                       (or (narrows-any? env ct pt)
+                           (not (types-compatible? env pt ct))))
               (throw (ex-info (str "Invalid override of '" m-name "'")
                               {:error (type-error
                                        (str "Override of '" m-name "' in class '" class-name
@@ -6756,8 +7020,9 @@
         ;; Return is covariant: the overriding return type must conform to the
         ;; inherited return type.
         (let [pr (:return-type parent-m) cr (:return-type member)]
-          (when (and pr cr (concrete? pr) (concrete? cr)
-                     (not (types-compatible? env cr pr)))
+          (when (and pr cr
+                     (or (narrows-any? env pr cr)
+                         (not (types-compatible? env cr pr))))
             (throw (ex-info (str "Invalid override of '" m-name "'")
                             {:error (type-error
                                      (if (:synthesized-getter? member)
@@ -7069,15 +7334,21 @@
                   (:parents class-def))))))))
 
 (defn- check-class-invariants!
-  "Every `invariant` clause must be Boolean (or Void)."
+  "Every `invariant` clause must type-check as Boolean. The parser puts a
+   clause's expression under `:condition`, as for require/ensure; this read
+   `:expr`, so no invariant was ever type-checked."
   [class-env name invariant]
   (doseq [assertion invariant]
-    (when (and assertion (:expr assertion))
-      (let [inv-type (check-expression class-env (:expr assertion))]
-        (when-not (or (= inv-type "Boolean") (= inv-type "Void"))
-          (throw (ex-info (str "Invariant must be Boolean in class " name)
-                          {:error (type-error
-                                   (str "Invariant must be Boolean, got " inv-type))})))))))
+    (when-let [condition (:condition assertion)]
+      (with-type-error-location
+        condition
+        (fn []
+          (let [inv-type (check-expression class-env condition)]
+            (when-not (= inv-type "Boolean")
+              (throw (ex-info (str "Invariant must be Boolean in class " name)
+                              {:error (type-error
+                                       (str "Invariant must be Boolean, got "
+                                            (display-type inv-type)))})))))))))
 
 (defn- check-class-sections!
   "Check each feature/constructor section: override conformance and bodies for
@@ -7094,7 +7365,7 @@
               member
               (fn []
                 (check-attribute-redeclaration env name parents member)
-                (check-override-conformance env name parents member)
+                (check-override-conformance class-env name parents member)
                 (check-override-contracts env name parents member)))
             (check-method class-env name member))
           (= (:type member) :field)

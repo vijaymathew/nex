@@ -77,8 +77,8 @@ feature
         writer := create PrintWriter.make(opened_socket.getOutputStream(), true)
         result := true
       rescue
-        if socket /= nil then
-          socket.close()
+        if ?socket as s then
+          s.close()
         end
         socket := nil
         reader := nil
@@ -98,9 +98,9 @@ feature
     require
       connected: writer /= nil
     do
-      if writer /= nil then
-        writer.print(text)
-        writer.flush()
+      if ?writer as w then
+        w.print(text)
+        w.flush()
       end
     end
 
@@ -109,9 +109,9 @@ feature
     require
       connected: writer /= nil
     do
-      if writer /= nil then
-        writer.println(text)
-        writer.flush()
+      if ?writer as w then
+        w.println(text)
+        w.flush()
       end
     end
 
@@ -120,23 +120,23 @@ feature
     require
       connected: reader /= nil
     do
-      if reader /= nil then
-        result := reader.readLine()
+      if ?reader as r then
+        result := r.readLine()
       end
     end
 
   close()
     note "Close the connection if it is open. Safe to call multiple times."
   do
-    if reader /= nil then
-      reader.close()
+    if ?reader as r then
+      r.close()
     end
-    if writer /= nil then
-      writer.flush()
-      writer.close()
+    if ?writer as w then
+      w.flush()
+      w.close()
     end
-    if socket /= nil then
-      socket.close()
+    if ?socket as s then
+      s.close()
     end
     reader := nil
     writer := nil

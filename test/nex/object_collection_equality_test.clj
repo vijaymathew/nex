@@ -47,7 +47,10 @@
     tag: String
   create make(i: Integer, n: String) do id := i tag := n end
   feature
-    equals(o: K): Boolean do result := id = o.id end
+    equals(other: Any): Boolean do
+      result := false
+      if convert other to o: K then result := id = o.id end
+    end
     hash: Integer do result := id end
 end
 let a := create K.make(1, \"first\")

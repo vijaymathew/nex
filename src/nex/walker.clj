@@ -711,15 +711,28 @@
                             :body [{:type :assign :target "ordinal"
                                     :value {:type :identifier :name "o"}}]
                             :declaration-only? false :ensure nil :rescue nil}
+        ;; Comparable's `compare(a: Any)` cannot be narrowed by an override
+        ;; (parameters are contravariant), so this takes Any and narrows to
+        ;; the enum inside, raising for anything else as Byte_Array does.
         compare-method {:type :method :name "compare"
-                        :params [{:name "other__" :type parent-name}]
+                        :params [{:name "other__" :type "Any"}]
                         :return-type "Integer" :alias nil :note nil :require nil
-                        :body [{:type :assign :target "result"
-                                :value {:type :binary :operator "-"
-                                        :left {:type :identifier :name "ordinal"}
-                                        :right {:type :call :target "other__"
-                                                :method "ordinal" :args []
-                                                :has-parens false}}}]
+                        :body [{:type :if
+                                :condition {:type :convert
+                                            :value {:type :identifier :name "other__"}
+                                            :var-name "o__"
+                                            :target-type parent-name}
+                                :then [{:type :assign :target "result"
+                                        :value {:type :binary :operator "-"
+                                                :left {:type :identifier :name "ordinal"}
+                                                :right {:type :call :target "o__"
+                                                        :method "ordinal" :args []
+                                                        :has-parens false}}}]
+                                :elseif []
+                                :else [{:type :raise
+                                        :value {:type :string
+                                                :value (str parent-name ".compare requires a "
+                                                            parent-name)}}]}]
                         :declaration-only? false :ensure nil :rescue nil}
         member-constants (mapv (fn [vname]
                                  {:type :field :name vname :field-type parent-name

@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+- **Fix: class invariants are type-checked.** The checker read each clause
+  from the wrong AST key, so no `invariant` was ever checked: an undefined
+  name, a non-Boolean clause, or `rate >= 0` on a `Real` all passed and failed
+  later or never. They are now errors like in `require`/`ensure`, with the
+  clause's line. `examples/emacs_demo.nex` compared a `Real` with Integer
+  literals in its invariant and is fixed.
+- **Breaking: `x /= nil` no longer narrows a field.** Any call, or another
+  task, may reset a field between the check and the use, so `if f /= nil then
+  clear() f.m() end` type-checked and then failed with a void error. Bind the
+  field to a local with the object test: `if ?f as g then g.m() end`.
+  `lib/net/tcp_socket.nex` and `lib/net/server_socket.nex` are updated.
+- **Fix: nil-check narrowing ends when the variable may be nil again.** A
+  narrowed local stayed narrowed after `x := nil` (in the same block, in a
+  branch, or in a loop body that runs again), inside a closure that runs after
+  such an assignment, after a call to a closure or `spawn` body that assigns
+  it, and even for a nested `let x` shadowing it. All of these are now
+  rejected. Assigning an attached value keeps the narrowing, and an assignment
+  in one branch of an `if` or `match` does not affect the others.
+- **Fix: overrides of builtin protocol routines are checked for variance.**
+  `equals(other: Rational)` narrows `Any`'s `equals(other: Any)`, and
+  `compare(other: Box)` in a class inheriting `Comparable` narrows
+  `compare(a: Any)`, but both were accepted: the override check only walked
+  user-declared ancestors, never the implicit `Any` or the builtin
+  `Comparable`/`Hashable`, and it let an inherited `Any` parameter pass for
+  any narrower type. Both are now rejected at the definition. Keep the `Any`
+  parameter and narrow inside with `convert other to r: Rational then ... end`.
+  Narrowing a user ancestor's `Any` parameter (or `?Any`) is rejected too.
+  An `enum`'s generated `compare` now takes `Any` to match, and raises when
+  given something other than a member of that enum.
+- **Fix: four more variance holes closed.**
+  - A function value with an `Any` parameter or return no longer conforms
+    by wildcard: `fn (x: Integer)` is not a `Function(x: Any)`, and
+    `fn (): Any` is not a `Function(): Integer`. (A `Void` return still
+    accepts any function, since its result is discarded.)
+  - `?` inside a function type is no longer ignored: `fn (x: Dog)` is not a
+    `Function(x: ?Dog)` (it could be passed `nil`), and `fn (): ?Dog` is not
+    a `Function(): Dog`.
+  - Under multiple inheritance an override must conform to the routine
+    inherited along every `inherit` clause; only the first was checked.
+  - An override naming the heir's own generic parameter is checked instead of
+    skipped: `Stack[E] inherit Container[E]` can no longer redefine
+    `store(x: E)` as `store(x: Integer)`, and `take(x: E)` cannot redefine
+    `take(x: Any)`.
+
 ## 0.5.7 - 2026-10-06
 
 - **Change: repeated inheritance follows the Definition.** A class that

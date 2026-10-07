@@ -286,7 +286,7 @@ end"))
               repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
       (let [ctx (repl/init-repl-context)]
         (with-out-str
-          (repl/eval-code ctx "class C inherit Comparable create make(v: Integer) do x := v end feature x: Integer compare(c: C): Integer do if x < c.x then result := -1 elseif x > c.x then result := 1 else result := 0 end ensure valid_c: c.x > 10 end end")
+          (repl/eval-code ctx "class C inherit Comparable create make(v: Integer) do x := v end feature x: Integer compare(a: Any): Integer do if convert a to c: C then if x < c.x then result := -1 elseif x > c.x then result := 1 else result := 0 end end ensure valid_c: convert a to c: C and c.x > 10 end end")
           (repl/eval-code ctx "let c1 := create C.make(10)")
           (repl/eval-code ctx "let c2 := create C.make(100)"))
         (is (= "Boolean true" (str/trim (with-out-str (repl/eval-code ctx "c1 < c2")))))

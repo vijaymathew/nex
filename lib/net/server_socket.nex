@@ -46,8 +46,8 @@ feature
     require
       listening: server_socket /= nil
     do
-      if server_socket /= nil then
-        result := create Tcp_Socket.from_socket(server_socket.accept())
+      if ?server_socket as ss then
+        result := create Tcp_Socket.from_socket(ss.accept())
       else
         raise "server socket is not listening"
       end
@@ -59,15 +59,13 @@ feature
       listening: server_socket /= nil
       valid_timeout: timeout_ms >= 0
     do
-      if server_socket /= nil then
+      if ?server_socket as ss then
         do
-          server_socket.setSoTimeout(timeout_ms)
-          result := create Tcp_Socket.from_socket(server_socket.accept())
-          server_socket.setSoTimeout(0)
+          ss.setSoTimeout(timeout_ms)
+          result := create Tcp_Socket.from_socket(ss.accept())
+          ss.setSoTimeout(0)
         rescue
-          if server_socket /= nil then
-            server_socket.setSoTimeout(0)
-          end
+          ss.setSoTimeout(0)
           result := nil
         end
       else
@@ -78,8 +76,8 @@ feature
   close()
     note "Close the server socket if it is open. Safe to call multiple times."
   do
-    if server_socket /= nil then
-      server_socket.close()
+    if ?server_socket as ss then
+      ss.close()
     end
     server_socket := nil
   ensure

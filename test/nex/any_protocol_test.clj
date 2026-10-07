@@ -305,7 +305,7 @@ print(m)"))))
   feature v: Integer
   create make(x: Integer) do v := x end
   feature
-    equals(o: E): Boolean do result := true end
+    equals(o: Any): Boolean do result := true end
     hash: Integer do result := 1 end
 end
 let a := create E.make(1)

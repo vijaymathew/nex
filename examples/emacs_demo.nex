@@ -65,7 +65,7 @@ class DemoClass
   -- Class invariants
   invariant
     valid_count: count >= 0
-    valid_rate: rate >= 0 and rate <= 1
+    valid_rate: rate >= 0.0 and rate <= 1.0
 end
 
 -- Inheritance and base feature access

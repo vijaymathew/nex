@@ -277,14 +277,16 @@ let swapped: Boolean := ar.compare_and_set(nil, \"done\")"
                   inherit Comparable
                   feature
                     x: Integer
-                    compare(a: A): Integer
+                    compare(other: Any): Integer
                     do
-                      if x < a.x then
-                        result := -1
-                      elseif x > a.x then
-                        result := 1
-                      else
-                        result := 0
+                      if convert other to a: A then
+                        if x < a.x then
+                          result := -1
+                        elseif x > a.x then
+                          result := 1
+                        else
+                          result := 0
+                        end
                       end
                     end
                   create
@@ -1680,8 +1682,7 @@ end
 
 class B
   feature
-    a: ?A
-    demo() do
+    demo(a: ?A) do
       if a /= nil then
         a.show()
       end
@@ -1703,8 +1704,7 @@ end
 
 class B
   feature
-    a: ?A
-    demo() do
+    demo(a: ?A) do
       if a = nil then
         print(\"nil\")
       else
@@ -2138,8 +2138,10 @@ end"
       this.value := value
     end
   feature
-    compare(other: Box): Integer do
-      result := value.compare(other.value)
+    compare(other: Any): Integer do
+      if convert other to b: Box then
+        result := value.compare(b.value)
+      end
     end
 end
 

@@ -214,13 +214,13 @@ class Result [V]
     end
     describe(): String do
       if ok then
-        if value /= nil then
-          result := "Success: " + value.to_string
+        if ?value as v then
+          result := "Success: " + v.to_string
         else
           result := "Error"
         end
-      elseif error /= nil then
-        result := "Error: " + error
+      elseif ?error as e then
+        result := "Error: " + e
       else
         result := "Error"
       end
