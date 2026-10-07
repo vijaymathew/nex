@@ -2,24 +2,13 @@
 
 ## Unreleased
 
-- **Fix: class invariants are type-checked.** The checker read each clause
-  from the wrong AST key, so no `invariant` was ever checked: an undefined
-  name, a non-Boolean clause, or `rate >= 0` on a `Real` all passed and failed
-  later or never. They are now errors like in `require`/`ensure`, with the
-  clause's line. `examples/emacs_demo.nex` compared a `Real` with Integer
-  literals in its invariant and is fixed.
+## 0.5.8 - 2026-10-07
+
 - **Breaking: `x /= nil` no longer narrows a field.** Any call, or another
   task, may reset a field between the check and the use, so `if f /= nil then
   clear() f.m() end` type-checked and then failed with a void error. Bind the
   field to a local with the object test: `if ?f as g then g.m() end`.
   `lib/net/tcp_socket.nex` and `lib/net/server_socket.nex` are updated.
-- **Fix: nil-check narrowing ends when the variable may be nil again.** A
-  narrowed local stayed narrowed after `x := nil` (in the same block, in a
-  branch, or in a loop body that runs again), inside a closure that runs after
-  such an assignment, after a call to a closure or `spawn` body that assigns
-  it, and even for a nested `let x` shadowing it. All of these are now
-  rejected. Assigning an attached value keeps the narrowing, and an assignment
-  in one branch of an `if` or `match` does not affect the others.
 - **Fix: overrides of builtin protocol routines are checked for variance.**
   `equals(other: Rational)` narrows `Any`'s `equals(other: Any)`, and
   `compare(other: Box)` in a class inheriting `Comparable` narrows
@@ -45,6 +34,19 @@
     skipped: `Stack[E] inherit Container[E]` can no longer redefine
     `store(x: E)` as `store(x: Integer)`, and `take(x: E)` cannot redefine
     `take(x: Any)`.
+- **Fix: nil-check narrowing ends when the variable may be nil again.** A
+  narrowed local stayed narrowed after `x := nil` (in the same block, in a
+  branch, or in a loop body that runs again), inside a closure that runs after
+  such an assignment, after a call to a closure or `spawn` body that assigns
+  it, and even for a nested `let x` shadowing it. All of these are now
+  rejected. Assigning an attached value keeps the narrowing, and an assignment
+  in one branch of an `if` or `match` does not affect the others.
+- **Fix: class invariants are type-checked.** The checker read each clause
+  from the wrong AST key, so no `invariant` was ever checked: an undefined
+  name, a non-Boolean clause, or `rate >= 0` on a `Real` all passed and failed
+  later or never. They are now errors like in `require`/`ensure`, with the
+  clause's line. `examples/emacs_demo.nex` compared a `Real` with Integer
+  literals in its invariant and is fixed.
 
 ## 0.5.7 - 2026-10-06
 
