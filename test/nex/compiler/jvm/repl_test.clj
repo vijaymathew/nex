@@ -2977,3 +2977,73 @@ end")
           (is (not (str/includes? output "Internal error")) output)
           (is (str/includes? output "15") output)
           (is (str/includes? output "42") output))))))
+
+(defn- repl-session-output
+  "Everything a fresh compiled-backend REPL session prints for INPUTS, each
+   entered as its own input."
+  [type-checking? inputs]
+  (binding [repl/*type-checking-enabled* (atom type-checking?)
+            repl/*repl-var-types* (atom {})
+            repl/*repl-type-aliases* (atom {})
+            repl/*repl-backend* (atom :compiled)
+            repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+    (with-out-str
+      (reduce (fn [ctx input] (or (repl/eval-code ctx input) ctx))
+              (repl/init-repl-context)
+              inputs))))
+
+(deftest repl-class-redefinition-reaches-everything-compiled-against-it-test
+  (testing "redefining a class recompiles the session's classes and functions
+            compiled against its old version: a subclass sees the redefined
+            parent's new feature, and a class or function creating it creates
+            the new version"
+    (doseq [type-checking? [false true]]
+      (let [output (repl-session-output
+                    type-checking?
+                    ["class Engine create make do end feature power: Integer do result := 100 end end"
+                     "class Car create make do engine := create Engine.make end feature engine: Engine end"
+                     "function new_engine(): Engine do result := create Engine.make end"
+                     "class Sedan inherit Car create make do Car.make end feature seats: Integer do result := 5 end end"
+                     "class Engine create make do end feature power: Integer do result := 200 end end"
+                     "print((create Car.make).engine.power + 1)"
+                     "print(new_engine().power + 2)"
+                     "class Car create make do engine := create Engine.make end feature engine: Engine wheels: Integer do result := 4 end end"
+                     "print((create Sedan.make).wheels + (create Sedan.make).seats)"])]
+        (is (str/includes? output "201") output)
+        (is (str/includes? output "202") output)
+        (is (str/includes? output "9") output)
+        (is (not (str/includes? output "Error")) output)))))
+
+(deftest repl-closure-made-by-a-method-on-a-new-object-test
+  (testing "a closure a method makes, used in the same input that creates the
+            object, works when that input runs on the interpreter: its
+            reference to the enclosing object, prepared for the compiled
+            backend as `__closure_this__`, reads as `this` there"
+    (doseq [type-checking? [false true]]
+      (let [output (repl-session-output
+                    type-checking?
+                    ["class K create make(n: Integer) do k := n end feature k: Integer scaler: Function do result := fn(x: Integer): Integer do result := x * k end end end"
+                     "print((create K.make(3)).scaler.call1(5))"
+                     "let t := (create K.make(4)).scaler\nprint(t.call1(5))"])]
+        (is (not (str/includes? output "__closure_this__")) output)
+        (is (str/includes? output "15") output)
+        (is (str/includes? output "20") output)))))
+
+(deftest repl-caller-of-a-function-redefined-with-other-parameters-test
+  (testing "calling code compiled against a function's earlier parameter list
+            reports that, instead of failing with an index out of bounds"
+    (let [output (repl-session-output
+                  false
+                  ["function g(x: Integer): Integer do result := x end"
+                   "function f(): Integer do result := g(3) end"
+                   "function g(x: Integer, y: Integer): Integer do result := x + y end"
+                   "print(f())"])]
+      (is (str/includes? output "`g` takes 2 arguments, but this call passes 1") output)
+      (is (not (str/includes? output "out of bounds")) output))))
+
+(deftest repl-assignment-shows-the-variable-type-test
+  (testing "with type checking on, an assignment's echo shows the variable's
+            type, not Any"
+    (let [output (repl-session-output true ["let n := 5" "n := 6"])]
+      (is (str/includes? output "Integer 6") output)
+      (is (not (str/includes? output "Any 6")) output))))

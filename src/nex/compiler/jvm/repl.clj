@@ -876,10 +876,43 @@
          distinct
          (mapv latest))))
 
+(defn- referenced-class-names
+  "The names in CANDIDATES that CLASS-DEF mentions anywhere — as a parent, a
+   field or parameter type, a `create` target, ... — other than its own.
+   Over-approximate on purpose: an extra recompile is harmless."
+  [class-def candidates]
+  (disj (into #{} (comp (filter string?) (filter candidates)) (tree-seq coll? seq class-def))
+        (:name class-def)))
+
+(defn- dependent-session-classes
+  "The session's classes, other than those in BATCH-NAMES, that depend on a
+   class in REDEFINED, directly or through one another. Each was compiled
+   against the redefined class's old JVM class — as its superclass, in a
+   `create`, ... — so it must be recompiled with the batch, or a subclass
+   misses its redefined parent's features and a class creating the
+   redefined one keeps creating the old version."
+  [session redefined batch-names]
+  (let [others (remove #(contains? batch-names (:name %)) (vals @(:class-asts session)))
+        all-names (into (set batch-names) (map :name others))
+        refs (into {} (map (juxt :name #(referenced-class-names % all-names))) others)]
+    (loop [stale (set redefined), deps []]
+      (let [more (remove (fn [cd] (or (some #(= (:name cd) (:name %)) deps)
+                                      (empty? (filter stale (refs (:name cd))))))
+                         others)]
+        (if (seq more)
+          (recur (into stale (map :name more)) (into deps more))
+          deps)))))
+
 (defn- compile-and-register-classes!
   [session ast source-id]
-  (let [actual-classes (one-per-name (concat (user-class-defs ast)
-                                             (anonymous-class-defs ast)))]
+  (let [batch (one-per-name (concat (user-class-defs ast)
+                                    (anonymous-class-defs ast)))
+        batch-names (set (map :name batch))
+        redefined (filter #(contains? @(:compiled-classes session) %) batch-names)
+        actual-classes (one-per-name
+                        (concat batch
+                                (when (seq redefined)
+                                  (dependent-session-classes session redefined batch-names))))]
     (when (seq actual-classes)
       (let [compiled-class-defs actual-classes
             new-class-map (allocate-compiled-class-metadata session compiled-class-defs)
@@ -1234,8 +1267,17 @@
              redeclaring? (redeclares-existing-class-or-function? session prepared-ast)]
          (try
            (let [class-name (next-class-name! session)
+                 redefines-class? (some #(contains? @(:compiled-classes session) (:name %))
+                                        (user-class-defs prepared-ast))
                  _ (compile-and-register-classes! session prepared-ast source-id)
                  _ (remember-top-level-ast! session prepared-ast)
+                 ;; The session's functions were compiled against the old
+                 ;; class too (a `create` in one still made the old version).
+                 ;; Only after remembering this input: recompiling functions
+                 ;; recompiles the session's classes from what it remembers,
+                 ;; which must already be the new definition.
+                 _ (when redefines-class?
+                     (re-register-session-functions! session source-id))
                  {:keys [unit]} (lower/lower-repl-cell prepared-ast {:name class-name
                                                                      :compiled-classes (compiled-classes-for-lowering session)
                                                                      :classes (vals @(:class-asts session))

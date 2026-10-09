@@ -1114,6 +1114,14 @@
                                  {:classes (vals @(:classes ctx))
                                   :imports @(:imports ctx)
                                   :var-types @*repl-var-types*})))
+                     ;; the variable's type, which an assignment leaves as it was
+                     :assign (or (get @*repl-var-types* (:target expr-node))
+                                 (when-let [value (:value expr-node)]
+                                   (tc/infer-expression-type
+                                    value
+                                    {:classes (vals @(:classes ctx))
+                                     :imports @(:imports ctx)
+                                     :var-types @*repl-var-types*})))
                      (tc/infer-expression-type
                       expr-node
                       {:classes (vals @(:classes ctx))
