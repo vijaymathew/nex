@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+## 0.5.9 - 2026-10-09
+
+- **Breaking: some earlier programs are rejected or read differently.**
+  In a script or a routine, `x = 5` standing alone (a comparison whose answer
+  is thrown away, almost always meant as `x := 5`) and a function named but
+  not called (`hello` for `hello()`) are now type errors; REPL input is
+  exempt. A line starting with `(` after a `let` or assignment now starts a
+  new statement instead of continuing the value. The text of `exception` in a
+  `rescue` changed for an invalid number (`Not a valid number: "abc"`) and for
+  `Map.get` of a missing key, and many type-error messages are reworded (see
+  below). The installer now requires Java 17 or later, which Nex already
+  needed to run.
+- **Faster startup: an installed `nex` now starts in about 0.6-1.5s instead
+  of 5-7s.** `install.sh` compiles Nex ahead of time into `nex.jar`
+  (`clojure -M:dist`), and the `nex` command runs it with plain `java`
+  instead of loading Nex's Clojure source through the Clojure CLI on every
+  run. After the first run, a JVM class-data cache (an AOT cache on Java 25+,
+  AppCDS on Java 17-24) is built in the background in `~/.cache/nex`;
+  `NEX_JVM_CACHE=off` disables it. Running `bin/nex` from a source checkout
+  is unchanged. When it has to install Java, the installer now prefers
+  Java 25.
+- **Fix: the installer works on fresh machines.** It requires Java 17+ and
+  Clojure CLI 1.11.1.1420+ (installing or upgrading them), uses `sudo` only
+  when the install directory needs it, verifies the install by running a
+  program, and no longer exits with an error after a successful install.
+- **Clearer errors for four common beginner mistakes.** `greet "Bob"` and
+  `print "hi"` (arguments without parentheses) are rejected with "Missing
+  parentheses: ... `greet("Bob")`" instead of silently doing nothing or
+  failing with an internal compiler error. `x = 5` written for `x := 5`, and a
+  function named but not called (`hello` for `hello()`), are rejected
+  anywhere in a routine or script, not only as a routine's last statement;
+  REPL input is exempt, since the REPL shows the value. `Counter.make(1)`
+  without `create` now says to write `create Counter.make(1)` (it used to
+  print a sentence with the class name missing). A builtin's name alone, such
+  as `print`, now runs as a call with no arguments instead of crashing the
+  compiled backend.
+- **Syntax errors name the habit from another language.** Instead of parser
+  wording ("no viable alternative at input", "token recognition error") at
+  the place parsing failed, a syntax error now points at the likely mistake
+  and says what Nex writes: `else if` (`elseif`), `&&`/`||` (`and`/`or`),
+  `;`, `//` comments (`--`), `+=` (`x := x + 1`), `xs[0]` (`xs.get(0)`),
+  braces for blocks, a string never closed (at the line where it starts, not
+  where parsing gave up), a field with no type, fields outside a `feature`
+  section, and a block whose `end` is missing (naming the `if`, loop, class or
+  function and its line). `return`, `while`, `for`, `println`, `printf`,
+  `puts` and `echo` now say what Nex uses instead of "Undefined function".
+  Any parser message left over loses its jargon too.
+- **Runtime errors say where they happened.** `nex file.nex` now follows the
+  error message with its line and the calls that led there (`at line 9, in
+  Stack.pop` / `called from line 14, in drain`), read from the compiled
+  program's stack trace; a deep recursion is shown once, with a repeat count.
+  A broken contract says whose obligation it was: a precondition blames the
+  call ("The call at line 8 does not meet the precondition `non_negative` of
+  sqrt_int."), a postcondition or invariant the routine ("double, called at
+  line 8, does not deliver its postcondition `doubled`."). A stack overflow
+  is reported as too many nested calls, not `java.lang.StackOverflowError`;
+  an invalid number names its input (`Not a valid number: "abc"`); a
+  substring's range reads `Range 1 to 10` instead of Java's `[1, 10)`; and
+  `Map.get` of a missing key names the key and points to `has_key` and
+  `try_get`. The last two messages also change the text of `exception` in a
+  `rescue`.
 - **Type errors say what to write instead.** A misspelled or foreign member
   name names the class and suggests the likely one: "`increment` is not a
   feature of Counter. Did you mean `inc`? Counter has: inc, value."
@@ -17,58 +78,9 @@
   statement.** `let y := x + 1` followed by `(x + y).to_string` used to be
   read as one expression, failing with "Undefined variable: y"; statements
   already worked this way.
-- **Runtime errors say where they happened.** `nex file.nex` now follows the
-  error message with its line and the calls that led there (`at line 9, in
-  Stack.pop` / `called from line 14, in drain`), read from the compiled
-  program's stack trace; a deep recursion is shown once, with a repeat count.
-  A broken contract says whose obligation it was: a precondition blames the
-  call ("The call at line 8 does not meet the precondition `non_negative` of
-  sqrt_int."), a postcondition or invariant the routine ("double, called at
-  line 8, does not deliver its postcondition `doubled`."). A stack overflow
-  is reported as too many nested calls, not `java.lang.StackOverflowError`;
-  an invalid number names its input (`Not a valid number: "abc"`); a
-  substring's range reads `Range 1 to 10` instead of Java's `[1, 10)`; and
-  `Map.get` of a missing key names the key and points to `has_key` and
-  `try_get`. The last two messages also change the text of `exception` in a
-  `rescue`.
-- **Syntax errors name the habit from another language.** Instead of parser
-  wording ("no viable alternative at input", "token recognition error") at
-  the place parsing failed, a syntax error now points at the likely mistake
-  and says what Nex writes: `else if` (`elseif`), `&&`/`||` (`and`/`or`),
-  `;`, `//` comments (`--`), `+=` (`x := x + 1`), `xs[0]` (`xs.get(0)`),
-  braces for blocks, a string never closed (at the line where it starts, not
-  where parsing gave up), a field with no type, fields outside a `feature`
-  section, and a block whose `end` is missing (naming the `if`, loop, class or
-  function and its line). `return`, `while`, `for`, `println`, `printf`,
-  `puts` and `echo` now say what Nex uses instead of "Undefined function".
-  Any parser message left over loses its jargon too.
-- **Clearer errors for four common beginner mistakes.** `greet "Bob"` and
-  `print "hi"` (arguments without parentheses) are rejected with "Missing
-  parentheses: ... `greet("Bob")`" instead of silently doing nothing or
-  failing with an internal compiler error. `x = 5` written for `x := 5`, and a
-  function named but not called (`hello` for `hello()`), are rejected
-  anywhere in a routine or script, not only as a routine's last statement;
-  REPL input is exempt, since the REPL shows the value. `Counter.make(1)`
-  without `create` now says to write `create Counter.make(1)` (it used to
-  print a sentence with the class name missing). A builtin's name alone, such
-  as `print`, now runs as a call with no arguments instead of crashing the
-  compiled backend.
 - **New beginner error-message regression suite** in `test/beginner_errors/`:
   one program per common mistake, with the message it must produce. Cases
   whose message still needs work are recorded as `pending`.
-- **Faster startup: an installed `nex` now starts in about 0.6-1.5s instead
-  of 5-7s.** `install.sh` compiles Nex ahead of time into `nex.jar`
-  (`clojure -M:dist`), and the `nex` command runs it with plain `java`
-  instead of loading Nex's Clojure source through the Clojure CLI on every
-  run. After the first run, a JVM class-data cache (an AOT cache on Java 25+,
-  AppCDS on Java 17-24) is built in the background in `~/.cache/nex`;
-  `NEX_JVM_CACHE=off` disables it. Running `bin/nex` from a source checkout
-  is unchanged. When it has to install Java, the installer now prefers
-  Java 25.
-- **Fix: the installer works on fresh machines.** It requires Java 17+ and
-  Clojure CLI 1.11.1.1420+ (installing or upgrading them), uses `sudo` only
-  when the install directory needs it, verifies the install by running a
-  program, and no longer exits with an error after a successful install.
 
 ## 0.5.8 - 2026-10-07
 
