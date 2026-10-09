@@ -73,7 +73,7 @@ if d /= nil then
  d := maybe()
  print(g(d))
 end")
-                 (re-find #"Expected Dog, got \?Dog")))))
+                 (re-find #"should be Dog, but got \?Dog")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Loops

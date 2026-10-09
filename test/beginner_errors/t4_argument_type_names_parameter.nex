@@ -5,5 +5,5 @@ end
 print(add(1, "2"))
 
 -- Mistake: an argument of the wrong type
--- status: pending
+-- status: fixed
 -- expect: `b`

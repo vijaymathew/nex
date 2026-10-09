@@ -70,4 +70,4 @@ print(a.size())")
                    ::no-error
                    (catch clojure.lang.ExceptionInfo e (:errors (ex-data e))))]
       (is (not= ::no-error errors))
-      (is (some #(re-find #"Method not found: size" (:message %)) errors)))))
+      (is (some #(re-find #"`size` is not a feature of Array" (:message %)) errors)))))

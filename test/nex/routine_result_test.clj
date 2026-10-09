@@ -185,7 +185,7 @@ function p(): Pt do let q := create Pt end"
   feature
     name: String do end
 end"]]
-      (is (some #(str/includes? % "does not definitely assign result")
+      (is (some #(str/includes? % "not every path through it assigns `result`")
                 (type-errors src))
           src)))
   (testing "an explicit assignment on every returning path does"

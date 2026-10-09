@@ -84,12 +84,12 @@ print(b.item.name())
 let d: Dog_Box := create Dog_Box.make(create Dog.make)
 print(d.item.name())")))))
   (testing "an argument of the wrong type is reported against the instantiated type"
-    (is (re-find #"Expected Dog, got Cat"
+    (is (re-find #"should be Dog, but got Cat"
                  (type-error (str classes "class Dog_Box
 inherit Box[Dog]
 end
 let b := create Dog_Box.make(create Cat.make)"))))
-    (is (re-find #"Expected Dog, got Cat"
+    (is (re-find #"should be Dog, but got Cat"
                  (type-error (str classes "class Dog_Box
 inherit Box[Dog]
 create

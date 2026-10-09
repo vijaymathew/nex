@@ -67,15 +67,15 @@ print(n)")))))
   (testing "argument types and count are held to the function's parameters,
             with the messages a direct call gets"
     (doseq [[code expected] [["let f := fn(x: Integer): Integer do result := x * 2 end\nprint(f.call1(\"s\"))"
-                              #"Expected Integer, got String"]
+                              #"should be Integer, but got String"]
                              ["let f := fn(x: Integer): Integer do result := x * 2 end\nprint(f.call2(4, 5))"
                               #"Method call2 expects 1 arguments, got 2"]
                              [(str adder "print(adder(1)(\"s\"))")
-                              #"Expected Integer, got String"]
+                              #"should be Integer, but got String"]
                              [(str adder "print(adder(1)(2, 3))")
                               #"Method call2 expects 1 arguments, got 2"]
                              ["let k: Function(Integer, x: Array[String]): Integer := fn(n: Integer, x: Array[String]): Integer do result := n end\nprint(k.call2(1, [2]))"
-                              #"Expected Array\[String\], got Array\[Integer\]"]
+                              #"should be Array\[String\], but got Array\[Integer\]"]
                              ["let f: Function(Integer): Integer := fn(n: Integer): Integer do result := n end\nlet a: Any := 3\nprint(f.call1(a))"
                               #"parameter 'arg1' of call1"]]]
       (let [err (type-error code)]
@@ -84,7 +84,7 @@ print(n)")))))
 
 (deftest direct-calls-are-unchanged-test
   (testing "the direct spelling keeps its own checks"
-    (is (re-find #"Expected Integer, got String"
+    (is (re-find #"should be Integer, but got String"
                  (or (type-error "let f := fn(x: Integer): Integer do result := x * 2 end\nprint(f(\"s\"))") "")))
     (is (re-find #"expects 1 arguments, got 2"
                  (or (type-error "let f := fn(x: Integer): Integer do result := x * 2 end\nprint(f(1, 2))") "")))))

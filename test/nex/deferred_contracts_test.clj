@@ -151,7 +151,7 @@ feature
   scale(x: Integer): Integer require ok: y > 0 deferred
 end")))))
   (testing "`result` needs a return type"
-    (is (re-find #"uses Result but does not declare a return type"
+    (is (re-find #"uses `result` but declares no return type"
                  (str (error-message "deferred class Shape
 feature
   touch(x: Integer) deferred ensure ok: result > 0 end

@@ -5,5 +5,5 @@ function name_of(n: Integer): String do
 end
 
 -- Mistake: `result` not assigned on every path
--- status: pending
+-- status: fixed
 -- expect: line 1

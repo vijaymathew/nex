@@ -217,7 +217,7 @@ print(a.name())")))))
                  (type-error (str animals "let c := false
 let a: Animal := when c then create Dog.make else create Cat.make end")))))
   (testing "the result has the wider branch's type, whichever branch that is"
-    (is (re-find #"Method not found: bark"
+    (is (re-find #"`bark` is not a feature of Animal"
                  (type-error (str animals "let c := false
 let d := when c then create Dog.make else create Animal.make end
 print(d.bark())")))))

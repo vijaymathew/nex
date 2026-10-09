@@ -130,7 +130,7 @@
 (deftest routine-messages-name-what-the-program-wrote
   (testing "a free function is named as itself, not as its wrapper's `call0`"
     (is (rejected-with "function f()\ndo\n  result := 3\nend"
-                       "Function 'f' uses Result but does not declare a return type. Use: f(...)"))
+                       "Function 'f' uses `result` but declares no return type, so it has nothing to return. Declare the type it returns: `f(...): <Type>`."))
     (is (rejected-with "function f()\ndo\n  retry\nend"
                        "found it elsewhere in function 'f'"))
     (is (rejected-with "function k(a, a: Integer): Integer\ndo\n  result := a\nend"
@@ -138,12 +138,12 @@
     (is (rejected-with "function q(x) do\n  print(x)\nend"
                        "Parameter 'x' of function 'q' must declare a type"))
     (is (rejected-with "class T\nend\nfunction r(b: Boolean): T do\n  if b then result := create T end\nend"
-                       "Function 'r' declares return type T but does not definitely assign result")))
+                       "Function 'r' returns T, but not every path through it assigns `result`")))
   (testing "a method is named as a method, an anonymous function as one"
     (is (rejected-with "class C\nfeature\n  g()\n  do\n    result := 3\n  end\nend"
-                       "Method 'g' uses Result but does not declare a return type"))
+                       "Method 'g' uses `result` but declares no return type"))
     (is (rejected-with "let h := fn(x: Integer) do\n  result := x\nend"
-                       "Anonymous function uses Result but does not declare a return type. Use: fn(...)"))))
+                       "Anonymous function uses `result` but declares no return type, so it has nothing to return. Declare the type it returns: `fn(...): <Type>`."))))
 
 (deftest integer-literal-out-of-range-rejected
   (testing "an Integer literal outside the 64-bit range is reported as such,

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Type errors say what to write instead.** A misspelled or foreign member
+  name names the class and suggests the likely one: "`increment` is not a
+  feature of Counter. Did you mean `inc`? Counter has: inc, value."
+  (`lenght` → `length`, `size` → `length`, `toUpperCase` → `to_upper`); it
+  lists routines as well as fields, and replaces both "Undefined field" and
+  "Method not found". A wrong argument names its parameter ("Argument `b` of
+  `add` should be Integer, but got String"), a wrong assignment names its
+  variable, and both suggest the conversion (`.to_real`, `.round`,
+  `.to_string`, `.to_integer`), explaining that `7 / 2` is 3. The `result`
+  errors spell it `result` and give a line. A constructor's argument count
+  reads like a function's.
+- **A line starting with `(` after a `let` or assignment is its own
+  statement.** `let y := x + 1` followed by `(x + y).to_string` used to be
+  read as one expression, failing with "Undefined variable: y"; statements
+  already worked this way.
 - **Runtime errors say where they happened.** `nex file.nex` now follows the
   error message with its line and the calls that led there (`at line 9, in
   Stack.pop` / `called from line 14, in drain`), read from the compiled

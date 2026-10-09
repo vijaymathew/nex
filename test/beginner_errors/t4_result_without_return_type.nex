@@ -3,6 +3,6 @@ function greet(name: String) do
 end
 
 -- Mistake: `result` in a function with no return type
--- status: pending
+-- status: fixed
 -- expect: line 2
 -- reject: uses Result

@@ -575,9 +575,9 @@ print(d(create Box.make(\"hi\")))"))))))
   end
 end
 print(d(create Draft.make()))"))]
-      (is (some #(re-find #"Undefined field: q on Shipped" %) msgs)
+      (is (some #(re-find #"`q` is not a field of Shipped" %) msgs)
           (str "error should name the variant, got: " (pr-str msgs)))
-      (is (some #(re-find #"Accessible fields: at, tracking" %) msgs)
+      (is (some #(re-find #"Shipped has: at, tracking" %) msgs)
           (str "error should list the real fields, got: " (pr-str msgs)))
       (is (some #(re-find #"write `<field> as q`" %) msgs)
           (str "error should give the binding form, got: " (pr-str msgs))))))
@@ -594,7 +594,7 @@ print(d(create Draft.make()))"))]
   end
 end
 print(create P.make(1).z)")]
-      (is (some #(re-find #"Undefined field: z on P\. Accessible fields: x\." %) msgs)
+      (is (some #(re-find #"`z` is not a feature of P\. P has: x\." %) msgs)
           (str "got: " (pr-str msgs)))
       ;; The listing follows the same visibility rules as the lookup, so a
       ;; private field is not disclosed to a caller that could not read it.

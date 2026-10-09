@@ -16,7 +16,8 @@
 (declare env-lookup-type-alias-generic-params)
 (declare resolve-generic-type)
 (declare type-error)
-(declare check-no-discarded-values! check-missing-call-parens! short-source)
+(declare check-no-discarded-values! check-missing-call-parens! short-source closest-spelling
+         lookup-class-constructors argument-mismatch-message assignment-mismatch-message)
 
 (def ^:dynamic *strict-undefined-targets*
   "When true, a member access / call on an unresolved bare-identifier target is a
@@ -1951,26 +1952,120 @@
                          (:parents class-def))))))]
     (distinct (walk class-name #{}))))
 
-(defn- undefined-field-message
-  "\"Undefined field: q\" alone leaves the reader to guess what the field is
-   called. Name the class and list what it does have. FROM-PATTERN adds the
-   rule a `match` clause is most often tripping over: the name before the colon
-   is a field, not a new binding.
+(defn- registered-method-names
+  "Names of the routines registered for class CN in ENV or any enclosing env."
+  [env cn]
+  (loop [e env, names #{}]
+    (if e
+      (recur (:parent e) (into names (keys (get @(:methods e) cn))))
+      names)))
 
-   The listing is visibility-filtered, so it never discloses a private field to
-   a caller that could not read one — hence \"accessible\" rather than a flat
-   claim about what the class has: a class whose every field is private has
-   fields, just not for this reader."
-  [env class-name field-name caller-class-name from-pattern]
-  (let [fields (visible-field-names env class-name caller-class-name)]
-    (str "Undefined field: " field-name " on " class-name
-         (if (seq fields)
-           (str ". Accessible fields: " (str/join ", " (sort fields)) ".")
-           ". It has no accessible fields.")
-         (when from-pattern
-           (str " In a pattern the name before `:` is a field of the variant;"
-                " to bind a field to a local named `" field-name "`, write"
-                " `<field> as " field-name "`.")))))
+(defn- visible-routine-names
+  "Names of the routines callable on CLASS-NAME from CALLER-CLASS-NAME, parents
+   included, builtin types' too; internal names (`__...`, `$...`) left out."
+  [env class-name caller-class-name]
+  (letfn [(walk [cn visited]
+            (when (and cn (not (contains? visited cn)))
+              (let [class-def (env-lookup-class env cn)
+                    ;; constructors share the registry, but are not called on an object
+                    constructor? (fn [name]
+                                   (and (some #(= (:name %) name) (lookup-class-constructors env cn))
+                                        (not-any? #(and (= (:type %) :method) (= (:name %) name))
+                                                  (when class-def (feature-members class-def)))))
+                    private? (fn [name]
+                               (some #(and (= (:type %) :method) (= (:name %) name)
+                                           (not (public-member? %)))
+                                     (when class-def (feature-members class-def))))]
+                (concat
+                 (remove #(or (str/starts-with? % "_") (str/starts-with? % "$")
+                              (constructor? %)
+                              (and (not= caller-class-name cn) (private? %)))
+                         (registered-method-names env cn))
+                 (mapcat (fn [{:keys [parent]}] (walk parent (conj visited cn)))
+                         (:parents class-def))))))]
+    (distinct (walk class-name #{}))))
+
+(defn- edit-distance
+  "Levenshtein distance between strings A and B."
+  [^String a ^String b]
+  (let [n (count b)]
+    (peek
+     (reduce (fn [prev [i ca]]
+               (reduce (fn [row j]
+                         (conj row (min (inc (peek row))
+                                        (inc (nth prev (inc j)))
+                                        (+ (nth prev j) (if (= ca (.charAt b j)) 0 1)))))
+                       [(inc i)]
+                       (range n)))
+             (vec (range (inc n)))
+             (map-indexed vector a)))))
+
+(def ^:private feature-names-elsewhere
+  "What other languages call a feature, and Nex's name for it."
+  {"size" "length", "len" "length", "count" "length",
+   "push" "add", "append" "add",
+   "toString" "to_string", "str" "to_string",
+   "toUpperCase" "to_upper", "upper" "to_upper",
+   "toLowerCase" "to_lower", "lower" "to_lower"})
+
+(defn- closest-name
+  "The name in CANDIDATES most likely meant by NAME: what another language
+   calls it (`size` for `length`), a small misspelling (`lenght`, `valu`), or
+   a longer or shorter form of it (`increment` for `inc`); nil when none is
+   close."
+  [name candidates]
+  (if-let [nex-name (some #{(get feature-names-elsewhere name)} candidates)]
+    nex-name
+    (closest-spelling name candidates)))
+
+(defn- closest-spelling
+  [name candidates]
+  (->> candidates
+       (keep (fn [c]
+               (let [d (edit-distance name c)]
+                 (when (or (<= d (cond (<= (count name) 2) 0
+                                       (<= (count name) 4) 1
+                                       :else (max 2 (quot (count name) 3))))
+                           (and (>= (min (count name) (count c)) 3)
+                                (or (str/starts-with? name c) (str/starts-with? c name))))
+                   [d c]))))
+       sort
+       first
+       second))
+
+(def ^:private max-listed-features
+  "Beyond this many, a class's features are not listed in an error: a builtin
+   like String has dozens, and the suggestion is what helps."
+  12)
+
+(defn- undefined-field-message
+  "The error for NAME, which is not a feature of CLASS-NAME. Names the class,
+   suggests the feature most likely meant, and lists what the class has when
+   that is short — fields only when WRITING?, since only a field can be
+   assigned. FROM-PATTERN adds the rule a `match` clause is most often
+   tripping over: the name before the colon is a field, not a new binding.
+
+   The listing is visibility-filtered, so it never discloses a private feature
+   to a caller that could not use it."
+  ([env class-name name caller-class-name from-pattern]
+   (undefined-field-message env class-name name caller-class-name from-pattern false))
+  ([env class-name name caller-class-name from-pattern writing?]
+   (let [fields (visible-field-names env class-name caller-class-name)
+         candidates (sort (distinct (concat fields
+                                            (when-not (or writing? from-pattern)
+                                              (visible-routine-names env class-name caller-class-name)))))
+         kind (if (or writing? from-pattern) "field" "feature")
+         suggestion (closest-name name candidates)]
+     (str "`" name "` is not a " kind " of " class-name "."
+          (when suggestion (str " Did you mean `" suggestion "`?"))
+          (cond
+            (empty? candidates) (str " " class-name " has no " kind "s you can use here.")
+            (<= (count candidates) max-listed-features)
+            (str " " class-name " has: " (str/join ", " candidates) "."))
+          (when from-pattern
+            (str " In a pattern the name before `:` is a field of the variant;"
+                 " to bind a field to a local named `" name "`, write"
+                 " `<field> as " name "`."))))))
 
 (defn- field-write-error
   [field-name declaring-class]
@@ -2170,15 +2265,15 @@
                       {:error (type-error
                                (str "Method " method " expects " (count params)
                                     " arguments, got " (count args)))})))
-    (doseq [[arg-type param] (map vector arg-types params)]
+    (doseq [[arg-type param arg] (map vector arg-types params args)]
       (let [param-type (resolve-generic-type (:type param) type-map)]
         (when (any-into-concrete-without-convert? env param-type arg-type)
           (throw-any-narrowing-error! (str "parameter '" (:name param) "' of " method) param-type))
         (when-not (types-compatible? env arg-type param-type)
           (throw (ex-info (str "Argument type mismatch for method " method)
                           {:error (type-error
-                                   (str "Expected " (display-type param-type)
-                                        ", got " (display-type arg-type)))})))))
+                                   (argument-mismatch-message (:name param) method
+                                                              arg-type param-type arg))})))))
     ;; A method with no return-type annotation stores :return-type as nil, not
     ;; the string "Void" — coalesce it here (same convention as other
     ;; return-type call sites) so a Void-returning user method's call
@@ -3428,7 +3523,7 @@
                     (throw (ex-info msg {:error (type-error msg)})))
                   (let [msg (if (and from-across (= "cursor" method))
                               (across-target-message base-type)
-                              (str "Method not found: " method))]
+                              (undefined-field-message env base-type method current-class nil))]
                     (throw (ex-info msg {:error (type-error msg)}))))
                 (let [msg (if (and from-across (= "cursor" method))
                             (across-target-message base-type)
@@ -4127,7 +4222,7 @@
                         {:error (type-error
                                  (str "Method " call-name " expects " (count effective-params)
                                       " arguments, got " (count args)))})))
-      (doseq [[arg-type param] (map vector arg-types effective-params)]
+      (doseq [[arg-type param arg] (map vector arg-types effective-params args)]
         (let [param-type (resolve-generic-type (:type param) type-map)]
           (when (and (is-generic-type-param? env param-type)
                      (not (contains? type-map param-type))
@@ -4153,8 +4248,8 @@
           (when-not (types-compatible? env arg-type param-type)
             (throw (ex-info (str "Argument type mismatch for method " call-name)
                             {:error (type-error
-                                     (str "Expected " (display-type param-type)
-                                          ", got " (display-type arg-type)))})))))
+                                     (argument-mismatch-message (:name param) method
+                                                                arg-type param-type arg))})))))
           ;; A Function value carrying an explicit signature knows its own return
           ;; type; prefer it over the generic callN result (which is Any). Still
           ;; resolve it through type-map: when that signature is itself generic
@@ -4648,9 +4743,11 @@
             (when (not= (count params) (count args))
               (throw (ex-info (str "Constructor argument count mismatch for " class-name "." ctor-name)
                               {:error (type-error
-                                       (str "Expected " (count params) " args, got "
-                                            (count args)))})))
-            (doseq [[arg-type param declared-type] (map vector arg-types params param-types)]
+                                       (str "Constructor `" class-name "." ctor-name "` takes "
+                                            (count params) (if (= 1 (count params)) " argument" " arguments")
+                                            ", " (when (< (count args) (count params)) "only ")
+                                            (count args) " given"))})))
+            (doseq [[arg-type param declared-type arg] (map vector arg-types params param-types args)]
               (let [param-type (resolve-generic-type declared-type type-map)]
                 (when (any-into-concrete-without-convert? env param-type arg-type)
                   (throw-any-narrowing-error! (str "parameter '" (:name param) "' of constructor "
@@ -4659,8 +4756,9 @@
                 (when-not (types-compatible? env arg-type param-type)
                   (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
                                   {:error (type-error
-                                           (str "Expected " (display-type param-type)
-                                                ", got " (display-type arg-type)))})))))))
+                                           (argument-mismatch-message (:name param)
+                                                                      (str class-name "." ctor-name)
+                                                                      arg-type param-type arg))})))))))
         target-type))))
 
 (defn check-create
@@ -5256,8 +5354,8 @@
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
-                               (str "Cannot assign " (display-type val-type)
-                                    " to variable of type " (display-type var-type)))})))
+                               (assignment-mismatch-message (str "variable '" target "'")
+                                                            val-type var-type (:value stmt)))})))
     ;; Keep nil-check narrowing in step with the assignment: a value that may
     ;; be nil undoes it for every block containing this one. One that cannot
     ;; be nil leaves it standing.
@@ -5388,6 +5486,54 @@
   (doseq [stmt stmts]
     (check-statement env stmt)))
 
+(defn- conversion-hint
+  "How to turn a VAL-TYPE value into a TARGET-TYPE one, for the mix-ups
+   beginners make most, or nil. VALUE is the expression being assigned: an
+   Integer division gets its own explanation, since `7 / 2` looking like 3.5
+   is the usual reason for putting it in a Real."
+  [val-type target-type value]
+  (let [integer? #{"Integer" "Integer16" "Integer32" "Integer64" "Byte"}
+        [v t] [(display-type val-type) (display-type target-type)]]
+    (cond
+      (and (integer? v) (= t "Real") (= :binary (:type value)) (= "/" (:operator value)))
+      (str " `/` between Integers keeps only the whole part (7 / 2 is 3). For a Real"
+           " result, convert one side first: `" (or (short-source (:left value)) "a")
+           ".to_real / " (or (short-source (:right value)) "b") "`.")
+
+      (and (integer? v) (= t "Real"))
+      " To use an Integer as a Real, convert it with `.to_real`."
+
+      (and (= v "Real") (integer? t))
+      " To turn a Real into an Integer, round it with `.round`."
+
+      (and (or (integer? v) (= v "Real")) (= t "String"))
+      " To make text from a number, use `.to_string`."
+
+      ;; not for a literal that plainly isn't a number, like "five"
+      (and (= v "String") (or (integer? t) (= t "Real"))
+           (not (and (= :string (:type value))
+                     (not (re-matches #"\s*-?\d+(\.\d+)?\s*" (str (:value value)))))))
+      (str " To read a number from text, use `.to_" (if (= t "Real") "real" "integer") "`."))))
+
+(defn- assignment-mismatch-message
+  "The error for assigning a VAL-TYPE VALUE to WHAT (\"variable 'x'\",
+   \"field 'v'\"), which has TARGET-TYPE."
+  [what val-type target-type value]
+  (str "Cannot assign " (display-type val-type) " to " what " of type "
+       (display-type target-type) "."
+       (conversion-hint val-type target-type value)))
+
+(defn- argument-mismatch-message
+  "The error for passing an ARG-TYPE value as parameter PARAM-NAME (of type
+   PARAM-TYPE) of ROUTINE."
+  [param-name routine arg-type param-type arg]
+  (str "Argument `" param-name "` of "
+       ;; `callN` is how a function value is invoked, not a name the reader wrote
+       (if (re-matches #"call\d+" (str routine)) "the function" (str "`" routine "`"))
+       " should be " (display-type param-type)
+       ", but got " (display-type arg-type) "."
+       (conversion-hint arg-type param-type arg)))
+
 (defn check-let
   "Check a let statement"
   [env {:keys [name var-type value synthetic] :as stmt}]
@@ -5428,9 +5574,8 @@
     (when-not (types-compatible? env val-type inferred-type)
       (throw (ex-info (str "Type mismatch in let binding for " name)
                       {:error (type-error
-                               (str "Cannot assign " (display-type val-type)
-                                    " to variable '" name "' of type "
-                                    (display-type inferred-type)))})))
+                               (assignment-mismatch-message (str "variable '" name "'")
+                                                            val-type inferred-type value))})))
     (env-add-var env name inferred-type)
     ;; A mark already in this env for NAME was about the variable this one
     ;; shadows.
@@ -5972,7 +6117,7 @@
       (throw (ex-info (str "Undefined field: " field-name)
                       {:error (type-error
                                (undefined-field-message
-                                env class-name field-name caller-class nil))})))
+                                env class-name field-name caller-class nil true))})))
     ;; Write permission is always checked against the class whose code is
     ;; actually running (CURRENT-CLASS), never CALLER-CLASS — unlike
     ;; visibility just above, which correctly resolves `super.field` as the
@@ -5991,8 +6136,8 @@
     (when-not (types-compatible? env val-type field-type)
       (throw (ex-info (str "Type mismatch in assignment to " field-name)
                       {:error (type-error
-                               (str "Cannot assign " (display-type val-type)
-                                    " to field of type " (display-type field-type)))})))))
+                               (assignment-mismatch-message (str "field '" field-name "'")
+                                                            val-type field-type (:value stmt)))})))))
 
 (defn check-statement
   "Check a statement"
@@ -6593,14 +6738,18 @@
           (validate-type-annotation env (:type param))))
       (when return-type
         (validate-type-annotation env return-type))))
-  ;; Check that methods using Result declare a return type
+  ;; Check that methods using `result` declare a return type
   (when (and (not return-type)
              (or (some references-result? body)
                  (some #(references-result? (:condition %)) ensure)))
-    (throw (ex-info (str "Return type required for " routine " because it uses Result")
-                    {:error (type-error
-                             (str Routine " uses Result but does not declare a return type. "
-                                  "Use: " (or routine-name "fn") "(...): <ReturnType>"))})))
+    (let [msg (str Routine " uses `result` but declares no return type, so it has"
+                   " nothing to return. Declare the type it returns: `"
+                   (or routine-name "fn") "(...): <Type>`.")]
+      ;; at the first statement using it, or else the routine itself
+      (with-type-error-location
+        (or (first (filter references-result? body)) method)
+        #(throw (ex-info (str "Return type required for " routine " because it uses result")
+                         {:error (type-error msg)})))))
 
   (let [method-env (make-type-env env)]
     ;; Track current class for this/super resolution
@@ -6653,12 +6802,14 @@
                    (attached-non-scalar-type? return-type)
                    (or (and normal-path-returns? (not normal-path-inits?))
                        (and rescue-path-returns? (not rescue-path-inits?))))
-          (throw (ex-info (str Routine " does not initialize result")
-                          {:error (type-error
-                                   (str Routine " declares return type "
-                                        (display-type return-type)
-                                        " but does not definitely assign result on all returning paths. "
-                                        "Use 'result :=' or declare the return type detachable."))})))))
+          (let [msg (str Routine " returns " (display-type return-type)
+                         ", but not every path through it assigns `result`. Assign it on"
+                         " every path (an `else` branch, say), or make the return type"
+                         " detachable (`?" (display-type return-type) "`) so it may stay nil.")]
+            (with-type-error-location
+              method
+              #(throw (ex-info (str Routine " does not initialize result")
+                               {:error (type-error msg)})))))))
 
 ;; Check postconditions
     (doseq [assertion ensure]

@@ -14,6 +14,6 @@ let c := create Counter.make(1)
 c.increment
 
 -- Mistake: a misspelled method name
--- status: pending
+-- status: fixed
 -- expect: inc
 -- reject: Undefined field
