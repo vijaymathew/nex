@@ -1,0 +1,9 @@
+function double(n: Integer): Integer do
+  return n * 2
+end
+
+print(double(4))
+
+-- Mistake: `return` instead of `result :=`
+-- status: fixed
+-- expect: result :=

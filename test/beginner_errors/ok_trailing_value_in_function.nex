@@ -1,0 +1,9 @@
+function double(n: Integer): Integer do
+  n * 2
+end
+
+print(double(3))
+
+-- Mistake: a function ending in a value instead of `result :=`
+-- status: fixed
+-- expect: did you mean `result := n * 2`?

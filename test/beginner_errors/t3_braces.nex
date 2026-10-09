@@ -1,0 +1,9 @@
+let x := 1
+if x > 0 then {
+  print("pos")
+}
+
+-- Mistake: braces instead of `then ... end`
+-- status: fixed
+-- expect: end
+-- reject: no viable alternative

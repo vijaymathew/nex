@@ -240,6 +240,16 @@
 (defn nex-format-value [value]
   (value/nex-format-value nex-object? nex-map-str nex-array-str nex-set-str value))
 
+(defn report-missing-map-key
+  "Map.get of a key the map lacks: its `key_must_exist` precondition, worded to
+   name the key and the two ways to avoid the failure. Shared by both backends."
+  [key]
+  (throw (ex-info (str "Precondition violation: the map has no key " (nex-format-value key)
+                       "; check with has_key first, or use try_get with a default")
+                  {:contract-type Precondition
+                   :label "key_must_exist"
+                   :condition "has_key"})))
+
 (defn nex-clone-value [value]
   (value/nex-clone-value nex-object? make-object value))
 
@@ -1134,7 +1144,7 @@
    (fn [m key & _]
      (if (nex-map-contains-key m key)
        (nex-map-get m key)
-       (report-contract-violation Precondition "key_must_exist" "has_key")))
+       (report-missing-map-key key)))
    "try_get"      ^{:returns :value
                     :signatures [{:params [{:name "key" :type "K"}
                                            {:name "default" :type "V"}]

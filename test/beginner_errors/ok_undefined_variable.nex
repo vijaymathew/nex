@@ -1,0 +1,7 @@
+let count := 3
+print(cuont)
+
+-- Mistake: a misspelled variable
+-- status: fixed
+-- expect: Undefined variable: cuont
+-- expect: line 2

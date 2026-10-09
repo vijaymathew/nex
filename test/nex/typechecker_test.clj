@@ -104,10 +104,9 @@
           result (tc/type-check ast)]
       (is (not (:success result)))
       ;; `count` is private, so from outside it is simply not there. The message
-      ;; must not disclose it as an alternative — "no accessible fields" rather
-      ;; than naming the very field being hidden.
-      (is (some #(= (str "Undefined field: count on Counter."
-                         " It has no accessible fields.")
+      ;; must not disclose it as an alternative: it lists only what the caller
+      ;; can use, never the very field being hidden.
+      (is (some #(= "`count` is not a feature of Counter. Counter has: current."
                     (:message %))
                 (:errors result))))))
 
@@ -782,7 +781,7 @@ end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (not (:success result)))
-      (is (some #(re-find #"does not definitely assign result on all returning paths" %)
+      (is (some #(re-find #"not every path through it assigns `result`" %)
                 (map tc/format-type-error (:errors result)))))))
 
 (deftest test-detachable-non-scalar-return-may-omit-result-assignment
@@ -857,7 +856,7 @@ end"
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (not (:success result)))
-      (is (some #(re-find #"does not definitely assign result on all returning paths" %)
+      (is (some #(re-find #"not every path through it assigns `result`" %)
                 (map tc/format-type-error (:errors result)))))))
 
 (deftest test-case-clause-with-no-do-end-assigns-result
@@ -1302,7 +1301,7 @@ end"]
           result (tc/type-check ast)]
       (is (not (:success result)))
       (is (seq (:errors result)))
-      (is (some #(re-find #"does not declare a return type" %)
+      (is (some #(re-find #"declares no return type" %)
                 (map tc/format-type-error (:errors result)))))))
 
 (deftest test-method-using-result-with-return-type-succeeds
@@ -1347,7 +1346,7 @@ end"]
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (not (:success result)))
-      (is (some #(re-find #"does not declare a return type" %)
+      (is (some #(re-find #"declares no return type" %)
                 (map tc/format-type-error (:errors result)))))))
 
 ;; Generic type safety tests
@@ -1375,7 +1374,7 @@ end"]
           ast (p/ast code)
           result (tc/type-check ast)]
       (is (not (:success result)))
-      (is (some #(re-find #"Expected Integer, got String" %)
+      (is (some #(re-find #"should be Integer, but got String" %)
                 (map tc/format-type-error (:errors result)))))))
 
 (deftest test-generic-method-correct-type-succeeds
@@ -1425,7 +1424,7 @@ end"]
                              :args [{:type :string :value "hello"}]}]}
           result (tc/type-check call-ast {:var-types var-types})]
       (is (not (:success result)))
-      (is (some #(re-find #"Expected Integer, got String" %)
+      (is (some #(re-find #"should be Integer, but got String" %)
                 (map tc/format-type-error (:errors result)))))))
 
 (deftest test-string-conversion-methods-typecheck
@@ -2586,7 +2585,7 @@ end"))
           result (tc/type-check (p/ast code))
           msgs (error-messages result)]
       (is (false? (:success result)))
-      (is (some #(str/includes? % "Expected T, got G") msgs) (pr-str msgs)))))
+      (is (some #(str/includes? % "should be T, but got G") msgs) (pr-str msgs)))))
 
 (deftest test-generic-function-relating-two-params-through-a-function-arg-succeeds
   (testing "a generic parameter that only flows from one to another through an actual G -> T Function argument still checks out"
@@ -2607,7 +2606,7 @@ end"))
           result (tc/type-check (p/ast code))
           msgs (error-messages result)]
       (is (false? (:success result)))
-      (is (some #(str/includes? % "Cannot assign G to variable of type Integer") msgs) (pr-str msgs)))))
+      (is (some #(str/includes? % "Cannot assign G to variable 'result' of type Integer") msgs) (pr-str msgs)))))
 
 (deftest test-generic-constraint-checked-against-inferred-call-argument
   (testing "an argument inferred to bind a constrained generic parameter must itself satisfy the constraint"

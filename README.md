@@ -237,8 +237,10 @@ From Clojure, use the JVM backend directly:
 
 ### Prerequisites
 
-- Java 11 or higher
-- [Clojure CLI tools](https://clojure.org/guides/install_clojure) (version 1.11+)
+- Java 17 or higher
+- [Clojure CLI tools](https://clojure.org/guides/install_clojure) (version 1.11.1.1420+)
+
+The installer checks both, and `--install-deps` installs or upgrades them.
 
 ### Installation
 

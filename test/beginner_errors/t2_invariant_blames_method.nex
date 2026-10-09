@@ -1,0 +1,20 @@
+class Account
+  create
+    make do
+      this.balance := 0
+    end
+  feature
+    balance: Integer
+    withdraw(amt: Integer) do
+      this.balance := this.balance - amt
+    end
+  invariant
+    non_negative: balance >= 0
+end
+
+let a := create Account.make
+a.withdraw(10)
+
+-- Mistake: a method that leaves the class invariant broken
+-- status: fixed
+-- expect: Account.withdraw, called at line 16, leaves the invariant `non_negative` of Account broken

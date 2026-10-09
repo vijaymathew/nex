@@ -60,7 +60,7 @@ let anything: Box[Any] := dogs"))))
                  (type-error (str classes "let anything: Box[Any] := create Box[Any].make(1)
 let dogs: Box[Dog] := anything")))))
   (testing "nor is an Array[T] an Array[Any] inside a generic routine"
-    (is (re-find #"Expected Array\[Any\], got Array\[T\]"
+    (is (re-find #"should be Array\[Any\], but got Array\[T\]"
                  (type-error "function size_of(a: Array[Any]): Integer do result := a.length end
 function count[T](a: Array[T]): Integer do result := size_of(a) end")))))
 

@@ -13,6 +13,10 @@ else
     NEX_HOME="/usr/local/lib/nex"
 fi
 
+# install.sh may put a Clojure CLI next to this script (for example under
+# ~/.local/bin); prefer it over any older one elsewhere on PATH.
+PATH="$SCRIPT_DIR:$PATH"
+
 # Helper functions
 show_help() {
     cat <<'EOF'
@@ -78,28 +82,142 @@ show_version() {
 J_OPTIONS="${J_OPTIONS:--J--enable-native-access=ALL-UNNAMED}"
 USER_DIR="$(pwd)"
 
-# Run `clojure.main -m "$@"` with extra jar/dir paths (colon-separated, same
-# convention as `java -cp`) prepended onto the project's own computed
-# classpath. Bypassing the `clojure` launcher for this case (going straight to
-# `java`) makes the extra entries visible on the real JVM classpath from
-# process start, so both compile-time interop resolution (Class/forName) and
-# runtime class linkage see them — no dynamic classloader trickery, and no
-# reliance on `URLClassLoader`, which the JDK 9+ app classloader isn't.
-run_with_extra_classpath() {
+# JVM system properties (-Dk=v) for the next run_main call.
+NEX_JVM_PROPS=()
+
+# An installed Nex (install.sh) ships an AOT-compiled nex.jar plus its
+# dependency jars, listed in $NEX_HOME/classpath, and runs them with plain
+# `java`. A source checkout has neither and loads the Clojure source through
+# the Clojure CLI instead, which is several times slower to start.
+NEX_CP=""
+if [[ -f "$NEX_HOME/nex.jar" && -f "$NEX_HOME/classpath" ]]; then
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        [[ -n "$entry" ]] && NEX_CP="${NEX_CP:+$NEX_CP:}$NEX_HOME/$entry"
+    done < "$NEX_HOME/classpath"
+fi
+
+# Version of the `java` on PATH (e.g. 21.0.12), read from the JDK's `release`
+# file when there is one, which is much cheaper than starting a JVM.
+java_version() {
+    local java_bin home
+    java_bin="$(command -v java)" || return 0
+    home="$(dirname "$(dirname "$(readlink -f "$java_bin")")")"
+    if [[ -f "$home/release" ]]; then
+        sed -n 's/^JAVA_VERSION="\(.*\)"/\1/p' "$home/release"
+    else
+        java -version 2>&1 | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -n 1
+    fi
+}
+
+# Per-user JVM class-data cache, which roughly halves startup again: an AOT
+# cache on Java 25+, an AppCDS archive on Java 17-24. Built once per Nex and
+# JDK version by a background run of aot-training.nex after the first
+# program finishes, so no run ever waits for it or prints anything about it.
+# A cache that no longer matches is ignored by the JVM (its messages about
+# that are silenced) and rebuilt when nex.jar is newer than it.
+# NEX_JVM_CACHE=off disables it.
+NEX_CACHE_OPTS=()
+NEX_CACHE_TRAIN=()
+NEX_CACHE_FILE=""
+setup_jvm_cache() {
+    [[ -n "$NEX_CP" && "${NEX_JVM_CACHE:-on}" != off ]] || return 0
+    local version major dir
+    version="$(java_version)"
+    major="${version%%[.+_-]*}"
+    [[ "$major" =~ ^[0-9]+$ ]] && (( major >= 17 )) || return 0
+    dir="${XDG_CACHE_HOME:-$HOME/.cache}/nex"
+    mkdir -p "$dir" 2> /dev/null || return 0
+
+    NEX_CACHE_OPTS=(-Xlog:cds=off -Xlog:class+path=off)
+    if (( major >= 25 )); then
+        NEX_CACHE_FILE="$dir/nex-$VERSION-java-$version.aot"
+        NEX_CACHE_OPTS+=(-Xlog:aot=off)
+    else
+        NEX_CACHE_FILE="$dir/nex-$VERSION-java-$version.jsa"
+    fi
+
+    if [[ -f "$NEX_CACHE_FILE" && "$NEX_CACHE_FILE" -nt "$NEX_HOME/nex.jar" ]]; then
+        if (( major >= 25 )); then
+            NEX_CACHE_OPTS+=(-XX:AOTCache="$NEX_CACHE_FILE")
+        else
+            NEX_CACHE_OPTS+=(-XX:SharedArchiveFile="$NEX_CACHE_FILE")
+        fi
+    elif [[ -f "$NEX_HOME/aot-training.nex" ]]; then
+        local tmp="$dir/.tmp-$$-${NEX_CACHE_FILE##*/}"
+        if (( major >= 25 )); then
+            NEX_CACHE_TRAIN=(-XX:AOTCacheOutput="$tmp")
+        else
+            NEX_CACHE_TRAIN=(-XX:ArchiveClassesAtExit="$tmp")
+        fi
+    fi
+}
+
+# Build the class-data cache in the background (see setup_jvm_cache). A lock
+# directory keeps concurrent runs from training at the same time; one left
+# behind by a killed run is cleared after ten minutes.
+train_jvm_cache() {
+    local -a java_opts=("$@")
+    local dir="${NEX_CACHE_FILE%/*}"
+    local lock="$dir/.training"
+    local tmp="${NEX_CACHE_TRAIN[0]#*=}"
+    find "$lock" -maxdepth 0 -mmin +10 -exec rm -rf {} + 2> /dev/null
+    mkdir "$lock" 2> /dev/null || return 0
+    (
+        trap '' HUP
+        cd "$NEX_HOME" \
+            && java -XX:+UseSerialGC "${NEX_CACHE_OPTS[@]}" "${NEX_CACHE_TRAIN[@]}" "${java_opts[@]}" \
+                    -cp "$NEX_CP" clojure.main -m nex.eval "$NEX_HOME/aot-training.nex" \
+            && [[ -s "$tmp" ]] \
+            && mv -f "$tmp" "$NEX_CACHE_FILE"
+        rm -rf "$tmp" "$lock"
+    ) < /dev/null > /dev/null 2>&1 &
+}
+
+# Run `clojure.main -m NS ARGS...` from NEX_HOME:
+#   run_main EXTRA_CP NS [ARGS...]
+# EXTRA_CP (colon-separated, `java -cp` style, may be empty) is appended to
+# Nex's own classpath, and is put on the real JVM classpath from process start
+# so both compile-time interop resolution (Class/forName) and runtime class
+# linkage see it — no dynamic classloader trickery, and no reliance on
+# `URLClassLoader`, which the JDK 9+ app classloader isn't.
+run_main() {
     local extra_cp="$1"
     shift
-    local base_cp
-    base_cp="$(cd "$NEX_HOME" && clojure -Spath)" || exit 1
     local -a java_opts=()
+    local tok
     for tok in $J_OPTIONS; do
         java_opts+=("${tok#-J}")
     done
-    cd "$NEX_HOME" && java "${java_opts[@]}" -cp "${base_cp}:${extra_cp}" clojure.main -m "$@"
+    java_opts+=("${NEX_JVM_PROPS[@]}")
+
+    if [[ -n "$NEX_CP" ]]; then
+        # The class-data cache is tied to the exact classpath, so runs with
+        # extra entries go without it rather than rebuilding it every time.
+        [[ -z "$extra_cp" ]] && setup_jvm_cache
+        local status=0
+        (cd "$NEX_HOME" && java -XX:+UseSerialGC "${NEX_CACHE_OPTS[@]}" "${java_opts[@]}" \
+            -cp "$NEX_CP${extra_cp:+:$extra_cp}" clojure.main -m "$@") || status=$?
+        if (( ${#NEX_CACHE_TRAIN[@]} > 0 )); then
+            train_jvm_cache "${java_opts[@]}"
+        fi
+        return $status
+    elif [[ -n "$extra_cp" ]]; then
+        local base_cp
+        base_cp="$(cd "$NEX_HOME" && clojure -Spath)" || exit 1
+        cd "$NEX_HOME" && java "${java_opts[@]}" -cp "${base_cp}:${extra_cp}" clojure.main -m "$@"
+    else
+        local -a clj_opts=()
+        for tok in "${java_opts[@]}"; do
+            clj_opts+=("-J$tok")
+        done
+        cd "$NEX_HOME" && clojure "${clj_opts[@]}" -M -m "$@"
+    fi
 }
 
 # Command implementations
 cmd_repl() {
-    cd "$NEX_HOME" && clojure ${J_OPTIONS} -J-Dnex.user.dir="$USER_DIR" -M:repl
+    NEX_JVM_PROPS=(-Dnex.user.dir="$USER_DIR")
+    run_main "" nex.repl
 }
 
 cmd_compile() {
@@ -174,11 +292,7 @@ cmd_compile() {
         extra_flags+=(--skip-contracts)
     fi
 
-    if [[ -n "$classpath" ]]; then
-        run_with_extra_classpath "$classpath" nex.compiler.jvm.file "$file" "$output" "${extra_flags[@]}"
-    else
-        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.compiler.jvm.file "$file" "$output" "${extra_flags[@]}"
-    fi
+    run_main "$classpath" nex.compiler.jvm.file "$file" "$output" "${extra_flags[@]}"
 }
 
 cmd_format() {
@@ -202,10 +316,10 @@ cmd_format() {
         # Format all .nex files in directory
         find "$path" -name "*.nex" -type f | while read -r file; do
             echo "Formatting: $file"
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:fmt "$file"
+            run_main "" nex.fmt "$file"
         done
     else
-        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:fmt "$path"
+        run_main "" nex.fmt "$path"
     fi
 }
 
@@ -237,15 +351,15 @@ cmd_doc() {
             local basename="$(basename "$file" .nex)"
             local output_file="$output_dir/${basename}.md"
             echo "Generating docs: $file -> $output_file"
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:docgen "$file" "$output_file"
+            run_main "" nex.docgen "$file" "$output_file"
         done
     else
         if [[ -z "$output" ]]; then
             # Output to stdout
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:docgen "$input"
+            run_main "" nex.docgen "$input"
         else
             # Output to file
-            cd "$NEX_HOME" && clojure ${J_OPTIONS} -M:docgen "$input" "$output"
+            run_main "" nex.docgen "$input" "$output"
         fi
     fi
 }
@@ -264,7 +378,7 @@ cmd_eval() {
     echo "$code" > "$tmpfile"
 
     # Parse and evaluate
-    cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.eval "$tmpfile"
+    run_main "" nex.eval "$tmpfile"
 
     # Clean up
     rm -f "$tmpfile"
@@ -294,11 +408,7 @@ cmd_run_script() {
         esac
     done
 
-    if [[ -n "$classpath" ]]; then
-        run_with_extra_classpath "$classpath" nex.eval "$fullpath" "${rest[@]}"
-    else
-        cd "$NEX_HOME" && clojure ${J_OPTIONS} -M -m nex.eval "$fullpath" "${rest[@]}"
-    fi
+    run_main "$classpath" nex.eval "$fullpath" "${rest[@]}"
 }
 
 # Main command dispatcher

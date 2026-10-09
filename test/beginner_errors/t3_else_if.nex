@@ -1,0 +1,12 @@
+let x := 3
+if x > 5 then
+  print("a")
+else if x > 2 then
+  print("b")
+else
+  print("c")
+end
+
+-- Mistake: `else if` instead of `elseif`
+-- status: fixed
+-- expect: elseif

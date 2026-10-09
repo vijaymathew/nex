@@ -221,7 +221,7 @@ print(\"total \" + p.to_string)"))))))
   (testing "cursor protocol names are rejected on a class that declares none"
     (doseq [m ["cursor" "start" "item" "next" "at_end"]]
       (let [errs (type-errors (str plain-class "print(create P.make(1)." m ")"))]
-        (is (some #(re-find (re-pattern (str "Undefined field: " m)) %) errs)
+        (is (some #(re-find (re-pattern (str "`" m "` is not a feature of")) %) errs)
             (str m " should be a type error on a plain class, got: " (pr-str errs)))))))
 
 (deftest cursor-protocol-rejected-on-any-typed-receiver

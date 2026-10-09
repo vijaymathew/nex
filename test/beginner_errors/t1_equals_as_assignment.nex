@@ -1,0 +1,9 @@
+let x: Integer := 1
+x = 5
+print(x)
+
+-- Mistake: `=` used to assign
+-- status: fixed
+-- expect: `x = 5` compares
+-- expect: `x := 5`
+-- expect: line 2

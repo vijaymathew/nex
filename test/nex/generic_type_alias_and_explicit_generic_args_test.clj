@@ -178,13 +178,13 @@ let circles: Array[Circle] := [create Circle.make(1.0)]
                   "total_area[Square](circles)"]]
       (let [{:keys [success errors]} (type-check (str shapes "print(" call ")"))]
         (is (false? success) call)
-        (is (str/includes? (:message (first errors)) "Expected Array[") call)
+        (is (str/includes? (:message (first errors)) "should be Array[") call)
         (is (some? (:line (first errors))) call)))
     (testing "through a pinned function value too"
       (let [{:keys [success errors]}
             (type-check (str shapes "let f := total_area[Circle]\nprint(f(shapes))"))]
         (is (false? success))
-        (is (str/includes? (:message (first errors)) "Expected Array[Circle], got Array[Shape]")))))
+        (is (str/includes? (:message (first errors)) "should be Array[Circle], but got Array[Shape]")))))
   (testing "matching explicit type arguments, and plain inference, still work"
     (let [code (str shapes "print(total_area[Shape](shapes))
 print(total_area[Circle](circles))

@@ -78,12 +78,13 @@ end
             "\"Assertion_Violation [named]: Assertion violation: named\""
             "\"Refinement_Violation [Quantity]: Refinement Quantity violated\""
             "\"Index_Out_Of_Bounds: Index 5 out of bounds for length 1\""
-            "\"Precondition_Violation [key_must_exist]: Precondition violation: key_must_exist\""
+            (str "\"Precondition_Violation [key_must_exist]: Precondition violation: the map has"
+                 " no key \"x\"; check with has_key first, or use try_get with a default\"")
             "\"Conversion_Error: Byte value must be in range 0..255, got 300\""
             "\"Channel_Closed: Cannot send on a closed channel\""
             "\"No_Matching_Clause: No matching clause in match\""
             "\"Index_Out_Of_Bounds: Index 10 out of bounds for length 3\""
-            "\"Conversion_Error: Not a valid number\""
+            "\"Conversion_Error: Not a valid number: \"x\"\""
             "\"Variant_Violation: Loop variant must be non-negative\""
             "\"Assertion_Violation: Assertion violation (line 86)\""]
            (both (str "declare type Quantity = Integer where n: n > 0

@@ -1,0 +1,6 @@
+let xs := [1, 2, 3]
+print(xs.get(3))
+
+-- Mistake: an index past the end of an array
+-- status: fixed
+-- expect: line 2

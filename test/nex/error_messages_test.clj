@@ -16,8 +16,8 @@
   (testing "integer overflow does not leak \"long overflow\""
     (is (= "Arithmetic overflow"
            (interp/nex-error-message (thrown #(+ Long/MAX_VALUE 1))))))
-  (testing "number parsing does not leak \"For input string\""
-    (is (= "Not a valid number"
+  (testing "number parsing does not leak \"For input string\", but names the input"
+    (is (= "Not a valid number: \"abc\""
            (interp/nex-error-message (thrown #(Long/parseLong "abc"))))))
   (testing "a class cast does not leak java.lang class names"
     (let [m (interp/nex-error-message (thrown #(- "a" 1)))]
@@ -51,5 +51,5 @@
     (is (= ["\"Arithmetic overflow\""]
            (run (str "do\n  let a: Integer := 9223372036854775807\n  let b: Integer := a + 1\n"
                      "rescue\n  print(exception)\nend"))))
-    (is (= ["\"Not a valid number\""]
+    (is (= ["\"Not a valid number: \"abc\"\""]
            (run "do\n  print(\"abc\".to_integer)\nrescue\n  print(exception)\nend")))))

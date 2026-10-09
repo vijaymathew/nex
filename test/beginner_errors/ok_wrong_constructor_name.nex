@@ -1,0 +1,14 @@
+class Point
+  create
+    make(a: Integer) do
+      this.x := a
+    end
+  feature
+    x: Integer
+end
+
+let p := create Point.new(1)
+
+-- Mistake: a constructor name that does not exist
+-- status: fixed
+-- expect: Constructor not found: Point.new

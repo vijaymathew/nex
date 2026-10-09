@@ -1,0 +1,7 @@
+let x := 1;
+print(x);
+
+-- Mistake: statements ended with semicolons
+-- status: fixed
+-- expect: semicolon
+-- reject: token recognition error

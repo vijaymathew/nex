@@ -1,0 +1,9 @@
+let s := "first line
+second line"
+print(s.length > 0)
+
+-- Mistake: (not a mistake) a string spanning two lines
+-- status: fixed
+-- expect: true
+-- reject: never closed
+-- exit: 0

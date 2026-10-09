@@ -1,0 +1,96 @@
+-- Training run for the JVM class-data cache (see setup_jvm_cache in
+-- bin/nex). The launcher runs it once, in the background, with all output
+-- discarded, so that the classes a typical program needs -- parser,
+-- typechecker, compiler, runtime -- are already loaded and linked when the
+-- user's own programs start. It only has to touch common features, not test
+-- them.
+
+class Account
+  create
+    make(initial: Integer)
+      require
+        non_negative: initial >= 0
+      do
+        this.balance := initial
+      ensure
+        set: balance = initial
+      end
+
+  feature
+    balance: Integer
+
+    deposit(amount: Integer)
+      require
+        positive: amount > 0
+      do
+        this.balance := balance + amount
+      ensure
+        increased: balance = old balance + amount
+      end
+
+    to_string(): String do
+      result := "Account(" + balance + ")"
+    end
+
+  invariant
+    never_negative: balance >= 0
+end
+
+class Box [T]
+  create
+    make(initial: T) do
+      this.value := initial
+    end
+
+  feature
+    value: T
+end
+
+function square(n: Integer): Integer do
+  result := n * n
+end
+
+let account := create Account.make(10)
+account.deposit(5)
+print(account)
+
+let box: Box [String] := create Box[String].make("boxed")
+print(box.value.length)
+
+let squares: Array [Integer] := []
+from
+  let i: Integer := 1
+until
+  i > 20
+do
+  squares.add(square(i))
+  i := i + 1
+end
+
+let total: Real := 0.0
+across squares as s do
+  total := total + s.to_real / 2.0
+end
+print(total)
+
+let names: Map [String, Integer] := {"ada": 1, "alan": 2}
+across names as entry do
+  print(entry.key + ": " + entry.value)
+end
+
+let label := when total > 100.0 then "big" else "small" end
+case squares.length of
+  20 then print(label)
+  else print("unexpected")
+end
+
+let add := fn (a: Integer, b: Integer): Integer do
+  result := a + b
+end
+print(add(2, 3))
+
+do
+  account.deposit(0)
+rescue
+  print("contract checked")
+end

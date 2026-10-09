@@ -1,0 +1,7 @@
+let s: ?String := nil
+print(s.length)
+
+-- Mistake: a call on a value that may be nil
+-- status: fixed
+-- expect: detachable
+-- expect: Wrap with: if

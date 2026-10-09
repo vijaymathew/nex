@@ -381,7 +381,7 @@ end"))
             fn-output (with-out-str
                         (repl/eval-code ctx "function f(): Box do end"))]
         (is (str/includes? fn-output "Error:"))
-        (is (str/includes? fn-output "does not definitely assign result on all returning paths"))))))
+        (is (str/includes? fn-output "not every path through it assigns `result`"))))))
 
 (deftest repl-compiled-backend-public-field-is-not-publicly-writable-test
   (testing "compiled backend rejects top-level writes to public fields"

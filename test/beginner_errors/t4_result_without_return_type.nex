@@ -1,0 +1,8 @@
+function greet(name: String) do
+  result := "Hi " + name
+end
+
+-- Mistake: `result` in a function with no return type
+-- status: fixed
+-- expect: line 2
+-- reject: uses Result

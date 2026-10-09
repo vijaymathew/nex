@@ -1,0 +1,10 @@
+function hello() do
+  print("hi")
+end
+
+hello
+
+-- Mistake: a function named alone, expecting it to run
+-- status: fixed
+-- expect: `hello` names a function but does not call it
+-- expect: `hello()`

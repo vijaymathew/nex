@@ -4,8 +4,12 @@ This guide explains how to install the Nex language implementation on your syste
 
 ## Prerequisites
 
-- **Java 11 or later** - [Download](https://adoptium.net/)
-- **Clojure CLI** - [Installation Guide](https://clojure.org/guides/install_clojure)
+- **Java 17 or later** - [Download](https://adoptium.net/)
+- **Clojure CLI 1.11.1.1420 or later** - [Installation Guide](https://clojure.org/guides/install_clojure).
+  Older CLIs cannot run Nex from a read-only install directory such as `/usr/local/lib/nex`.
+
+The installer checks both versions and, with `--install-deps` (or after asking),
+installs or upgrades whichever is missing or too old.
 
 ## Quick Install
 
@@ -67,19 +71,35 @@ The installer supports automatic dependency installation on:
 
 When using `--install-deps` flag:
 
-- Java (OpenJDK 11 or later)
-- Clojure CLI tools (latest stable)
+- Java (the newest of OpenJDK 25, 21 or 17 that your system packages; 25+ starts Nex fastest)
+- Clojure CLI tools (latest release), under the same prefix as `nex`
 
 ## Installation Details
 
 The installation script will:
 
-1. **Check prerequisites** - Verify Java and Clojure are installed
-2. **Offer to install dependencies** - If missing (or auto-install with `--install-deps`)
-3. **Install files** to:
+1. **Check prerequisites** - Verify Java 17+ and Clojure CLI 1.11.1.1420+ are installed
+2. **Offer to install dependencies** - If missing or too old (or auto-install with `--install-deps`)
+3. **Build** - Compile Nex ahead of time (`clojure -M:dist`, see
+   `scripts/build-dist.clj`) into `nex.jar` plus its dependency jars. The
+   installed `nex` runs these with plain `java`, so the Clojure CLI is needed
+   only to install, and every run skips compiling Nex's own source.
+4. **Install files** to:
    - Executable: `/usr/local/bin/nex`
    - Library: `/usr/local/lib/nex`
-5. **Verify** - Test that `nex` command is available
+5. **Verify** - Run a test program with the installed `nex`.
+
+`sudo` is used only when the install directories are not writable by you, so a
+`--prefix` inside your home directory needs no administrator rights.
+
+## Startup Cache
+
+After the first program you run, `nex` builds a JVM class-data cache in the
+background, in `~/.cache/nex` (or `$XDG_CACHE_HOME/nex`), which roughly halves
+startup again: an AOT cache on Java 25 or later, an AppCDS archive on Java
+17-24. Nothing waits for it and nothing is printed about it. A new Nex or Java
+version gets a new cache automatically; old ones can be deleted at any time.
+To run without it, set `NEX_JVM_CACHE=off`.
 
 ## Custom Installation Prefix
 
@@ -193,6 +213,12 @@ rm -rf $INSTALL_PREFIX/bin/nex
 rm -rf $INSTALL_PREFIX/lib/nex
 ```
 
+Each user's startup cache and shipped libraries can be removed too:
+
+```bash
+rm -rf ~/.cache/nex ~/.nex
+```
+
 ## Troubleshooting
 
 ### "nex: command not found"
@@ -207,10 +233,16 @@ Add this line to your `~/.bashrc`, `~/.zshrc`, or equivalent shell configuration
 
 ### Permission Denied
 
-The install script requires sudo to write to `/usr/local`. Either:
+Installing into `/usr/local` needs `sudo`; the installer uses it automatically
+when it is available. Without administrator rights, install into your home
+directory instead:
 
-1. Run with sudo: `sudo ./install.sh`
-2. Install to user directory: `INSTALL_PREFIX=$HOME/.local ./install.sh`
+```bash
+./install.sh --prefix "$HOME/.local"
+```
+
+Java itself still has to be installed system-wide, so on an account without
+`sudo` ask an administrator for Java 17 or later first.
 
 ### Java/Clojure Not Found
 
@@ -223,10 +255,9 @@ The install script requires sudo to write to `/usr/local`. Either:
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt-get install default-jdk
-curl -O https://download.clojure.org/install/linux-install-1.11.1.1208.sh
-chmod +x linux-install-1.11.1.1208.sh
-sudo ./linux-install-1.11.1.1208.sh
+sudo apt-get install openjdk-21-jdk-headless   # or openjdk-17-jdk-headless
+curl -fsSLO https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh
+sudo bash linux-install.sh
 ```
 
 **macOS (requires Homebrew):**
@@ -236,7 +267,7 @@ brew install openjdk clojure/tools/clojure
 
 **Fedora:**
 ```bash
-sudo dnf install java-latest-openjdk
+sudo dnf install java-21-openjdk-headless
 # Then install Clojure CLI (see Ubuntu instructions)
 ```
 

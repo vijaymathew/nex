@@ -1,0 +1,6 @@
+let n := 5
+print(n.sqrt)
+
+-- Mistake: a method Integer does not have
+-- status: fixed
+-- reject: no accessible fields

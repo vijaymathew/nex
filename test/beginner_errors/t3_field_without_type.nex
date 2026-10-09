@@ -1,0 +1,10 @@
+class Point
+  feature
+    x
+    y
+end
+
+-- Mistake: a field declared without a type
+-- status: fixed
+-- expect: type
+-- reject: expected STRING

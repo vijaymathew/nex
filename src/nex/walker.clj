@@ -393,6 +393,8 @@
        (:glue-paren-line node)
        (> (:glue-paren-line node) (:glue-target-line node))))
 
+(declare split-glued-value)
+
 (defn- split-glued-statement
   "Undo a false merge detected by phantom-call-glue-point?, splitting NODE
    back into the two (or more, for a run of 3+ glued lines) statements the
@@ -437,11 +439,35 @@
               (assoc clean :target (call-target (last split-target))))
         [clean]))
 
+    ;; `let y := x + 1` then `(x + y).to_string` on the next line glues
+    ;; the second line onto the end of the first's value, not onto a
+    ;; statement of its own, so it is undone there.
+    (and (map? node) (#{:let :assign} (:type node)))
+    (let [[value split-off] (split-glued-value (:value node))]
+      (into [(assoc node :value value)] split-off))
+
     (map? node)
     [(dissoc node :glue-target-line :glue-paren-line)]
 
     :else
     [node]))
+
+(defn- split-glued-value
+  "Split a glue point off the right-hand end of a `let` or assignment's
+   VALUE, the only place the next line can have been glued onto it: [the
+   value as written on its own line, the statements split off after it]."
+  [value]
+  (cond
+    (and (map? value) (= :binary (:type value)))
+    (let [[right split-off] (split-glued-value (:right value))]
+      [(assoc value :right right) split-off])
+
+    (and (map? value) (= :call (:type value)))
+    (let [[own & split-off] (split-glued-statement value)]
+      [own (vec split-off)])
+
+    :else
+    [value []]))
 
 (defn- build-function-node
   "POS ({:row :column}, 0-based, from node-pos on the raw parse node -- a bare

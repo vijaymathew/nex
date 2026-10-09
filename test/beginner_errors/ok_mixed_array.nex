@@ -1,0 +1,6 @@
+let xs := [1, "two", 3]
+print(xs)
+
+-- Mistake: an array mixing types
+-- status: fixed
+-- expect: Array elements must have same type

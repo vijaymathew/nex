@@ -1,0 +1,10 @@
+let x := 3
+let y := x + 1
+(x + y).to_string
+print(y)
+
+-- Mistake: a line starting with `(` after a `let`, which used to be glued onto it
+-- status: fixed
+-- reject: Undefined variable: y
+-- expect: 4
+-- exit: 0

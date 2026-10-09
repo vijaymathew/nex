@@ -1,0 +1,25 @@
+class Box [T]
+  create
+    make(v: T) do
+      this.value := v
+    end
+  feature
+    value: T
+end
+
+function first[T](xs: Array[T]): T
+  require
+    not_empty: xs.length > 0
+  do
+    result := xs.get(0)
+  end
+
+let names: Array[?String] := ["a", nil]
+let b := create Box[String].make("x")
+print(first([1, 2]))
+
+-- Mistake: (not a mistake) square brackets in types, generic classes and generic functions
+-- status: fixed
+-- expect: 1
+-- reject: indexing
+-- exit: 0

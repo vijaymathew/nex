@@ -151,4 +151,4 @@ end)")))))
 
 let m: Mutex[Integer] := create Mutex.make(0)
 print(m.value)"
-         "Undefined field"))))
+         "is not a feature of Mutex"))))

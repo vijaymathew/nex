@@ -104,7 +104,9 @@ main() {
     require_command tar
     require_command mktemp
 
-    local temp_dir archive_url archive_path extracted_dir
+    local archive_url archive_path extracted_dir
+    # Global, not local: the EXIT trap below runs after main has returned,
+    # when a local would already be unset (and `set -u` makes that fatal).
     temp_dir="$(mktemp -d)"
     archive_path="$temp_dir/${REPO_NAME}.tar.gz"
     archive_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/${REPO_REF}.tar.gz"

@@ -1,0 +1,7 @@
+function add(a: Integer b: Integer): Integer do
+  result := a + b
+end
+
+-- Mistake: a missing comma between parameters
+-- status: fixed
+-- expect: expected {')', ','}

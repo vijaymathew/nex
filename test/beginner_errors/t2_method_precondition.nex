@@ -1,0 +1,21 @@
+class Account
+  create
+    make do
+      this.balance := 0
+    end
+  feature
+    balance: Integer
+    withdraw(amt: Integer)
+      require
+        enough: amt <= balance
+      do
+        this.balance := this.balance - amt
+      end
+end
+
+let a := create Account.make
+a.withdraw(10)
+
+-- Mistake: calling a method without meeting its precondition
+-- status: fixed
+-- expect: The call at line 17 does not meet the precondition `enough` of Account.withdraw

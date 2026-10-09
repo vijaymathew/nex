@@ -1,0 +1,5 @@
+let n: Integer := 3.5
+
+-- Mistake: a Real assigned to an Integer variable
+-- status: fixed
+-- expect: Cannot assign Real to variable 'n' of type Integer

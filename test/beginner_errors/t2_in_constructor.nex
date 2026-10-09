@@ -1,0 +1,15 @@
+class Ratio
+  create
+    make(a: Integer, b: Integer) do
+      this.value := a / b
+    end
+  feature
+    value: Integer
+end
+
+let r := create Ratio.make(1, 0)
+
+-- Mistake: an error inside a constructor
+-- status: fixed
+-- expect: at line 4, in Ratio.make
+-- expect: called from line 10

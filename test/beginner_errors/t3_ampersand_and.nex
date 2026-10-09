@@ -1,0 +1,9 @@
+let a := 3
+if a > 1 && a < 5 then
+  print("mid")
+end
+
+-- Mistake: `&&` instead of `and`
+-- status: fixed
+-- expect: `and`
+-- reject: token recognition error

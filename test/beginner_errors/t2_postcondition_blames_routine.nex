@@ -1,0 +1,12 @@
+function double(n: Integer): Integer
+  do
+    result := n + 2
+  ensure
+    doubled: result = n * 2
+  end
+
+print(double(5))
+
+-- Mistake: a function whose result breaks its postcondition
+-- status: fixed
+-- expect: double, called at line 8, does not deliver its postcondition `doubled`

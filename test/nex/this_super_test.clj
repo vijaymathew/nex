@@ -428,7 +428,7 @@ class Shape
 end"
           result (tc/type-check (p/ast code))]
       (is (not (:success result)))
-      (is (some #(clojure.string/includes? (:message %) "is not reachable here")
+      (is (some #(clojure.string/includes? (:message %) "write `create Other.make(1)`")
                 (:errors result))))))
 
 (deftest explicit-same-class-constructor-call-rejected-with-hint-test
