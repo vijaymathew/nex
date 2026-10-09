@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-09
+
 - **Fix: redefining a class in the REPL reaches everything built on it.** A
   subclass kept its parent's old definition (a feature added to the parent
   was "not found"), and a class or function creating the redefined class
