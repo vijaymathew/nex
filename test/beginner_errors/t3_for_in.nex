@@ -3,6 +3,6 @@ for i in [1, 2, 3] do
 end
 
 -- Mistake: a `for ... in` loop
--- status: pending
+-- status: fixed
 -- expect: across
 -- reject: Undefined function: for

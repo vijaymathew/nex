@@ -2,5 +2,5 @@
 print("hi")
 
 -- Mistake: `//` comments
--- status: pending
+-- status: fixed
 -- expect: --

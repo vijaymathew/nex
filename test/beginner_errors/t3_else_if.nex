@@ -8,5 +8,5 @@ else
 end
 
 -- Mistake: `else if` instead of `elseif`
--- status: pending
+-- status: fixed
 -- expect: elseif

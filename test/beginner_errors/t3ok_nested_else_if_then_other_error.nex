@@ -1,0 +1,12 @@
+let x := 3
+if x > 5 then
+  print("a")
+else if x > 2 then
+  print("b")
+end end
+let y = 5
+
+-- Mistake: an unrelated error after a valid nested `else if`
+-- status: fixed
+-- expect: Line 7
+-- reject: elseif

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Syntax errors name the habit from another language.** Instead of parser
+  wording ("no viable alternative at input", "token recognition error") at
+  the place parsing failed, a syntax error now points at the likely mistake
+  and says what Nex writes: `else if` (`elseif`), `&&`/`||` (`and`/`or`),
+  `;`, `//` comments (`--`), `+=` (`x := x + 1`), `xs[0]` (`xs.get(0)`),
+  braces for blocks, a string never closed (at the line where it starts, not
+  where parsing gave up), a field with no type, fields outside a `feature`
+  section, and a block whose `end` is missing (naming the `if`, loop, class or
+  function and its line). `return`, `while`, `for`, `println`, `printf`,
+  `puts` and `echo` now say what Nex uses instead of "Undefined function".
+  Any parser message left over loses its jargon too.
 - **Clearer errors for four common beginner mistakes.** `greet "Bob"` and
   `print "hi"` (arguments without parentheses) are rejected with "Missing
   parentheses: ... `greet("Bob")`" instead of silently doing nothing or

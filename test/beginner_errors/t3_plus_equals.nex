@@ -3,5 +3,5 @@ x += 1
 print(x)
 
 -- Mistake: `+=`
--- status: pending
+-- status: fixed
 -- expect: x := x + 1

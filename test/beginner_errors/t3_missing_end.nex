@@ -4,6 +4,6 @@ if x > 2 then
 print("done")
 
 -- Mistake: an `if` never closed
--- status: pending
+-- status: fixed
 -- expect: `if`
 -- expect: line 2

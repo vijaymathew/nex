@@ -4,6 +4,6 @@ if a > 1 && a < 5 then
 end
 
 -- Mistake: `&&` instead of `and`
--- status: pending
+-- status: fixed
 -- expect: `and`
 -- reject: token recognition error

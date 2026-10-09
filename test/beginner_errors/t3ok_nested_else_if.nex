@@ -1,0 +1,13 @@
+let x := 3
+if x > 5 then
+  print("a")
+else if x > 2 then
+  print("b")
+else
+  print("c")
+end end
+
+-- Mistake: (not a mistake) an `if` nested in an `else`, with its own `end`
+-- status: fixed
+-- expect: "b"
+-- exit: 0

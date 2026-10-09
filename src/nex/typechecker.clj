@@ -3862,6 +3862,29 @@
                                       (display-type handler-type)))}))))
     "Void"))
 
+(def ^:private foreign-statement-hints
+  "Words from other languages that a beginner writes as if they were Nex, and
+   what to write instead. They parse as calls of an unknown function, so the
+   plain message would be \"Undefined function: while\"."
+  {"return" (str "Nex has no `return`: a routine returns whatever `result` holds when it"
+                 " ends, so write `result := ...` instead.")
+   "while" (str "Nex has no `while` loop. Write `from ... until <stop condition> do ... end`;"
+                " `until` takes the condition for stopping, the opposite of `while`'s.")
+   "for" (str "Nex has no `for` loop. To go through a collection, write"
+              " `across <collection> as <item> do ... end`; to count, write"
+              " `from let i := 0 until i >= n do ... i := i + 1 end`.")
+   "println" "Nex prints with `print(...)`, which ends the line itself."
+   "printf" "Nex prints with `print(...)`; build the text with `+`, as in `print(\"n = \" + n)`."
+   "puts" "Nex prints with `print(...)`."
+   "echo" "Nex prints with `print(...)`."})
+
+(defn- unknown-call-message
+  "The error for a call of METHOD, which names nothing: PREFIX and the name,
+   or, for a word carried over from another language, what Nex writes instead."
+  [prefix method]
+  (or (get foreign-statement-hints method)
+      (str prefix method)))
+
 (def ^:private builtin-call-checkers
   {"print"   check-builtin-print
    "println" check-builtin-print
@@ -4199,16 +4222,14 @@
         (check-function-object-call env method args global-type)
         (do
           (doseq [arg args] (check-expression env arg))
-          (throw (ex-info (str "Undefined function or method: " method)
-                          {:error (type-error
-                                   (str "Undefined function or method: " method))})))))
+          (let [msg (unknown-call-message "Undefined function or method: " method)]
+            (throw (ex-info msg {:error (type-error msg)}))))))
     (if-let [global-type (expand-type-aliases env (env-lookup-global env method))]
       (check-function-object-call env method args global-type)
       (do
         (doseq [arg args] (check-expression env arg))
-        (throw (ex-info (str "Undefined function: " method)
-                        {:error (type-error
-                                 (str "Undefined function: " method))}))))))
+        (let [msg (unknown-call-message "Undefined function: " method)]
+          (throw (ex-info msg {:error (type-error msg)})))))))
 
 (defn check-call
   "Check the type of a method call"

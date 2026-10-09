@@ -1,0 +1,18 @@
+class Dog
+  create
+    make do
+    end
+  feature
+    speak
+      do
+        print("woof")
+      end
+end
+
+let d := create Dog.make
+let y = 5
+
+-- Mistake: an unrelated error after a routine whose `do` is on the next line
+-- status: fixed
+-- expect: Line 13
+-- reject: needs a type

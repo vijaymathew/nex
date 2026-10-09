@@ -5,5 +5,5 @@ end
 print(double(4))
 
 -- Mistake: `return` instead of `result :=`
--- status: pending
+-- status: fixed
 -- expect: result :=

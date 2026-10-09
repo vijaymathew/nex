@@ -5,6 +5,6 @@ class Point
 end
 
 -- Mistake: a field declared without a type
--- status: pending
+-- status: fixed
 -- expect: type
 -- reject: expected STRING

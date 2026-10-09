@@ -4,6 +4,6 @@ class Point
 end
 
 -- Mistake: fields declared outside a `feature` section
--- status: pending
+-- status: fixed
 -- expect: feature
 -- reject: expected 'end'

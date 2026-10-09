@@ -2,6 +2,6 @@ let x := 1;
 print(x);
 
 -- Mistake: statements ended with semicolons
--- status: pending
+-- status: fixed
 -- expect: semicolon
 -- reject: token recognition error
