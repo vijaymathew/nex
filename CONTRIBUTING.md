@@ -54,8 +54,8 @@ Enhancement suggestions are welcome! Please include:
 
 ### Prerequisites
 
-- Java 11 or later
-- Clojure CLI tools (version 1.10.3 or later)
+- Java 17 or later
+- Clojure CLI tools (version 1.11.1.1420 or later)
 - Git
 
 ### Getting Started

@@ -13,6 +13,10 @@ else
     NEX_HOME="/usr/local/lib/nex"
 fi
 
+# install.sh may put a Clojure CLI next to this script (for example under
+# ~/.local/bin); prefer it over any older one elsewhere on PATH.
+PATH="$SCRIPT_DIR:$PATH"
+
 # Helper functions
 show_help() {
     cat <<'EOF'
