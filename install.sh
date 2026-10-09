@@ -190,17 +190,21 @@ install_java() {
     case "$OS" in
         ubuntu|debian|linuxmint|pop)
             as_root apt-get update -qq
-            as_root apt-get install -y openjdk-21-jdk-headless \
+            # Newest first: Java 25+ starts Nex fastest (see bin/nex).
+            as_root apt-get install -y openjdk-25-jdk-headless \
+                || as_root apt-get install -y openjdk-21-jdk-headless \
                 || as_root apt-get install -y openjdk-17-jdk-headless
             ;;
         fedora)
-            as_root dnf install -y java-21-openjdk-headless \
+            as_root dnf install -y java-25-openjdk-headless \
+                || as_root dnf install -y java-21-openjdk-headless \
                 || as_root dnf install -y java-latest-openjdk-headless
             ;;
         centos|rhel|rocky|almalinux)
             local pm=yum
             command -v dnf &> /dev/null && pm=dnf
-            as_root "$pm" install -y java-21-openjdk-headless \
+            as_root "$pm" install -y java-25-openjdk-headless \
+                || as_root "$pm" install -y java-21-openjdk-headless \
                 || as_root "$pm" install -y java-17-openjdk-headless
             ;;
         arch|manjaro)
@@ -332,9 +336,24 @@ check_prerequisites() {
 }
 
 # Build for target
+# AOT-compile Nex into target/dist (see scripts/build-dist.clj), so the
+# installed command starts with plain `java` instead of loading the Clojure
+# source on every run.
 build() {
-    echo "Building Nex..."
-    echo "  No build required for JVM (using Clojure CLI)"
+    echo "Building Nex (compiling ahead of time; this takes a minute)..."
+
+    local log
+    log="$(mktemp)"
+    rm -rf target/dist
+    if ! clojure -M:dist > "$log" 2>&1; then
+        echo "Error: building Nex failed. The build output ends with:"
+        tail -n 30 "$log" | sed 's/^/    /'
+        rm -f "$log"
+        exit 1
+    fi
+    rm -f "$log"
+
+    echo "  ✓ Compiled $(wc -l < target/dist/classpath | tr -d ' ') jars into target/dist"
     echo ""
 }
 
@@ -357,15 +376,20 @@ install_files() {
 
     # Remove previously installed managed content first so deleted/renamed source
     # files do not linger and shadow newer namespaces.
-    $SUDO rm -rf "$LIB_DIR/src" "$LIB_DIR/grammar"
-    $SUDO rm -f "$LIB_DIR/deps.edn"
+    $SUDO rm -rf "$LIB_DIR/src" "$LIB_DIR/grammar" "$LIB_DIR/deps"
+    $SUDO rm -f "$LIB_DIR/deps.edn" "$LIB_DIR/nex.jar" "$LIB_DIR/classpath" "$LIB_DIR/aot-training.nex"
 
     # Copy source files
     $SUDO cp -r src "$LIB_DIR/"
     $SUDO cp -r grammar "$LIB_DIR/"
     $SUDO cp deps.edn "$LIB_DIR/"
 
-    echo "  ✓ Installed source files to $LIB_DIR"
+    # Copy the compiled distribution the nex command runs
+    $SUDO cp target/dist/nex.jar target/dist/classpath "$LIB_DIR/"
+    $SUDO cp -r target/dist/deps "$LIB_DIR/"
+    $SUDO cp scripts/aot-training.nex "$LIB_DIR/"
+
+    echo "  ✓ Installed Nex to $LIB_DIR"
     echo ""
 }
 

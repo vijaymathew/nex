@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Faster startup: an installed `nex` now starts in about 0.6-1.5s instead
+  of 5-7s.** `install.sh` compiles Nex ahead of time into `nex.jar`
+  (`clojure -M:dist`), and the `nex` command runs it with plain `java`
+  instead of loading Nex's Clojure source through the Clojure CLI on every
+  run. After the first run, a JVM class-data cache (an AOT cache on Java 25+,
+  AppCDS on Java 17-24) is built in the background in `~/.cache/nex`;
+  `NEX_JVM_CACHE=off` disables it. Running `bin/nex` from a source checkout
+  is unchanged. When it has to install Java, the installer now prefers
+  Java 25.
+- **Fix: the installer works on fresh machines.** It requires Java 17+ and
+  Clojure CLI 1.11.1.1420+ (installing or upgrading them), uses `sudo` only
+  when the install directory needs it, verifies the install by running a
+  program, and no longer exits with an error after a successful install.
+
 ## 0.5.8 - 2026-10-07
 
 - **Breaking: `x /= nil` no longer narrows a field.** Any call, or another

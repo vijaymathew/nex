@@ -71,7 +71,7 @@ The installer supports automatic dependency installation on:
 
 When using `--install-deps` flag:
 
-- Java (OpenJDK 21, or 17 where 21 is not packaged)
+- Java (the newest of OpenJDK 25, 21 or 17 that your system packages; 25+ starts Nex fastest)
 - Clojure CLI tools (latest release), under the same prefix as `nex`
 
 ## Installation Details
@@ -80,14 +80,26 @@ The installation script will:
 
 1. **Check prerequisites** - Verify Java 17+ and Clojure CLI 1.11.1.1420+ are installed
 2. **Offer to install dependencies** - If missing or too old (or auto-install with `--install-deps`)
-3. **Install files** to:
+3. **Build** - Compile Nex ahead of time (`clojure -M:dist`, see
+   `scripts/build-dist.clj`) into `nex.jar` plus its dependency jars. The
+   installed `nex` runs these with plain `java`, so the Clojure CLI is needed
+   only to install, and every run skips compiling Nex's own source.
+4. **Install files** to:
    - Executable: `/usr/local/bin/nex`
    - Library: `/usr/local/lib/nex`
-4. **Verify** - Run a test program with the installed `nex`. This first run also
-   downloads Nex's Java libraries, so later runs work offline.
+5. **Verify** - Run a test program with the installed `nex`.
 
 `sudo` is used only when the install directories are not writable by you, so a
 `--prefix` inside your home directory needs no administrator rights.
+
+## Startup Cache
+
+After the first program you run, `nex` builds a JVM class-data cache in the
+background, in `~/.cache/nex` (or `$XDG_CACHE_HOME/nex`), which roughly halves
+startup again: an AOT cache on Java 25 or later, an AppCDS archive on Java
+17-24. Nothing waits for it and nothing is printed about it. A new Nex or Java
+version gets a new cache automatically; old ones can be deleted at any time.
+To run without it, set `NEX_JVM_CACHE=off`.
 
 ## Custom Installation Prefix
 
@@ -199,6 +211,12 @@ Or if you used a custom prefix:
 ```bash
 rm -rf $INSTALL_PREFIX/bin/nex
 rm -rf $INSTALL_PREFIX/lib/nex
+```
+
+Each user's startup cache and shipped libraries can be removed too:
+
+```bash
+rm -rf ~/.cache/nex ~/.nex
 ```
 
 ## Troubleshooting
