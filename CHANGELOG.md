@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fix: REPL internal error after calling a function that returns a
+  closure.** With `function partial(f: Function, x: Any): Function` returning
+  an `fn`, a later `let g := partial(add, 10)` printed its value and then
+  failed with "Internal error: ... attempted duplicate class definition for
+  nex.repl.AnonymousFunction_1_...". Recompiling the session's functions
+  defined the anonymous function's class twice, once from the session's
+  remembered classes and once collected again from the function bodies.
+
 ## 0.5.9 - 2026-10-09
 
 - **Breaking: some earlier programs are rejected or read differently.**

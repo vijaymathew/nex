@@ -862,10 +862,24 @@
             compiled
             (vals @(:class-asts session)))))
 
+(defn- one-per-name
+  "CLASS-DEFS with a single definition per class name, the last one given
+   winning, in first-appearance order. An anonymous function's class can
+   arrive twice in one batch: once among the session's remembered classes
+   (a cell run through the interpreter records it there), and again
+   collected afresh from the function bodies being recompiled. Defining
+   both put the same class name into the loader twice."
+  [class-defs]
+  (let [latest (into {} (map (juxt :name identity)) class-defs)]
+    (->> class-defs
+         (map :name)
+         distinct
+         (mapv latest))))
+
 (defn- compile-and-register-classes!
   [session ast source-id]
-  (let [actual-classes (vec (concat (user-class-defs ast)
-                                    (anonymous-class-defs ast)))]
+  (let [actual-classes (one-per-name (concat (user-class-defs ast)
+                                             (anonymous-class-defs ast)))]
     (when (seq actual-classes)
       (let [compiled-class-defs actual-classes
             new-class-map (allocate-compiled-class-metadata session compiled-class-defs)

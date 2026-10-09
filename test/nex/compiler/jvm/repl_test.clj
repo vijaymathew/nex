@@ -155,12 +155,16 @@ end"))]
 
 (deftest repl-compiled-backend-method-call-on-interpreter-object-test
   (testing "a compiled method call dispatches on an object produced by an interpreter-fallback function"
-    ;; `vectorize` below names the `Op2` type alias in a local annotation, which
-    ;; routes it to the interpreter, so it returns an interpreter `NexObject` that is
-    ;; stored in the compiled session. A later compiled method call on that binding
-    ;; (`vec.apply_add(...)`) could not reflect user methods off a `NexObject` and
-    ;; failed with `Method not found: apply_add`; it must dispatch back through the
-    ;; interpreter instead (mirroring how function-object invocation already does).
+    ;; The input creating `vec` names the `Op2` type alias in a local annotation,
+    ;; which routes the whole input to the interpreter, so `vec` is an interpreter
+    ;; `NexObject` stored in the compiled session. A later compiled method call on
+    ;; that binding (`vec.apply_add(...)`) could not reflect user methods off a
+    ;; `NexObject` and failed with `Method not found: apply_add`; it must dispatch
+    ;; back through the interpreter instead (mirroring how function-object
+    ;; invocation already does). (`vectorize` itself is defined on the interpreter
+    ;; too, but is then recompiled into the session, so calling it from a compiled
+    ;; input would give a compiled object; that recompile used to fail with a
+    ;; duplicate class definition, which is all that once made `vec` interpreted.)
     (binding [repl/*type-checking-enabled* (atom true)
               repl/*repl-var-types* (atom {})
               repl/*repl-type-aliases* (atom {})
@@ -199,7 +203,8 @@ end"))]
                                    "      else raise \"na\" end\n"
                                    "    end\n"
                                    "  result := create VecArith.make(op) end"))
-          (repl/eval-code ctx "let vec: VecArith := vectorize(base)"))
+          (repl/eval-code ctx (str "let unused_op: Op2 := base.add\n"
+                                   "let vec: VecArith := vectorize(base)")))
         ;; The producing function fell back to the interpreter, so `vec` is an
         ;; interpreter object stored in the compiled session.
         (is (interp/nex-object?
@@ -2944,3 +2949,31 @@ end")
           (is (= "Integer 5" (show "5")))
           (is (= "String \"s\"" (show "\"s\"")))
           (is (= "Array[Integer] [1, 2]" (show "[1, 2]"))))))))
+
+(deftest repl-function-returning-a-closure-survives-later-inputs-test
+  (testing "a function whose body creates an anonymous function, called in a
+            later input whose result goes through the interpreter, does not
+            define that anonymous function's class twice — once among the
+            session's remembered classes and once collected afresh from the
+            function bodies being recompiled — which failed with
+            \"attempted duplicate class definition for
+            nex.repl.AnonymousFunction_1_...\""
+    (doseq [type-checking? [false true]]
+      (binding [repl/*type-checking-enabled* (atom type-checking?)
+                repl/*repl-var-types* (atom {})
+                repl/*repl-backend* (atom :compiled)
+                repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+        (let [output (with-out-str
+                       (reduce (fn [ctx input] (or (repl/eval-code ctx input) ctx))
+                               (repl/init-repl-context)
+                               ["function partial(f: Function, param: Any): Function do result := fn(other: Any): Any do result := f(param, other) end end"
+                                "function add(a, b: Integer): Integer do result := a + b end"
+                                "let add_10 := partial(add, 10)"
+                                "print(add_10(5))"
+                                ;; a class defined afterwards recompiles the session's classes too
+                                "class Box create make do end end"
+                                "print(add_10(32))"]))]
+          (is (not (str/includes? output "duplicate class definition")) output)
+          (is (not (str/includes? output "Internal error")) output)
+          (is (str/includes? output "15") output)
+          (is (str/includes? output "42") output))))))
