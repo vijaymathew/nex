@@ -1,0 +1,20 @@
+class Counter
+  create
+    make(start: Integer) do
+      this.value := start
+    end
+  feature
+    value: Integer
+    inc() do
+      this.value := this.value + 1
+    end
+end
+
+let c := create Counter.make(1)
+c.inc
+print(c.value)
+
+-- Mistake: (not a mistake) paren-less calls of routines and fields
+-- status: fixed
+-- expect: 2
+-- exit: 0

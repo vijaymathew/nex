@@ -1,0 +1,10 @@
+function f(n: Integer): Integer do
+  result := f(n + 1)
+end
+
+print(f(0))
+
+-- Mistake: recursion with no base case
+-- status: pending
+-- expect: recursion
+-- reject: java.lang

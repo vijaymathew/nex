@@ -1,0 +1,8 @@
+for i in [1, 2, 3] do
+  print(i)
+end
+
+-- Mistake: a `for ... in` loop
+-- status: pending
+-- expect: across
+-- reject: Undefined function: for

@@ -1,0 +1,5 @@
+pritn("hi")
+
+-- Mistake: a misspelled function
+-- status: fixed
+-- expect: Undefined function: pritn

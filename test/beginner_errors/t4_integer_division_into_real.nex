@@ -1,0 +1,5 @@
+let r: Real := 7 / 2
+
+-- Mistake: Integer division assigned to a Real
+-- status: pending
+-- expect: to_real

@@ -1,0 +1,27 @@
+class Counter
+  create
+    make(start: Integer) do
+      this.value := start
+    end
+  feature
+    value: Integer
+    inc() do
+      this.value := this.value + 1
+    end
+end
+
+class Tally
+  create
+    make do
+      this.counter := Counter.make(0)
+    end
+  feature
+    counter: Counter
+end
+
+let t := create Tally.make
+
+-- Mistake: constructor called without `create` inside a class
+-- status: fixed
+-- expect: `create Counter.make(0)`
+-- expect: Tally does not

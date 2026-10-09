@@ -1,0 +1,6 @@
+let n: integer := 3
+print(n)
+
+-- Mistake: a type name in lower case
+-- status: fixed
+-- expect: Undefined type: integer

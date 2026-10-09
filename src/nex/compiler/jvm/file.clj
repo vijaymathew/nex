@@ -272,7 +272,8 @@
    (try
      (let [module-ast (augment-ast-with-interns source-id ast)
            _ (when-not (:skip-type-check opts)
-               (let [result (tc/type-check module-ast {:strict-undefined-targets? true})]
+               (let [result (tc/type-check module-ast {:strict-undefined-targets? true
+                                                       :reject-discarded-top-level? true})]
                  (when-not (:success result)
                    (throw (ex-info "Type checking failed"
                                    {:errors (map tc/format-type-error (:errors result))})))))

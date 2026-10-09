@@ -1,0 +1,8 @@
+let x := 3
+if x > 2
+  print("big")
+end
+
+-- Mistake: `then` left out of an if
+-- status: fixed
+-- expect: missing 'then'

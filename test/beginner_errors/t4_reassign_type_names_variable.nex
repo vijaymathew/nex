@@ -1,0 +1,6 @@
+let x := 5
+x := "five"
+
+-- Mistake: a variable reassigned a different type
+-- status: pending
+-- expect: 'x'

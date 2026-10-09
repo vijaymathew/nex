@@ -1,0 +1,6 @@
+print "hi"
+
+-- Mistake: print written without parentheses
+-- status: fixed
+-- expect: `print("hi")`
+-- reject: internal error

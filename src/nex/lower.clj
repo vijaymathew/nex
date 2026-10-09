@@ -6940,28 +6940,43 @@
     :else
     (lower-general-receiver-call env expr target-expr arg-irs)))
 
+(defn- bare-builtin-call?
+  "True when EXPR is a builtin function's name written alone (`print`), with
+   no local or field of that name shadowing it. The typechecker treats that
+   as a call with no arguments, the same as a class's own zero-argument
+   routine, so it is lowered as one rather than as a variable read."
+  [env expr]
+  (and (nil? (:target expr))
+       (empty? (:args expr))
+       (false? (:has-parens expr))
+       (contains? builtin-function-names (:method expr))
+       (not (contains? (:locals env) (:method expr)))
+       (not (contains? (:fields env) (:method expr)))))
+
 (defn- lower-call-expr [env expr]
-  (if (and (nil? (:target expr))
-           (empty? (:args expr))
-           (not (:has-parens expr)))
-    (lower-expression env {:type :identifier
-                           :name (:method expr)})
-    (let [raw-target (:target expr)
-          class-target-name (when (string? raw-target)
-                              (some #(when (= (:name %) raw-target)
-                                       (:name %))
-                                    (:classes env)))
-          target-expr (normalize-call-target raw-target)
-          arg-irs (mapv #(lower-expression env %) (:args expr))]
-      (if (and (map? target-expr)
-               (= :create (:type target-expr))
-               (nil? (:method expr)))
-        (if (nil? (:constructor target-expr))
-          (throw (invalid-bare-create-call-ex (:class-name target-expr)))
-          (lower-expression env (assoc target-expr :args (:args expr))))
-        (if (nil? target-expr)
-          (lower-call-without-target env expr arg-irs)
-          (lower-call-with-target env expr target-expr class-target-name arg-irs))))))
+  (let [expr (cond-> expr
+               (bare-builtin-call? env expr) (assoc :has-parens true))]
+    (if (and (nil? (:target expr))
+             (empty? (:args expr))
+             (not (:has-parens expr)))
+      (lower-expression env {:type :identifier
+                             :name (:method expr)})
+      (let [raw-target (:target expr)
+            class-target-name (when (string? raw-target)
+                                (some #(when (= (:name %) raw-target)
+                                         (:name %))
+                                      (:classes env)))
+            target-expr (normalize-call-target raw-target)
+            arg-irs (mapv #(lower-expression env %) (:args expr))]
+        (if (and (map? target-expr)
+                 (= :create (:type target-expr))
+                 (nil? (:method expr)))
+          (if (nil? (:constructor target-expr))
+            (throw (invalid-bare-create-call-ex (:class-name target-expr)))
+            (lower-expression env (assoc target-expr :args (:args expr))))
+          (if (nil? target-expr)
+            (lower-call-without-target env expr arg-irs)
+            (lower-call-with-target env expr target-expr class-target-name arg-irs)))))))
 
 (defn- across-item-type
   "The element type `across` yields over TARGET-TYPE: the builtin collections'

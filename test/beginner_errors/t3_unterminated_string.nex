@@ -1,0 +1,8 @@
+print("hello)
+print("bye")
+
+-- Mistake: a string missing its closing quote
+-- status: pending
+-- expect: Line 1
+-- expect: string
+-- reject: no viable alternative

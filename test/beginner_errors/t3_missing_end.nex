@@ -1,0 +1,9 @@
+let x := 3
+if x > 2 then
+  print("big")
+print("done")
+
+-- Mistake: an `if` never closed
+-- status: pending
+-- expect: `if`
+-- expect: line 2

@@ -1,0 +1,8 @@
+print
+print("after")
+
+-- Mistake: print alone, with no arguments
+-- status: fixed
+-- expect: "after"
+-- reject: internal error
+-- exit: 0

@@ -1,0 +1,9 @@
+function add(a: Integer, b: Integer): Integer do
+  result := a + b
+end
+
+print(add(1, "2"))
+
+-- Mistake: an argument of the wrong type
+-- status: pending
+-- expect: `b`

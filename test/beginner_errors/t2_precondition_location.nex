@@ -1,0 +1,14 @@
+function sqrt_int(n: Integer): Integer
+  require
+    non_negative: n >= 0
+  do
+    result := n
+  end
+
+print(sqrt_int(-4))
+
+-- Mistake: breaking a precondition
+-- status: pending
+-- expect: non_negative
+-- expect: sqrt_int
+-- expect: line 8

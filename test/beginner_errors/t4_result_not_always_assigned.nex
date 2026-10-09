@@ -1,0 +1,9 @@
+function name_of(n: Integer): String do
+  if n = 1 then
+    result := "one"
+  end
+end
+
+-- Mistake: `result` not assigned on every path
+-- status: pending
+-- expect: line 1

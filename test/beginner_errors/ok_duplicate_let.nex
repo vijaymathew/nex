@@ -1,0 +1,7 @@
+let x := 1
+let x := 2
+print(x)
+
+-- Mistake: the same name declared twice
+-- status: fixed
+-- expect: Duplicate local variable 'x'

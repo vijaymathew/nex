@@ -33,23 +33,25 @@
 (deftest trailing-value-expression-is-rejected-test
   (testing "a routine body ending in a value-only expression is a type error
             naming the expression and the `result :=` it probably meant"
-    (doseq [[src shown] [["function f(n: Integer): Integer do n * 2 end" "n * 2"]
-                         ["function f(k: Integer): Integer do k end" "k"]
-                         ["function f(): Integer do 11 end" "11"]
-                         ["function f(n: Integer): Integer do -n end" "-n"]
-                         ["function f(): Boolean do not true end" "not true"]
-                         ["function f(): Array[Integer] do [1, 2] end" "[1, 2]"]
-                         ["function f(n: Integer): Integer do
+    ;; HINT, when given, is what `result :=` should be followed by, if not SHOWN
+    ;; itself: a function named but not called is meant to be called.
+    (doseq [[src shown hint] [["function f(n: Integer): Integer do n * 2 end" "n * 2"]
+                              ["function f(k: Integer): Integer do k end" "k"]
+                              ["function f(): Integer do 11 end" "11"]
+                              ["function f(n: Integer): Integer do -n end" "-n"]
+                              ["function f(): Boolean do not true end" "not true"]
+                              ["function f(): Array[Integer] do [1, 2] end" "[1, 2]"]
+                              ["function f(n: Integer): Integer do
   let y := n + 1
   y
 end" "y"]
-                         ["function g(): Integer do result := 1 end
-function f(): Integer do g end" "g"]]]
+                              ["function g(): Integer do result := 1 end
+function f(): Integer do g end" "g" "g()"]]]
       (let [err (discard-error src)]
         (is (some? err) src)
         (when (and err shown)
           (is (str/includes? err (str "`" shown "`")) err)
-          (is (str/includes? err (str "did you mean `result := " shown "`?")) err))))))
+          (is (str/includes? err (str "did you mean `result := " (or hint shown) "`?")) err))))))
 
 (deftest every-kind-of-routine-body-is-checked-test
   (testing "methods, fields' getters, anonymous functions, constructors and

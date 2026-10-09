@@ -16,7 +16,7 @@
 (declare env-lookup-type-alias-generic-params)
 (declare resolve-generic-type)
 (declare type-error)
-(declare check-no-discarded-tail!)
+(declare check-no-discarded-values! check-missing-call-parens! short-source)
 
 (def ^:dynamic *strict-undefined-targets*
   "When true, a member access / call on an unresolved bare-identifier target is a
@@ -2860,9 +2860,10 @@
   (let [spawn-env (narrowing-barrier-env env)]
     (env-add-var spawn-env "result" "Any")
     (env-add-var spawn-env "__spawn_result_type__" "Void")
+    (check-missing-call-parens! spawn-env body)
     (doseq [stmt body]
       (check-statement spawn-env stmt))
-    (check-no-discarded-tail! spawn-env body true)
+    (check-no-discarded-values! spawn-env body {:routine? true :returns-value? true})
     (let [result-type (env-lookup-var spawn-env "__spawn_result_type__")]
       (if (= result-type "Void")
         "Task"
@@ -3507,10 +3508,23 @@
                             (build-member-generic-type-map
                              env (self-type-with-own-generic-params env current-class) target-name))
 
+      ;; Almost always a `create` left out: `Counter.make(1)` where
+      ;; `create Counter.make(1)` was meant. Calling an ancestor's
+      ;; constructor directly is only for a heir's constructor delegating to
+      ;; it, so mention that rule only where it could apply — in a class.
       :else
-      (let [msg (str target-name "." method "(...) is not reachable here: "
-                     target-name " is neither " current-class
-                     " itself nor one of its ancestors")]
+      (let [call (str target-name "." method "("
+                      (or (some->> args (map short-source) (#(when (every? some? %) %))
+                                   (str/join ", "))
+                          "...")
+                      ")")
+            article (if (re-find #"(?i)^[aeiou]" target-name) "an" "a")
+            msg (str "`" call "` runs a constructor without creating an object. To create "
+                     article " " target-name ", write `create " call "`."
+                     (when (seq current-class)
+                       (str " (Calling a constructor directly like this is only for a"
+                            " constructor of a class that inherits from " target-name
+                            ", and " current-class " does not.)")))]
         (throw (ex-info msg {:error (type-error msg)}))))
     (let [msg (str "Constructor not found: " target-name "." method " with "
                    (count args) " argument(s)")]
@@ -6062,32 +6076,170 @@
         (:scoped-block :with) (tail-statements (:body stmt))
         [stmt]))))
 
-(defn- check-no-discarded-tail!
-  "Reject a routine body that ends in a value-only expression. A routine returns
-   only what `result` holds, so a trailing `n * 2` is computed and silently
-   dropped — almost always a missing `result :=`. (Top-level statements, and so
-   REPL input, are never routine bodies and may still end in an expression.)"
-  [env body returns-value?]
-  (doseq [stmt (tail-statements body)]
-    (when (discarded-value-statement? env stmt)
-      (let [src (let [s (if (= :call (:type stmt))
-                          (:method stmt)  ; a bare name — fmt would add `()`
-                          (try (fmt/format-expression stmt) (catch Exception _ nil)))]
-                  (when (and s (<= (count s) 60)) s))
-            msg (str "Discarded value: " (if src (str "`" src "`") "this expression")
-                     " is computed and thrown away. "
-                     (cond
-                       (and returns-value? src)
-                       (str "A routine returns only what `result` holds; did you mean `result := " src "`?")
+(defn- nested-statement-lists
+  "The statement lists directly inside STMT: branches, loop bodies, blocks. A
+   `case`/`match` clause body is a single statement, not a list."
+  [stmt]
+  (case (:type stmt)
+    :if (concat [(:then stmt)] (map :then (:elseif stmt)) [(:else stmt)])
+    :loop [(:init stmt) (:body stmt)]
+    :select (concat (map :body (:clauses stmt)) [(:body (:timeout stmt)) (:else stmt)])
+    (:case :match) (concat (map :body (:clauses stmt)) [(:else stmt)])
+    :scoped-block [(:body stmt) (:rescue stmt)]
+    ;; A `with "java"` body is host code, checked by its own rules.
+    :with (when-not (= "java" (:target stmt)) [(:body stmt)])
+    nil))
 
-                       returns-value?
-                       "A routine returns only what `result` holds; assign it with `result := ...`."
+(defn- each-statement-list
+  "Call F on STMTS and on every statement list nested inside them."
+  [f stmts]
+  (let [stmts (if (map? stmts) [stmts] stmts)]
+    (f stmts)
+    (doseq [stmt stmts
+            :when (map? stmt)
+            nested (nested-statement-lists stmt)
+            :when nested]
+      (each-statement-list f nested))))
 
-                       :else
-                       "Remove it, or use its value."))]
-        (with-type-error-location
-          stmt
-          #(throw (ex-info msg {:error (type-error msg)})))))))
+(defn- paren-less-name
+  "The name in a bare, paren-less, argument-less call statement (`hello`),
+   which is how a name alone on a line arrives (nex.walker/statement-position-node)."
+  [stmt]
+  (when (and (map? stmt)
+             (= :call (:type stmt))
+             (nil? (:target stmt))
+             (false? (:has-parens stmt))
+             (empty? (:args stmt)))
+    (:method stmt)))
+
+(defn- free-function-name?
+  "True when NAME is bound to a function value: a free function (whose
+   variable's type is its generated `Function` class) or a local holding one."
+  [env name]
+  (let [t (env-lookup-var env name)]
+    (and (string? t)
+         (boolean (try (class-subtype? env t "Function") (catch Exception _ false))))))
+
+(defn- callable-name?
+  "True when NAME, written alone, could be meant as a call taking ARITY
+   arguments: a builtin, a function value, or one of the current class's
+   routines."
+  [env name arity]
+  (or (contains? bi/builtins name)
+      (free-function-name? env name)
+      (boolean (when-let [current-class (env-lookup-var env "__current_class__")]
+                 (lookup-class-method env current-class name arity current-class)))))
+
+(defn- short-source
+  "NODE as source text, or nil when it cannot be rendered or is too long to
+   quote in a message."
+  [node]
+  (let [s (try (fmt/format-expression node) (catch Exception _ nil))]
+    (when (and s (<= (count s) 60)) s)))
+
+(defn- check-missing-call-parens!
+  "Reject a call written without parentheses around its arguments, such as
+   `greet \"Bob\"` or `print \"hi\"`. It parses as two statements on one line —
+   the bare name, then the argument — and would otherwise either do nothing
+   at all or fail somewhere far less helpful."
+  [env stmts]
+  (each-statement-list
+   (fn [stmts]
+     (doseq [[stmt next-stmt] (partition 2 1 stmts)
+             :let [name (paren-less-name stmt)]
+             :when (and name
+                        (map? next-stmt)
+                        (some? (:dbg/line stmt))
+                        (= (:dbg/line stmt) (:dbg/line next-stmt))
+                        (callable-name? env name 1))]
+       (let [arg (short-source next-stmt)
+             msg (str "Missing parentheses: to call `" name "`, put its arguments in"
+                      " parentheses: `" name "(" (or arg "...") ")`.")]
+         (with-type-error-location
+           stmt
+           #(throw (ex-info msg {:error (type-error msg)}))))))
+   stmts))
+
+(defn- comparison-meant-as-assignment
+  "For `x = 5` or `p.x = 5` — a comparison whose left side could be assigned
+   to — the [left right] source texts; nil otherwise."
+  [stmt]
+  (when (and (= :binary (:type stmt)) (= "=" (:operator stmt)))
+    (let [left (:left stmt)
+          sides [(short-source left) (short-source (:right stmt))]]
+      (when (and (or (= :identifier (:type left))
+                     (and (= :call (:type left)) (false? (:has-parens left))
+                          (empty? (:args left))))
+                 (every? some? sides))
+        sides))))
+
+(defn- beginner-discard?
+  "True for the two discarded statements that are always a mistake, wherever
+   they stand: `x = 5` written for `x := 5`, and a function named without
+   being called."
+  [env stmt]
+  (boolean (or (comparison-meant-as-assignment stmt)
+               (some->> (paren-less-name stmt) (free-function-name? env)))))
+
+(defn- discarded-value-message
+  "Why STMT, a statement whose value is thrown away, is rejected, and the
+   likeliest fix: a call missing its parentheses, an assignment written with
+   `=`, or — in tail position of a routine that returns a value — a missing
+   `result :=`."
+  [env stmt result-hint?]
+  (let [name (paren-less-name stmt)
+        src (if name name (short-source stmt))]
+    (str "Discarded value: "
+         (cond
+           (and name (free-function-name? env name))
+           (str "`" name "` names a function but does not call it. "
+                (if result-hint?
+                  (str "A routine returns only what `result` holds; did you mean `result := "
+                       name "()`?")
+                  (str "To call it, write `" name "()`.")))
+
+           (comparison-meant-as-assignment stmt)
+           (let [[left right] (comparison-meant-as-assignment stmt)]
+             (str "`" src "` compares `" left "` with `" right "` and throws the answer away."
+                  " To assign, write `" left " := " right "`."))
+
+           :else
+           (str (if src (str "`" src "`") "this expression")
+                " is computed and thrown away. "
+                (cond
+                  (and result-hint? src)
+                  (str "A routine returns only what `result` holds; did you mean `result := " src "`?")
+
+                  result-hint?
+                  "A routine returns only what `result` holds; assign it with `result := ...`."
+
+                  :else
+                  "Remove it, or use its value."))))))
+
+(defn- check-no-discarded-values!
+  "Reject statements in BODY, nested ones included, that only compute a value
+   which is then thrown away. In a routine (ROUTINE? true), a value-only
+   expression in tail position is rejected: the routine returns only what
+   `result` holds, so a trailing `n * 2` is almost always a missing
+   `result :=`. Anywhere — routine or, when running a script, its top-level
+   statements — `x = 5` (a comparison, not an assignment) and a function
+   named but not called are rejected too. REPL input is not checked: the REPL
+   shows a value left standing."
+  [env body {:keys [routine? returns-value?]}]
+  (let [tails (when routine? (tail-statements body))]
+    (each-statement-list
+     (fn [stmts]
+       (doseq [stmt stmts
+               :let [tail? (boolean (some #(identical? % stmt) tails))]
+               :when (and (map? stmt)
+                          (not (:synthetic stmt))
+                          (discarded-value-statement? env stmt)
+                          (or tail? (beginner-discard? env stmt)))]
+         (let [msg (discarded-value-message env stmt (and returns-value? tail?))]
+           (with-type-error-location
+             stmt
+             #(throw (ex-info msg {:error (type-error msg)}))))))
+     body)))
 
 (defn references-result?
   "Check if an AST node or any of its descendants references 'result' or 'Result'."
@@ -6457,11 +6609,13 @@
     ;; its implementations inherit are checked.
     (when-not deferred?
       ;; Check method body
+      (check-missing-call-parens! method-env body)
       (check-statements method-env body)
       ;; A REPL cell is run as `__ReplTemp__.__eval__` and may end in a bare
       ;; expression, whose value the REPL shows.
       (when-not (and (= class-name "__ReplTemp__") (= name "__eval__"))
-        (check-no-discarded-tail! method-env body (some? return-type)))
+        (check-no-discarded-values! method-env body {:routine? true
+                                                     :returns-value? (some? return-type)}))
 
       ;; Check rescue clause
       (when rescue
@@ -6526,8 +6680,9 @@
                                      (str "Precondition must be Boolean, got " cond-type))}))))))
 
     ;; Check body
+    (check-missing-call-parens! ctor-env body)
     (check-statements ctor-env body)
-    (check-no-discarded-tail! ctor-env body false)
+    (check-no-discarded-values! ctor-env body {:routine? true :returns-value? false})
 
     ;; Check postconditions
     (doseq [assertion ensure]
@@ -8437,7 +8592,14 @@
              stray
              (fn [] (check-old-and-retry! "top-level code" nil nil nil statements nil))))
          (if (seq statements)
-           (check-statements env statements)
+           (do
+             (check-missing-call-parens! env statements)
+             (check-statements env statements)
+             ;; `x = 5` or a function named but not called, standing alone,
+             ;; is a mistake in a script, which never shows a top-level value;
+             ;; the REPL, which does show it, leaves this option off.
+             (when (:reject-discarded-top-level? opts)
+               (check-no-discarded-values! env statements {:routine? false})))
            (doseq [call calls]
              (check-expression env call)))
 

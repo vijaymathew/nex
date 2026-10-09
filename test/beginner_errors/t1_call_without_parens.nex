@@ -1,0 +1,11 @@
+function greet(name: String) do
+  print("Hi " + name)
+end
+
+greet "Bob"
+
+-- Mistake: a call's arguments written without parentheses
+-- status: fixed
+-- expect: Missing parentheses
+-- expect: `greet("Bob")`
+-- expect: line 5

@@ -1,0 +1,7 @@
+let xs := [1, 2, 3]
+print(xs[0])
+
+-- Mistake: `xs[0]` instead of `xs.get(0)`
+-- status: pending
+-- expect: xs.get(0)
+-- reject: no viable alternative

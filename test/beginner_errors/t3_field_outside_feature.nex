@@ -1,0 +1,9 @@
+class Point
+  x: Integer
+  y: Integer
+end
+
+-- Mistake: fields declared outside a `feature` section
+-- status: pending
+-- expect: feature
+-- reject: expected 'end'

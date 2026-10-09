@@ -1,0 +1,7 @@
+let x := 3
+let y := x + 1
+(x + y).to_string
+
+-- Mistake: a line starting with `(` after a statement
+-- status: pending
+-- reject: Undefined variable: y

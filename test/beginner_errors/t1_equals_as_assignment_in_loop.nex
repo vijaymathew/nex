@@ -1,0 +1,17 @@
+function count_to(n: Integer): Integer do
+  from
+    let i := 0
+  until
+    i >= n
+  do
+    i = i + 1
+  end
+  result := n
+end
+
+print(count_to(3))
+
+-- Mistake: `=` used to assign inside a loop body
+-- status: fixed
+-- expect: `i := i + 1`
+-- expect: line 7

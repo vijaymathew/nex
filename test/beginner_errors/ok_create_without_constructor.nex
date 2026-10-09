@@ -1,0 +1,14 @@
+class Point
+  create
+    make(a: Integer) do
+      this.x := a
+    end
+  feature
+    x: Integer
+end
+
+let p := create Point
+
+-- Mistake: `create` without naming the constructor
+-- status: fixed
+-- expect: use an explicit constructor call

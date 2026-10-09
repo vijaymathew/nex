@@ -259,6 +259,20 @@ call of one of the class's own routines. Top-level statements are not a routine
 body, so a script or the REPL can still end in an expression (the REPL shows its
 value).
 
+Two discarded statements are always a mistake, so they are rejected anywhere in
+a routine or a script — only REPL input, which shows the value, is exempt:
+
+```
+x = 5          -- Type error: Discarded value: `x = 5` compares `x` with `5` and
+               --   throws the answer away. To assign, write `x := 5`.
+hello          -- Type error: Discarded value: `hello` names a function but does
+               --   not call it. To call it, write `hello()`.
+```
+
+A call's arguments always go in parentheses. `greet "Bob"` is rejected with
+"Missing parentheses: ... `greet("Bob")`". A builtin's name alone, such as
+`print`, is a call with no arguments, like a class's own routine.
+
 `result` starts at its return type's zero value, so a routine that never assigns
 it returns that value:
 

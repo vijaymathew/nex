@@ -37,7 +37,8 @@
 (defn- type-check-ast!
   [source-id ast]
   (let [module-ast (augment-ast-with-interns source-id ast)
-        result (tc/type-check module-ast {:strict-undefined-targets? true})]
+        result (tc/type-check module-ast {:strict-undefined-targets? true
+                                          :reject-discarded-top-level? true})]
     (doseq [w (:warnings result)]
       (binding [*out* *err*]
         (println (str "Warning: " w))))
@@ -243,6 +244,39 @@
      (type-check-ast! source-id ast)
      (run-ast source-id ast opts))))
 
+(defn run-file
+  "Run FILE the way the `nex <file.nex>` command does: evaluate it, reporting
+   any syntax, type or runtime error on *out* exactly as the user sees it.
+   Returns the process exit code. opts as for eval-file."
+  [file opts]
+  (try
+    (eval-file file opts)
+    0
+    (catch ParseError e
+      (println "Syntax error:")
+      (let [source (try (slurp file) (catch Exception _ ""))]
+        (parser/format-parse-errors e source 0))
+      1)
+    ;; A syntax error in a file `file` interns, not `file` itself
+    ;; (nex.intern/parse-interned-file) — arrives wrapped in an
+    ;; ex-info, not a bare ParseError, precisely so it does NOT match the
+    ;; clause above: rendering it against `file`'s own source (which the
+    ;; ParseError's line/column have nothing to do with) is what this
+    ;; case exists to avoid. Any other ex-info (a type error, say) falls
+    ;; through to the same rendering the generic `catch Exception` below
+    ;; already gives it.
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (if (:nex/intern-parse-error data)
+          (let [{:keys [file-path source parse-error]} data]
+            (println (str "Syntax error in " file-path ":"))
+            (parser/format-parse-errors parse-error source 0))
+          (println "Error:" (rt/nex-error-message e)))
+        1))
+    (catch Exception e
+      (println "Error:" (rt/nex-error-message e))
+      1)))
+
 (defn -main
   "Main entry point for nex eval command.
    Usage: nex.eval [--interpret] [--skip-contracts] <file.nex> [program-args...]"
@@ -256,32 +290,6 @@
       (println "Error: No file provided")
       (println "Usage: nex <file.nex> [--interpret] [--skip-contracts] [program-args...]")
       (System/exit 1))
-    (try
-      (eval-file file {:interpret? interpret?
-                       :skip-contracts? skip-contracts?
-                       :program-args program-args})
-      (System/exit 0)
-      (catch ParseError e
-        (println "Syntax error:")
-        (let [source (try (slurp file) (catch Exception _ ""))]
-          (parser/format-parse-errors e source 0))
-        (System/exit 1))
-      ;; A syntax error in a file `file` interns, not `file` itself
-      ;; (nex.intern/parse-interned-file) — arrives wrapped in an
-      ;; ex-info, not a bare ParseError, precisely so it does NOT match the
-      ;; clause above: rendering it against `file`'s own source (which the
-      ;; ParseError's line/column have nothing to do with) is what this
-      ;; case exists to avoid. Any other ex-info (a type error, say) falls
-      ;; through to the same rendering the generic `catch Exception` below
-      ;; already gives it.
-      (catch clojure.lang.ExceptionInfo e
-        (let [data (ex-data e)]
-          (if (:nex/intern-parse-error data)
-            (let [{:keys [file-path source parse-error]} data]
-              (println (str "Syntax error in " file-path ":"))
-              (parser/format-parse-errors parse-error source 0))
-            (println "Error:" (rt/nex-error-message e)))
-          (System/exit 1)))
-      (catch Exception e
-        (println "Error:" (rt/nex-error-message e))
-        (System/exit 1)))))
+    (System/exit (run-file file {:interpret? interpret?
+                                 :skip-contracts? skip-contracts?
+                                 :program-args program-args}))))

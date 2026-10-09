@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Clearer errors for four common beginner mistakes.** `greet "Bob"` and
+  `print "hi"` (arguments without parentheses) are rejected with "Missing
+  parentheses: ... `greet("Bob")`" instead of silently doing nothing or
+  failing with an internal compiler error. `x = 5` written for `x := 5`, and a
+  function named but not called (`hello` for `hello()`), are rejected
+  anywhere in a routine or script, not only as a routine's last statement;
+  REPL input is exempt, since the REPL shows the value. `Counter.make(1)`
+  without `create` now says to write `create Counter.make(1)` (it used to
+  print a sentence with the class name missing). A builtin's name alone, such
+  as `print`, now runs as a call with no arguments instead of crashing the
+  compiled backend.
+- **New beginner error-message regression suite** in `test/beginner_errors/`:
+  one program per common mistake, with the message it must produce. Cases
+  whose message still needs work are recorded as `pending`.
 - **Faster startup: an installed `nex` now starts in about 0.6-1.5s instead
   of 5-7s.** `install.sh` compiles Nex ahead of time into `nex.jar`
   (`clojure -M:dist`), and the `nex` command runs it with plain `java`

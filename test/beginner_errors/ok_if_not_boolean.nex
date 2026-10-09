@@ -1,0 +1,8 @@
+let x := 1
+if x then
+  print("yes")
+end
+
+-- Mistake: an Integer used as an if condition
+-- status: fixed
+-- expect: If condition must be Boolean, got Integer

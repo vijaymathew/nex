@@ -1,0 +1,19 @@
+class Counter
+  create
+    make(start: Integer) do
+      this.value := start
+    end
+  feature
+    value: Integer
+    inc() do
+      this.value := this.value + 1
+    end
+end
+
+let c := Counter.make(1)
+print(c.value)
+
+-- Mistake: constructor called without `create`
+-- status: fixed
+-- expect: `create Counter.make(1)`
+-- reject: neither  itself

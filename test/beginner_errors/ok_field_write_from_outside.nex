@@ -1,0 +1,15 @@
+class P
+  create
+    make do
+      this.x := 0
+    end
+  feature
+    x: Integer
+end
+
+let p := create P.make
+p.x := 5
+
+-- Mistake: assigning a field from outside its class
+-- status: fixed
+-- expect: Cannot assign to field x outside of class P
