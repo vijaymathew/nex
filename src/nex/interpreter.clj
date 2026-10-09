@@ -1,5 +1,6 @@
 (ns nex.interpreter
   (:require [clojure.string :as str]
+            [clojure.walk :as walk]
             [nex.parser :as parser]
             [nex.walker :as walker]
             [nex.types.runtime :as rt]
@@ -1841,10 +1842,26 @@
     (env-define (:current-env ctx) name obj)
     obj))
 
+(defn- closure-this-as-this
+  "CLASS-DEF, a closure's generated class, with its references to the
+   enclosing object read as `this` again. Prepared for the compiled backend
+   (nex.lower/prepare-program-for-closures, as the REPL keeps its session),
+   such a closure reaches the object that made it through a captured
+   `__closure_this__`, which only the compiled closure's constructor sets.
+   Here the body runs as part of the routine that made it (see the
+   :enclosing it is given below), where `this` already is that routine's
+   live object — so `this` is what it should read."
+  [class-def]
+  (walk/postwalk (fn [n]
+                   (if (and (map? n) (= :identifier (:type n)) (= "__closure_this__" (:name n)))
+                     (merge {:type :this} (select-keys n [:dbg/line :dbg/col]))
+                     n))
+                 class-def))
+
 (defmethod eval-node :anonymous-function
   [ctx {:keys [class-def class-name]}]
   ;; Register the generated function class and return an object with closure env
-  (register-class ctx class-def)
+  (register-class ctx (closure-this-as-this class-def))
   (cond-> (make-object class-name {} (:current-env ctx))
     ;; Made inside a routine: its body's `this`, and its unqualified calls,
     ;; are that routine's object's, as they are in the routine itself (see

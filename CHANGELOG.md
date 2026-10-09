@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Fix: redefining a class in the REPL reaches everything built on it.** A
+  subclass kept its parent's old definition (a feature added to the parent
+  was "not found"), and a class or function creating the redefined class
+  kept creating the old version. Classes and functions compiled against it
+  are now recompiled with it.
+- **Fix: REPL closure made by a method on a new object.**
+  `print((create K.make(3)).scaler.call1(5))`, where `scaler` returns an `fn`
+  using a field, failed with "Undefined variable: __closure_this__" whenever
+  the input ran on the interpreter.
+- **Fix: calling a function redefined with other parameters.** In the REPL,
+  code compiled against a function's earlier parameter list failed with
+  "Index 1 out of bounds for length 1"; it now says "`g` takes 2 arguments,
+  but this call passes 1" and that the calling code needs defining again.
+- **Fix: with `:typecheck on`, the REPL showed an assignment's type as `Any`**
+  (`n := 6` echoed `Any 6`); it shows the variable's type.
+- **Fix: REPL internal error after calling a function that returns a
+  closure.** With `function partial(f: Function, x: Any): Function` returning
+  an `fn`, a later `let g := partial(add, 10)` printed its value and then
+  failed with "Internal error: ... attempted duplicate class definition for
+  nex.repl.AnonymousFunction_1_...". Recompiling the session's functions
+  defined the anonymous function's class twice, once from the session's
+  remembered classes and once collected again from the function bodies.
+
 ## 0.5.9 - 2026-10-09
 
 - **Breaking: some earlier programs are rejected or read differently.**

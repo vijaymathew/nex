@@ -2898,6 +2898,33 @@
         (.visitMaxs mv 0 0)
         (.visitEnd mv)))))
 
+(defn- emit-repl-fn-arity-check!
+  "A top-level function is found by name when called, so in the REPL its
+   caller may have been compiled against an earlier definition with a
+   different number of parameters. Check the count before unpacking the
+   arguments, and report it, rather than reading past the end of the array."
+  [^MethodVisitor mv fn-node arg-array-slot]
+  (let [ok (Label.)
+        expected (count (:params fn-node))]
+    (.visitVarInsn mv Opcodes/ALOAD arg-array-slot)
+    (.visitInsn mv Opcodes/ARRAYLENGTH)
+    (.visitLdcInsn mv (int expected))
+    (.visitJumpInsn mv Opcodes/IF_ICMPEQ ok)
+    (emit-runtime-var! mv "repl-fn-arity-error")
+    (.visitLdcInsn mv ^String (str (:name fn-node)))
+    (.visitLdcInsn mv (int expected))
+    (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Integer" "valueOf"
+                      "(I)Ljava/lang/Integer;" false)
+    (.visitVarInsn mv Opcodes/ALOAD arg-array-slot)
+    (.visitMethodInsn mv
+                      Opcodes/INVOKEVIRTUAL
+                      var-internal-name
+                      "invoke"
+                      "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+                      false)
+    (.visitInsn mv Opcodes/POP)
+    (.visitLabel mv ok)))
+
 (defn- emit-repl-fn-method!
   [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
@@ -2907,6 +2934,7 @@
           local-ranges (atom {})]
       (binding [*local-debug-ranges* local-ranges]
         (.visitLabel mv start-label)
+        (emit-repl-fn-arity-check! mv fn-node 1)
         (emit-function-arg-prologue! mv fn-node 1)
         (doseq [stmt (:body fn-node)]
           (emit-stmt! mv stmt 0))

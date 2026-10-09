@@ -137,6 +137,18 @@
              (.put name fn-wrapper))))
   fn-wrapper)
 
+(defn repl-fn-arity-error
+  "Thrown by a top-level function called with the wrong number of arguments,
+   which only happens when the caller was compiled against an earlier
+   definition of it (in the REPL; see emit-repl-fn-arity-check!)."
+  [name expected ^objects args]
+  (let [given (alength args)
+        plural (fn [n] (str n (if (= 1 n) " argument" " arguments")))]
+    (throw (ex-info (str "`" name "` takes " (plural expected) ", but this call passes " given
+                         ". `" name "` was redefined after the code calling it was written;"
+                         " define that code again so it calls the new `" name "`.")
+                    {:function name :expected expected :given given}))))
+
 (defn register-repl-fn!
   [state name owner-binary-name method-name]
   (state-set-fn! state name {:owner owner-binary-name
