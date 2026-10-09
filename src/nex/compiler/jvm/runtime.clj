@@ -2784,7 +2784,7 @@
     (if (rt/nex-map? m)
       (rt/nex-map-get m key)
       (hashmap-deep-get m key nil))
-    (bi/report-contract-violation bi/Precondition "key_must_exist" "has_key")))
+    (bi/report-missing-map-key key)))
 
 (defn map-try-get
   [state m key default]

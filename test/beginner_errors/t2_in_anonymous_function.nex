@@ -1,0 +1,9 @@
+let xs: Array[Integer] := []
+let pick := fn (i: Integer): Integer do
+  result := xs.get(i)
+end
+print(pick(2))
+
+-- Mistake: an error inside an anonymous function
+-- status: fixed
+-- expect: at line 3, in an anonymous function

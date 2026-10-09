@@ -1326,17 +1326,33 @@
    own ex-info (already user-level: contract violations, \"Method not found\",
    \"Division by zero\", etc.) pass through unchanged."
   [e]
-  (let [raw (or (ex-message e) "")]
+  (let [raw (or (ex-message e) "")
+        ;; The compiled backend rethrows an Error (not an Exception) wrapped
+        ;; in an ex-info carrying it as :cause (nex.eval/run-compiled).
+        cause (or (:cause (ex-data e)) e)]
     (cond
+      (instance? StackOverflowError cause)
+      (str "Too many nested calls (stack overflow): usually a recursion that never"
+           " reaches the case that stops it")
+
       (instance? java.lang.ArithmeticException e)
       (cond
         (re-find #"(?i)overflow" raw)                 "Arithmetic overflow"
         (re-find #"(?i)divide by zero|/ by zero" raw) "Division by zero"
         :else raw)
-      (instance? java.lang.NumberFormatException e)     "Not a valid number"
+      (instance? java.lang.NumberFormatException e)
+      (if-let [[_ input] (re-find #"For input string: (\".*\")" raw)]
+        (str "Not a valid number: " input)
+        "Not a valid number")
       (instance? java.lang.ClassCastException e)        "Type error: a value was not of the expected type"
       (instance? clojure.lang.ArityException e)         "Wrong number of arguments"
       (instance? java.lang.NullPointerException e)      "Used a value that is void (nil)"
+      ;; A substring's range, worded like an index (Java writes `[1, 10)`).
+      (instance? java.lang.StringIndexOutOfBoundsException e)
+      (if-let [[_ from to len] (or (re-find #"Range \[(-?\d+), (-?\d+)\) out of bounds for length (\d+)" raw)
+                                   (re-find #"begin (-?\d+), end (-?\d+), length (\d+)" raw))]
+        (str "Range " from " to " to " out of bounds for length " len)
+        (if (seq raw) raw "Index out of bounds"))
       (instance? java.lang.IndexOutOfBoundsException e) (if (seq raw) raw "Index out of bounds")
       :else (if (seq raw) raw (str e)))))
 

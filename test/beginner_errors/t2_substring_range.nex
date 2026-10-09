@@ -2,6 +2,6 @@ let s := "hello"
 print(s.substring(1, 10))
 
 -- Mistake: a substring past the end of a string
--- status: pending
+-- status: fixed
 -- expect: line 2
 -- reject: Range [

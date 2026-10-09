@@ -2,6 +2,6 @@ let s := "abc"
 print(s.to_integer)
 
 -- Mistake: converting a non-numeric string
--- status: pending
+-- status: fixed
 -- expect: "abc"
 -- expect: line 2

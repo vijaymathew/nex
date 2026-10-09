@@ -244,6 +244,123 @@
      (type-check-ast! source-id ast)
      (run-ast source-id ast opts))))
 
+;;
+;; Where a runtime error happened
+;;
+;; Compiled Nex classes carry their .nex file as SourceFile and a line number
+;; for each statement (nex.compiler.jvm.emit/emit-line-number!), so the JVM
+;; stack trace of a runtime error already says where in the Nex program it
+;; happened, and through which calls. Contract-checking code has no line of
+;; its own (-1): a precondition fails in the routine it guards, but the call
+;; that broke it is in the caller's frame, one up.
+
+(defn- frame-routine
+  "The Nex routine a compiled method belongs to, as the reader wrote it, or
+   nil for top-level code and anything unrecognised."
+  [class-name method]
+  (let [cls (last (str/split class-name #"\."))]
+    (cond
+      (str/starts-with? cls "AnonymousFunction") "an anonymous function"
+      :else
+      (when-let [[_ kind name] (re-matches #"__(i?method|ctor)_(.+)\$arity\d+" method)]
+        (cond
+          (str/starts-with? name "$invariant") {:invariant-of cls}
+          (and (= cls "Program") (not= kind "ctor")) name
+          :else (str cls "." name))))))
+
+(defn- nex-frames
+  "The frames of compiled Nex code in T's stack trace, innermost first:
+   [{:file :line :routine}], :line nil for contract-checking code."
+  [^Throwable t]
+  (for [^StackTraceElement fr (.getStackTrace t)
+        :let [file (.getFileName fr)
+              method (.getMethodName fr)]
+        :when (and file (str/ends-with? file ".nex") (not= method "main"))]
+    {:file file
+     :line (when (pos? (.getLineNumber fr)) (.getLineNumber fr))
+     :routine (frame-routine (.getClassName fr) method)}))
+
+(defn- collapse-repeats
+  "Runs of identical frames — a recursion — as one frame with a :times count."
+  [frames]
+  (->> (partition-by identity frames)
+       (map #(assoc (first %) :times (count %)))))
+
+(def ^:private max-trace-lines 6)
+
+(defn- contract-sentence
+  "For a contract violation, a sentence saying whose obligation was broken:
+   a precondition is the caller's, a postcondition or invariant the routine's.
+   Returns [sentence frames-left-to-show], or nil when FRAMES do not have the
+   shape it needs. FRAMES are innermost first."
+  [contract label frames place in]
+  (let [[routine-frame & more] frames
+        routine (:routine routine-frame)
+        invariant-of (when (map? routine) (:invariant-of routine))
+        ;; an invariant is checked in its own frame, inside the routine's
+        [routine-frame more] (if invariant-of [(first more) (rest more)] [routine-frame more])
+        routine (:routine routine-frame)
+        [caller & outer] (drop-while (complement :line) more)]
+    (when (and (string? routine) caller)
+      (case contract
+        "Precondition"
+        (when (nil? (:line routine-frame))
+          [(str "The call at " (place caller) (in caller) " does not meet the precondition `"
+                label "` of " routine ".")
+           outer])
+
+        "Postcondition"
+        [(str routine ", called at " (place caller) (in caller)
+              ", does not deliver its postcondition `" label "`.")
+         outer]
+
+        "Class invariant"
+        [(str routine ", called at " (place caller) (in caller) ", leaves the invariant `"
+              label "`" (when invariant-of (str " of " invariant-of)) " broken.")
+         outer]
+
+        nil))))
+
+(defn- runtime-error-trace
+  "Lines saying where in the Nex source runtime error E happened, and through
+   which calls; empty when it did not come from compiled Nex code (a type
+   error, say). A broken contract says whose obligation it was."
+  [e main-file]
+  (let [t ^Throwable (or (:cause (ex-data e)) e)
+        ;; The JVM keeps at most this many frames, so a deep recursion's
+        ;; repeat count is only a lower bound.
+        truncated? (>= (count (.getStackTrace t)) 1024)
+        frames (collapse-repeats (nex-frames t))
+        main-name (.getName (io/file main-file))
+        place (fn [{:keys [file line]}]
+                (str "line " line (when (not= file main-name) (str " of " file))))
+        in (fn [{:keys [routine]}] (when (string? routine) (str ", in " routine)))
+        times (fn [{:keys [times]}]
+                (when (> times 1)
+                  (str " (repeated " (when truncated? "at least ") times " times)")))
+        describe (fn [i frame]
+                   (if (:line frame)
+                     (str "  " (if (zero? i) "at " "called from ") (place frame) (in frame) (times frame))
+                     (when (string? (:routine frame))
+                       (str "  in " (:routine frame) (times frame)))))
+        data (ex-data e)
+        lines (if-let [[sentence outer] (contract-sentence (or (:kind data) (:contract-type data))
+                                                           (:label data) frames place in)]
+                (cons (str "  " sentence)
+                      (keep-indexed (fn [i f] (describe (inc i) f)) outer))
+                (keep-indexed describe (remove #(map? (:routine %)) frames)))]
+    (if (> (count lines) max-trace-lines)
+      (concat (take max-trace-lines lines)
+              [(str "  ... " (- (count lines) max-trace-lines) " more calls")])
+      lines)))
+
+(defn- print-error!
+  "Print runtime or type error E as the `nex` command reports it."
+  [e file]
+  (println "Error:" (rt/nex-error-message e))
+  (doseq [line (runtime-error-trace e file)]
+    (println line)))
+
 (defn run-file
   "Run FILE the way the `nex <file.nex>` command does: evaluate it, reporting
    any syntax, type or runtime error on *out* exactly as the user sees it.
@@ -271,10 +388,10 @@
           (let [{:keys [file-path source parse-error]} data]
             (println (str "Syntax error in " file-path ":"))
             (parser/format-parse-errors parse-error source 0))
-          (println "Error:" (rt/nex-error-message e)))
+          (print-error! e file))
         1))
     (catch Exception e
-      (println "Error:" (rt/nex-error-message e))
+      (print-error! e file)
       1)))
 
 (defn -main

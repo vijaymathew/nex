@@ -5,6 +5,6 @@ end
 print(f(0))
 
 -- Mistake: recursion with no base case
--- status: pending
+-- status: fixed
 -- expect: recursion
 -- reject: java.lang

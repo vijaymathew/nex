@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Runtime errors say where they happened.** `nex file.nex` now follows the
+  error message with its line and the calls that led there (`at line 9, in
+  Stack.pop` / `called from line 14, in drain`), read from the compiled
+  program's stack trace; a deep recursion is shown once, with a repeat count.
+  A broken contract says whose obligation it was: a precondition blames the
+  call ("The call at line 8 does not meet the precondition `non_negative` of
+  sqrt_int."), a postcondition or invariant the routine ("double, called at
+  line 8, does not deliver its postcondition `doubled`."). A stack overflow
+  is reported as too many nested calls, not `java.lang.StackOverflowError`;
+  an invalid number names its input (`Not a valid number: "abc"`); a
+  substring's range reads `Range 1 to 10` instead of Java's `[1, 10)`; and
+  `Map.get` of a missing key names the key and points to `has_key` and
+  `try_get`. The last two messages also change the text of `exception` in a
+  `rescue`.
 - **Syntax errors name the habit from another language.** Instead of parser
   wording ("no viable alternative at input", "token recognition error") at
   the place parsing failed, a syntax error now points at the likely mistake

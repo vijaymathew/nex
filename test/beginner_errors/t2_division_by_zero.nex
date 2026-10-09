@@ -3,6 +3,6 @@ let b := 0
 print(a / b)
 
 -- Mistake: dividing by zero
--- status: pending
+-- status: fixed
 -- expect: Division by zero
 -- expect: line 3

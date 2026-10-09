@@ -8,7 +8,7 @@ function sqrt_int(n: Integer): Integer
 print(sqrt_int(-4))
 
 -- Mistake: breaking a precondition
--- status: pending
+-- status: fixed
 -- expect: non_negative
 -- expect: sqrt_int
 -- expect: line 8

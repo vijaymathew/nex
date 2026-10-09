@@ -1,0 +1,24 @@
+class Stack
+  create
+    make do
+      this.items := []
+    end
+  feature
+    items: Array[Integer]
+    pop(): Integer do
+      result := items.get(items.length - 1)
+    end
+end
+
+function drain(s: Stack): Integer do
+  result := s.pop + s.pop
+end
+
+let s := create Stack.make
+print(drain(s))
+
+-- Mistake: an error inside a method, reached through a function
+-- status: fixed
+-- expect: at line 9, in Stack.pop
+-- expect: called from line 14, in drain
+-- expect: called from line 18

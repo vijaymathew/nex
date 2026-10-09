@@ -2,7 +2,7 @@ let m := {"a": 1}
 print(m.get("b"))
 
 -- Mistake: reading a key the map does not have
--- status: pending
+-- status: fixed
 -- expect: "b"
 -- expect: line 2
 -- reject: key_must_exist
