@@ -363,3 +363,32 @@ f()")
       (is (false? success))
       (is (some #(str/includes? (tc/format-type-error %) "read-only")
                 errors)))))
+
+;; --- a trailing `if` whose branch calls a method on a global ------------------
+
+(def trailing-if-calls-method-on-global
+  "let con: Console := create Console
+let n: Integer := 3
+if n > 2 then
+  con.print_line(\"big\")
+else
+  con.print_line(\"small\")
+end")
+
+(def trailing-if-yields-value-from-global
+  "let names: Array[String] := [\"a\", \"b\"]
+if names.length > 1 then
+  names.get(1)
+else
+  names.get(0)
+end")
+
+(deftest trailing-if-branch-reads-a-global-declared-in-the-same-program
+  (testing "the program's last statement is an `if` whose branch is a method
+            call on a top-level `let` from this same program — deciding whether
+            that tail yields a value has to type the branch, which used to run
+            before the leading `let`s were lowered and crashed with \"Unable to
+            infer expression type during lowering\""
+    (is (= ["big"] (run-compiled trailing-if-calls-method-on-global))))
+  (testing "same shape with value-returning branches still compiles"
+    (is (= [] (run-compiled trailing-if-yields-value-from-global)))))

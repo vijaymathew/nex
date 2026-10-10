@@ -8835,15 +8835,23 @@
           statements (vec (:statements program))
           globals-map (compute-top-level-globals env (:var-types opts) statements)
           tail-stmt (last statements)
-          return-tail? (repl-tail-returns-value? env tail-stmt)
-          leading-statements (if return-tail? (pop statements) statements)
+          leading-statements (if (seq statements) (pop statements) statements)
           [env' lowered-body] (lower-statements env leading-statements)
-          [env'' tail-stmts final-expr-ir] (if return-tail?
+          ;; Decided against env', not env: the tail may read a top-level
+          ;; `let` from this same program (`if c then con.print_line(x) end`),
+          ;; whose type only exists once the leading statements are lowered.
+          return-tail? (repl-tail-returns-value? env' tail-stmt)
+          [env'' tail-stmts final-expr-ir] (cond
+                                             return-tail?
                                              (lower-repl-tail env' tail-stmt)
+
+                                             tail-stmt
+                                             (let [[tail-env lowered-tail] (lower-statement env' tail-stmt)]
+                                               [tail-env [lowered-tail] nil])
+
+                                             :else
                                              [env' [] nil])
-          lowered-body' (if return-tail?
-                          (into lowered-body tail-stmts)
-                          lowered-body)
+          lowered-body' (into lowered-body tail-stmts)
           lowered-body'' (repl-cell-body-with-return lowered-body' final-expr-ir tail-stmt)]
       {:env env''
        :unit (binding [*top-level-globals* globals-map]
