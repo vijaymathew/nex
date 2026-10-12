@@ -1485,6 +1485,8 @@
               {:type :intern :path "lang" :class-name "Exception" :alias nil :implied true})
       program)))
 
+(declare handle-function-decl)
+
 (defn- handle-program
   [[_ & nodes]]
   (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
@@ -1494,8 +1496,17 @@
         ;; fully resolved (harmless no-op here for the non-statement
         ;; nodes -- classes, functions, imports, ... -- also flowing
         ;; through this same mapcat).
+        ;; A `function` is a statement to the grammar. Here, at the top
+        ;; level, it is a free function; anywhere deeper `transform-node`
+        ;; makes it a local closure (see handle-local-function-decl).
+        transform-top-level (fn [[tag inner :as node]]
+                              (if (and (= :statement tag)
+                                       (sequential? inner)
+                                       (= :functionDecl (first inner)))
+                                (attach-debug-pos (handle-function-decl inner) inner)
+                                (transform-node node)))
         transformed (->> cleaned-nodes
-                         (mapcat #(split-glued-statement (transform-node %)))
+                         (mapcat #(split-glued-statement (transform-top-level %)))
                          (mapv statement-position-node))
         classes (filter #(= :class (:type %)) transformed)
         fn-nodes (filter #(= :function (:type %)) transformed)
@@ -3150,7 +3161,7 @@
    :importStmt handle-import-stmt
    :classDecl handle-class-decl
    :unionDecl handle-union-decl
-   :functionDecl handle-function-decl
+   :functionDecl handle-local-function-decl
    :declareFunctionDecl handle-declare-function-decl
    :anonymousFunction handle-anonymous-function
    :inheritClause handle-inherit-clause
@@ -3208,7 +3219,6 @@
    :assertion handle-assertion
    :assignment handle-assignment
    :localVarDecl handle-local-var-decl
-   :localFunctionDecl handle-local-function-decl
    :argumentList handle-argument-list
    :methodCall handle-method-call
    :callChain handle-call-chain

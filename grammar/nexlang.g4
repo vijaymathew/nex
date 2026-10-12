@@ -7,7 +7,7 @@ grammar nexlang;
  */
 
 program
-    : (importStmt | internStmt | classDecl | unionDecl | declareTypeDecl | declareFunctionDecl | functionDecl | statement)* EOF
+    : (importStmt | internStmt | classDecl | unionDecl | declareTypeDecl | declareFunctionDecl | statement)* EOF
     ;
 
 importStmt
@@ -46,6 +46,10 @@ unionVariant
     : IDENTIFIER ('(' paramList? ')')?
     ;
 
+// Reached through `statement`, so that it may be written inside a block too.
+// At the top level it declares a free function; inside a block it is a local
+// closure, bound exactly as `let f := fn (...) ... end` binds `f` (see
+// `handle-program` and `handle-local-function-decl` in walker.clj).
 functionDecl
     : FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
     ;
@@ -230,7 +234,7 @@ block
 statement
     : assignment
     | localVarDecl
-    | localFunctionDecl
+    | functionDecl
     | scopedBlock
     | ifStatement
     | loopStatement
@@ -373,15 +377,6 @@ assignment
 
 localVarDecl
     : LET IDENTIFIER (':' type)? ASSIGN expression
-    ;
-
-// A `function` written inside a block. It is a local closure: `function f(...)
-// ... end` binds `f` exactly as `let f := fn (...) ... end` does (see
-// `handle-local-function-decl` in walker.clj), so it captures the enclosing
-// locals and may call itself. At the top level `program` matches the same
-// text as a `functionDecl` first, which is what keeps that a free function.
-localFunctionDecl
-    : FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 // Calls in statement position are NOT matched here. They reach the walker
