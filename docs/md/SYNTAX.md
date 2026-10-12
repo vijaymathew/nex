@@ -1406,6 +1406,50 @@ can be dropped, leaving just the types:
 let is_positive: Function(Integer): Boolean := fn(n: Integer): Boolean do result := n > 0 end
 ```
 
+An `fn` takes the same `require`, `ensure` and `rescue` clauses as a named
+routine:
+
+```nex
+let half := fn (n: Integer): Integer
+  require
+    even: n % 2 = 0
+  do
+    result := n / 2
+  ensure
+    halved: result * 2 = n
+  end
+print(half(10))                 -- 5
+```
+
+### Local functions
+
+A `function` written inside a routine (or any other block) is local to it. It
+is a closure with a name: `function f(...) ... end` there means
+`let f := fn (...) ... end`, so it sees the enclosing parameters and locals,
+may call itself, and can be returned as a value.
+
+```nex
+declare type Pair = Function(Integer): Any
+
+function cons(x, y: Any): Pair
+do
+  function dispatch(m: Integer): Any
+  require
+    valid_selector: m = 0 or m = 1
+  do
+    if m = 0 then result := x else result := y end
+  end
+  result := dispatch
+end
+
+let p := cons(1, "two")
+print(p(0))                     -- 1
+print(p(1))                     -- "two"
+```
+
+`old` is not available in the `ensure` of an `fn` or a local function; it
+belongs to the postconditions of methods and constructors.
+
 ## Type Aliases
 
 `declare type` binds a name to any type expression — most commonly used to

@@ -230,6 +230,7 @@ block
 statement
     : assignment
     | localVarDecl
+    | localFunctionDecl
     | scopedBlock
     | ifStatement
     | loopStatement
@@ -374,6 +375,15 @@ localVarDecl
     : LET IDENTIFIER (':' type)? ASSIGN expression
     ;
 
+// A `function` written inside a block. It is a local closure: `function f(...)
+// ... end` binds `f` exactly as `let f := fn (...) ... end` does (see
+// `handle-local-function-decl` in walker.clj), so it captures the enclosing
+// locals and may call itself. At the top level `program` matches the same
+// text as a `functionDecl` first, which is what keeps that a free function.
+localFunctionDecl
+    : FUNCTION IDENTIFIER genericParams? '(' paramList? ')' (':' type)? noteClause? requireClause? DO block ensureClause? rescueClause? END
+    ;
+
 // Calls in statement position are NOT matched here. They reach the walker
 // through `expression`, which restores their statement shapes (see
 // `statement-position-node` in walker.clj).
@@ -500,7 +510,7 @@ whenExpression
     ;
 
 anonymousFunction
-    : FN genericParams? '(' paramList? ')' (':' type)? DO block END
+    : FN genericParams? '(' paramList? ')' (':' type)? requireClause? DO block ensureClause? rescueClause? END
     ;
 
 oldExpression

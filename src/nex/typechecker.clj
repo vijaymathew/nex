@@ -6619,12 +6619,14 @@
                 "give them different arities or names.")))))))
 
 (defn- collect-old-nodes
-  "All `old` expression nodes within an AST fragment."
+  "All `old` expression nodes within an AST fragment. A closure is a routine of
+   its own, with its own `ensure`, and is checked as one."
   [node]
   (cond
     (sequential? node) (mapcat collect-old-nodes node)
-    (map? node) (if (= :old (:type node))
-                  (cons node (collect-old-nodes (vals (dissoc node :type))))
+    (map? node) (case (:type node)
+                  :old (cons node (collect-old-nodes (vals (dissoc node :type))))
+                  :anonymous-function nil
                   (collect-old-nodes (vals (dissoc node :type))))
     :else nil))
 
@@ -6647,7 +6649,7 @@
 (defn- check-old-and-retry!
   "`old` may appear only in an `ensure` clause and must denote a field, not a
    parameter; `retry` may appear only inside a `rescue` block."
-  [kind routine-name params require body ensure]
+  [kind routine-name params require body ensure & {:keys [closure?]}]
   (when (some #(seq (collect-old-nodes %)) (cons body (map :condition require)))
     (restriction-error!
      (str "'old' may appear only in an ensure (postcondition) clause; found it "
@@ -6655,6 +6657,13 @@
   (let [param-names (set (map :name params))]
     (doseq [assertion ensure
             o (collect-old-nodes (:condition assertion))]
+      ;; A closure has no object of its own to snapshot at entry: the fields
+      ;; it names are its enclosing routine's object's.
+      (when closure?
+        (restriction-error!
+         (str "'old' is not available in the ensure clause of "
+              (if routine-name (str "the local function '" routine-name "'") "an anonymous function")
+              "; it may appear only in the ensure clause of a method or constructor.")))
       (let [e (:expr o)]
         (when (and (map? e) (= :identifier (:type e))
                    (contains? param-names (:name e)))
@@ -6727,7 +6736,8 @@
         routine (describe-routine described)
         Routine (str (str/upper-case (subs routine 0 1)) (subs routine 1))]
   (check-distinct-parameters! params kind routine-name)
-  (check-old-and-retry! kind routine-name params require body ensure)
+  (check-old-and-retry! kind routine-name params require body ensure
+                        :closure? (:closure? method))
   (require-declared-param-types! class-name kind (or routine-name name) params)
   ;; Validate parameter and return type annotations (generic constraints)
   (with-type-error-location

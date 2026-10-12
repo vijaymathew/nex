@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Local functions.** A `function` may be written inside a routine or any
+  other block. It is a closure bound to its name — `function f(...) ... end`
+  there means `let f := fn (...) ... end` — so it captures the enclosing
+  locals, may call itself, and can be returned as a value. It was a syntax
+  error before.
+- **Contracts on `fn`.** An anonymous function takes `require`, `ensure` and
+  `rescue` clauses, as a named routine does.
+
 ## 0.6.0 - 2026-10-09
 
 - **Fix: redefining a class in the REPL reaches everything built on it.** A
