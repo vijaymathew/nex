@@ -3269,8 +3269,22 @@
                         (map (fn [{:keys [name type]}] [name type]))
                         params)
         nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
-        [rewritten-body _ nested-captures]
-        (rewrite-statements-for-closures nested-ctx fn-locals (:body expr))
+        ;; The contract clauses and the rescue arm are this closure's own
+        ;; text as much as its body is: a name only they mention is captured
+        ;; all the same.
+        own-captures (atom {})
+        rewrite-assertions (fn [assertions]
+                             (when assertions
+                               (mapv #(update % :condition
+                                              (fn [c] (rewrite-expression-for-closures nested-ctx fn-locals own-captures c)))
+                                     assertions)))
+        [rewritten-body] (rewrite-statements-for-closures* nested-ctx fn-locals own-captures (:body expr))
+        rewritten-require (rewrite-assertions (:require expr))
+        rewritten-ensure (rewrite-assertions (:ensure expr))
+        rewritten-rescue (when (:rescue expr)
+                           (first (rewrite-statements-for-closures*
+                                   nested-ctx (assoc fn-locals "exception" "Any") own-captures (:rescue expr))))
+        nested-captures @own-captures
         capture-vec (->> nested-captures
                          (map (fn [[name type]] {:name name :type type}))
                          (sort-by :name)
@@ -3318,11 +3332,18 @@
                                    (class-methods (:class-def expr)))]
     (assoc expr
            :body rewritten-body
+           :require rewritten-require
+           :ensure rewritten-ensure
+           :rescue rewritten-rescue
            :captures capture-vec
            :class-def (attach-capture-fields
                        (sync-callable-into-class-def
                         (:class-def expr)
-                        (assoc original-call-method :body rewritten-body))
+                        (assoc original-call-method
+                               :body rewritten-body
+                               :require rewritten-require
+                               :ensure rewritten-ensure
+                               :rescue rewritten-rescue))
                        capture-vec (:this-type ctx)
                        (:scope-generic-params ctx)))))
 
@@ -3599,7 +3620,11 @@
 (defn- rewrite-let-stmt-for-closures
   [ctx local-types captures stmt]
   (let [value (if (and (map? (:value stmt)) (= :anonymous-function (:type (:value stmt))))
-                (update (:value stmt) :body #(rewrite-self-recursive-calls (:name stmt) %))
+                (reduce (fn [value k]
+                          (cond-> value
+                            (get value k) (update k #(rewrite-self-recursive-calls (:name stmt) %))))
+                        (:value stmt)
+                        [:require :body :ensure :rescue])
                 (:value stmt))
         value' (rewrite-expression-for-closures ctx local-types captures value)
         stmt' (assoc stmt :value value')
@@ -3824,6 +3849,14 @@
 
     :raise
     [(assoc stmt :value (rewrite-expression-for-closures ctx local-types captures (:value stmt)))
+     local-types]
+
+    :assert
+    [(update stmt :assertions
+             (fn [assertions]
+               (mapv #(update % :condition
+                              (fn [c] (rewrite-expression-for-closures ctx local-types captures c)))
+                     assertions)))
      local-types]
 
     [stmt local-types]))
@@ -4149,6 +4182,12 @@
         (comp (filter map?) (filter #(= :assign (:type %))) (keep :target))
         (tree-seq coll? seq stmts)))
 
+(defn- closure-own-text
+  "Everything FN-NODE's routine is written as: its body, its contract clauses
+   and its rescue arm."
+  [fn-node]
+  (keep fn-node [:require :body :ensure :rescue]))
+
 (defn- names-touched-inside-closures
   "Every name read (`:identifier`) or written (`:assign` target) inside any
    `:anonymous-function` OR `:spawn` body reachable in STMTS — a boxing
@@ -4177,7 +4216,7 @@
                                                 :identifier [(:name n)]
                                                 :assign [(:target n)]
                                                 nil))))
-                              (tree-seq coll? seq (:body fn-node))))))
+                              (tree-seq coll? seq (closure-own-text fn-node))))))
         (tree-seq coll? seq stmts)))
 
 (defn- shadowed-anywhere-names
@@ -4435,7 +4474,7 @@
     (into #{}
           (mapcat (fn [[name let-stmt]]
                     (let [i (get name->index name)
-                          refs (bare-references-in (:body (:value let-stmt)))]
+                          refs (bare-references-in (closure-own-text (:value let-stmt)))]
                       (keep (fn [ref-name]
                               (when (and (contains? name->index ref-name)
                                          (> (get name->index ref-name) i))

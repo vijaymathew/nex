@@ -1485,6 +1485,8 @@
               {:type :intern :path "lang" :class-name "Exception" :alias nil :implied true})
       program)))
 
+(declare handle-function-decl)
+
 (defn- handle-program
   [[_ & nodes]]
   (let [cleaned-nodes (remove string? nodes) ; Filter out "<EOF>" token
@@ -1494,8 +1496,17 @@
         ;; fully resolved (harmless no-op here for the non-statement
         ;; nodes -- classes, functions, imports, ... -- also flowing
         ;; through this same mapcat).
+        ;; A `function` is a statement to the grammar. Here, at the top
+        ;; level, it is a free function; anywhere deeper `transform-node`
+        ;; makes it a local closure (see handle-local-function-decl).
+        transform-top-level (fn [[tag inner :as node]]
+                              (if (and (= :statement tag)
+                                       (sequential? inner)
+                                       (= :functionDecl (first inner)))
+                                (attach-debug-pos (handle-function-decl inner) inner)
+                                (transform-node node)))
         transformed (->> cleaned-nodes
-                         (mapcat #(split-glued-statement (transform-node %)))
+                         (mapcat #(split-glued-statement (transform-top-level %)))
                          (mapv statement-position-node))
         classes (filter #(= :class (:type %)) transformed)
         fn-nodes (filter #(= :function (:type %)) transformed)
@@ -1705,35 +1716,38 @@
   (let [[_ _declare-kw _function-kw name & rest] node]
     (build-function-node name rest true (node-pos node))))
 
-(defn- handle-anonymous-function
-  [[_ _fn-kw & rest]]
+(defn- build-anonymous-function-node
+  "The :anonymous-function node for the tokens after `fn` — or, for a local
+   `function`, after its name: the two share everything from the generic
+   parameters on."
+  [rest]
   (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
-        generic-params (first (filter #(and (sequential? %)
-                                            (= :genericParams (first %)))
-                                      cleaned))
-        params (first (filter #(and (sequential? %)
-                                    (= :paramList (first %)))
-                              cleaned))
-        return-type (first (filter #(and (sequential? %)
-                                         (= :type (first %)))
-                                   cleaned))
-        block (first (filter #(and (sequential? %)
-                                   (= :block (first %)))
-                             cleaned))
+        clause (fn [tag] (first (filter #(and (sequential? %)
+                                              (= tag (first %)))
+                                        cleaned)))
+        generic-params (clause :genericParams)
+        params (clause :paramList)
+        return-type (clause :type)
+        note-clause (clause :noteClause)
+        require-clause (clause :requireClause)
+        ensure-clause (clause :ensureClause)
+        rescue-clause (clause :rescueClause)
         params-v (when params (transform-node params))
         return-type-v (when return-type (transform-node return-type))
-        body (transform-node block)
+        body (transform-node (clause :block))
         class-name (generate-unique-fn-name)
         method-name (str "call" (count params-v))
         generic-params-v (when generic-params (transform-node generic-params))
         method-def {:type :method
                     :name method-name
+                    :closure? true
                     :params params-v
                     :return-type return-type-v
-                    :note nil
-                    :require nil
+                    :note (when note-clause (transform-node note-clause))
+                    :require (when require-clause (transform-node require-clause))
                     :body body
-                    :ensure nil}
+                    :ensure (when ensure-clause (transform-node ensure-clause))
+                    :rescue (when rescue-clause (transform-node rescue-clause))}
         class-def {:type :class
                    :name class-name
                    :generic-params generic-params-v
@@ -1748,8 +1762,26 @@
      :generic-params generic-params-v
      :params params-v
      :return-type return-type-v
+     :require (:require method-def)
      :body body
+     :ensure (:ensure method-def)
+     :rescue (:rescue method-def)
      :class-def class-def}))
+
+(defn- handle-anonymous-function
+  [[_ _fn-kw & rest]]
+  (build-anonymous-function-node rest))
+
+(defn- handle-local-function-decl
+  "A `function` inside a block is a closure bound to its name: the `let name :=
+   fn ... end` it could have been written as."
+  [[_ _function-kw name & rest]]
+  (let [fn-name (token-text name)]
+    {:type :let
+     :name fn-name
+     :var-type nil
+     :value (assoc-in (build-anonymous-function-node rest)
+                      [:class-def :body 0 :members 0 :function-name] fn-name)}))
 
 (defn- handle-inherit-clause
   [[_ _inherit-kw & entries]]
@@ -3132,7 +3164,7 @@
    :importStmt handle-import-stmt
    :classDecl handle-class-decl
    :unionDecl handle-union-decl
-   :functionDecl handle-function-decl
+   :functionDecl handle-local-function-decl
    :declareFunctionDecl handle-declare-function-decl
    :anonymousFunction handle-anonymous-function
    :inheritClause handle-inherit-clause
