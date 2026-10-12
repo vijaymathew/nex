@@ -1762,7 +1762,10 @@
      :generic-params generic-params-v
      :params params-v
      :return-type return-type-v
+     :require (:require method-def)
      :body body
+     :ensure (:ensure method-def)
+     :rescue (:rescue method-def)
      :class-def class-def}))
 
 (defn- handle-anonymous-function

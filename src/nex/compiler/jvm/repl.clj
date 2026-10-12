@@ -454,7 +454,14 @@
                                                       (map (fn [{:keys [name type]}] [name type]) params)
                                                       [["result" (or (:return-type expr) "Any")]])))
                       (augment-ctx-with-visible-generic-classes))]
-    (boolean (supported-stmt-block? child-ctx (:body expr)))))
+    (boolean (and (supported-stmt-block? child-ctx (:body expr))
+                  (every? #(supported-expr-in-ctx? child-ctx (:condition %))
+                          (concat (:require expr) (:ensure expr)))
+                  (or (nil? (:rescue expr))
+                      (supported-stmt-block? (-> child-ctx
+                                                 (update :known-vars conj "exception")
+                                                 (assoc-in [:var-types "exception"] "Any"))
+                                             (:rescue expr)))))))
 
 (defn normalize-program-ast
   "Normalize legacy program shapes so the compiled REPL path can reason about

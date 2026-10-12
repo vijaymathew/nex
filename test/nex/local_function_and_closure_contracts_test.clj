@@ -173,3 +173,95 @@ feature
   end
 end" {})]
       (is (str/includes? msg "local function 'add'")))))
+
+(deftest closure-contract-captures-test
+  (testing "a name only a contract clause mentions is captured"
+    (is (= ["1"]
+           (both "function bounded(lo, hi: Integer): Function(Integer): Integer
+do
+  function clamp(n: Integer): Integer
+  require
+    ordered: lo <= hi
+  do
+    result := n
+    if n < lo then result := lo end
+  ensure
+    capped: result <= hi or n > hi
+  end
+  result := clamp
+end
+print(bounded(1, 10)(0))")))
+    (is (fails-on-both? "function pick(x, y: Any): Function(Integer): Any
+do
+  function dispatch(m: Integer): Any
+  do
+    if m = 0 then result := x else result := 100 end
+  ensure
+    x_or_y: result = x or result = y
+  end
+  result := dispatch
+end
+print(pick(1, 2)(1))" "x_or_y")))
+  (testing "a rescue arm assigns a captured local"
+    (is (= ["10"]
+           (both "function tries(limit: Integer): Integer
+do
+  let failures := 0
+  function go(n: Integer): Integer
+  do
+    if failures < limit then raise \"boom\" end
+    result := n
+  rescue
+    failures := failures + 1
+    retry
+  end
+  result := go(7) + failures
+end
+print(tries(3))"))))
+  (testing "a postcondition calls the local function it belongs to"
+    (is (= ["4"]
+           (both "function down(n: Integer): Integer
+do
+  function count(k: Integer): Integer
+  do
+    if k = 0 then result := 0 else result := 1 + count(k - 1) end
+  ensure
+    same: k = 0 or result = 1 + count(k - 1)
+  end
+  result := count(n)
+end
+print(down(4))"))))
+  (testing "a closure's contracts read the enclosing object's fields"
+    (let [box "class Box
+create
+  make(l: Integer) do limit := l end
+feature
+  limit: Integer
+  checker(): Function(Integer): Integer
+  do
+    result := fn (n: Integer): Integer
+      require
+        within: n <= limit
+      do
+        result := n
+      ensure
+        still_within: result <= limit
+      end
+  end
+end
+let b := create Box.make(5)
+"]
+      (is (= ["3"] (both (str box "print(b.checker()(3))"))))
+      (is (fails-on-both? (str box "print(b.checker()(9))") "within")))))
+
+(deftest assert-in-closure-captures-test
+  (testing "a name only an `assert` in a closure's body mentions is captured"
+    (is (= ["2"]
+           (both "function guard(x: Integer): Function(Integer): Integer
+do
+  result := fn (n: Integer): Integer do
+    assert x > 0
+    result := n
+  end
+end
+print(guard(1)(2))")))))
