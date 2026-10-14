@@ -32,9 +32,6 @@
   ([parent]
    {:parent parent
     :vars (atom {})
-    ;; {name -> type} for each variable a `convert` added here (check-convert)
-    ;; rather than a declaration: see contract-binding-clash?.
-    :convert-vars (atom {})
     :methods (atom {})
     :classes (atom {})
     ;; Bare class names that resolve to more than one distinct interned
@@ -2842,21 +2839,6 @@
        (filter #(and (map? %) (#{:convert :attached-test} (:type %))
                      (:var-name %) (not= "_" (:var-name %))))))
 
-(defn- contract-binding-clash?
-  "Whether NAME is already declared where a contract clause in ENV is
-   checked. A name only a `convert` put in scope does not count: the
-   checker lets an `if convert a to c: C` binding outlive its `if` (the
-   compiled backend does not), and a clause binding `c` again should not be
-   rejected for that."
-  [env name]
-  (when-let [owner (->> (iterate :parent env)
-                        (take-while some?)
-                        (filter #(contains? @(:vars %) name))
-                        first)]
-    (let [convert-vars (some-> (:convert-vars owner) deref)]
-      (not (and (contains? convert-vars name)
-                (= (get convert-vars name) (get @(:vars owner) name)))))))
-
 (defn- check-contract-condition
   "Type-check a contract clause's CONDITION (require, ensure, or a loop or
    class invariant) and return its type. A name it binds (`convert n to s:
@@ -2874,7 +2856,7 @@
       (with-type-error-location
         (first same)
         (fn []
-          (when (contract-binding-clash? env name)
+          (when (env-lookup-var env name)
             (throw (ex-info (str "Contract binding shadows " name)
                             {:error (type-error
                                      (str "`" name "` is already defined here, so a contract"
@@ -3020,9 +3002,7 @@
                                     " and "
                                     (display-type target-type)))})))
     ;; convert may fail at runtime, so variable is detachable in this scope.
-    (let [bound-type (detachable-version target-type)]
-      (env-add-var env var-name bound-type)
-      (some-> (:convert-vars env) (swap! assoc var-name bound-type)))
+    (env-add-var env var-name (detachable-version target-type))
     "Boolean"))
 
 (defn check-attached-test
@@ -5723,7 +5703,15 @@
 (defn check-if
   "Check an if statement"
   [env {:keys [condition then elseif else] :as stmt}]
-  (let [cond-type (check-condition env condition)]
+  ;; A condition's guard bindings (`if convert a to c: C`) belong to the
+  ;; branches (apply-condition-branch-refinement! adds them there), not to
+  ;; the code after the `if`: check it in a scope of its own, or `c` would
+  ;; outlive the `if` here while the compiled backend (rightly) scopes it to
+  ;; the `if`. A convert nested deeper (`if f(convert a to d: Dog)`) still
+  ;; binds for the rest of the scope, as in any other statement.
+  (let [cond-type (check-condition (make-type-env env) condition)]
+    (doseq [{:keys [var-name target-type]} (nested-convert-nodes condition)]
+      (env-add-var env var-name (detachable-version target-type)))
     (when-not (= cond-type "Boolean")
       (throw (ex-info "If condition must be Boolean"
                       {:error (type-error
@@ -5742,7 +5730,7 @@
         [elseif-branches final-else-env]
         (reduce
          (fn [[branches residual-env] clause]
-           (let [ei-cond-type (check-expression residual-env (:condition clause))]
+           (let [ei-cond-type (check-condition (make-type-env residual-env) (:condition clause))]
              (when-not (= ei-cond-type "Boolean")
                (throw (ex-info "Elseif condition must be Boolean"
                                {:error (type-error
