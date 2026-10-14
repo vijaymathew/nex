@@ -732,6 +732,36 @@
 
       :else e)))
 
+(def ^:dynamic *collected-errors*
+  "While check-program runs, an atom of the type errors found so far, so one
+   run can report several: a routine, class-level check or top-level
+   statement that fails is recorded (see recovering) and checking goes on
+   with the next one. Unbound everywhere else, where the first error throws
+   as before."
+  nil)
+
+(defn- exception-type-errors
+  "The TypeErrors type-check exception E carries: a batch (:errors), a
+   single :error, or one made from its message."
+  [e]
+  (let [data (ex-data e)]
+    (or (:errors data)
+        [(or (:error data) (type-error (ex-message e)))])))
+
+(defn- recovering
+  "Run F. While errors are being collected (*collected-errors*), a type
+   error F throws is recorded instead, and ::failed returned, so checking
+   can continue with the next routine or statement. Only one error per F is
+   found: what follows the first inside it may hinge on what failed."
+  [f]
+  (if-let [sink *collected-errors*]
+    (try
+      (f)
+      (catch clojure.lang.ExceptionInfo e
+        (swap! sink into (exception-type-errors e))
+        ::failed))
+    (f)))
+
 (defn- with-source-file
   "Run f, and — when source-file is given — stamp it onto any TypeError(s)
    an exception escaping f carries (see annotate-type-exception-source-file).
@@ -747,10 +777,19 @@
   [source-file f]
   (if-not source-file
     (f)
-    (try
-      (f)
-      (catch clojure.lang.ExceptionInfo e
-        (throw (annotate-type-exception-source-file e source-file))))))
+    (let [sink *collected-errors*
+          before (when sink (count @sink))]
+      (try
+        (f)
+        (catch clojure.lang.ExceptionInfo e
+          (throw (annotate-type-exception-source-file e source-file)))
+        (finally
+          ;; Errors recovered inside f never escape it, so stamp them here.
+          (when sink
+            (swap! sink (fn [errs]
+                          (into (subvec errs 0 before)
+                                (map #(error-with-source-file % source-file))
+                                (subvec errs before))))))))))
 
 (def unknown-type-arg
   "A type argument inference left open: the element type of an empty `[]`,
@@ -4964,13 +5003,16 @@
         enclosing-class (env-lookup-var env "__current_class__")]
     ;; Register the dynamic class definition in the type environment
     (collect-class-info env class-def)
-    (if enclosing-class
-      (check-method (narrowing-barrier-env env) enclosing-class
-                    (some #(when (= :method (:type %)) %)
-                          (feature-members class-def)))
-      ;; No enclosing class (a top-level anonymous function): check the class
-      ;; as before.
-      (check-class (narrowing-barrier-env env) class-def))
+    ;; An error in the literal's body is the enclosing statement's: it must
+    ;; propagate, not be recovered from inside check-class.
+    (binding [*collected-errors* nil]
+      (if enclosing-class
+        (check-method (narrowing-barrier-env env) enclosing-class
+                      (some #(when (= :method (:type %)) %)
+                            (feature-members class-def)))
+        ;; No enclosing class (a top-level anonymous function): check the class
+        ;; as before.
+        (check-class (narrowing-barrier-env env) class-def)))
     ;; Anonymous functions have distinct generated runtime classes, but their
     ;; stable static type is structural Function -- carrying the literal's own
     ;; param/return types (falling back to Any for anything left unannotated
@@ -7814,26 +7856,30 @@
       (= (:type section) :feature-section)
       (doseq [member (:members section)]
         (cond
+          ;; Each routine is checked on its own (recovering): an error in
+          ;; one does not stop the others being checked.
           (= (:type member) :method)
-          (do
-            (with-type-error-location
-              member
-              (fn []
-                (check-attribute-redeclaration env name parents member)
-                (check-override-conformance class-env name parents member)
-                (check-override-contracts env name parents member)))
-            (check-method class-env name member))
+          (recovering
+           (fn []
+             (with-type-error-location
+               member
+               (fn []
+                 (check-attribute-redeclaration env name parents member)
+                 (check-override-conformance class-env name parents member)
+                 (check-override-contracts env name parents member)))
+             (check-method class-env name member)))
           (= (:type member) :field)
           (when-not (:constant? member)
-            (with-type-error-location
-              member
-              (fn []
-                (check-attribute-redeclaration env name parents member)
-                (validate-type-annotation class-env (:field-type member)))))))
+            (recovering
+             #(with-type-error-location
+                member
+                (fn []
+                  (check-attribute-redeclaration env name parents member)
+                  (validate-type-annotation class-env (:field-type member))))))))
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]
-        (check-constructor class-env name ctor)))))
+        (recovering #(check-constructor class-env name ctor))))))
 
 (defn- check-attachable-field-initialization!
   "Void-safety: every attachable class-object field must be assigned by every
@@ -7911,9 +7957,13 @@
         invariant (:invariant class-def)
         parents (:parents class-def)
         class-env (make-type-env env)]
-    (check-distinct-fields! name (:body class-def))
-    (check-distinct-methods! name (:body class-def))
-    (check-equals-hash-consistency env name class-def)
+    ;; Each check below that can fail is `recovering`: one failing does not
+    ;; hide errors in the others, or in the class's routines.
+    (recovering
+     (fn []
+       (check-distinct-fields! name (:body class-def))
+       (check-distinct-methods! name (:body class-def))
+       (check-equals-hash-consistency env name class-def)))
     (env-add-var class-env "__current_class__" name)
     (register-generic-param-classes! class-env generic-params)
     (bind-visible-class-fields! class-env env name)
@@ -7922,22 +7972,25 @@
   ;; subclasses (the very guarantee `sealed` exists to provide), failing at
   ;; runtime with no compile-time warning.
     (when (and (:sealed? class-def) (not (:deferred? class-def)))
-      (throw (ex-info (str "Sealed class " name " must be deferred")
-                      {:error (type-error
-                               (str "Sealed class '" name "' must be declared 'sealed deferred'. "
-                                    "A sealed class cannot be instantiated; otherwise an exhaustive "
-                                    "match over its subclasses would not cover a bare " name " value."))})))
+      (recovering
+       #(throw (ex-info (str "Sealed class " name " must be deferred")
+                        {:error (type-error
+                                 (str "Sealed class '" name "' must be declared 'sealed deferred'. "
+                                      "A sealed class cannot be instantiated; otherwise an exhaustive "
+                                      "match over its subclasses would not cover a bare " name " value."))}))))
   ;; Check inheritance
     (when parents
-      (check-inheritance env name parents)
-      (check-java-super-constructor-call env name
-                                         (->> body
-                                              (filter #(= :constructors (:type %)))
-                                              (mapcat :constructors))))
-    (check-deferred-methods-implemented! env name class-def)
-    (check-class-invariants! class-env name invariant)
+      (recovering
+       (fn []
+         (check-inheritance env name parents)
+         (check-java-super-constructor-call env name
+                                            (->> body
+                                                 (filter #(= :constructors (:type %)))
+                                                 (mapcat :constructors))))))
+    (recovering #(check-deferred-methods-implemented! env name class-def))
+    (recovering #(check-class-invariants! class-env name invariant))
     (check-class-sections! env class-env name parents body)
-    (check-attachable-field-initialization! env name body parents)))
+    (recovering #(check-attachable-field-initialization! env name body parents))))
 
 ;;
 ;; Program Type Checking
@@ -8647,13 +8700,60 @@
       (doseq [cd class-defs] (visit cd)))
     @out))
 
+(def default-max-errors
+  "How many type errors one check reports, unless :max-errors says otherwise."
+  10)
+
+(defn- error-result
+  "check-program's failing result for ERRORS: duplicates dropped, in source
+   order (the entry file's first, by line), and at most :max-errors of them,
+   with :omitted-errors saying how many more there were."
+  [opts errors env]
+  (let [max-errors (or (:max-errors opts) default-max-errors)
+        errors (->> (distinct errors)
+                    (map-indexed vector)
+                    (sort-by (fn [[i e]] [(if (:source-file e) 1 0)
+                                          (or (:line e) Long/MAX_VALUE)
+                                          (or (:column e) 0)
+                                          i]))
+                    (map second))]
+    {:success false
+     :errors (vec (take max-errors errors))
+     :omitted-errors (max 0 (- (count errors) max-errors))
+     :warnings (vec @(:warnings env))}))
+
+(defn- check-top-level-statements!
+  "check-statements for a program's top-level statements, recovering from
+   each failing statement in turn so later ones are still checked. A `let`
+   that fails still defines its name, as Any, so its later uses are not
+   reported as undefined too."
+  [env stmts]
+  (register-closure-let-signatures! env stmts)
+  (register-assigned-names! env stmts)
+  (doseq [stmt stmts]
+    (when (and (= ::failed (recovering #(check-statement env stmt)))
+               (= :let (:type stmt))
+               (string? (:name stmt))
+               (nil? (env-lookup-var env (:name stmt))))
+      (env-add-var env (:name stmt) "Any"))))
+
+(defn format-type-errors
+  "The lines reporting type-check RESULT's errors, ending with a count of any
+   left out (see :max-errors)."
+  [result]
+  (let [omitted (:omitted-errors result 0)]
+    (cond-> (mapv format-type-error (:errors result))
+      (pos? omitted) (conj (str "... and " omitted " more error" (when (> omitted 1) "s")
+                                " (use --max-errors to see more)")))))
+
 (defn check-program
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
   ([{:keys [classes calls statements imports functions type-aliases duplicate-functions
             function-signature-conflicts] :as program} opts]
-   (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))]
+   (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))
+             *collected-errors* (atom [])]
      (let [env (make-type-env)
            normalized-functions (normalize-function-defs classes functions)
            all-class-defs (vec (concat (redeclare/desugar-classes classes)
@@ -8699,7 +8799,9 @@
          (try
            (field-shadowing/check-classes! all-class-defs (redeclare/class-lookup all-class-defs))
            (catch clojure.lang.ExceptionInfo e
-             (throw (ex-info (ex-message e) {:error (type-error (ex-message e))}))))
+             (throw (ex-info (ex-message e)
+                             {:errors (mapv type-error (or (:messages (ex-data e))
+                                                           [(ex-message e)]))}))))
        ;; Reject duplicate free-function definitions before they are collapsed
        ;; last-wins (which would otherwise make the earlier definition silently
        ;; vanish and surface later as an obscure "Method not found: callN").
@@ -8837,7 +8939,9 @@
                 (remove #(contains? skip-body-names (:name %)) classes)
                 functions
                 statements
-                (or (:max-undefined-type-errors opts) default-max-undefined-type-errors))]
+                (or (:max-undefined-type-errors opts)
+                    ;; scan past the reported cap, so the count of the rest is right
+                    (max default-max-undefined-type-errors (or (:max-errors opts) 0))))]
            (when (seq undefined-type-errors)
              (throw (ex-info "Undefined type(s) referenced"
                              {:errors undefined-type-errors}))))
@@ -8893,29 +8997,27 @@
              (fn [] (check-old-and-retry! "top-level code" nil nil nil statements nil))))
          (if (seq statements)
            (do
-             (check-missing-call-parens! env statements)
-             (check-statements env statements)
+             (recovering #(check-missing-call-parens! env statements))
+             (check-top-level-statements! env statements)
              ;; `x = 5` or a function named but not called, standing alone,
              ;; is a mistake in a script, which never shows a top-level value;
              ;; the REPL, which does show it, leaves this option off.
              (when (:reject-discarded-top-level? opts)
-               (check-no-discarded-values! env statements {:routine? false})))
+               (recovering #(check-no-discarded-values! env statements {:routine? false}))))
            (doseq [call calls]
              (check-expression env call)))
 
-         {:success true
-          :errors []
-          :warnings (vec @(:warnings env))}
+         (if (seq @*collected-errors*)
+           (error-result opts @*collected-errors* env)
+           {:success true
+            :errors []
+            :warnings (vec @(:warnings env))})
 
          (catch clojure.lang.ExceptionInfo e
-           (let [error-data (ex-data e)]
-             {:success false
-            ;; A pass may report several errors at once (e.g. undefined-type
-            ;; validation) via :errors; otherwise fall back to the single :error.
-              :errors (or (:errors error-data)
-                          [(or (:error error-data)
-                               (type-error (ex-message e)))])
-              :warnings (vec @(:warnings env))}))
+           ;; A pass that checks the program as a whole (undefined types,
+           ;; duplicate functions, ...) stops the run: what follows would mostly
+           ;; repeat it. It may report several errors at once via :errors.
+           (error-result opts (into @*collected-errors* (exception-type-errors e)) env))
 
        ;; Any other exception is an internal type-checker fault (e.g. a shape
        ;; assumption broken by an unexpected AST). Surface it as a type error

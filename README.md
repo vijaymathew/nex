@@ -365,8 +365,12 @@ separator, matching `java -cp`.
 The CLI also has a `--skip-contracts` flag: `nex compile jvm app.nex
 --skip-contracts` and `nex app.nex --skip-contracts` lower `require`/`ensure`/
 `invariant` checks to no-ops, for a trusted, perf-critical release build. Bare
-`assert` always runs regardless — there is no mode that strips it. Run
-`nex help` for the full list of CLI commands and examples.
+`assert` always runs regardless — there is no mode that strips it.
+
+Type checking reports up to 10 errors at once, one per routine or top-level
+statement; `--max-errors N` (on both `nex app.nex` and `nex compile jvm`)
+changes that limit. Run `nex help` for the full list of CLI commands and
+examples.
 
 ### Running Tests
 

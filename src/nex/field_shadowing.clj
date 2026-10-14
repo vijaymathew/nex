@@ -7,7 +7,8 @@
 
    Only user-written `let`s are checked. Parameters (`make(name: String) do
    this.name := name end`) and loop/pattern variables are deliberate bindings
-   and stay allowed.")
+   and stay allowed."
+  (:require [clojure.string :as str]))
 
 (defn- feature-sections
   [class-def]
@@ -66,22 +67,29 @@
     (some #(shadowing-let fields % line) node)))
 
 (defn check-classes!
-  "Throw on the first `let` in CLASS-DEFS that reuses a visible field's name.
+  "Throw if any routine in CLASS-DEFS has a `let` that reuses a visible
+   field's name, reporting the first such `let` of every routine: the
+   exception's message has one line per routine, and :messages lists them.
    LOOKUP maps a parent name to its class definition (nil when unknown, in
    which case that ancestor's fields are simply not considered)."
   [class-defs lookup]
-  (doseq [class-def class-defs
-          :when (and (map? class-def) (= :class (:type class-def)))
-          :let [fields (visible-fields lookup class-def)]
-          :when (seq fields)
-          routine (routine-bodies class-def)]
-    (when-let [[{:keys [name]} line] (shadowing-let fields [(:body routine) (:rescue routine)] (:dbg/line routine))]
-      (let [owner (get fields name)
-            msg (str (when line (str "Line " line ": "))
-                     "Local variable '" name "' has the same name as the field '" name "'"
-                     (if (= owner (:name class-def))
-                       (str " of class '" owner "'")
-                       (str " that class '" (:name class-def) "' inherits from '" owner "'"))
-                     ", and would hide it. To set the field, assign it: `" name
-                     " := ...`. Otherwise choose another name.")]
-        (throw (ex-info msg {:error msg :line line}))))))
+  (let [messages
+        (for [class-def class-defs
+              :when (and (map? class-def) (= :class (:type class-def)))
+              :let [fields (visible-fields lookup class-def)]
+              :when (seq fields)
+              routine (routine-bodies class-def)
+              :let [[{:keys [name]} line] (shadowing-let fields [(:body routine) (:rescue routine)]
+                                                         (:dbg/line routine))]
+              :when name]
+          (let [owner (get fields name)]
+            (str (when line (str "Line " line ": "))
+                 "Local variable '" name "' has the same name as the field '" name "'"
+                 (if (= owner (:name class-def))
+                   (str " of class '" owner "'")
+                   (str " that class '" (:name class-def) "' inherits from '" owner "'"))
+                 ", and would hide it. To set the field, assign it: `" name
+                 " := ...`. Otherwise choose another name.")))]
+    (when (seq messages)
+      (let [msg (str/join "\n" messages)]
+        (throw (ex-info msg {:error msg :messages (vec messages)}))))))

@@ -1604,8 +1604,8 @@
                                 {:var-types @*repl-var-types*
                                  :skip-class-body-names skip-class-body-names})]
       (when-not (:success result)
-        (doseq [error (:errors result)]
-          (println (tc/format-type-error error)))
+        (doseq [line (tc/format-type-errors result)]
+          (println line))
         (throw (ex-info "Type checking failed" {:errors (:errors result)}))))))
 
 (defn- repl-log-path
