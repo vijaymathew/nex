@@ -4874,16 +4874,15 @@
       ;; lowering" at compile time.
       ;;
       ;; Only the members the compiled object model actually implements are
-      ;; routed here. `clone` is deliberately excluded: its :Any default
-      ;; (`bi/nex-clone-value`) only understands the interpreter's object maps
-      ;; and would quietly return the *same* object rather than a copy. Falling
-      ;; through to the error below keeps it an honest "not supported yet"
-      ;; instead of a silent wrong answer. Same for the typechecker's
-      ;; `cursor`/`start`/`item`/`next`/`at_end`, which have no Any default at
-      ;; all. `hash` has its own state-aware runtime path (any:hash), like
-      ;; `to_string` and `equals`.
+      ;; routed here, each to a state-aware runtime path (any:to_string,
+      ;; any:equals, any:hash, any:clone) that understands compiled objects --
+      ;; the :Any defaults in nex.types.builtins only understand the
+      ;; interpreter's object maps, and `clone` through them returned the
+      ;; *same* object. The typechecker's `cursor`/`start`/`item`/`next`/
+      ;; `at_end` have no Any default at all, and fall through to the error
+      ;; below.
       (and (or class-def (contains? (:generic-param-names env) base-type))
-           (contains? #{"to_string" "equals" "hash"} method))
+           (contains? #{"to_string" "equals" "hash" "clone"} method))
       (let [nex-type (or (bi/builtin-type-method-return-type :Any method) "Any")
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/call-runtime-node (str "any:" method)
@@ -6734,7 +6733,7 @@
         ;; same fix already applied to the known-user-class-without-override
         ;; case (`lower-instance-user-method-call`'s Any-protocol fallback).
         ;; Reuse that same state-aware path here instead.
-        helper (if (and (= base-type "Any") (contains? #{"to_string" "equals" "hash"} method))
+        helper (if (and (= base-type "Any") (contains? #{"to_string" "equals" "hash" "clone"} method))
                  (str "any:" method)
                  (str "builtin-method:" base-type ":" method))]
     (ir/call-runtime-node helper

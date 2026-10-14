@@ -4,6 +4,7 @@
             [nex.parser :as p]
             [nex.interpreter :as interp]
             [nex.compiler.jvm.repl :as compiled-repl]
+            [nex.lower]
             [nex.repl :as repl]))
 
 (deftest self-inheritance-registration-fails-test
@@ -811,31 +812,48 @@ end"))
        ~@body)
      (str s#)))
 
-(def ^:private generic-class-calling-clone-on-unconstrained-param
-  "`.clone` on a value of unconstrained generic type `G` is a real, still-open
-   compiled-lowering gap (deliberately excluded when `to_string`/`equals`/`hash`
-   were made to work in this same position — see lower.clj's
-   `lower-instance-dispatch`, the comment on the `any:` dispatch branch).
-   Lowering it throws \"Unsupported target call expression for lowering\", a
-   reliable trigger for this test."
-  "class Box [G]
+(def ^:private gap-marker
+  "An Integer literal only `class-with-a-gap` uses, which with-simulated-gap
+   makes the compiled backend refuse."
+  424242)
+
+(def ^:private class-with-a-gap
+  "A valid class whose body the compiled backend cannot lower, while
+   with-simulated-gap is in force."
+  (str "class Box [G]
   create make(v: G) do value := v end
   feature
     value: G
-    copy(): Any do result := value.clone end
-end")
+    key(): Integer do result := " gap-marker " end
+end"))
+
+(defmacro ^:private with-simulated-gap
+  "Run BODY with the compiled backend refusing to lower `gap-marker`, as it
+   refuses a construct it does not implement yet (nex.lower/unsupported). These
+   tests are about how the REPL reports and recovers from such a gap, not about
+   any particular one; they used to rely on a real gap (`.hash`, then `.clone`,
+   on a generic value), and broke each time one was closed."
+  [& body]
+  `(let [lower-expression# nex.lower/lower-expression]
+     (with-redefs [nex.lower/lower-expression
+                   (fn [env# expr#]
+                     (if (and (= :integer (:type expr#)) (= gap-marker (:value expr#)))
+                       (throw (#'nex.lower/unsupported "Unsupported target call expression for lowering"
+                                                       {:expr expr#}))
+                       (lower-expression# env# expr#)))]
+       ~@body)))
 
 (deftest compiled-backend-gap-in-class-body-fails-visibly-test
   (testing "the class definition itself reports the error, not silence"
     (with-compiled-repl ctx
       (let [out (with-out-str
-                  (repl/eval-code ctx generic-class-calling-clone-on-unconstrained-param))]
+                  (with-simulated-gap (repl/eval-code ctx class-with-a-gap)))]
         (is (str/includes? out "Error:") out)
         (is (str/includes? out "Unsupported") out))))
 
   (testing "and the class was never defined by either backend — no silent partial success"
     (with-compiled-repl ctx
-      (with-out-str (repl/eval-code ctx generic-class-calling-clone-on-unconstrained-param))
+      (with-out-str (with-simulated-gap (repl/eval-code ctx class-with-a-gap)))
       (let [out (with-out-str (repl/eval-code ctx "let b := create Box[Integer].make(1)"))]
         (is (str/includes? out "Error:") out)))))
 
@@ -859,14 +877,14 @@ end")
         (is (str/includes? out "2") out)))))
 
 (deftest redefining-a-compiled-class-with-a-gap-falls-back-visibly-test
-  (testing "a redefinition whose *new* shape hits a real compiled-backend gap
+  (testing "a redefinition whose *new* shape hits a compiled-backend gap
             falls back to the interpreter (visible warning), not a raw error"
     (with-compiled-repl ctx
       (with-out-str
         (repl/eval-code ctx "class Box [G] create make(v: G) do value := v end feature value: G end"))
       (let [redef-out (with-out-str
                         (let [err (with-err-str
-                                    (repl/eval-code ctx generic-class-calling-clone-on-unconstrained-param))]
+                                    (with-simulated-gap (repl/eval-code ctx class-with-a-gap)))]
                           (is (str/includes? err "Warning") err)
                           (is (str/includes? err "interpreter") err)))]
         (is (not (str/includes? redef-out "Error:")) redef-out))))
@@ -876,7 +894,7 @@ end")
       (with-out-str
         (repl/eval-code ctx "class Box [G] create make(v: G) do value := v end feature value: G end"))
       (with-err-str
-        (with-out-str (repl/eval-code ctx generic-class-calling-clone-on-unconstrained-param)))
+        (with-out-str (with-simulated-gap (repl/eval-code ctx class-with-a-gap))))
       (with-out-str (repl/eval-code ctx "let b := create Box[Integer].make(1)"))
       ;; `b.key` itself hits an unrelated, pre-existing interpreter gap in
       ;; generic-method resolution after a redefinition — not what this test

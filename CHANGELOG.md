@@ -15,6 +15,12 @@
   then fail on the compiled backend). It is the structural hash `Map` and `Set`
   already used, and a class's `hash` override still takes its place. Remove
   `inherit Hashable` and `-> Hashable` constraints: every type now qualifies.
+- **Fix: `clone` on the compiled backend.** `p.clone` on a user class was
+  rejected as unsupported; on an `Any`-typed value it returned the object
+  itself, so changing the "copy" changed the original; and cloning an `Array`,
+  `Map` or `Set` shared the objects in it. A clone is now a deep copy, as on
+  the interpreter, and a class's own `clone` still takes its place. Objects
+  shared or cyclic in the original stay so in the copy.
 
 ## 0.6.0 - 2026-10-09
 
