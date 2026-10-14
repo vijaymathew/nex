@@ -2485,7 +2485,8 @@ end"))
                 end
 
                 let top: Bogus13 := 1"
-          result (tc/type-check (p/ast code))
+          ;; above the default reporting cap of 10, which this is not about
+          result (tc/type-check (p/ast code) {:max-errors 20})
           msgs (error-messages result)
           expected [1 3 4 5 6 7 8 9 10 11 12 13]]
       (is (false? (:success result)))
