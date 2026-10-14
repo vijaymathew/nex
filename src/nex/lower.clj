@@ -7701,11 +7701,11 @@
 
 (defn- result-local-init-stmt
   "Zero-value initializer for a routine's `result` local: the primitive default
-   for a scalar return, an empty collection for a non-detachable Array/Map/Set
-   return (so a body that only mutates `result` without an explicit
-   `result := ...` still has a real object — matching get-default-field-value in
-   the interpreter), and null otherwise (detachable collection returns
-   included)."
+   for a scalar return, \"\" for a non-detachable String return, an empty
+   collection for a non-detachable Array/Map/Set return (so a body that only
+   mutates `result` without an explicit `result := ...` still has a real
+   object) — all matching get-default-field-value in the interpreter — and
+   null otherwise (detachable String and collection returns included)."
   [result-local]
   (when result-local
     (let [jvm-type (:jvm-type result-local)
@@ -7734,6 +7734,9 @@
 
                       (and (not detachable?) (= "Integer32" (base-type-name nex-type)))
                       (ir/call-runtime-node "make-int32" [(ir/const-node 0 "Integer" :long)] nex-type jvm-type)
+
+                      (and (not detachable?) (= "String" (base-type-name nex-type)))
+                      (ir/const-node "" nex-type jvm-type)
 
                       (and (not detachable?) (= base-type "Array"))
                       (ir/array-literal-node [] nex-type jvm-type)

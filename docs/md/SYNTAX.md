@@ -280,12 +280,13 @@ it returns that value:
 |---|---|
 | `Integer` (and the other integer types), `Real` | `0`, `0.0` |
 | `Boolean`, `Char` | `false`, `#nul` |
+| `String` | `""` |
 | `Array[T]`, `Map[K, V]`, `Set[T]` | `[]`, `{}`, `#{}` (a fresh empty collection) |
 | any detachable type `?T` | `nil` |
 
-Any other return type — `String`, or an attached class type — has no zero value,
-so the typechecker rejects a routine that does not assign `result` on every path
-that returns.
+Any other return type — an attached class type, say — has no zero value, so the
+typechecker rejects a routine that does not assign `result` on every path that
+returns.
 
 Every function in a program is checked against every other function's
 signature regardless of which is written first, so mutually recursive
