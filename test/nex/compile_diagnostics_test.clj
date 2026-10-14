@@ -20,7 +20,8 @@
    and looking at the wrong language feature entirely."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [nex.eval :as e]))
+            [nex.eval :as e]
+            [nex.lower]))
 
 (def ^:private message #'nex.eval/compile-error-message)
 
@@ -44,11 +45,30 @@ end
         (ex-message ex))
       (finally (.delete f)))))
 
+(defmacro ^:private with-simulated-gap
+  "Run BODY with the compiled backend refusing `clone` on a created object
+   exactly as it refuses a user-defined target access it does not implement
+   (nex.lower/unsupported, with the method and receiver type). These tests are
+   about how such a gap is reported, not about any particular one; they used
+   to rely on `clone` being a real gap, and broke when it was closed."
+  [& body]
+  `(let [lower-expression# nex.lower/lower-expression]
+     (with-redefs [nex.lower/lower-expression
+                   (fn [env# expr#]
+                     (if (and (= :call (:type expr#)) (= "clone" (:method expr#))
+                              (= :create (:type (:target expr#))))
+                       (throw (#'nex.lower/unsupported
+                               "Unsupported user-defined target access during lowering"
+                               {:expr (:target expr#)
+                                :target-type (:class-name (:target expr#))
+                                :method (:method expr#)}))
+                       (lower-expression# env# expr#)))]
+       ~@body)))
+
 (deftest gap-names-the-construct-and-the-line
   (testing "an unsupported construct reports the method, the receiver, and where"
-    ;; `clone` is a real gap: the Any protocol admits it on every receiver and
-    ;; the interpreter implements it, but the compiled object model does not.
-    (let [msg (compile-failure (str plain-class "print(create P.make(1).clone)"))]
+    (let [msg (with-simulated-gap
+                (compile-failure (str plain-class "print(create P.make(1).clone)")))]
       (is (str/includes? msg "does not support yet") msg)
       (is (str/includes? msg "method \"clone\"") msg)
       (is (str/includes? msg "target-type \"P\"") msg)
@@ -57,7 +77,8 @@ end
 
 (deftest gap-is-not-reported-as-a-defect
   (testing "a gap does not ask the user to file a bug"
-    (let [msg (compile-failure (str plain-class "print(create P.make(1).clone)"))]
+    (let [msg (with-simulated-gap
+                (compile-failure (str plain-class "print(create P.make(1).clone)")))]
       (is (not (str/includes? msg "please report")) msg)
       (is (not (str/includes? msg "internal error")) msg))))
 
