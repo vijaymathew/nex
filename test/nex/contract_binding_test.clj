@@ -168,7 +168,19 @@ end
 print(f(create Succ.make(create Zero.make)))
 ")]
       (is (nil? (type-error-message code)))
-      (is (= ["1"] (run-compiled code))))))
+      (is (= ["1"] (run-compiled code)))))
+  (testing "an ensure may reuse a name the body bound with `if convert`"
+    (let [code (str number-decl
+                    "function f(n: Number): Boolean
+do
+  if convert n to s: Succ then result := true end
+ensure
+  ok: convert n to s: Succ
+end
+print(f(create Succ.make(create Zero.make)))
+")]
+      (is (nil? (type-error-message code)))
+      (is (= ["true"] (run-compiled code))))))
 
 (deftest contract-binding-name-must-be-new
   (testing "a parameter"

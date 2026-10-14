@@ -32,6 +32,9 @@
   ([parent]
    {:parent parent
     :vars (atom {})
+    ;; {name -> type} for each variable a `convert` added here (check-convert)
+    ;; rather than a declaration: see contract-binding-clash?.
+    :convert-vars (atom {})
     :methods (atom {})
     :classes (atom {})
     ;; Bare class names that resolve to more than one distinct interned
@@ -2839,6 +2842,21 @@
        (filter #(and (map? %) (#{:convert :attached-test} (:type %))
                      (:var-name %) (not= "_" (:var-name %))))))
 
+(defn- contract-binding-clash?
+  "Whether NAME is already declared where a contract clause in ENV is
+   checked. A name only a `convert` put in scope does not count: the
+   checker lets an `if convert a to c: C` binding outlive its `if` (the
+   compiled backend does not), and a clause binding `c` again should not be
+   rejected for that."
+  [env name]
+  (when-let [owner (->> (iterate :parent env)
+                        (take-while some?)
+                        (filter #(contains? @(:vars %) name))
+                        first)]
+    (let [convert-vars (some-> (:convert-vars owner) deref)]
+      (not (and (contains? convert-vars name)
+                (= (get convert-vars name) (get @(:vars owner) name)))))))
+
 (defn- check-contract-condition
   "Type-check a contract clause's CONDITION (require, ensure, or a loop or
    class invariant) and return its type. A name it binds (`convert n to s:
@@ -2856,7 +2874,7 @@
       (with-type-error-location
         (first same)
         (fn []
-          (when (env-lookup-var env name)
+          (when (contract-binding-clash? env name)
             (throw (ex-info (str "Contract binding shadows " name)
                             {:error (type-error
                                      (str "`" name "` is already defined here, so a contract"
@@ -3002,7 +3020,9 @@
                                     " and "
                                     (display-type target-type)))})))
     ;; convert may fail at runtime, so variable is detachable in this scope.
-    (env-add-var env var-name (detachable-version target-type))
+    (let [bound-type (detachable-version target-type)]
+      (env-add-var env var-name bound-type)
+      (some-> (:convert-vars env) (swap! assoc var-name bound-type)))
     "Boolean"))
 
 (defn check-attached-test
