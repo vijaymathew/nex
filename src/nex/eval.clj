@@ -326,7 +326,10 @@
    which calls; empty when it did not come from compiled Nex code (a type
    error, say). A broken contract says whose obligation it was."
   [e main-file]
-  (let [t ^Throwable (or (:cause (ex-data e)) e)
+  (let [;; run-compiled stores a non-Exception throwable under :cause; other
+        ;; code (nex.walker/walk-node) uses the key for a message string.
+        cause (:cause (ex-data e))
+        t ^Throwable (if (instance? Throwable cause) cause e)
         ;; The JVM keeps at most this many frames, so a deep recursion's
         ;; repeat count is only a lower bound.
         truncated? (>= (count (.getStackTrace t)) 1024)

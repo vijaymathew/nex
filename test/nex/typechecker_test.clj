@@ -842,12 +842,13 @@ end"
 
 (deftest test-rescue-that-completes-normally-still-requires-result-assignment
   (testing "A rescue that can fall through without assigning result is still rejected"
-    (let [code "class Test
+    (let [code "class Pt feature x: Integer end
+class Test
   feature
-    bad(): String
+    bad(): Pt
     do
       do
-        result := \"ok\"
+        result := create Pt
       rescue
         let x := 1
       end
