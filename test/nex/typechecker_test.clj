@@ -2094,18 +2094,9 @@ end"
       (is (:success result))
       (is (empty? (:errors result))))))
 
-(deftest test-builtin-comparable-hashable-constraints
-  (testing "Built-in scalar types satisfy Comparable and Hashable generic constraints"
+(deftest test-builtin-comparable-constraints
+  (testing "Built-in scalar types satisfy Comparable generic constraints"
     (let [code "class Sorted_Box [T -> Comparable]
-  feature
-    value: T
-  create
-    make(v: T) do
-      value := v
-    end
-end
-
-class Hash_Box [T -> Hashable]
   feature
     value: T
   create
@@ -2119,8 +2110,8 @@ class Main
     demo() do
       let s1: Sorted_Box[String] := create Sorted_Box[String].make(\"x\")
       let s2: Sorted_Box[Integer] := create Sorted_Box[Integer].make(10)
-      let h1: Hash_Box[Boolean] := create Hash_Box[Boolean].make(true)
-      let h2: Hash_Box[Char] := create Hash_Box[Char].make(#A)
+      let s3: Sorted_Box[Boolean] := create Sorted_Box[Boolean].make(true)
+      let s4: Sorted_Box[Char] := create Sorted_Box[Char].make(#A)
     end
 end"
           ast (p/ast code)

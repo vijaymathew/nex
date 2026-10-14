@@ -66,6 +66,7 @@ create Array[String].filled(2, "x")
 | `concat` | `other: Array[T]` | `Array[T]` | Return a new array containing this array followed by `other`. | `O(n + m) / O(n + m)` |
 | `to_string` | none | `String` | Render the array and its nested values as text. | `O(n) / O(n)`, deep* |
 | `equals` | `other: Array[T]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
+| `hash` | none | `Integer` | Hash of the elements, in order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Array[T]` | Deep-copy the array and its nested values while preserving element type. | `O(n) / O(n)`, deep* |
 | `cursor` | none | `ArrayCursor` | Create iterator. | `O(1) / O(1)` to create |
 
@@ -100,6 +101,7 @@ create Array[String].filled(2, "x")
 | `remove` | `key: K` | `Void` | Delete entry by key. | `O(1) avg / O(1)`†  |
 | `to_string` | none | `String` | Render the map and its nested values as text. | `O(n) / O(n)`, deep* |
 | `equals` | `other: Map[K, V]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
+| `hash` | none | `Integer` | Hash of the entries, in any order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Map[K, V]` | Deep-copy the map and its nested keys and values while preserving key/value types. | `O(n) / O(n)`, deep* |
 | `cursor` | none | `MapCursor` | Create entry iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
 
@@ -153,6 +155,7 @@ Set literals use `#{...}`. The empty map literal remains `{}`.
 | `to_array` | none | `Array[T]` | Copy the set's elements into a new array, in insertion order. | `O(n) / O(n)` |
 | `to_string` | none | `String` | Render the set and its nested values as text. | `O(n) / O(n)`, deep* |
 | `equals` | `other: Set[T]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
+| `hash` | none | `Integer` | Hash of the elements, in any order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Set[T]` | Deep-copy the set and its nested values while preserving element type. | `O(n) / O(n)`, deep* |
 | `cursor` | none | `SetCursor` | Create iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
 

@@ -1123,6 +1123,8 @@
                    :signatures [{:params [{:name "other" :type {:base-type "Array" :type-params ["T"]}}]
                                  :return-type "Boolean"}]}
    (fn [arr other & _] (nex-deep-equals? arr other))
+   "hash"        ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
+   (fn [arr & _] (->nex-integer (nex-structural-hash arr)))
    "clone"       ^{:returns :self :signatures [{:params []
                                                 :return-type {:base-type "Array" :type-params ["T"]}}]}
    (fn [arr & _] (nex-clone-value arr))
@@ -1185,6 +1187,8 @@
                     :signatures [{:params [{:name "other" :type {:base-type "Map" :type-params ["K" "V"]}}]
                                   :return-type "Boolean"}]}
    (fn [m other & _] (nex-deep-equals? m other))
+   "hash"         ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
+   (fn [m & _] (->nex-integer (nex-structural-hash m)))
    "clone"        ^{:returns :self :signatures [{:params []
                                                  :return-type {:base-type "Map" :type-params ["K" "V"]}}]}
    (fn [m & _] (nex-clone-value m))
@@ -1236,6 +1240,8 @@
                             :signatures [{:params [{:name "other" :type {:base-type "Set" :type-params ["T"]}}]
                                           :return-type "Boolean"}]}
    (fn [s other & _] (nex-deep-equals? s other))
+   "hash"                 ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
+   (fn [s & _] (->nex-integer (nex-structural-hash s)))
    "clone"                ^{:returns :self :signatures [{:params []
                                                          :return-type {:base-type "Set" :type-params ["T"]}}]}
    (fn [s & _] (nex-clone-value s))

@@ -9,7 +9,7 @@ write `inherit Any`.
 |---|---|---|---|
 | `to_string` | none | `String` | Return a user-facing string representation. |
 | `equals` | `other: Any` | `Boolean` | Value equality used by the `=` and `/=` operators. The default compares structurally (deep, field-by-field); a class may override it to define its own equality. |
-| `hash` | none | `Integer` | Hash code, used to place values as `Set` elements and `Map` keys. The default is structural and consistent with the default `equals`. A class that overrides `equals` should also override `hash` so that equal values hash equal (the type checker warns otherwise). |
+| `hash` | none | `Integer` | Hash code, used to place values as `Set` elements and `Map` keys. Every value has one, so any type can be a key. The default is structural and consistent with the default `equals`. A class that overrides `equals` should also override `hash` so that equal values hash equal (the type checker warns otherwise). |
 | `clone` | none | `Any` | Clone the value. Built-in collections override this with deep-copy behavior. |
 
 The `=`/`/=` operators use `equals` (value equality); `==`/`!=` always compare
@@ -120,12 +120,6 @@ print(largest(["a", "z", "m"], ""))   -- "z"
 Any class may serve as a bound, not only the built-in ones; a routine deferred in
 the bound dispatches to the runtime subclass.
 
-## `Hashable` (deferred)
-
-| Method | Arguments | Returns | Description |
-|---|---|---|---|
-| `hash` | none | `Integer` | Return stable hash code for the value. |
-
 ## Examples
 
 ```nex
@@ -136,6 +130,8 @@ print(s.hash())
 let n := 42
 print(n.compare(10))               -- positive
 print(n.hash())
+
+print([1, 2].hash() = [1, 2].hash())   -- true: every value has `hash`
 ```
 
 ## Operators and the Routines They Denote

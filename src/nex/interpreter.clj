@@ -324,7 +324,7 @@
       :else nil)))
 
 ;; Guards the recursive descent below against reentrancy: a Map keyed by
-;; objects with a user-defined Hashable/`hash` override calls back into the
+;; objects with a user-defined `hash` override calls back into the
 ;; interpreter (rt/*value-hash*, bound in eval-node's :call dispatch) to
 ;; compute each key's hash while replace-object-alias-in-collection! iterates
 ;; it — and that nested interpreted call can itself trigger a mutation whose
@@ -442,7 +442,6 @@
 (def build-cursor-base-class bootstrap/build-cursor-base-class)
 (def build-comparable-base-class bootstrap/build-comparable-base-class)
 (def build-any-base-class bootstrap/build-any-base-class)
-(def build-hashable-base-class bootstrap/build-hashable-base-class)
 (def build-builtin-scalar-class bootstrap/build-builtin-scalar-class)
 
 (defn make-context

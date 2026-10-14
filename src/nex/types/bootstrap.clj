@@ -84,23 +84,6 @@
    :body []
    :invariant nil})
 
-(defn build-hashable-base-class
-  []
-  {:type :class
-   :name "Hashable"
-   :deferred? true
-   :generic-params nil
-   :note nil
-   :parents nil
-   :body [{:type :feature-section
-           :visibility {:type :public}
-           :members [{:type :method :name "hash"
-                      :params nil
-                      :return-type "Integer"
-                      :declaration-only? true
-                      :note nil :require nil :body [] :ensure nil}]}]
-   :invariant nil})
-
 (defn build-builtin-scalar-class
   [name]
   {:type :class
@@ -108,7 +91,7 @@
    :deferred? false
    :generic-params nil
    :note nil
-   :parents [{:parent "Any"} {:parent "Comparable"} {:parent "Hashable"}]
+   :parents [{:parent "Any"} {:parent "Comparable"}]
    :body []
    :invariant nil})
 
@@ -117,13 +100,12 @@
 
 (defn base-class-defs
   "The standard environment's base classes, in registration order (each
-   class's parents precede it): Any, Function, Cursor, Comparable, Hashable,
-   then the builtin scalars. Shared by every engine that needs the builtin
+   class's parents precede it): Any, Function, Cursor, Comparable, then
+   the builtin scalars. Shared by every engine that needs the builtin
    roots of the class hierarchy."
   []
   (into [(build-any-base-class)
          (build-function-base-class)
          (build-cursor-base-class)
-         (build-comparable-base-class)
-         (build-hashable-base-class)]
+         (build-comparable-base-class)]
         (map build-builtin-scalar-class builtin-scalar-class-names)))

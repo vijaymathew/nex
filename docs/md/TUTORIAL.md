@@ -355,7 +355,7 @@ end
 With constraints:
 
 ```nex
-class Dictionary [K -> Hashable, V]
+class Sorted_Map [K -> Comparable, V]
   feature
     key: K
     value: V

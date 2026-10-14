@@ -3124,9 +3124,8 @@
 ;; `check-target-call`, Array/Map/Set/String in `register-builtin-methods`,
 ;; and any user class that declares its own.
 ;;
-;; `hash` is intentionally absent even though the other two tables carry it:
-;; a class opts into hashing by inheriting Hashable. Adding it here would
-;; typecheck `p.hash` on any class, which the compiled backend cannot lower.
+;; `hash` is every value's, like `equals`, with which it must agree: the same
+;; structural hash `Map` and `Set` use to place keys and elements.
 (defn- builtin-method-signature-any
   [method argc _type-map]
   (case method
@@ -3134,6 +3133,8 @@
                   {:params [] :return-type "String"})
     "equals" (when (= argc 1)
                {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
+    "hash" (when (= argc 0)
+             {:params [] :return-type "Integer"})
     "clone" (when (= argc 0)
               {:params [] :return-type "Any"})
     nil))
@@ -5078,9 +5079,10 @@
 (defn join-type
   "The type of `when c then a else b end` from the types of A and B: the
    narrowest type to which both conform. When there is no single narrowest
-   one — Integer and String, say, both inherit Comparable and Hashable, and
-   neither of those conforms to the other — it is Any. A nil branch makes the
-   other branch's type optional."
+   one, it is Any. Integer and String, say, share only Comparable and Any, and
+   since types-compatible? lets Any stand for anything, neither of those counts
+   as narrower: their join is Any. A nil branch makes the other branch's type
+   optional."
   [env t1 t2]
   (let [n1 (normalize-type t1)
         n2 (normalize-type t2)]
@@ -7442,8 +7444,8 @@
 (def ^:private builtin-protocol-classes
   "The builtin classes whose routines live only in the method table (their
    `:body` is empty), so `inherited-method-member` never sees them. Any is
-   every class's implicit root; the other two are reached through `inherit`."
-  #{"Any" "Comparable" "Hashable"})
+   every class's implicit root; Comparable is reached through `inherit`."
+  #{"Any" "Comparable"})
 
 (defn- inherited-method-members
   "Every routine named METHOD-NAME of ARITY that the heir redefines: the
@@ -7457,8 +7459,8 @@
        vec))
 
 (defn- inherited-protocol-method-member
-  "The signature of a builtin protocol routine (Any.equals, Comparable.compare,
-   Hashable.hash, ...) that a method named METHOD-NAME of ARITY redefines, or
+  "The signature of a builtin protocol routine (Any.equals, Any.hash,
+   Comparable.compare, ...) that a method named METHOD-NAME of ARITY redefines, or
    nil. Explicit protocol ancestors are tried before the implicit Any."
   [env parents method-name arity]
   (letfn [(ancestors [class-name visited]
@@ -7472,7 +7474,7 @@
               (when (or (= cn "Any") (contains? reached cn))
                 (when-let [sig (env-lookup-method env cn method-name arity)]
                   (assoc sig :name method-name))))
-            ["Comparable" "Hashable" "Any"]))))
+            ["Comparable" "Any"]))))
 
 (defn- check-override-conformance
   "Enforce CONTRAVARIANT parameters and COVARIANT return for a method that
@@ -8029,25 +8031,14 @@
                   {:params [{:name "a" :type "Any"}]
                    :return-type "Integer"}))
 
-(defn- register-hashable-protocol!
-  [env]
-  (env-add-class env "Hashable" {:name "Hashable"
-                                 :deferred? true
-                                 :generic-params nil
-                                 :parents nil
-                                 :body []})
-  (env-add-method env "Hashable" "hash"
-                  {:params []
-                   :return-type "Integer"}))
-
-;; Built-in scalar classes implement Comparable + Hashable
+;; Built-in scalar classes implement Comparable
 (defn- register-scalar-classes!
   [env]
   (doseq [scalar ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"]]
     (env-add-class env scalar {:name scalar
                                :deferred? false
                                :generic-params nil
-                               :parents [{:parent "Any"} {:parent "Comparable"} {:parent "Hashable"}]
+                               :parents [{:parent "Any"} {:parent "Comparable"}]
                                :body []})
     (env-add-method env scalar "compare"
                     {:params [{:name "a" :type "Any"}]
@@ -8189,7 +8180,6 @@
   [env]
   (register-any-protocol! env)
   (register-comparable-protocol! env)
-  (register-hashable-protocol! env)
   (register-scalar-classes! env)
   (register-integer-methods! env)
   (register-byte-methods! env)

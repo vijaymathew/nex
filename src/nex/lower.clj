@@ -99,8 +99,7 @@
                               (concat [(bootstrap/build-any-base-class)
                                        (bootstrap/build-function-base-class)
                                        (bootstrap/build-cursor-base-class)
-                                       (bootstrap/build-comparable-base-class)
-                                       (bootstrap/build-hashable-base-class)]
+                                       (bootstrap/build-comparable-base-class)]
                                       (map bootstrap/build-builtin-scalar-class
                                            ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))
         env (tc/make-type-env)]
@@ -158,7 +157,7 @@
 ;; whatever object the `Any` is holding at runtime — and must not be routed
 ;; through the same table, or it resolves to a Var that was never defined.
 (def ^:private any-protocol-method-names
-  #{"to_string" "equals" "clone" "cursor" "start" "item" "next" "at_end" "get" "length"})
+  #{"to_string" "equals" "hash" "clone" "cursor" "start" "item" "next" "at_end" "get" "length"})
 
 ;; Same idea as `any-protocol-method-names`, generalized to every OTHER
 ;; builtin-runtime-receiver-type (String, Array, Integer, ...): inside a
@@ -1014,14 +1013,11 @@
          (case (:method expr)
            "compare" "Integer"
            nil)
-         "Hashable"
-         (case (:method expr)
-           "hash" "Integer"
-           nil)
          nil))
-       ;; The Any/Comparable/Hashable protocols (spec B.1): every value renders
-       ;; with to_string and compares with equals, so their types are known even
-       ;; when the receiver is a builtin scalar with no per-method type table.
+       ;; The Any/Comparable protocols (spec B.1): every value renders with
+       ;; to_string, compares with equals and hashes with hash, so their types
+       ;; are known even when the receiver is a builtin scalar with no
+       ;; per-method type table.
      (case (:method expr)
        "to_string" "String"
        "equals" "Boolean"
@@ -4878,16 +4874,16 @@
       ;; lowering" at compile time.
       ;;
       ;; Only the members the compiled object model actually implements are
-      ;; routed here. `clone` and `hash` are deliberately excluded: their :Any
-      ;; defaults (`bi/nex-clone-value`, `bi/nex-structural-hash`) only
-      ;; understand the interpreter's object maps and would quietly return the
-      ;; *same* object from `clone` rather than a copy. Falling through to the
-      ;; error below keeps them an honest "not supported yet" — which is what
-      ;; they were before this branch existed — instead of a silent wrong
-      ;; answer. Same for the typechecker's `cursor`/`start`/`item`/`next`/
-      ;; `at_end`, which have no Any default at all.
+      ;; routed here. `clone` is deliberately excluded: its :Any default
+      ;; (`bi/nex-clone-value`) only understands the interpreter's object maps
+      ;; and would quietly return the *same* object rather than a copy. Falling
+      ;; through to the error below keeps it an honest "not supported yet"
+      ;; instead of a silent wrong answer. Same for the typechecker's
+      ;; `cursor`/`start`/`item`/`next`/`at_end`, which have no Any default at
+      ;; all. `hash` has its own state-aware runtime path (any:hash), like
+      ;; `to_string` and `equals`.
       (and (or class-def (contains? (:generic-param-names env) base-type))
-           (contains? #{"to_string" "equals"} method))
+           (contains? #{"to_string" "equals" "hash"} method))
       (let [nex-type (or (bi/builtin-type-method-return-type :Any method) "Any")
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/call-runtime-node (str "any:" method)
@@ -6738,7 +6734,7 @@
         ;; same fix already applied to the known-user-class-without-override
         ;; case (`lower-instance-user-method-call`'s Any-protocol fallback).
         ;; Reuse that same state-aware path here instead.
-        helper (if (and (= base-type "Any") (contains? #{"to_string" "equals"} method))
+        helper (if (and (= base-type "Any") (contains? #{"to_string" "equals" "hash"} method))
                  (str "any:" method)
                  (str "builtin-method:" base-type ":" method))]
     (ir/call-runtime-node helper
