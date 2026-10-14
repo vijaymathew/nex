@@ -266,15 +266,6 @@
       ;; handler.
       (with-meta
         (cond
-          (string? target)
-          {:type :when
-           :condition {:type :binary
-                       :operator "/="
-                       :left {:type :identifier :name target}
-                       :right {:type :nil}}
-           :consequent (dissoc call-node :safe?)
-           :alternative {:type :nil}}
-
           ;; Fold this guard into the prior `?.`'s `and`-chain instead of
           ;; nesting a `:when` inside an attached-test's `:value` (the
           ;; `:else` case just below, applied to TARGET itself, would do
@@ -303,11 +294,13 @@
              :consequent (-> call-node (dissoc :safe?) (assoc :target temp-name))
              :alternative {:type :nil}})
 
-          ;; A compound receiver (`x.y?.z`, not a bare identifier and not a
-          ;; chained `?.`): reuse the `?<expr> as <name>` object-test
+          ;; Any other receiver -- a bare name (`tail?.to_string`) or a
+          ;; compound one (`x.y?.z`): reuse the `?<expr> as <name>` object-test
           ;; machinery to evaluate TARGET exactly once into a synthetic
-          ;; binding, rather than the plain `/= nil` comparison above, which
-          ;; only reads a variable that already exists — every backend
+          ;; binding. A `/= nil` test on the name itself would not do even for
+          ;; a bare name: it narrows a local but not a field (any call may reset
+          ;; a field), so `field?.m` was rejected as a call on a detachable
+          ;; field, and it read the receiver twice. Every backend
           ;; (typechecker's apply-condition-branch-refinement!, lower's
           ;; ensure-attached-test-bindings/refine-condition-branch-env, the
           ;; interpreter's :attached-test eval) already narrows a `:when`
@@ -317,7 +310,7 @@
           (let [temp-name (str "__safe_receiver_" (swap! next-fn-id inc) "__")]
             {:type :when
              :condition {:type :attached-test
-                         :value target
+                         :value (identifier-target-expr target)
                          :var-name temp-name}
              :consequent (-> call-node (dissoc :safe?) (assoc :target temp-name))
              :alternative {:type :nil}}))
