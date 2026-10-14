@@ -2828,6 +2828,47 @@
                                         (display-type left-type) " and " (display-type right-type)))})))))
     (check-expression env condition)))
 
+(defn- contract-binding-nodes
+  "The `convert` and object-test (`?e as x`) nodes in a contract clause's
+   CONDITION, outside any closure (which is checked as a routine of its own)."
+  [condition]
+  (->> (tree-seq #(and (or (map? %) (sequential? %))
+                       (not= :anonymous-function (:type %)))
+                 #(if (map? %) (vals %) (seq %))
+                 condition)
+       (filter #(and (map? %) (#{:convert :attached-test} (:type %))
+                     (:var-name %) (not= "_" (:var-name %))))))
+
+(defn- check-contract-condition
+  "Type-check a contract clause's CONDITION (require, ensure, or a loop or
+   class invariant) and return its type. A name it binds (`convert n to s:
+   Succ`, `?x as y`) is local to the clause, as Eiffel scopes an object-test
+   local: visible to the rest of the clause (`convert n to s: Succ and
+   s.pred /= nil`), but not to the body, other clauses, or anything after.
+   A clause may be skipped (`--skip-contracts`, or an inherited precondition
+   met through another alternative), so code outside it must not depend on
+   its bindings. So that a clause never shadows what the routine sees, a
+   bound name must also be new: not a parameter, local, field or global
+   already in scope, and not bound twice in the clause."
+  [env condition]
+  (let [nodes (contract-binding-nodes condition)]
+    (doseq [[name same] (group-by :var-name nodes)]
+      (with-type-error-location
+        (first same)
+        (fn []
+          (when (env-lookup-var env name)
+            (throw (ex-info (str "Contract binding shadows " name)
+                            {:error (type-error
+                                     (str "`" name "` is already defined here, so a contract"
+                                          " cannot bind it. Choose a new name for the"
+                                          " binding."))})))
+          (when (next same)
+            (throw (ex-info (str "Contract binding repeated: " name)
+                            {:error (type-error
+                                     (str "`" name "` is bound more than once in this"
+                                          " clause. Give each binding its own name."))}))))))
+    (check-condition (make-type-env env) condition)))
+
 (defn convert-guard-binding
   "Extract convert-bound variable info from condition of form:
    convert <expr> to <var>:<Type>"
@@ -5734,7 +5775,7 @@
                                    (str "Loop until condition must be Boolean, got "
                                         (display-type cond-type)))})))))
     (doseq [{:keys [condition]} invariant]
-      (let [cond-type (check-expression loop-env condition)]
+      (let [cond-type (check-contract-condition loop-env condition)]
         (when-not (= cond-type "Boolean")
           (throw (ex-info "Loop invariant must be Boolean"
                           {:error (type-error
@@ -6848,7 +6889,7 @@
 
     ;; Check preconditions
     (doseq [assertion require]
-      (let [cond-type (check-expression method-env (:condition assertion))]
+      (let [cond-type (check-contract-condition method-env (:condition assertion))]
         (when-not (= cond-type "Boolean")
           (throw (ex-info (str "Precondition must be Boolean in " routine)
                           {:error (type-error
@@ -6892,7 +6933,7 @@
 
 ;; Check postconditions
     (doseq [assertion ensure]
-      (let [cond-type (check-expression method-env (:condition assertion))]
+      (let [cond-type (check-contract-condition method-env (:condition assertion))]
         (when-not (= cond-type "Boolean")
           (throw (ex-info (str "Postcondition must be Boolean in " routine)
                           {:error (type-error
@@ -6924,7 +6965,7 @@
     ;; Check preconditions
     (doseq [assertion require]
       (when assertion
-        (let [cond-type (check-expression ctor-env (:condition assertion))]
+        (let [cond-type (check-contract-condition ctor-env (:condition assertion))]
           (when-not (= cond-type "Boolean")
             (throw (ex-info (str "Precondition must be Boolean in constructor " name)
                             {:error (type-error
@@ -6938,7 +6979,7 @@
     ;; Check postconditions
     (doseq [assertion ensure]
       (when assertion
-        (let [cond-type (check-expression ctor-env (:condition assertion))]
+        (let [cond-type (check-contract-condition ctor-env (:condition assertion))]
           (when-not (= cond-type "Boolean")
             (throw (ex-info (str "Postcondition must be Boolean in constructor " name)
                             {:error (type-error
@@ -7749,7 +7790,7 @@
       (with-type-error-location
         condition
         (fn []
-          (let [inv-type (check-expression class-env condition)]
+          (let [inv-type (check-contract-condition class-env condition)]
             (when-not (= inv-type "Boolean")
               (throw (ex-info (str "Invariant must be Boolean in class " name)
                               {:error (type-error

@@ -7306,6 +7306,29 @@
             env
             nodes)))
 
+(defn- contract-assertion-ir
+  "assertion-ir for a contract clause (require, ensure, or a loop or class
+   invariant). A clause is not a statement, so lower-statement's
+   ensure-statement-bindings never allocated its `convert`/object-test
+   bindings, and lowering one failed. They are allocated here in a scope of
+   the clause's own: the checker keeps them local to the clause
+   (check-contract-condition). ENV's :next-slot must be past every local
+   live where the clause runs. Returns [env' ir], env' being ENV with its
+   :next-slot past the clause's own slots."
+  [env kind assertion]
+  (let [clause-env (ensure-statement-bindings (scoped-child-env env) assertion)]
+    [(scoped-env env clause-env) (assertion-ir clause-env kind assertion)]))
+
+(defn- contract-assertions-ir
+  "contract-assertion-ir for each of ASSERTIONS in turn: [env' irs], ENV with
+   its :next-slot past every slot the clauses allocated."
+  [env kind assertions]
+  (reduce (fn [[env' irs] assertion]
+            (let [[env'' ir] (contract-assertion-ir env' kind assertion)]
+              [env'' (conj irs ir)]))
+          [env []]
+          assertions))
+
 (defn lower-statement
   [env stmt]
   (let [env (ensure-statement-bindings env stmt)
@@ -7504,7 +7527,7 @@
 (defn- lower-loop-stmt [env stmt]
   (let [loop-env (scoped-child-env env)
         [env-after-init lowered-init] (lower-statements loop-env (:init stmt))
-        invariant-start-stmts (mapv #(assertion-ir env-after-init :invariant %) (:invariant stmt))
+        [env-after-init invariant-start-stmts] (contract-assertions-ir env-after-init :invariant (:invariant stmt))
         [env-with-variant variant-init-stmts variant-prefix]
         (if-let [variant-expr (:variant stmt)]
           (let [variant-type (infer-type env-after-init variant-expr)
@@ -7559,7 +7582,7 @@
           [env-after-init [] []])
         test-ir (lower-expression env-with-variant (:until stmt))
         [env-after-body lowered-body] (lower-statements env-with-variant (:body stmt))
-        invariant-end-stmts (mapv #(assertion-ir env-after-body :invariant %) (:invariant stmt))
+        [env-after-body invariant-end-stmts] (contract-assertions-ir env-after-body :invariant (:invariant stmt))
         loop-body (vec (concat variant-prefix lowered-body invariant-end-stmts))]
     [(scoped-env env env-after-body)
      (ir/block-node
@@ -7832,9 +7855,13 @@
       ;; result-local-init-stmt). A trailing expression is not returned.
       (let [[env-after-body raw-body-stmts] (lower-statements env-with-old body)
             [env-after-rescue lowered-body] (lower-body-with-rescue env-with-old env-after-body raw-body-stmts (:rescue fn-def))
-            require-stmts (mapv #(assertion-ir env-with-old :require %) effective-require)
-            ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
-            ensure-stmts (mapv #(assertion-ir ensure-env :ensure %) effective-ensure)
+            ;; Lowered after the body, so its slots must start past the body's.
+            [require-env require-stmts] (contract-assertions-ir (scoped-env env-with-old env-after-rescue)
+                                                                :require effective-require)
+            [ensure-env ensure-stmts] (contract-assertions-ir
+                                       (assoc (scoped-env env-after-rescue require-env)
+                                              :old-field-locals old-field-locals)
+                                       :ensure effective-ensure)
             class-validation-stmts (if (and (:class-def fn-def)
                                             (not (:unchecked-twin? fn-def))
                                             (get (:compiled-classes fn-def) current-class))
@@ -8019,28 +8046,33 @@
    validation `return`."
   [{:keys [unit-name class-name ctor-def params compiled-classes locals
            runtime-field-set-stmts old-snapshot-stmts require-env ensure-env core-body]}]
-  (ir/fn-node {:name (:name ctor-def)
-               :owner unit-name
-               :emitted-name (lowered-constructor-method-name ctor-def)
-               :params params
-               :return-type class-name
-               :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-               :locals locals
-               :body (vec (concat runtime-field-set-stmts
-                                  old-snapshot-stmts
-                                  (map #(assertion-ir require-env :require %) (:require ctor-def))
-                                  core-body
-                                  (map #(assertion-ir ensure-env :ensure %) (:ensure ctor-def))
-                                  ;; No invariant check here: a constructor is
-                                  ;; also run by delegation (`super.make`,
-                                  ;; `Parent.make`, a sibling constructor), on an
-                                  ;; object still being built. The outermost
-                                  ;; `create` checks it (lower-user-create).
-                                  [(ir/return-node
-                                    (ir/this-node class-name
-                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                    class-name
-                                    (ir/object-jvm-type "java/lang/Object"))]))}))
+  ;; The body is lowered already, so the clauses' slots start past its own.
+  (let [[require-env require-stmts] (contract-assertions-ir (scoped-env require-env ensure-env)
+                                                            :require (:require ctor-def))
+        [_ ensure-stmts] (contract-assertions-ir (scoped-env ensure-env require-env)
+                                                 :ensure (:ensure ctor-def))]
+    (ir/fn-node {:name (:name ctor-def)
+                 :owner unit-name
+                 :emitted-name (lowered-constructor-method-name ctor-def)
+                 :params params
+                 :return-type class-name
+                 :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                 :locals locals
+                 :body (vec (concat runtime-field-set-stmts
+                                    old-snapshot-stmts
+                                    require-stmts
+                                    core-body
+                                    ensure-stmts
+                                    ;; No invariant check here: a constructor is
+                                    ;; also run by delegation (`super.make`,
+                                    ;; `Parent.make`, a sibling constructor), on an
+                                    ;; object still being built. The outermost
+                                    ;; `create` checks it (lower-user-create).
+                                    [(ir/return-node
+                                      (ir/this-node class-name
+                                                    (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                      class-name
+                                      (ir/object-jvm-type "java/lang/Object"))]))})))
 
 (defn- lower-constructor
   [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
@@ -8342,7 +8374,7 @@
                                               []
                                               nex-name
                                               (ir/object-jvm-type "java/lang/Object")))))))
-        own-asserts (mapv #(assertion-ir env :class-invariant %) (:invariant class-def))
+        [_ own-asserts] (contract-assertions-ir env :class-invariant (:invariant class-def))
         body (vec (concat parent-calls
                           own-asserts
                           [(ir/return-node (ir/this-node class-name this-jvm)

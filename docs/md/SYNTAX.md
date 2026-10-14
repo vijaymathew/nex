@@ -1310,6 +1310,20 @@ if convert vehicle_1 to my_car:Car then
 end
 ```
 
+In a contract clause (`require`, `ensure`, or an `invariant`), the name is
+visible only within that clause, since the clause might not run (contracts
+can be skipped, and an inherited precondition can be met by another
+alternative). It must be a new name: not a parameter, local or field already
+in scope.
+
+```nex
+pred(n: Number): Number
+  require
+    not_zero: not (convert n to z: Zero)            -- z is unused, and fine
+    has_pred: convert n to s: Succ and s.pred /= nil -- s, for this clause only
+  do ... end
+```
+
 ## Object Test: `?<expr> as <name>`
 
 ```nex
