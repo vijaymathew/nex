@@ -2719,6 +2719,100 @@
   [value]
   (value/nex-clone-value interp-object? bi/make-object value))
 
+;; ---------------------------------------------------------------------------
+;; Deep copy, in Nex terms, of values that may hold compiled objects.
+;;
+;; `clone-value` above is the interpreter's (nex.types.value/nex-clone-value):
+;; it copies interpreter object maps and collections but does not recognise an
+;; instance of a generated class, which it returned as is -- so `clone` on a
+;; compiled object, or on a collection holding one, shared it with the original.
+;; These copy compiled objects too, with the interpreter's semantics: the value
+;; and everything it holds are copied structurally, and only a top-level `clone`
+;; override is honoured (any-clone). Unlike the interpreter's, they keep shared
+;; and cyclic references shared and cyclic in the copy instead of recursing
+;; without end.
+;; ---------------------------------------------------------------------------
+
+(declare clone-deep)
+
+(defn- copy-compiled-fields!
+  "Copy SRC's fields into DST, a fresh instance of the same generated class:
+   each field's value deep-copied, each parent part (`_parent_X`, which DST's
+   own <init> has already built and linked) copied into in place, and the
+   bookkeeping links (`__outer__`, `__container__`, `__state__`) left as DST's."
+  [state src dst memo]
+  (doseq [^Field f (.getDeclaredFields (.getClass ^Object src))
+          :let [field-name (.getName f)]
+          :when (and (not (java.lang.reflect.Modifier/isStatic (.getModifiers f)))
+                     (not (#{"__outer__" "__container__" "__state__"} field-name)))]
+    (.setAccessible f true)
+    (if (str/starts-with? field-name "_parent_")
+      (let [src-part (.get f src)
+            dst-part (.get f dst)]
+        (when (and src-part dst-part)
+          (copy-compiled-fields! state src-part dst-part memo)))
+      (.set f dst (clone-deep state (.get f src) memo)))))
+
+(defn- clone-compiled-object
+  "A copy of compiled object SRC, made through its class's no-argument <init>
+   (which sets field defaults and builds the parent parts, and runs no user
+   constructor), registered in MEMO before its fields are copied so a cycle
+   back to SRC reaches the copy."
+  [state ^Object src ^java.util.IdentityHashMap memo]
+  (let [^Class cls (.getClass src)
+        dst (.newInstance (.getDeclaredConstructor cls (into-array Class []))
+                          (object-array 0))]
+    (when-let [^Field state-field (reflected-field cls "__state__")]
+      (.set state-field dst (or (.get state-field src) state)))
+    (.put memo src dst)
+    (copy-compiled-fields! state src dst memo)
+    dst))
+
+(defn- clone-deep
+  [state v ^java.util.IdentityHashMap memo]
+  (cond
+    (nil? v) nil
+    (.containsKey memo v) (.get memo v)
+    (compiled-object? state v) (clone-compiled-object state v memo)
+
+    (instance? java.util.ArrayList v)
+    (let [out (java.util.ArrayList.)]
+      (.put memo v out)
+      (doseq [x v] (.add out (clone-deep state x memo)))
+      out)
+
+    (instance? java.util.LinkedHashSet v)
+    (let [out (java.util.LinkedHashSet.)]
+      (.put memo v out)
+      (doseq [x v] (.add out (clone-deep state x memo)))
+      out)
+
+    (instance? java.util.HashMap v)
+    (let [out (java.util.LinkedHashMap.)]
+      (.put memo v out)
+      (doseq [^java.util.Map$Entry e (.entrySet ^java.util.Map v)]
+        (.put out (clone-deep state (.getKey e) memo) (clone-deep state (.getValue e) memo)))
+      out)
+
+    ;; Interpreter objects, portable collections, scalars, builtins.
+    :else (clone-value v)))
+
+(defn deep-clone
+  "A deep copy of V, compiled objects included (see above)."
+  [state v]
+  (clone-deep state v (java.util.IdentityHashMap.)))
+
+(defn any-clone
+  "The `clone` that the Any protocol gives every value, for a receiver whose
+   *static* type declares none: the runtime value's own `clone` override when it
+   has one (resolved on the value, as `any-equals` and `any-hash` are), a deep
+   copy otherwise."
+  [state v]
+  (if (and (compiled-object? state v)
+           (find-user-method v (lowered-instance-method-name "clone" 0)))
+    (invoke-user-method state v "clone" [])
+    (deep-clone state v)))
+
 (defn shallow-copy-collection
   "A new, independent Array/Map container holding the SAME elements/entries —
    unlike clone-value, does not recurse into them. Used only for `old`
@@ -3111,7 +3205,10 @@
    (fn [state args] (any-equals state (first args) (second args)))
 
    "any:hash"
-   (fn [state args] (any-hash state (first args)))})
+   (fn [state args] (any-hash state (first args)))
+
+   "any:clone"
+   (fn [state args] (any-clone state (first args)))})
 
 (defn invoke-builtin
   [state name args]

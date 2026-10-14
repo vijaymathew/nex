@@ -1666,8 +1666,11 @@
 
 (defn- emit-array-method-clone!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
-  (emit-runtime-call! mv "clone-value"
-                      [(fn [] (emit-boxed-expr! mv target state-slot))])
+  ;; deep-clone, not the stateless clone-value: it also copies the compiled
+  ;; objects the collection holds, which clone-value would share.
+  (emit-runtime-call! mv "deep-clone"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-boxed-expr! mv target state-slot))])
   (emit-unbox-or-cast! mv jvm-type)
   jvm-type)
 
@@ -1837,8 +1840,11 @@
 
 (defn- emit-map-method-clone!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
-  (emit-runtime-call! mv "clone-value"
-                      [(fn [] (emit-boxed-expr! mv target state-slot))])
+  ;; deep-clone, not the stateless clone-value: it also copies the compiled
+  ;; objects the collection holds, which clone-value would share.
+  (emit-runtime-call! mv "deep-clone"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-boxed-expr! mv target state-slot))])
   (emit-unbox-or-cast! mv jvm-type)
   jvm-type)
 
@@ -1961,8 +1967,11 @@
 
 (defn- emit-set-method-clone!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
-  (emit-runtime-call! mv "clone-value"
-                      [(fn [] (emit-boxed-expr! mv target state-slot))])
+  ;; deep-clone, not the stateless clone-value: it also copies the compiled
+  ;; objects the collection holds, which clone-value would share.
+  (emit-runtime-call! mv "deep-clone"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-boxed-expr! mv target state-slot))])
   (emit-unbox-or-cast! mv jvm-type)
   jvm-type)
 
