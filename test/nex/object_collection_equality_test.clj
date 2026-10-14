@@ -41,7 +41,7 @@
   "Two instances with the same `id` are one value, however their other fields
    differ — so a container keyed on identity or on structure gives a different
    answer from one keyed on the override."
-  "class K inherit Hashable
+  "class K
   feature
     id: Integer
     tag: String

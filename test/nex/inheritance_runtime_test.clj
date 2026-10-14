@@ -811,30 +811,31 @@ end"))
        ~@body)
      (str s#)))
 
-(def ^:private generic-class-calling-hash-on-unconstrained-param
-  "`.hash` on a value of unconstrained generic type `G` is a real, still-open
-   compiled-lowering gap (deliberately excluded when `to_string`/`equals` were
-   fixed for this same position — see lower.clj's `lower-instance-dispatch`,
-   the comment on the `any:` dispatch branch). Lowering it throws \"Unsupported
-   target call expression for lowering\", a reliable trigger for this test."
+(def ^:private generic-class-calling-clone-on-unconstrained-param
+  "`.clone` on a value of unconstrained generic type `G` is a real, still-open
+   compiled-lowering gap (deliberately excluded when `to_string`/`equals`/`hash`
+   were made to work in this same position — see lower.clj's
+   `lower-instance-dispatch`, the comment on the `any:` dispatch branch).
+   Lowering it throws \"Unsupported target call expression for lowering\", a
+   reliable trigger for this test."
   "class Box [G]
   create make(v: G) do value := v end
   feature
     value: G
-    key(): Integer do result := value.hash end
+    copy(): Any do result := value.clone end
 end")
 
 (deftest compiled-backend-gap-in-class-body-fails-visibly-test
   (testing "the class definition itself reports the error, not silence"
     (with-compiled-repl ctx
       (let [out (with-out-str
-                  (repl/eval-code ctx generic-class-calling-hash-on-unconstrained-param))]
+                  (repl/eval-code ctx generic-class-calling-clone-on-unconstrained-param))]
         (is (str/includes? out "Error:") out)
         (is (str/includes? out "Unsupported") out))))
 
   (testing "and the class was never defined by either backend — no silent partial success"
     (with-compiled-repl ctx
-      (with-out-str (repl/eval-code ctx generic-class-calling-hash-on-unconstrained-param))
+      (with-out-str (repl/eval-code ctx generic-class-calling-clone-on-unconstrained-param))
       (let [out (with-out-str (repl/eval-code ctx "let b := create Box[Integer].make(1)"))]
         (is (str/includes? out "Error:") out)))))
 
@@ -865,7 +866,7 @@ end")
         (repl/eval-code ctx "class Box [G] create make(v: G) do value := v end feature value: G end"))
       (let [redef-out (with-out-str
                         (let [err (with-err-str
-                                    (repl/eval-code ctx generic-class-calling-hash-on-unconstrained-param))]
+                                    (repl/eval-code ctx generic-class-calling-clone-on-unconstrained-param))]
                           (is (str/includes? err "Warning") err)
                           (is (str/includes? err "interpreter") err)))]
         (is (not (str/includes? redef-out "Error:")) redef-out))))
@@ -875,7 +876,7 @@ end")
       (with-out-str
         (repl/eval-code ctx "class Box [G] create make(v: G) do value := v end feature value: G end"))
       (with-err-str
-        (with-out-str (repl/eval-code ctx generic-class-calling-hash-on-unconstrained-param)))
+        (with-out-str (repl/eval-code ctx generic-class-calling-clone-on-unconstrained-param)))
       (with-out-str (repl/eval-code ctx "let b := create Box[Integer].make(1)"))
       ;; `b.key` itself hits an unrelated, pre-existing interpreter gap in
       ;; generic-method resolution after a redefinition — not what this test

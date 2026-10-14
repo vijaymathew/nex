@@ -146,8 +146,8 @@
                        "class Stack[E] inherit Container[E] feature store(x: E) do end create make do end end")))))
 
 ;; ---------------------------------------------------------------------------
-;; Builtin protocol routines. Any's `equals`/`clone`, Comparable's `compare`
-;; and Hashable's `hash` live only in the method table, never in a class body,
+;; Builtin protocol routines. Any's `equals`/`hash`/`clone` and Comparable's
+;; `compare` live only in the method table, never in a class body,
 ;; so the ancestor walk used to miss them, and every class inherits Any
 ;; without naming it. An `Any` parameter also passed for any narrowing,
 ;; because types-compatible? treats Any as a wildcard.

@@ -158,10 +158,12 @@ print(3)")))))
 
 (deftest zero-values-test
   (testing "each return type with a zero value starts `result` at it"
-    (is (= ["0" "0.0" "false" "[]" "{}" "#{}" "nil" "nil"]
+    (is (= ["0" "0.0" "false" "\"\"" "\"\"" "[]" "{}" "#{}" "nil" "nil"]
            (run-lines "function i(): Integer do end
 function r(): Real do end
 function b(): Boolean do end
+function str(): String do end
+class Named feature name(): String do end end
 function a(): Array[Integer] do end
 function m(): Map[String, Integer] do end
 function s(): Set[Integer] do end
@@ -170,6 +172,9 @@ function da(): ?Array[Integer] do end
 print(i())
 print(r())
 print(b())
+print(str())
+let named := create Named
+print(named.name())
 print(a())
 print(m())
 print(s())
@@ -178,12 +183,12 @@ print(da())")))))
 
 (deftest no-zero-value-must-assign-result-test
   (testing "a return type with no zero value must assign `result`"
-    (doseq [src ["function s(): String do print(1) end"
-                 "class Pt feature x: Integer end
+    (doseq [src ["class Pt feature x: Integer end
 function p(): Pt do let q := create Pt end"
-                 "class C
+                 "class Pt feature x: Integer end
+class C
   feature
-    name: String do end
+    origin: Pt do end
 end"]]
       (is (some #(str/includes? % "not every path through it assigns `result`")
                 (type-errors src))

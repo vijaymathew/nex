@@ -99,8 +99,7 @@
                               (concat [(bootstrap/build-any-base-class)
                                        (bootstrap/build-function-base-class)
                                        (bootstrap/build-cursor-base-class)
-                                       (bootstrap/build-comparable-base-class)
-                                       (bootstrap/build-hashable-base-class)]
+                                       (bootstrap/build-comparable-base-class)]
                                       (map bootstrap/build-builtin-scalar-class
                                            ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))
         env (tc/make-type-env)]
@@ -158,7 +157,7 @@
 ;; whatever object the `Any` is holding at runtime — and must not be routed
 ;; through the same table, or it resolves to a Var that was never defined.
 (def ^:private any-protocol-method-names
-  #{"to_string" "equals" "clone" "cursor" "start" "item" "next" "at_end" "get" "length"})
+  #{"to_string" "equals" "hash" "clone" "cursor" "start" "item" "next" "at_end" "get" "length"})
 
 ;; Same idea as `any-protocol-method-names`, generalized to every OTHER
 ;; builtin-runtime-receiver-type (String, Array, Integer, ...): inside a
@@ -1014,14 +1013,11 @@
          (case (:method expr)
            "compare" "Integer"
            nil)
-         "Hashable"
-         (case (:method expr)
-           "hash" "Integer"
-           nil)
          nil))
-       ;; The Any/Comparable/Hashable protocols (spec B.1): every value renders
-       ;; with to_string and compares with equals, so their types are known even
-       ;; when the receiver is a builtin scalar with no per-method type table.
+       ;; The Any/Comparable protocols (spec B.1): every value renders with
+       ;; to_string, compares with equals and hashes with hash, so their types
+       ;; are known even when the receiver is a builtin scalar with no
+       ;; per-method type table.
      (case (:method expr)
        "to_string" "String"
        "equals" "Boolean"
@@ -4878,16 +4874,16 @@
       ;; lowering" at compile time.
       ;;
       ;; Only the members the compiled object model actually implements are
-      ;; routed here. `clone` and `hash` are deliberately excluded: their :Any
-      ;; defaults (`bi/nex-clone-value`, `bi/nex-structural-hash`) only
-      ;; understand the interpreter's object maps and would quietly return the
-      ;; *same* object from `clone` rather than a copy. Falling through to the
-      ;; error below keeps them an honest "not supported yet" — which is what
-      ;; they were before this branch existed — instead of a silent wrong
-      ;; answer. Same for the typechecker's `cursor`/`start`/`item`/`next`/
-      ;; `at_end`, which have no Any default at all.
+      ;; routed here. `clone` is deliberately excluded: its :Any default
+      ;; (`bi/nex-clone-value`) only understands the interpreter's object maps
+      ;; and would quietly return the *same* object rather than a copy. Falling
+      ;; through to the error below keeps it an honest "not supported yet"
+      ;; instead of a silent wrong answer. Same for the typechecker's
+      ;; `cursor`/`start`/`item`/`next`/`at_end`, which have no Any default at
+      ;; all. `hash` has its own state-aware runtime path (any:hash), like
+      ;; `to_string` and `equals`.
       (and (or class-def (contains? (:generic-param-names env) base-type))
-           (contains? #{"to_string" "equals"} method))
+           (contains? #{"to_string" "equals" "hash"} method))
       (let [nex-type (or (bi/builtin-type-method-return-type :Any method) "Any")
             jvm-type (resolve-jvm-type env nex-type)]
         (ir/call-runtime-node (str "any:" method)
@@ -6738,7 +6734,7 @@
         ;; same fix already applied to the known-user-class-without-override
         ;; case (`lower-instance-user-method-call`'s Any-protocol fallback).
         ;; Reuse that same state-aware path here instead.
-        helper (if (and (= base-type "Any") (contains? #{"to_string" "equals"} method))
+        helper (if (and (= base-type "Any") (contains? #{"to_string" "equals" "hash"} method))
                  (str "any:" method)
                  (str "builtin-method:" base-type ":" method))]
     (ir/call-runtime-node helper
@@ -7306,6 +7302,29 @@
             env
             nodes)))
 
+(defn- contract-assertion-ir
+  "assertion-ir for a contract clause (require, ensure, or a loop or class
+   invariant). A clause is not a statement, so lower-statement's
+   ensure-statement-bindings never allocated its `convert`/object-test
+   bindings, and lowering one failed. They are allocated here in a scope of
+   the clause's own: the checker keeps them local to the clause
+   (check-contract-condition). ENV's :next-slot must be past every local
+   live where the clause runs. Returns [env' ir], env' being ENV with its
+   :next-slot past the clause's own slots."
+  [env kind assertion]
+  (let [clause-env (ensure-statement-bindings (scoped-child-env env) assertion)]
+    [(scoped-env env clause-env) (assertion-ir clause-env kind assertion)]))
+
+(defn- contract-assertions-ir
+  "contract-assertion-ir for each of ASSERTIONS in turn: [env' irs], ENV with
+   its :next-slot past every slot the clauses allocated."
+  [env kind assertions]
+  (reduce (fn [[env' irs] assertion]
+            (let [[env'' ir] (contract-assertion-ir env' kind assertion)]
+              [env'' (conj irs ir)]))
+          [env []]
+          assertions))
+
 (defn lower-statement
   [env stmt]
   (let [env (ensure-statement-bindings env stmt)
@@ -7504,7 +7523,7 @@
 (defn- lower-loop-stmt [env stmt]
   (let [loop-env (scoped-child-env env)
         [env-after-init lowered-init] (lower-statements loop-env (:init stmt))
-        invariant-start-stmts (mapv #(assertion-ir env-after-init :invariant %) (:invariant stmt))
+        [env-after-init invariant-start-stmts] (contract-assertions-ir env-after-init :invariant (:invariant stmt))
         [env-with-variant variant-init-stmts variant-prefix]
         (if-let [variant-expr (:variant stmt)]
           (let [variant-type (infer-type env-after-init variant-expr)
@@ -7559,7 +7578,7 @@
           [env-after-init [] []])
         test-ir (lower-expression env-with-variant (:until stmt))
         [env-after-body lowered-body] (lower-statements env-with-variant (:body stmt))
-        invariant-end-stmts (mapv #(assertion-ir env-after-body :invariant %) (:invariant stmt))
+        [env-after-body invariant-end-stmts] (contract-assertions-ir env-after-body :invariant (:invariant stmt))
         loop-body (vec (concat variant-prefix lowered-body invariant-end-stmts))]
     [(scoped-env env env-after-body)
      (ir/block-node
@@ -7678,11 +7697,11 @@
 
 (defn- result-local-init-stmt
   "Zero-value initializer for a routine's `result` local: the primitive default
-   for a scalar return, an empty collection for a non-detachable Array/Map/Set
-   return (so a body that only mutates `result` without an explicit
-   `result := ...` still has a real object — matching get-default-field-value in
-   the interpreter), and null otherwise (detachable collection returns
-   included)."
+   for a scalar return, \"\" for a non-detachable String return, an empty
+   collection for a non-detachable Array/Map/Set return (so a body that only
+   mutates `result` without an explicit `result := ...` still has a real
+   object) — all matching get-default-field-value in the interpreter — and
+   null otherwise (detachable String and collection returns included)."
   [result-local]
   (when result-local
     (let [jvm-type (:jvm-type result-local)
@@ -7711,6 +7730,9 @@
 
                       (and (not detachable?) (= "Integer32" (base-type-name nex-type)))
                       (ir/call-runtime-node "make-int32" [(ir/const-node 0 "Integer" :long)] nex-type jvm-type)
+
+                      (and (not detachable?) (= "String" (base-type-name nex-type)))
+                      (ir/const-node "" nex-type jvm-type)
 
                       (and (not detachable?) (= base-type "Array"))
                       (ir/array-literal-node [] nex-type jvm-type)
@@ -7832,9 +7854,13 @@
       ;; result-local-init-stmt). A trailing expression is not returned.
       (let [[env-after-body raw-body-stmts] (lower-statements env-with-old body)
             [env-after-rescue lowered-body] (lower-body-with-rescue env-with-old env-after-body raw-body-stmts (:rescue fn-def))
-            require-stmts (mapv #(assertion-ir env-with-old :require %) effective-require)
-            ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
-            ensure-stmts (mapv #(assertion-ir ensure-env :ensure %) effective-ensure)
+            ;; Lowered after the body, so its slots must start past the body's.
+            [require-env require-stmts] (contract-assertions-ir (scoped-env env-with-old env-after-rescue)
+                                                                :require effective-require)
+            [ensure-env ensure-stmts] (contract-assertions-ir
+                                       (assoc (scoped-env env-after-rescue require-env)
+                                              :old-field-locals old-field-locals)
+                                       :ensure effective-ensure)
             class-validation-stmts (if (and (:class-def fn-def)
                                             (not (:unchecked-twin? fn-def))
                                             (get (:compiled-classes fn-def) current-class))
@@ -8019,28 +8045,33 @@
    validation `return`."
   [{:keys [unit-name class-name ctor-def params compiled-classes locals
            runtime-field-set-stmts old-snapshot-stmts require-env ensure-env core-body]}]
-  (ir/fn-node {:name (:name ctor-def)
-               :owner unit-name
-               :emitted-name (lowered-constructor-method-name ctor-def)
-               :params params
-               :return-type class-name
-               :return-jvm-type (ir/object-jvm-type "java/lang/Object")
-               :locals locals
-               :body (vec (concat runtime-field-set-stmts
-                                  old-snapshot-stmts
-                                  (map #(assertion-ir require-env :require %) (:require ctor-def))
-                                  core-body
-                                  (map #(assertion-ir ensure-env :ensure %) (:ensure ctor-def))
-                                  ;; No invariant check here: a constructor is
-                                  ;; also run by delegation (`super.make`,
-                                  ;; `Parent.make`, a sibling constructor), on an
-                                  ;; object still being built. The outermost
-                                  ;; `create` checks it (lower-user-create).
-                                  [(ir/return-node
-                                    (ir/this-node class-name
-                                                  (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                    class-name
-                                    (ir/object-jvm-type "java/lang/Object"))]))}))
+  ;; The body is lowered already, so the clauses' slots start past its own.
+  (let [[require-env require-stmts] (contract-assertions-ir (scoped-env require-env ensure-env)
+                                                            :require (:require ctor-def))
+        [_ ensure-stmts] (contract-assertions-ir (scoped-env ensure-env require-env)
+                                                 :ensure (:ensure ctor-def))]
+    (ir/fn-node {:name (:name ctor-def)
+                 :owner unit-name
+                 :emitted-name (lowered-constructor-method-name ctor-def)
+                 :params params
+                 :return-type class-name
+                 :return-jvm-type (ir/object-jvm-type "java/lang/Object")
+                 :locals locals
+                 :body (vec (concat runtime-field-set-stmts
+                                    old-snapshot-stmts
+                                    require-stmts
+                                    core-body
+                                    ensure-stmts
+                                    ;; No invariant check here: a constructor is
+                                    ;; also run by delegation (`super.make`,
+                                    ;; `Parent.make`, a sibling constructor), on an
+                                    ;; object still being built. The outermost
+                                    ;; `create` checks it (lower-user-create).
+                                    [(ir/return-node
+                                      (ir/this-node class-name
+                                                    (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                      class-name
+                                      (ir/object-jvm-type "java/lang/Object"))]))})))
 
 (defn- lower-constructor
   [unit-name visible-functions visible-imports visible-classes class-def ctor-def compiled-classes]
@@ -8342,7 +8373,7 @@
                                               []
                                               nex-name
                                               (ir/object-jvm-type "java/lang/Object")))))))
-        own-asserts (mapv #(assertion-ir env :class-invariant %) (:invariant class-def))
+        [_ own-asserts] (contract-assertions-ir env :class-invariant (:invariant class-def))
         body (vec (concat parent-calls
                           own-asserts
                           [(ir/return-node (ir/this-node class-name this-jvm)

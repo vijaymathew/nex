@@ -93,7 +93,7 @@ nums.insert(1)
 assert nums.min = 1
 assert nums.max = 8
 
-class Dictionary [K -> Hashable, V]
+class Dictionary [K, V]
   create
     make() do
       entries := {}

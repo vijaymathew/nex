@@ -9,6 +9,12 @@
   error before.
 - **Contracts on `fn`.** An anonymous function takes `require`, `ensure` and
   `rescue` clauses, as a named routine does.
+- **`hash` is a feature of `Any`; `Hashable` is gone.** Every value has
+  `hash`, as it has `equals`: `[1, 2].hash`, `p.hash` on a plain class, and
+  `hash` on an `Any`-typed value now work (the last one used to type-check and
+  then fail on the compiled backend). It is the structural hash `Map` and `Set`
+  already used, and a class's `hash` override still takes its place. Remove
+  `inherit Hashable` and `-> Hashable` constraints: every type now qualifies.
 
 ## 0.6.0 - 2026-10-09
 

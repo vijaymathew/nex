@@ -1653,6 +1653,17 @@
   (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Boolean" "booleanValue" "()Z" false)
   :boolean)
 
+(defn- emit-collection-method-hash!
+  "`hash` on an Array, Map or Set: runtime any-hash, which reaches each
+   element's own hash (a compiled object's override included), so equal
+   collections hash equal."
+  [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
+  (emit-runtime-call! mv "any-hash"
+                      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                       (fn [] (emit-boxed-expr! mv target state-slot))])
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
 (defn- emit-array-method-clone!
   [^MethodVisitor mv {:keys [target jvm-type]} state-slot]
   (emit-runtime-call! mv "clone-value"
@@ -1713,6 +1724,7 @@
    "sort"      emit-array-method-sort!
    "to_string" emit-array-method-to-string!
    "equals"    emit-array-method-equals!
+   "hash"      emit-collection-method-hash!
    "clone"     emit-array-method-clone!
    "cursor"    emit-array-method-cursor!})
 
@@ -1855,6 +1867,7 @@
    "remove"       emit-map-method-remove!
    "to_string"    emit-map-method-to-string!
    "equals"       emit-map-method-equals!
+   "hash"         emit-collection-method-hash!
    "clone"        emit-map-method-clone!
    "cursor"       emit-map-method-cursor!})
 
@@ -1976,6 +1989,7 @@
    "to_array"             emit-set-method-to-array!
    "to_string"            emit-set-method-to-string!
    "equals"               emit-set-method-equals!
+   "hash"                 emit-collection-method-hash!
    "clone"                emit-set-method-clone!
    "cursor"               emit-set-method-cursor!})
 

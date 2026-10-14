@@ -732,6 +732,36 @@
 
       :else e)))
 
+(def ^:dynamic *collected-errors*
+  "While check-program runs, an atom of the type errors found so far, so one
+   run can report several: a routine, class-level check or top-level
+   statement that fails is recorded (see recovering) and checking goes on
+   with the next one. Unbound everywhere else, where the first error throws
+   as before."
+  nil)
+
+(defn- exception-type-errors
+  "The TypeErrors type-check exception E carries: a batch (:errors), a
+   single :error, or one made from its message."
+  [e]
+  (let [data (ex-data e)]
+    (or (:errors data)
+        [(or (:error data) (type-error (ex-message e)))])))
+
+(defn- recovering
+  "Run F. While errors are being collected (*collected-errors*), a type
+   error F throws is recorded instead, and ::failed returned, so checking
+   can continue with the next routine or statement. Only one error per F is
+   found: what follows the first inside it may hinge on what failed."
+  [f]
+  (if-let [sink *collected-errors*]
+    (try
+      (f)
+      (catch clojure.lang.ExceptionInfo e
+        (swap! sink into (exception-type-errors e))
+        ::failed))
+    (f)))
+
 (defn- with-source-file
   "Run f, and — when source-file is given — stamp it onto any TypeError(s)
    an exception escaping f carries (see annotate-type-exception-source-file).
@@ -747,10 +777,19 @@
   [source-file f]
   (if-not source-file
     (f)
-    (try
-      (f)
-      (catch clojure.lang.ExceptionInfo e
-        (throw (annotate-type-exception-source-file e source-file))))))
+    (let [sink *collected-errors*
+          before (when sink (count @sink))]
+      (try
+        (f)
+        (catch clojure.lang.ExceptionInfo e
+          (throw (annotate-type-exception-source-file e source-file)))
+        (finally
+          ;; Errors recovered inside f never escape it, so stamp them here.
+          (when sink
+            (swap! sink (fn [errs]
+                          (into (subvec errs 0 before)
+                                (map #(error-with-source-file % source-file))
+                                (subvec errs before))))))))))
 
 (def unknown-type-arg
   "A type argument inference left open: the element type of an empty `[]`,
@@ -911,19 +950,19 @@
     (and (string? base)
          (not (#{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean"} base)))))
 
-(defn- auto-initializable-collection-type?
-  "Whether type is a builtin collection type (Array/Map/Set) that always has
-   a sensible empty-value default (matching get-default-field-value in the
-   interpreter and the equivalent literal-node init emitted by the JVM
-   lowerer), so `result` need not be explicitly assigned on every path the
-   way other reference-like types are."
+(defn- auto-initializable-reference-type?
+  "Whether type is a builtin reference type with a sensible empty default --
+   String (\"\") or a collection (an empty Array/Map/Set) -- matching
+   get-default-field-value in the interpreter and result-local-init-stmt in
+   the JVM lowerer, so `result` need not be explicitly assigned on every path
+   the way other reference-like types are."
   [t]
   (let [n (attachable-type t)
         base (cond
                (string? n) n
                (map? n) (:base-type n)
                :else nil)]
-    (contains? #{"Array" "Map" "Set"} base)))
+    (contains? #{"String" "Array" "Map" "Set"} base)))
 
 (defn- attached-non-scalar-type?
   "Whether a type is an attached, non-scalar return type that must not
@@ -933,7 +972,7 @@
     (and (not (detachable-type? n))
          (not= n "Void")
          (reference-like-type? n)
-         (not (auto-initializable-collection-type? n)))))
+         (not (auto-initializable-reference-type? n)))))
 
 (defn is-generic-type-param?
   "Check if a type is a generic type parameter (single uppercase letter)."
@@ -2828,6 +2867,47 @@
                                         (display-type left-type) " and " (display-type right-type)))})))))
     (check-expression env condition)))
 
+(defn- contract-binding-nodes
+  "The `convert` and object-test (`?e as x`) nodes in a contract clause's
+   CONDITION, outside any closure (which is checked as a routine of its own)."
+  [condition]
+  (->> (tree-seq #(and (or (map? %) (sequential? %))
+                       (not= :anonymous-function (:type %)))
+                 #(if (map? %) (vals %) (seq %))
+                 condition)
+       (filter #(and (map? %) (#{:convert :attached-test} (:type %))
+                     (:var-name %) (not= "_" (:var-name %))))))
+
+(defn- check-contract-condition
+  "Type-check a contract clause's CONDITION (require, ensure, or a loop or
+   class invariant) and return its type. A name it binds (`convert n to s:
+   Succ`, `?x as y`) is local to the clause, as Eiffel scopes an object-test
+   local: visible to the rest of the clause (`convert n to s: Succ and
+   s.pred /= nil`), but not to the body, other clauses, or anything after.
+   A clause may be skipped (`--skip-contracts`, or an inherited precondition
+   met through another alternative), so code outside it must not depend on
+   its bindings. So that a clause never shadows what the routine sees, a
+   bound name must also be new: not a parameter, local, field or global
+   already in scope, and not bound twice in the clause."
+  [env condition]
+  (let [nodes (contract-binding-nodes condition)]
+    (doseq [[name same] (group-by :var-name nodes)]
+      (with-type-error-location
+        (first same)
+        (fn []
+          (when (env-lookup-var env name)
+            (throw (ex-info (str "Contract binding shadows " name)
+                            {:error (type-error
+                                     (str "`" name "` is already defined here, so a contract"
+                                          " cannot bind it. Choose a new name for the"
+                                          " binding."))})))
+          (when (next same)
+            (throw (ex-info (str "Contract binding repeated: " name)
+                            {:error (type-error
+                                     (str "`" name "` is bound more than once in this"
+                                          " clause. Give each binding its own name."))}))))))
+    (check-condition (make-type-env env) condition)))
+
 (defn convert-guard-binding
   "Extract convert-bound variable info from condition of form:
    convert <expr> to <var>:<Type>"
@@ -3044,9 +3124,8 @@
 ;; `check-target-call`, Array/Map/Set/String in `register-builtin-methods`,
 ;; and any user class that declares its own.
 ;;
-;; `hash` is intentionally absent even though the other two tables carry it:
-;; a class opts into hashing by inheriting Hashable. Adding it here would
-;; typecheck `p.hash` on any class, which the compiled backend cannot lower.
+;; `hash` is every value's, like `equals`, with which it must agree: the same
+;; structural hash `Map` and `Set` use to place keys and elements.
 (defn- builtin-method-signature-any
   [method argc _type-map]
   (case method
@@ -3054,6 +3133,8 @@
                   {:params [] :return-type "String"})
     "equals" (when (= argc 1)
                {:params [{:name "other" :type "Any"}] :return-type "Boolean"})
+    "hash" (when (= argc 0)
+             {:params [] :return-type "Integer"})
     "clone" (when (= argc 0)
               {:params [] :return-type "Any"})
     nil))
@@ -4923,13 +5004,16 @@
         enclosing-class (env-lookup-var env "__current_class__")]
     ;; Register the dynamic class definition in the type environment
     (collect-class-info env class-def)
-    (if enclosing-class
-      (check-method (narrowing-barrier-env env) enclosing-class
-                    (some #(when (= :method (:type %)) %)
-                          (feature-members class-def)))
-      ;; No enclosing class (a top-level anonymous function): check the class
-      ;; as before.
-      (check-class (narrowing-barrier-env env) class-def))
+    ;; An error in the literal's body is the enclosing statement's: it must
+    ;; propagate, not be recovered from inside check-class.
+    (binding [*collected-errors* nil]
+      (if enclosing-class
+        (check-method (narrowing-barrier-env env) enclosing-class
+                      (some #(when (= :method (:type %)) %)
+                            (feature-members class-def)))
+        ;; No enclosing class (a top-level anonymous function): check the class
+        ;; as before.
+        (check-class (narrowing-barrier-env env) class-def)))
     ;; Anonymous functions have distinct generated runtime classes, but their
     ;; stable static type is structural Function -- carrying the literal's own
     ;; param/return types (falling back to Any for anything left unannotated
@@ -4995,9 +5079,10 @@
 (defn join-type
   "The type of `when c then a else b end` from the types of A and B: the
    narrowest type to which both conform. When there is no single narrowest
-   one — Integer and String, say, both inherit Comparable and Hashable, and
-   neither of those conforms to the other — it is Any. A nil branch makes the
-   other branch's type optional."
+   one, it is Any. Integer and String, say, share only Comparable and Any, and
+   since types-compatible? lets Any stand for anything, neither of those counts
+   as narrower: their join is Any. A nil branch makes the other branch's type
+   optional."
   [env t1 t2]
   (let [n1 (normalize-type t1)
         n2 (normalize-type t2)]
@@ -5662,7 +5747,15 @@
 (defn check-if
   "Check an if statement"
   [env {:keys [condition then elseif else] :as stmt}]
-  (let [cond-type (check-condition env condition)]
+  ;; A condition's guard bindings (`if convert a to c: C`) belong to the
+  ;; branches (apply-condition-branch-refinement! adds them there), not to
+  ;; the code after the `if`: check it in a scope of its own, or `c` would
+  ;; outlive the `if` here while the compiled backend (rightly) scopes it to
+  ;; the `if`. A convert nested deeper (`if f(convert a to d: Dog)`) still
+  ;; binds for the rest of the scope, as in any other statement.
+  (let [cond-type (check-condition (make-type-env env) condition)]
+    (doseq [{:keys [var-name target-type]} (nested-convert-nodes condition)]
+      (env-add-var env var-name (detachable-version target-type)))
     (when-not (= cond-type "Boolean")
       (throw (ex-info "If condition must be Boolean"
                       {:error (type-error
@@ -5681,7 +5774,7 @@
         [elseif-branches final-else-env]
         (reduce
          (fn [[branches residual-env] clause]
-           (let [ei-cond-type (check-expression residual-env (:condition clause))]
+           (let [ei-cond-type (check-condition (make-type-env residual-env) (:condition clause))]
              (when-not (= ei-cond-type "Boolean")
                (throw (ex-info "Elseif condition must be Boolean"
                                {:error (type-error
@@ -5734,7 +5827,7 @@
                                    (str "Loop until condition must be Boolean, got "
                                         (display-type cond-type)))})))))
     (doseq [{:keys [condition]} invariant]
-      (let [cond-type (check-expression loop-env condition)]
+      (let [cond-type (check-contract-condition loop-env condition)]
         (when-not (= cond-type "Boolean")
           (throw (ex-info "Loop invariant must be Boolean"
                           {:error (type-error
@@ -6848,7 +6941,7 @@
 
     ;; Check preconditions
     (doseq [assertion require]
-      (let [cond-type (check-expression method-env (:condition assertion))]
+      (let [cond-type (check-contract-condition method-env (:condition assertion))]
         (when-not (= cond-type "Boolean")
           (throw (ex-info (str "Precondition must be Boolean in " routine)
                           {:error (type-error
@@ -6892,7 +6985,7 @@
 
 ;; Check postconditions
     (doseq [assertion ensure]
-      (let [cond-type (check-expression method-env (:condition assertion))]
+      (let [cond-type (check-contract-condition method-env (:condition assertion))]
         (when-not (= cond-type "Boolean")
           (throw (ex-info (str "Postcondition must be Boolean in " routine)
                           {:error (type-error
@@ -6924,7 +7017,7 @@
     ;; Check preconditions
     (doseq [assertion require]
       (when assertion
-        (let [cond-type (check-expression ctor-env (:condition assertion))]
+        (let [cond-type (check-contract-condition ctor-env (:condition assertion))]
           (when-not (= cond-type "Boolean")
             (throw (ex-info (str "Precondition must be Boolean in constructor " name)
                             {:error (type-error
@@ -6938,7 +7031,7 @@
     ;; Check postconditions
     (doseq [assertion ensure]
       (when assertion
-        (let [cond-type (check-expression ctor-env (:condition assertion))]
+        (let [cond-type (check-contract-condition ctor-env (:condition assertion))]
           (when-not (= cond-type "Boolean")
             (throw (ex-info (str "Postcondition must be Boolean in constructor " name)
                             {:error (type-error
@@ -7351,8 +7444,8 @@
 (def ^:private builtin-protocol-classes
   "The builtin classes whose routines live only in the method table (their
    `:body` is empty), so `inherited-method-member` never sees them. Any is
-   every class's implicit root; the other two are reached through `inherit`."
-  #{"Any" "Comparable" "Hashable"})
+   every class's implicit root; Comparable is reached through `inherit`."
+  #{"Any" "Comparable"})
 
 (defn- inherited-method-members
   "Every routine named METHOD-NAME of ARITY that the heir redefines: the
@@ -7366,8 +7459,8 @@
        vec))
 
 (defn- inherited-protocol-method-member
-  "The signature of a builtin protocol routine (Any.equals, Comparable.compare,
-   Hashable.hash, ...) that a method named METHOD-NAME of ARITY redefines, or
+  "The signature of a builtin protocol routine (Any.equals, Any.hash,
+   Comparable.compare, ...) that a method named METHOD-NAME of ARITY redefines, or
    nil. Explicit protocol ancestors are tried before the implicit Any."
   [env parents method-name arity]
   (letfn [(ancestors [class-name visited]
@@ -7381,7 +7474,7 @@
               (when (or (= cn "Any") (contains? reached cn))
                 (when-let [sig (env-lookup-method env cn method-name arity)]
                   (assoc sig :name method-name))))
-            ["Comparable" "Hashable" "Any"]))))
+            ["Comparable" "Any"]))))
 
 (defn- check-override-conformance
   "Enforce CONTRAVARIANT parameters and COVARIANT return for a method that
@@ -7749,7 +7842,7 @@
       (with-type-error-location
         condition
         (fn []
-          (let [inv-type (check-expression class-env condition)]
+          (let [inv-type (check-contract-condition class-env condition)]
             (when-not (= inv-type "Boolean")
               (throw (ex-info (str "Invariant must be Boolean in class " name)
                               {:error (type-error
@@ -7765,26 +7858,30 @@
       (= (:type section) :feature-section)
       (doseq [member (:members section)]
         (cond
+          ;; Each routine is checked on its own (recovering): an error in
+          ;; one does not stop the others being checked.
           (= (:type member) :method)
-          (do
-            (with-type-error-location
-              member
-              (fn []
-                (check-attribute-redeclaration env name parents member)
-                (check-override-conformance class-env name parents member)
-                (check-override-contracts env name parents member)))
-            (check-method class-env name member))
+          (recovering
+           (fn []
+             (with-type-error-location
+               member
+               (fn []
+                 (check-attribute-redeclaration env name parents member)
+                 (check-override-conformance class-env name parents member)
+                 (check-override-contracts env name parents member)))
+             (check-method class-env name member)))
           (= (:type member) :field)
           (when-not (:constant? member)
-            (with-type-error-location
-              member
-              (fn []
-                (check-attribute-redeclaration env name parents member)
-                (validate-type-annotation class-env (:field-type member)))))))
+            (recovering
+             #(with-type-error-location
+                member
+                (fn []
+                  (check-attribute-redeclaration env name parents member)
+                  (validate-type-annotation class-env (:field-type member))))))))
 
       (= (:type section) :constructors)
       (doseq [ctor (:constructors section)]
-        (check-constructor class-env name ctor)))))
+        (recovering #(check-constructor class-env name ctor))))))
 
 (defn- check-attachable-field-initialization!
   "Void-safety: every attachable class-object field must be assigned by every
@@ -7862,9 +7959,13 @@
         invariant (:invariant class-def)
         parents (:parents class-def)
         class-env (make-type-env env)]
-    (check-distinct-fields! name (:body class-def))
-    (check-distinct-methods! name (:body class-def))
-    (check-equals-hash-consistency env name class-def)
+    ;; Each check below that can fail is `recovering`: one failing does not
+    ;; hide errors in the others, or in the class's routines.
+    (recovering
+     (fn []
+       (check-distinct-fields! name (:body class-def))
+       (check-distinct-methods! name (:body class-def))
+       (check-equals-hash-consistency env name class-def)))
     (env-add-var class-env "__current_class__" name)
     (register-generic-param-classes! class-env generic-params)
     (bind-visible-class-fields! class-env env name)
@@ -7873,22 +7974,25 @@
   ;; subclasses (the very guarantee `sealed` exists to provide), failing at
   ;; runtime with no compile-time warning.
     (when (and (:sealed? class-def) (not (:deferred? class-def)))
-      (throw (ex-info (str "Sealed class " name " must be deferred")
-                      {:error (type-error
-                               (str "Sealed class '" name "' must be declared 'sealed deferred'. "
-                                    "A sealed class cannot be instantiated; otherwise an exhaustive "
-                                    "match over its subclasses would not cover a bare " name " value."))})))
+      (recovering
+       #(throw (ex-info (str "Sealed class " name " must be deferred")
+                        {:error (type-error
+                                 (str "Sealed class '" name "' must be declared 'sealed deferred'. "
+                                      "A sealed class cannot be instantiated; otherwise an exhaustive "
+                                      "match over its subclasses would not cover a bare " name " value."))}))))
   ;; Check inheritance
     (when parents
-      (check-inheritance env name parents)
-      (check-java-super-constructor-call env name
-                                         (->> body
-                                              (filter #(= :constructors (:type %)))
-                                              (mapcat :constructors))))
-    (check-deferred-methods-implemented! env name class-def)
-    (check-class-invariants! class-env name invariant)
+      (recovering
+       (fn []
+         (check-inheritance env name parents)
+         (check-java-super-constructor-call env name
+                                            (->> body
+                                                 (filter #(= :constructors (:type %)))
+                                                 (mapcat :constructors))))))
+    (recovering #(check-deferred-methods-implemented! env name class-def))
+    (recovering #(check-class-invariants! class-env name invariant))
     (check-class-sections! env class-env name parents body)
-    (check-attachable-field-initialization! env name body parents)))
+    (recovering #(check-attachable-field-initialization! env name body parents))))
 
 ;;
 ;; Program Type Checking
@@ -7927,25 +8031,14 @@
                   {:params [{:name "a" :type "Any"}]
                    :return-type "Integer"}))
 
-(defn- register-hashable-protocol!
-  [env]
-  (env-add-class env "Hashable" {:name "Hashable"
-                                 :deferred? true
-                                 :generic-params nil
-                                 :parents nil
-                                 :body []})
-  (env-add-method env "Hashable" "hash"
-                  {:params []
-                   :return-type "Integer"}))
-
-;; Built-in scalar classes implement Comparable + Hashable
+;; Built-in scalar classes implement Comparable
 (defn- register-scalar-classes!
   [env]
   (doseq [scalar ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"]]
     (env-add-class env scalar {:name scalar
                                :deferred? false
                                :generic-params nil
-                               :parents [{:parent "Any"} {:parent "Comparable"} {:parent "Hashable"}]
+                               :parents [{:parent "Any"} {:parent "Comparable"}]
                                :body []})
     (env-add-method env scalar "compare"
                     {:params [{:name "a" :type "Any"}]
@@ -8087,7 +8180,6 @@
   [env]
   (register-any-protocol! env)
   (register-comparable-protocol! env)
-  (register-hashable-protocol! env)
   (register-scalar-classes! env)
   (register-integer-methods! env)
   (register-byte-methods! env)
@@ -8598,13 +8690,60 @@
       (doseq [cd class-defs] (visit cd)))
     @out))
 
+(def default-max-errors
+  "How many type errors one check reports, unless :max-errors says otherwise."
+  10)
+
+(defn- error-result
+  "check-program's failing result for ERRORS: duplicates dropped, in source
+   order (the entry file's first, by line), and at most :max-errors of them,
+   with :omitted-errors saying how many more there were."
+  [opts errors env]
+  (let [max-errors (or (:max-errors opts) default-max-errors)
+        errors (->> (distinct errors)
+                    (map-indexed vector)
+                    (sort-by (fn [[i e]] [(if (:source-file e) 1 0)
+                                          (or (:line e) Long/MAX_VALUE)
+                                          (or (:column e) 0)
+                                          i]))
+                    (map second))]
+    {:success false
+     :errors (vec (take max-errors errors))
+     :omitted-errors (max 0 (- (count errors) max-errors))
+     :warnings (vec @(:warnings env))}))
+
+(defn- check-top-level-statements!
+  "check-statements for a program's top-level statements, recovering from
+   each failing statement in turn so later ones are still checked. A `let`
+   that fails still defines its name, as Any, so its later uses are not
+   reported as undefined too."
+  [env stmts]
+  (register-closure-let-signatures! env stmts)
+  (register-assigned-names! env stmts)
+  (doseq [stmt stmts]
+    (when (and (= ::failed (recovering #(check-statement env stmt)))
+               (= :let (:type stmt))
+               (string? (:name stmt))
+               (nil? (env-lookup-var env (:name stmt))))
+      (env-add-var env (:name stmt) "Any"))))
+
+(defn format-type-errors
+  "The lines reporting type-check RESULT's errors, ending with a count of any
+   left out (see :max-errors)."
+  [result]
+  (let [omitted (:omitted-errors result 0)]
+    (cond-> (mapv format-type-error (:errors result))
+      (pos? omitted) (conj (str "... and " omitted " more error" (when (> omitted 1) "s")
+                                " (use --max-errors to see more)")))))
+
 (defn check-program
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
   ([{:keys [classes calls statements imports functions type-aliases duplicate-functions
             function-signature-conflicts] :as program} opts]
-   (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))]
+   (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))
+             *collected-errors* (atom [])]
      (let [env (make-type-env)
            normalized-functions (normalize-function-defs classes functions)
            all-class-defs (vec (concat (redeclare/desugar-classes classes)
@@ -8650,7 +8789,9 @@
          (try
            (field-shadowing/check-classes! all-class-defs (redeclare/class-lookup all-class-defs))
            (catch clojure.lang.ExceptionInfo e
-             (throw (ex-info (ex-message e) {:error (type-error (ex-message e))}))))
+             (throw (ex-info (ex-message e)
+                             {:errors (mapv type-error (or (:messages (ex-data e))
+                                                           [(ex-message e)]))}))))
        ;; Reject duplicate free-function definitions before they are collapsed
        ;; last-wins (which would otherwise make the earlier definition silently
        ;; vanish and surface later as an obscure "Method not found: callN").
@@ -8788,7 +8929,9 @@
                 (remove #(contains? skip-body-names (:name %)) classes)
                 functions
                 statements
-                (or (:max-undefined-type-errors opts) default-max-undefined-type-errors))]
+                (or (:max-undefined-type-errors opts)
+                    ;; scan past the reported cap, so the count of the rest is right
+                    (max default-max-undefined-type-errors (or (:max-errors opts) 0))))]
            (when (seq undefined-type-errors)
              (throw (ex-info "Undefined type(s) referenced"
                              {:errors undefined-type-errors}))))
@@ -8844,29 +8987,27 @@
              (fn [] (check-old-and-retry! "top-level code" nil nil nil statements nil))))
          (if (seq statements)
            (do
-             (check-missing-call-parens! env statements)
-             (check-statements env statements)
+             (recovering #(check-missing-call-parens! env statements))
+             (check-top-level-statements! env statements)
              ;; `x = 5` or a function named but not called, standing alone,
              ;; is a mistake in a script, which never shows a top-level value;
              ;; the REPL, which does show it, leaves this option off.
              (when (:reject-discarded-top-level? opts)
-               (check-no-discarded-values! env statements {:routine? false})))
+               (recovering #(check-no-discarded-values! env statements {:routine? false}))))
            (doseq [call calls]
              (check-expression env call)))
 
-         {:success true
-          :errors []
-          :warnings (vec @(:warnings env))}
+         (if (seq @*collected-errors*)
+           (error-result opts @*collected-errors* env)
+           {:success true
+            :errors []
+            :warnings (vec @(:warnings env))})
 
          (catch clojure.lang.ExceptionInfo e
-           (let [error-data (ex-data e)]
-             {:success false
-            ;; A pass may report several errors at once (e.g. undefined-type
-            ;; validation) via :errors; otherwise fall back to the single :error.
-              :errors (or (:errors error-data)
-                          [(or (:error error-data)
-                               (type-error (ex-message e)))])
-              :warnings (vec @(:warnings env))}))
+           ;; A pass that checks the program as a whole (undefined types,
+           ;; duplicate functions, ...) stops the run: what follows would mostly
+           ;; repeat it. It may report several errors at once via :errors.
+           (error-result opts (into @*collected-errors* (exception-type-errors e)) env))
 
        ;; Any other exception is an internal type-checker fault (e.g. a shape
        ;; assumption broken by an unexpected AST). Surface it as a type error

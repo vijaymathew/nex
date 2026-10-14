@@ -272,11 +272,12 @@
    (try
      (let [module-ast (augment-ast-with-interns source-id ast)
            _ (when-not (:skip-type-check opts)
-               (let [result (tc/type-check module-ast {:strict-undefined-targets? true
-                                                       :reject-discarded-top-level? true})]
+               (let [result (tc/type-check module-ast (cond-> {:strict-undefined-targets? true
+                                                               :reject-discarded-top-level? true}
+                                                        (:max-errors opts) (assoc :max-errors (:max-errors opts))))]
                  (when-not (:success result)
                    (throw (ex-info "Type checking failed"
-                                   {:errors (map tc/format-type-error (:errors result))})))))
+                                   {:errors (tc/format-type-errors result)})))))
            prepared-ast (lower/prepare-program-for-closures
                          module-ast
                          {:classes (:classes module-ast)
@@ -529,17 +530,35 @@
          (when (.exists build-dir)
            (delete-tree! build-dir)))))))
 
+(defn take-max-errors-option
+  "ARGS with a `--max-errors N` option taken out: [n other-args], n nil when
+   absent. Exits with a usage error when N is not a positive integer."
+  [args]
+  (loop [[a & more] args, n nil, out []]
+    (cond
+      (nil? a) [n out]
+      (= a "--max-errors")
+      (let [v (first more)
+            parsed (when v (parse-long v))]
+        (when-not (and parsed (pos? parsed))
+          (println "Error: --max-errors requires a positive integer")
+          (System/exit 1))
+        (recur (rest more) parsed out))
+      :else (recur more n (conj out a)))))
+
 (defn -main
   [& args]
   (when (empty? args)
-    (println "Usage: nex compile jvm <input.nex> [output-dir] [--skip-contracts]")
+    (println "Usage: nex compile jvm <input.nex> [output-dir] [--skip-contracts] [--max-errors N]")
     (System/exit 1))
-  (let [skip-contracts? (boolean (some #{"--skip-contracts"} args))
+  (let [[max-errors args] (take-max-errors-option args)
+        skip-contracts? (boolean (some #{"--skip-contracts"} args))
         args (vec (remove #{"--skip-contracts"} args))
         input-file (first args)
         output-dir (or (second args) ".")]
     (try
-      (let [result (compile-jar input-file output-dir {:skip-contracts? skip-contracts?})]
+      (let [result (compile-jar input-file output-dir (cond-> {:skip-contracts? skip-contracts?}
+                                                        max-errors (assoc :max-errors max-errors)))]
         (println (str "Compiled " input-file " -> " (:jar result)))
         (println (str "Main class: " (:main-class result))))
       (System/exit 0)

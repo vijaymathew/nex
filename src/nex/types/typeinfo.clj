@@ -143,7 +143,7 @@
 (def ^:private builtin-type-names
   #{"Integer" "Integer64" "Integer32" "Integer16" "Byte" "Real" "Char" "Boolean"
     "String" "Array" "Map" "Set" "Function" "Task" "Channel" "Cursor"
-    "Comparable" "Hashable" "Console" "Process" "Min_Heap" "Map_Entry"
+    "Comparable" "Console" "Process" "Min_Heap" "Map_Entry"
     "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"})
 
 (defn known-type-name-fn

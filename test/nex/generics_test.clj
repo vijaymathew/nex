@@ -34,19 +34,19 @@ end"
 
 (deftest multiple-generic-params-parsing-test
   (testing "Parse generic class with multiple parameters"
-    (let [code "class Hash_Table [G, KEY -> Hashable]
+    (let [code "class Keyed_Table [G, KEY -> Comparable]
   feature
     value: G
     key: KEY
 end"
           ast (p/ast code)
           class-def (first (:classes ast))]
-      (is (= "Hash_Table" (:name class-def)))
+      (is (= "Keyed_Table" (:name class-def)))
       (is (= 2 (count (:generic-params class-def))))
       (is (= "G" (-> class-def :generic-params first :name)))
       (is (nil? (-> class-def :generic-params first :constraint)))
       (is (= "KEY" (-> class-def :generic-params second :name)))
-      (is (= "Hashable" (-> class-def :generic-params second :constraint))))))
+      (is (= "Comparable" (-> class-def :generic-params second :constraint))))))
 
 (deftest detachable-generic-parameter-parsing-test
   (testing "Parse detachable generic parameter syntax"

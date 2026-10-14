@@ -280,12 +280,13 @@ it returns that value:
 |---|---|
 | `Integer` (and the other integer types), `Real` | `0`, `0.0` |
 | `Boolean`, `Char` | `false`, `#nul` |
+| `String` | `""` |
 | `Array[T]`, `Map[K, V]`, `Set[T]` | `[]`, `{}`, `#{}` (a fresh empty collection) |
 | any detachable type `?T` | `nil` |
 
-Any other return type — `String`, or an attached class type — has no zero value,
-so the typechecker rejects a routine that does not assign `result` on every path
-that returns.
+Any other return type — an attached class type, say — has no zero value, so the
+typechecker rejects a routine that does not assign `result` on every path that
+returns.
 
 Every function in a program is checked against every other function's
 signature regardless of which is written first, so mutually recursive
@@ -1308,6 +1309,20 @@ end
 if convert vehicle_1 to my_car:Car then
   my_car.sound_horn
 end
+```
+
+In a contract clause (`require`, `ensure`, or an `invariant`), the name is
+visible only within that clause, since the clause might not run (contracts
+can be skipped, and an inherited precondition can be met by another
+alternative). It must be a new name: not a parameter, local or field already
+in scope.
+
+```nex
+pred(n: Number): Number
+  require
+    not_zero: not (convert n to z: Zero)            -- z is unused, and fine
+    has_pred: convert n to s: Succ and s.pred /= nil -- s, for this clause only
+  do ... end
 ```
 
 ## Object Test: `?<expr> as <name>`

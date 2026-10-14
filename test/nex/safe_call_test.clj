@@ -101,7 +101,7 @@ x?.set_right(y)")
         (is (str/includes? output "1\ntrue\n1"))))))
 
 (deftest safe-call-expression-desugars-to-when-test
-  (testing "safe field access in expression position desugars to a nil-producing when expression"
+  (testing "safe field access in expression position desugars to a nil-producing when expression over an object test"
     (let [ast (p/ast "class Node
 feature
   left: ?Node
@@ -110,12 +110,13 @@ let node: ?Node := nil
 print(node?.left)")
           print-call (last (:statements ast))
           arg (-> print-call :args first)]
+      ;; `when ?node as tmp then tmp.left else nil`: an object test, not
+      ;; `node /= nil`, which would not narrow `node` were it a field.
       (is (= :when (:type arg)))
-      (is (= "/=" (-> arg :condition :operator)))
-      (is (= "node" (-> arg :condition :left :name)))
-      (is (= :nil (-> arg :condition :right :type)))
+      (is (= :attached-test (-> arg :condition :type)))
+      (is (= "node" (-> arg :condition :value :name)))
       (is (= :call (-> arg :consequent :type)))
-      (is (= "node" (-> arg :consequent :target)))
+      (is (= (-> arg :condition :var-name) (-> arg :consequent :target)))
       (is (= "left" (-> arg :consequent :method)))
       (is (= :nil (-> arg :alternative :type))))))
 

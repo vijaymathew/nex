@@ -1,0 +1,15 @@
+class Counter
+feature
+  count: Integer
+
+  bump do
+    let count := 1
+    print(count)
+  end
+end
+
+-- Mistake: a local named like a field of its class
+-- status: fixed
+-- expect: Line 6: Local variable 'count' has the same name as the field 'count'
+-- reject: No matching field
+-- reject: Exception

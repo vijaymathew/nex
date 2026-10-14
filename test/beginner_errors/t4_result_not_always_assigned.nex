@@ -1,9 +1,16 @@
-function name_of(n: Integer): String do
+class Pet
+create
+  make(n: String) do name := n end
+feature
+  name: String
+end
+
+function pet_of(n: Integer): Pet do
   if n = 1 then
-    result := "one"
+    result := create Pet.make("Rex")
   end
 end
 
 -- Mistake: `result` not assigned on every path
 -- status: fixed
--- expect: line 1
+-- expect: line 8

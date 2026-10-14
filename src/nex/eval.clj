@@ -35,19 +35,20 @@
       walker/resolve-qualified-function-calls))
 
 (defn- type-check-ast!
-  [source-id ast]
+  [source-id ast max-errors]
   (let [module-ast (augment-ast-with-interns source-id ast)
-        result (tc/type-check module-ast {:strict-undefined-targets? true
-                                          :reject-discarded-top-level? true})]
+        result (tc/type-check module-ast (cond-> {:strict-undefined-targets? true
+                                                  :reject-discarded-top-level? true}
+                                           max-errors (assoc :max-errors max-errors)))]
     (doseq [w (:warnings result)]
       (binding [*out* *err*]
         (println (str "Warning: " w))))
     (when-not (:success result)
-      (throw (ex-info (str "Type checking failed"
-                           (when (seq (:errors result))
-                             (str "\n"
-                                  (str/join "\n" (map tc/format-type-error (:errors result))))))
-                      {:errors (map tc/format-type-error (:errors result))})))))
+      (let [lines (tc/format-type-errors result)]
+        (throw (ex-info (str "Type checking failed"
+                             (when (seq lines)
+                               (str "\n" (str/join "\n" lines))))
+                        {:errors lines}))))))
 
 (defn- run-interpreted
   [source-id ast program-args skip-contracts?]
@@ -235,13 +236,14 @@
    always runs regardless); {:program-args [...]} the program's own argv,
    returned by Process.command_line() — everything after the file name on the
    command line, not to be confused with the `nex` launcher's own flags like
-   --interpret."
+   --interpret. {:max-errors n} caps how many type errors are reported
+   (nex.typechecker/default-max-errors otherwise)."
   ([file-path] (eval-file file-path {}))
   ([file-path opts]
    (let [source-id (.getCanonicalPath (io/file file-path))
          source (slurp source-id)
          ast (parser/ast source)]
-     (type-check-ast! source-id ast)
+     (type-check-ast! source-id ast (:max-errors opts))
      (run-ast source-id ast opts))))
 
 ;;
@@ -326,7 +328,10 @@
    which calls; empty when it did not come from compiled Nex code (a type
    error, say). A broken contract says whose obligation it was."
   [e main-file]
-  (let [t ^Throwable (or (:cause (ex-data e)) e)
+  (let [;; run-compiled stores a non-Exception throwable under :cause; other
+        ;; code (nex.walker/walk-node) uses the key for a message string.
+        cause (:cause (ex-data e))
+        t ^Throwable (if (instance? Throwable cause) cause e)
         ;; The JVM keeps at most this many frames, so a deep recursion's
         ;; repeat count is only a lower bound.
         truncated? (>= (count (.getStackTrace t)) 1024)
@@ -396,17 +401,19 @@
 
 (defn -main
   "Main entry point for nex eval command.
-   Usage: nex.eval [--interpret] [--skip-contracts] <file.nex> [program-args...]"
+   Usage: nex.eval [--interpret] [--skip-contracts] [--max-errors N] <file.nex> [program-args...]"
   [& args]
-  (let [interpret? (boolean (some #{"--interpret"} args))
+  (let [[max-errors args] (jvm-file/take-max-errors-option args)
+        interpret? (boolean (some #{"--interpret"} args))
         skip-contracts? (boolean (some #{"--skip-contracts"} args))
         files (vec (remove #{"--interpret" "--skip-contracts"} args))
         file (first files)
         program-args (vec (rest files))]
     (when (nil? file)
       (println "Error: No file provided")
-      (println "Usage: nex <file.nex> [--interpret] [--skip-contracts] [program-args...]")
+      (println "Usage: nex <file.nex> [--interpret] [--skip-contracts] [--max-errors N] [program-args...]")
       (System/exit 1))
-    (System/exit (run-file file {:interpret? interpret?
-                                 :skip-contracts? skip-contracts?
-                                 :program-args program-args}))))
+    (System/exit (run-file file (cond-> {:interpret? interpret?
+                                         :skip-contracts? skip-contracts?
+                                         :program-args program-args}
+                                  max-errors (assoc :max-errors max-errors))))))

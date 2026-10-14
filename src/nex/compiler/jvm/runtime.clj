@@ -1439,7 +1439,7 @@
 
 (def ^:private builtin-base-class-defs
   "The standard environment's base classes (Any, Function, Cursor, Comparable,
-   Hashable, and the scalars), for hierarchy walks that cross from program
+   and the scalars), for hierarchy walks that cross from program
    classes into the builtin roots — no interpreter context needed."
   (delay (into {}
                (map (fn [class-def] [(:name class-def) class-def]))
@@ -2302,6 +2302,7 @@
 
 (def-builtin-method-wrapper builtin-method-any-to-string "to_string")
 (def-builtin-method-wrapper builtin-method-any-equals "equals")
+(def-builtin-method-wrapper builtin-method-any-hash "hash")
 (def-builtin-method-wrapper builtin-method-any-clone "clone")
 (def-builtin-method-wrapper builtin-method-any-cursor "cursor")
 (def-builtin-method-wrapper builtin-method-any-start "start")
@@ -2673,6 +2674,23 @@
           (if-let [[_ ^Method m] (find-user-method v (lowered-instance-method-name "hash" 0))]
             (rt/nex-int->number (invoke-user-method state v "hash" []))
             (structural-hash-of-compiled-object state v))))))
+
+(defn any-hash
+  "The `hash` that the Any protocol gives every value, for a receiver whose
+   *static* type declares none, agreeing with `any-equals`: a compiled object's
+   `hash` override or structural hash (object-hash-code, the same hash a Map or
+   Set places it with), a collection's element-wise hash, a scalar's own `hash`.
+   Resolved on the runtime value, as `any-equals` is."
+  [state v]
+  (long
+   (cond
+     (nil? v) 0
+     (compiled-object? state v) (object-hash-code state v)
+     (interp-object? v) (bi/nex-structural-hash v)
+     ;; A compiled Array/Map/Set; its hashCode reaches each element's,
+     ;; object-hash-code included, so equal collections hash equal.
+     (or (instance? java.util.Collection v) (instance? java.util.Map v)) (.hashCode ^Object v)
+     :else (bi/call-builtin-method nil v v "hash" []))))
 
 (defn- scalar-identity-value?
   [v]
@@ -3084,13 +3102,16 @@
    ;; `bi/call-builtin-method`, whose :Any defaults are written against the
    ;; interpreter's object maps and silently misread a compiled object (an
    ;; instance of a generated class) — `equals` on two equal objects returns
-   ;; false, `to_string` renders `#object[...]`. These two understand both
-   ;; object models.
+   ;; false, `to_string` renders `#object[...]`. These understand both object
+   ;; models.
    "any:to_string"
    (fn [state args] (any-to-string state (first args)))
 
    "any:equals"
-   (fn [state args] (any-equals state (first args) (second args)))})
+   (fn [state args] (any-equals state (first args) (second args)))
+
+   "any:hash"
+   (fn [state args] (any-hash state (first args)))})
 
 (defn invoke-builtin
   [state name args]

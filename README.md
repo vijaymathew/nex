@@ -365,8 +365,12 @@ separator, matching `java -cp`.
 The CLI also has a `--skip-contracts` flag: `nex compile jvm app.nex
 --skip-contracts` and `nex app.nex --skip-contracts` lower `require`/`ensure`/
 `invariant` checks to no-ops, for a trusted, perf-critical release build. Bare
-`assert` always runs regardless — there is no mode that strips it. Run
-`nex help` for the full list of CLI commands and examples.
+`assert` always runs regardless — there is no mode that strips it.
+
+Type checking reports up to 10 errors at once, one per routine or top-level
+statement; `--max-errors N` (on both `nex app.nex` and `nex compile jvm`)
+changes that limit. Run `nex help` for the full list of CLI commands and
+examples.
 
 ### Running Tests
 
@@ -402,7 +406,7 @@ See [examples/README.md](examples/README.md) for the full list.
 ### Type System
 
 - **Scalar types:** `Integer`, `Integer64`, `Real`, `Decimal`, `Char`, `String`, `Boolean`
-- **Generic types:** Parameterized classes with optional constraints — `List [G]`, `Map [K -> Hashable, V]`
+- **Generic types:** Parameterized classes with optional constraints — `List [G]`, `Sorted_Map [K -> Comparable, V]`
 - **Sum types:** `union` declares a closed set of data variants; a `match` over one is checked for exhaustiveness. The standard library ships `Result` and `Option` on top of this.
 - **Refinement types:** `declare type Quantity = Integer where n: n > 0` narrows a base type by a predicate, checked at the boundary and erased to the base representation.
 - **Nil-safety:** Types are non-nullable by default. Detachable references use `?T` and require nil-guards before feature access.

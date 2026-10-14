@@ -4,7 +4,7 @@ Built-in scalar classes: `String`, `Integer`, `Integer16`, `Integer32`, `Byte`, 
 `Boolean`, `Char`. `Integer64` is another spelling of `Integer`.
 
 All scalar classes are modeled as inheriting `Any` and implementing
-`Comparable` and `Hashable`.
+`Comparable`.
 
 ## `String`
 

@@ -27,7 +27,7 @@ USAGE:
 
 COMMANDS:
     (no command)              Start the Nex REPL
-    compile jvm <file> [output-dir] [--classpath entries] [--skip-contracts]
+    compile jvm <file> [output-dir] [--classpath entries] [--skip-contracts] [--max-errors N]
                               Compile a Nex file to a standalone JVM JAR
     format <file|dir>         Format Nex source files
     doc <file|dir> [output]   Generate documentation from Nex files
@@ -49,6 +49,9 @@ OPTIONS:
                               or latent bugs remain. Available on both
                               running (nex <file>.nex) and compiling
                               (nex compile jvm).
+    --max-errors N            Report at most N type errors (default 10).
+                              Available on both running (nex <file>.nex)
+                              and compiling (nex compile jvm).
 
 EXAMPLES:
     nex                                      # Start REPL
@@ -232,6 +235,7 @@ cmd_compile() {
 
     local classpath=""
     local skip_contracts=""
+    local max_errors=""
     local -a positional=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -247,6 +251,14 @@ cmd_compile() {
                 skip_contracts="1"
                 shift
                 ;;
+            --max-errors)
+                if [[ -z "$2" ]]; then
+                    echo "Error: --max-errors requires an argument"
+                    exit 1
+                fi
+                max_errors="$2"
+                shift 2
+                ;;
             *)
                 positional+=("$1")
                 shift
@@ -261,7 +273,7 @@ cmd_compile() {
 
     if [[ -z "$target" || -z "$file" ]]; then
         echo "Error: compile requires target and file arguments"
-        echo "Usage: nex compile jvm <file> [output-dir] [--classpath entries] [--skip-contracts]"
+        echo "Usage: nex compile jvm <file> [output-dir] [--classpath entries] [--skip-contracts] [--max-errors N]"
         exit 1
     fi
 
@@ -290,6 +302,9 @@ cmd_compile() {
     local -a extra_flags=()
     if [[ -n "$skip_contracts" ]]; then
         extra_flags+=(--skip-contracts)
+    fi
+    if [[ -n "$max_errors" ]]; then
+        extra_flags+=(--max-errors "$max_errors")
     fi
 
     run_main "$classpath" nex.compiler.jvm.file "$file" "$output" "${extra_flags[@]}"
