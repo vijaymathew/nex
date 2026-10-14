@@ -2272,7 +2272,7 @@
         (when-not (types-compatible? env arg-type param-type)
           (throw (ex-info (str "Argument type mismatch for method " method)
                           {:error (type-error
-                                   (argument-mismatch-message (:name param) method
+                                   (argument-mismatch-message env (:name param) method
                                                               arg-type param-type arg))})))))
     ;; A method with no return-type annotation stores :return-type as nil, not
     ;; the string "Void" — coalesce it here (same convention as other
@@ -2539,10 +2539,71 @@
                                        generic-name ": "
                                        (display-type existing)
                                        " and "
-                                       (display-type inferred-type)))})))
+                                       (display-type inferred-type)))
+                          :generic-name generic-name
+                          :existing existing
+                          :inferred inferred-type})))
        (assoc acc generic-name inferred-type)))
    left
    right))
+
+(defn- raw-generic-params
+  "The generic parameter names of class T when T is written bare (`Leaf`,
+   not `Leaf[Integer]`), or nil."
+  [env t]
+  (when (string? t)
+    (seq (map #(type-name-string (:name %))
+              (:generic-params (env-lookup-class env t))))))
+
+(defn- raw-generic-hint
+  "Explain that CLASS-NAME, a generic class used without type arguments,
+   needs them written out, suggesting each from BINDINGS (parameter name ->
+   type) where known. VALUE is the offending expression: a bare
+   `create Leaf.make` is shown corrected in place."
+  [env class-name bindings value]
+  (let [written (str class-name "["
+                     (str/join ", " (map #(display-type (get bindings % "..."))
+                                         (raw-generic-params env class-name)))
+                     "]")]
+    (if (and (map? value) (= :create (:type value))
+             (= class-name (:class-name value)) (empty? (:generic-args value)))
+      (str " `" class-name "` is generic; write its type arguments: `create " written
+           (when-let [ctor (:constructor value)] (str "." ctor)) "`.")
+      (str " `" class-name "` is generic, and this value was created without type"
+           " arguments; write them where it is created, as `" written "`."))))
+
+(defn- assignment-raw-generic-hint
+  "raw-generic-hint for assigning a bare generic VAL-TYPE (`create Leaf.make`)
+   to a parameterized TARGET-TYPE (`Tree[Integer]`) it inherits, or nil."
+  [env val-type target-type value]
+  (let [target (normalize-type target-type)
+        target-args (when (map? target) (or (:type-args target) (:type-params target)))]
+    (when-let [params (and (seq target-args) (raw-generic-params env val-type))]
+      (when-let [inst (ancestor-instantiation env val-type (vec params) (:base-type target) #{})]
+        (raw-generic-hint env val-type
+                          (into {} (filter (comp (set params) first)) (map vector inst target-args))
+                          value)))))
+
+(defn- with-raw-generic-conflict-hint
+  "E, a conflicting-binding error from inferring a call's generic arguments,
+   with a raw-generic-hint added when the conflict comes from an argument
+   whose generic class was created without type arguments: its own
+   parameter name (`A` of a bare `Leaf`) is what clashed with the binding
+   the other arguments gave (`Integer`)."
+  [env e arg-types args]
+  (let [{:keys [generic-name existing inferred error]} (ex-data e)]
+    (or (when generic-name
+          (some (fn [[t arg]]
+                  (let [params (set (raw-generic-params env t))]
+                    (some (fn [[leaked other]]
+                            (when (contains? params leaked)
+                              (ex-info (ex-message e)
+                                       (assoc (ex-data e) :error
+                                              (type-error (str (:message error) "."
+                                                               (raw-generic-hint env t {leaked other} arg)))))))
+                          [[inferred existing] [existing inferred]])))
+                (map vector arg-types (concat args (repeat nil)))))
+        e)))
 
 (defn- generic-names-in-type
   "Every bare generic-parameter-shaped name reachable within a type
@@ -4167,14 +4228,17 @@
                                     (:param-types var-type))
                              (:param-types var-type)
                              (:params method-sig))
-          inferred-type-map (reduce (fn [acc [arg-type param]]
-                                      (merge-inferred-generic-bindings
-                                       env
-                                       acc
-                                       (infer-generic-type-map-from-arg
-                                        env generic-names (:type param) arg-type)))
-                                    {}
-                                    (map vector arg-types effective-params))
+          inferred-type-map (try
+                              (reduce (fn [acc [arg-type param]]
+                                        (merge-inferred-generic-bindings
+                                         env
+                                         acc
+                                         (infer-generic-type-map-from-arg
+                                          env generic-names (:type param) arg-type)))
+                                      {}
+                                      (map vector arg-types effective-params))
+                              (catch clojure.lang.ExceptionInfo e
+                                (throw (with-raw-generic-conflict-hint env e arg-types args))))
           ;; Type arguments written at the call (`total_area[Circle](xs)`)
           ;; fix the binding: an argument must then conform to the
           ;; instantiated parameter, not re-bind it. Without them,
@@ -4248,7 +4312,7 @@
           (when-not (types-compatible? env arg-type param-type)
             (throw (ex-info (str "Argument type mismatch for method " call-name)
                             {:error (type-error
-                                     (argument-mismatch-message (:name param) method
+                                     (argument-mismatch-message env (:name param) method
                                                                 arg-type param-type arg))})))))
           ;; A Function value carrying an explicit signature knows its own return
           ;; type; prefer it over the generic callN result (which is Any). Still
@@ -4709,13 +4773,16 @@
             ;; Ok[Integer, Any]); parameters not mentioned by the constructor
             ;; stay `Any`. Explicit `[…]` remains authoritative.
             inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
-                           (reduce (fn [acc [arg-type param-type]]
-                                     (merge-inferred-generic-bindings
-                                      env acc
-                                      (infer-generic-type-map-from-arg
-                                       env (set (map :name gparams)) param-type arg-type)))
-                                   {}
-                                   (map vector arg-types param-types)))
+                           (try
+                             (reduce (fn [acc [arg-type param-type]]
+                                       (merge-inferred-generic-bindings
+                                        env acc
+                                        (infer-generic-type-map-from-arg
+                                         env (set (map :name gparams)) param-type arg-type)))
+                                     {}
+                                     (map vector arg-types param-types))
+                             (catch clojure.lang.ExceptionInfo e
+                               (throw (with-raw-generic-conflict-hint env e arg-types args)))))
             target-type (cond
                           (seq generic-args)
                           (do (validate-generic-args env class-name generic-args)
@@ -4756,7 +4823,7 @@
                 (when-not (types-compatible? env arg-type param-type)
                   (throw (ex-info (str "Argument type mismatch for constructor " class-name "." ctor-name)
                                   {:error (type-error
-                                           (argument-mismatch-message (:name param)
+                                           (argument-mismatch-message env (:name param)
                                                                       (str class-name "." ctor-name)
                                                                       arg-type param-type arg))})))))))
         target-type))))
@@ -5354,7 +5421,7 @@
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
-                               (assignment-mismatch-message (str "variable '" target "'")
+                               (assignment-mismatch-message env (str "variable '" target "'")
                                                             val-type var-type (:value stmt)))})))
     ;; Keep nil-check narrowing in step with the assignment: a value that may
     ;; be nil undoes it for every block containing this one. One that cannot
@@ -5518,21 +5585,23 @@
 (defn- assignment-mismatch-message
   "The error for assigning a VAL-TYPE VALUE to WHAT (\"variable 'x'\",
    \"field 'v'\"), which has TARGET-TYPE."
-  [what val-type target-type value]
+  [env what val-type target-type value]
   (str "Cannot assign " (display-type val-type) " to " what " of type "
        (display-type target-type) "."
-       (conversion-hint val-type target-type value)))
+       (or (assignment-raw-generic-hint env val-type target-type value)
+           (conversion-hint val-type target-type value))))
 
 (defn- argument-mismatch-message
   "The error for passing an ARG-TYPE value as parameter PARAM-NAME (of type
    PARAM-TYPE) of ROUTINE."
-  [param-name routine arg-type param-type arg]
+  [env param-name routine arg-type param-type arg]
   (str "Argument `" param-name "` of "
        ;; `callN` is how a function value is invoked, not a name the reader wrote
        (if (re-matches #"call\d+" (str routine)) "the function" (str "`" routine "`"))
        " should be " (display-type param-type)
        ", but got " (display-type arg-type) "."
-       (conversion-hint arg-type param-type arg)))
+       (or (assignment-raw-generic-hint env arg-type param-type arg)
+           (conversion-hint arg-type param-type arg))))
 
 (defn check-let
   "Check a let statement"
@@ -5574,7 +5643,7 @@
     (when-not (types-compatible? env val-type inferred-type)
       (throw (ex-info (str "Type mismatch in let binding for " name)
                       {:error (type-error
-                               (assignment-mismatch-message (str "variable '" name "'")
+                               (assignment-mismatch-message env (str "variable '" name "'")
                                                             val-type inferred-type value))})))
     (env-add-var env name inferred-type)
     ;; A mark already in this env for NAME was about the variable this one
@@ -6136,7 +6205,7 @@
     (when-not (types-compatible? env val-type field-type)
       (throw (ex-info (str "Type mismatch in assignment to " field-name)
                       {:error (type-error
-                               (assignment-mismatch-message (str "field '" field-name "'")
+                               (assignment-mismatch-message env (str "field '" field-name "'")
                                                             val-type field-type (:value stmt)))})))))
 
 (defn check-statement
