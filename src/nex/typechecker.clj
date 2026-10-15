@@ -3663,8 +3663,28 @@
                                  " expects " (count (:params method-sig))
                                  " argument(s), got " (count args))]
                     (throw (ex-info msg {:error (type-error msg)})))
-                  (let [msg (if (and from-across (= "cursor" method))
+                  (let [field-member (lookup-class-field-member env base-type method current-class)
+                        msg (cond
+                              (and from-across (= "cursor" method))
                               (across-target-message base-type)
+
+                              ;; `x.f()` where `f` is a field: the parentheses
+                              ;; ask for a routine, and the plain "not a
+                              ;; feature" message then suggests `f` itself.
+                              field-member
+                              (let [field-type (resolve-generic-type
+                                                (:field-type field-member)
+                                                (member-type-map env target-type type-map field-member))
+                                    function? (types-compatible? env field-type "Function")]
+                                (str "`" method "` is a field of " base-type
+                                     " (of type " (display-type field-type) "), not a routine,"
+                                     " so it cannot be called with parentheses."
+                                     (if function?
+                                       (str " To call the function it holds, bind it first:"
+                                            " `let f := <obj>." method "` then `f(...)`.")
+                                       (str " Write `<obj>." method "` without `()`."))))
+
+                              :else
                               (undefined-field-message env base-type method current-class nil))]
                     (throw (ex-info msg {:error (type-error msg)}))))
                 (let [msg (if (and from-across (= "cursor" method))

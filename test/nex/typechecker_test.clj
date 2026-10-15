@@ -2790,3 +2790,27 @@ end"))
                 end"
           result (tc/type-check (p/ast code))]
       (is (:success result) (pr-str (:errors result))))))
+
+(deftest test-calling-a-field-with-parens-names-the-field
+  (testing "`x.f()` on a field says it is a field, not \"did you mean `f`\""
+    (let [code "class Cons
+                feature
+                  head: Integer
+                  tail: Function(): Cons
+                create
+                  make(h: Integer, t: Function(): Cons) do head := h tail := t end
+                end
+
+                function f(xs: Cons): Integer do
+                  result := xs.head()
+                end
+
+                function g(xs: Cons): Cons do
+                  result := xs.tail()
+                end"
+          msgs (map :message (:errors (tc/type-check (p/ast code))))]
+      (is (not-any? #(re-find #"Did you mean" %) msgs) (pr-str msgs))
+      (is (some #(re-find #"`head` is a field of Cons \(of type Integer\), not a routine.*without `\(\)`" %) msgs)
+          (pr-str msgs))
+      (is (some #(re-find #"`tail` is a field of Cons \(of type Function\(\): Cons\), not a routine.*bind it first" %) msgs)
+          (pr-str msgs)))))
