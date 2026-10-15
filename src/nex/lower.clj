@@ -986,6 +986,15 @@
          nil))
      (when (or java-static-owner (:with-java? env))
        "Any")
+     ;; `f.callN(...)` / `a(1)(2)` invoke a Function value, typed by its own
+     ;; signature exactly as lower-general-receiver-call lowers the call.
+     ;; Without this, `xs.tail.call0().first` inferred `Any` for the call and
+     ;; dispatched `.first` through the Any-protocol table, which has no
+     ;; entry for it.
+     (when (and (= "Function" base-type)
+                (or (nil? (:method expr))
+                    (= (:method expr) (str "call" (count (:args expr))))))
+       (or (and (map? target-type) (:return-type target-type)) "Any"))
      (when class-def
        (if (and class-target-name (false? (:has-parens expr)))
          (some-> (lookup-class-constant env class-target-name (:method expr))
