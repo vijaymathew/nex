@@ -40,6 +40,8 @@ read one is to run it alongside the source.
 
 ## Library and tooling
 
+- **graphics_example.nex** — `graphics/Canvas`: a scene saved as a PNG, then a
+  short bouncing-ball animation in a window
 - **io_text_example.nex**, **io_binary_example.nex** — file I/O
 - **echo_server.nex**, **echo_client.nex** — TCP sockets
 - **http_server.nex**, **http_client_to_server.nex** — HTTP

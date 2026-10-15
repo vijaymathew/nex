@@ -5124,8 +5124,17 @@
           inferred-type (infer-type env expr)
           nex-type (if (= "Any" inferred-type)
                      (cond
+                       ;; Promote as infer-binary-type does, from the lowered
+                       ;; operands' own types: `k.a / 255.0` inside `with
+                       ;; "java"` infers as Any, and taking the left side's
+                       ;; Integer alone made it an integer division (0).
                        (#{"+" "-" "*" "/" "%"} (:operator expr))
-                       (:nex-type left-ir)
+                       (let [left-num (resolve-type-alias (:nex-type left-ir))
+                             right-num (resolve-type-alias (:nex-type right-ir))]
+                         (if (and (tc/is-numeric-type? left-num)
+                                  (tc/is-numeric-type? right-num))
+                           (tc/numeric-result-type left-num right-num)
+                           (:nex-type left-ir)))
 
                        (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} (:operator expr))
                        "Boolean"

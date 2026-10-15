@@ -1,0 +1,257 @@
+(ns nex.graphics-lib-test
+  "graphics/Canvas, graphics/Color, graphics/Font (lib/graphics/): drawing in
+   user coordinates onto an offscreen image, built entirely on Java interop.
+   Nothing here calls `show`, so no window opens; pixels are read back with
+   `color_at` or from the saved file.
+
+   Behaviour is asserted on both backends."
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
+            [nex.eval :as e]))
+
+;; ---------------------------------------------------------------------------
+;; Helpers (mirrors test/nex/mutex_test.clj's convention)
+;; ---------------------------------------------------------------------------
+
+(defn- run-backend
+  [code interpret?]
+  (let [f (java.io.File/createTempFile "graphics" ".nex")]
+    (try
+      (spit f code)
+      (let [out (with-out-str (e/eval-file (.getPath f) {:interpret? interpret?}))]
+        (is (not (str/includes? out "falling back to the tree-walking interpreter"))
+            (str "compiled backend declined this program:\n" out))
+        (str/split-lines (str/trim-newline out)))
+      (finally (.delete f)))))
+
+(defn- both
+  "Printed output lines of CODE, asserted identical on both backends."
+  [code]
+  (let [compiled (run-backend code false)
+        interpreted (run-backend code true)]
+    (is (= interpreted compiled) "compiled and interpreted output must agree")
+    compiled))
+
+(defn- raises-on-both?
+  "Whether CODE fails at runtime on both backends with a message containing MSG."
+  [code msg]
+  (every? (fn [interpret?]
+            (let [f (java.io.File/createTempFile "graphics" ".nex")]
+              (try
+                (spit f code)
+                (try (with-out-str (e/eval-file (.getPath f) {:interpret? interpret?}))
+                     false
+                     (catch Throwable t
+                       (loop [x t]
+                         (cond
+                           (str/includes? (str (ex-message x)) msg) true
+                           (.getCause x) (recur (.getCause x))
+                           :else false))))
+                (finally (.delete f)))))
+          [false true]))
+
+(defn- program
+  "CODE preceded by the Canvas intern."
+  [& lines]
+  (str/join "\n" (cons "intern graphics/Canvas" lines)))
+
+;; ---------------------------------------------------------------------------
+;; Color and Font
+;; ---------------------------------------------------------------------------
+
+(deftest color-is-a-value
+  (is (= ["Color(255, 0, 0)" "true" "Color(255, 255, 255, 64)" "false" "true"]
+         (both (program
+                "print(Color.RED)"
+                "print(create Color.make(255, 0, 0) = Color.RED)"
+                "print(Color.WHITE.with_alpha(64))"
+                "print(Color.WHITE.with_alpha(64).is_opaque())"
+                "print(Color.BLACK == Color.BLACK)")))))
+
+(deftest color-channels-are-checked
+  (is (raises-on-both? (program "let c := create Color.make(256, 0, 0)") "red_in_range"))
+  (is (raises-on-both? (program "let c := Color.RED.with_alpha(-1)") "alpha_in_range")))
+
+(deftest font-derivations
+  (is (= ["Font(SansSerif, 16)" "Font(Serif, 32, bold)" "Font(Monospaced, 16, italic)"]
+         (both (program
+                "print(Font.SANS)"
+                "print(Font.SERIF.with_size(32).bold())"
+                "print(Font.MONO.italic())"))))
+  (is (raises-on-both? (program "let f := Font.SANS.with_size(0)") "positive_size")))
+
+;; ---------------------------------------------------------------------------
+;; Drawing
+;; ---------------------------------------------------------------------------
+
+(deftest new-canvas-is-white-with-unit-scale
+  (is (= ["Color(255, 255, 255)" "\"0.0 1.0 0.0 1.0\"" "\"200 100\""]
+         (both (program
+                "let c := create Canvas.make(200, 100)"
+                "print(c.color_at(0.5, 0.5))"
+                "print(c.x_min.to_string + \" \" + c.x_max.to_string + \" \" + c.y_min.to_string + \" \" + c.y_max.to_string)"
+                "print(c.width.to_string + \" \" + c.height.to_string)")))))
+
+(deftest filled-shapes-are-centre-based
+  (is (= ["Color(255, 0, 0)" "Color(255, 255, 255)"
+          "Color(0, 0, 255)" "Color(0, 0, 255)" "Color(255, 255, 255)"
+          "Color(0, 255, 0)" "Color(255, 255, 255)"]
+         (both (program
+                "let c := create Canvas.make(100, 100)"
+                "c.set_pen_color(Color.RED)"
+                "c.filled_circle(0.25, 0.25, 0.1)"
+                "print(c.color_at(0.25, 0.25))"
+                ;; just outside the radius along the diagonal
+                "print(c.color_at(0.25 + 0.08, 0.25 + 0.08))"
+                "c.set_pen_color(Color.BLUE)"
+                "c.filled_rectangle(0.75, 0.25, 0.2, 0.1)"
+                "print(c.color_at(0.75, 0.25))"
+                "print(c.color_at(0.93, 0.25))"
+                "print(c.color_at(0.75, 0.38))"
+                "c.set_pen_color(Color.GREEN)"
+                "c.filled_polygon([0.1, 0.4, 0.25], [0.6, 0.6, 0.9])"
+                "print(c.color_at(0.25, 0.7))"
+                "print(c.color_at(0.1, 0.9))")))))
+
+(deftest outlines-leave-the-inside-alone
+  (is (= ["Color(255, 255, 255)" "Color(0, 0, 0)" "Color(255, 255, 255)"]
+         (both (program
+                "let c := create Canvas.make(100, 100)"
+                "c.set_pen_radius(2.0)"
+                "c.square(0.5, 0.5, 0.3)"
+                "print(c.color_at(0.5, 0.5))"
+                "print(c.color_at(0.2, 0.5))"
+                "c.circle(0.5, 0.5, 0.1)"
+                "print(c.color_at(0.5, 0.5))")))))
+
+(deftest lines-and-points
+  (is (= ["Color(0, 0, 0)" "Color(255, 255, 255)" "Color(255, 0, 0)"]
+         (both (program
+                "let c := create Canvas.make(100, 100)"
+                "c.set_pen_radius(2.0)"
+                "c.line(0.0, 0.5, 1.0, 0.5)"
+                "print(c.color_at(0.3, 0.5))"
+                "print(c.color_at(0.3, 0.7))"
+                "c.set_pen_color(Color.RED)"
+                "c.set_pen_radius(4.0)"
+                "c.point(0.8, 0.8)"
+                "print(c.color_at(0.8, 0.8))")))))
+
+(deftest user-scale-maps-coordinates
+  ;; y grows upward: (0, 8) is near the top of a -10..10 by 0..10 canvas.
+  (is (= ["Color(255, 0, 0)" "Color(255, 255, 255)"]
+         (both (program
+                "let c := create Canvas.make(100, 100)"
+                "c.set_x_scale(-10.0, 10.0)"
+                "c.set_y_scale(0.0, 10.0)"
+                "c.set_pen_color(Color.RED)"
+                "c.filled_square(0.0, 8.0, 1.0)"
+                "print(c.color_at(0.0, 8.0))"
+                "print(c.color_at(0.0, 2.0))")))))
+
+(deftest clear-and-alpha
+  (is (= ["Color(0, 0, 0)" "Color(255, 255, 255)" "true"]
+         (both (program
+                "let c := create Canvas.make(50, 50)"
+                "c.clear(Color.BLACK)"
+                "print(c.color_at(0.5, 0.5))"
+                "c.clear()"
+                "print(c.color_at(0.5, 0.5))"
+                ;; half-transparent red over white is pink
+                "c.set_pen_color(Color.RED.with_alpha(128))"
+                "c.filled_square(0.5, 0.5, 0.4)"
+                "let p := c.color_at(0.5, 0.5)"
+                "print(p.red = 255 and p.green > 100 and p.green < 155 and p.green = p.blue)")))))
+
+(deftest text-draws-something
+  (is (= ["true"]
+         (both (program
+                "let c := create Canvas.make(200, 100)"
+                "c.set_font(Font.SANS.with_size(48).bold())"
+                "c.text(0.5, 0.5, \"███\")"
+                "c.text_left(0.0, 0.1, \"left\")"
+                "c.text_right(1.0, 0.9, \"right\")"
+                "print(c.color_at(0.5, 0.5) /= Color.WHITE)")))))
+
+(deftest set-canvas-size-resizes-and-clears
+  (is (= ["\"300 120\"" "Color(255, 255, 255)" "Color(255, 0, 0)"]
+         (both (program
+                "let c := create Canvas.make(100, 100)"
+                "c.set_pen_color(Color.BLUE)"
+                "c.filled_square(0.5, 0.5, 0.5)"
+                "c.set_canvas_size(300, 120)"
+                "print(c.width.to_string + \" \" + c.height.to_string)"
+                "print(c.color_at(0.5, 0.5))"
+                "c.set_pen_color(Color.RED)"
+                "c.filled_square(0.5, 0.5, 0.1)"
+                "print(c.color_at(0.5, 0.5))")))))
+
+(deftest double-buffering-flag
+  (is (= ["false" "true" "false"]
+         (both (program
+                "let c := create Canvas.make(10, 10)"
+                "print(c.is_double_buffered)"
+                "c.enable_double_buffering()"
+                "print(c.is_double_buffered)"
+                "c.disable_double_buffering()"
+                "print(c.is_double_buffered)")))))
+
+;; ---------------------------------------------------------------------------
+;; Saving
+;; ---------------------------------------------------------------------------
+
+(deftest save-writes-each-format
+  (doseq [ext ["png" "jpg" "gif" "bmp"]
+          interpret? [false true]]
+    (let [out (java.io.File/createTempFile "canvas" (str "." ext))]
+      (try
+        (.delete out)
+        (run-backend (program
+                      "let c := create Canvas.make(64, 32)"
+                      "c.set_pen_color(Color.RED)"
+                      "c.filled_square(0.5, 0.5, 0.25)"
+                      (str "c.save(\"" (.getPath out) "\")"))
+                     interpret?)
+        (testing (str ext (when interpret? " (interpreted)"))
+          (let [img (javax.imageio.ImageIO/read out)]
+            (is (some? img))
+            (is (= [64 32] [(.getWidth img) (.getHeight img)]))
+            ;; centre pixel is (close to, for lossy jpg) pure red
+            (let [rgb (.getRGB img 32 16)
+                  r (bit-and (bit-shift-right rgb 16) 0xFF)
+                  g (bit-and (bit-shift-right rgb 8) 0xFF)]
+              (is (> r 240))
+              (is (< g 20)))))
+        (finally (io/delete-file out true))))))
+
+(deftest save-rejects-unknown-extension
+  (is (raises-on-both? (program
+                        "let c := create Canvas.make(10, 10)"
+                        "c.save(\"picture.tiff\")")
+                       "known_format")))
+
+;; ---------------------------------------------------------------------------
+;; Contracts
+;; ---------------------------------------------------------------------------
+
+(deftest preconditions
+  (is (raises-on-both? (program "let c := create Canvas.make(0, 10)") "positive_width"))
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "c.set_x_scale(1.0, 0.0)")
+                       "increasing"))
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "c.set_pen_radius(-1.0)")
+                       "non_negative_radius"))
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "c.polygon([0.1, 0.2, 0.3], [0.1, 0.2])")
+                       "same_length"))
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "c.filled_polygon([0.1, 0.2], [0.1, 0.2])")
+                       "at_least_three_points"))
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "c.circle(0.5, 0.5, -0.1)")
+                       "non_negative_radius"))
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "print(c.color_at(2.0, 0.5))")
+                       "inside_x")))

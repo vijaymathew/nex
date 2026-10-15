@@ -1,0 +1,98 @@
+-- graphics/Canvas: a still picture saved to a file, then a short animation.
+--
+--   nex examples/graphics_example.nex
+--
+-- Opens a window when a display is available. Without one (or with
+-- -Djava.awt.headless=true) it still runs to the end and writes the PNG.
+
+intern graphics/Canvas
+
+function draw_scene(c: Canvas) do
+  c.clear(create Color.make(200, 230, 255))
+
+  -- ground
+  c.set_pen_color(create Color.make(90, 160, 70))
+  c.filled_rectangle(5.0, 1.0, 5.0, 1.0)
+
+  -- sun, with a translucent halo
+  c.set_pen_color(Color.YELLOW.with_alpha(80))
+  c.filled_circle(8.0, 6.0, 1.2)
+  c.set_pen_color(Color.ORANGE)
+  c.filled_circle(8.0, 6.0, 0.8)
+
+  -- house: a square body, a triangular roof, a door
+  c.set_pen_color(create Color.make(230, 210, 180))
+  c.filled_square(3.5, 3.5, 1.5)
+  c.set_pen_color(Color.DARK_GRAY)
+  c.set_pen_radius(2.0)
+  c.square(3.5, 3.5, 1.5)
+  c.set_pen_color(create Color.make(170, 40, 40))
+  c.filled_polygon([1.6, 5.4, 3.5], [5.0, 5.0, 6.8])
+  c.set_pen_color(create Color.make(110, 70, 40))
+  c.filled_rectangle(3.5, 2.6, 0.4, 0.6)
+
+  -- a path, as a polyline of short lines
+  c.set_pen_color(Color.GRAY)
+  c.set_pen_radius(3.0)
+  c.line(3.5, 2.0, 4.5, 1.2)
+  c.line(4.5, 1.2, 6.5, 0.4)
+
+  c.set_pen_color(Color.BLACK)
+  c.set_font(Font.SERIF.with_size(24).bold())
+  c.text(5.0, 7.4, "Home")
+  c.set_font(Font.SANS.with_size(12))
+  c.text_right(9.9, 0.2, "drawn with graphics/Canvas")
+end
+
+function bounce(c: Canvas) do
+  c.enable_double_buffering()
+  let x: Real := 1.0
+  let y: Real := 6.0
+  let vx: Real := 0.12
+  let vy: Real := 0.0
+  from
+    let frame: Integer := 0
+  until
+    frame = 240
+  do
+    -- gravity, then bounce off the floor and the walls
+    vy := vy - 0.02
+    x := x + vx
+    y := y + vy
+    if y < 0.5 then
+      y := 0.5
+      vy := -vy * 0.85
+    end
+    if x < 0.5 or x > 9.5 then
+      vx := -vx
+    end
+
+    c.clear(Color.WHITE)
+    c.set_pen_color(Color.LIGHT_GRAY)
+    c.set_pen_radius(1.0)
+    c.line(0.0, 0.0, 10.0, 0.0)
+    c.set_pen_color(Color.BLUE)
+    c.filled_circle(x, y, 0.5)
+    c.show()
+    c.pause(16)
+    frame := frame + 1
+  end
+  c.disable_double_buffering()
+end
+
+let c := create Canvas.make(600, 480)
+c.set_x_scale(0.0, 10.0)
+c.set_y_scale(0.0, 8.0)
+
+draw_scene(c)
+c.save("scene.png")
+print("wrote scene.png")
+
+if c.has_display() then
+  c.show()
+  c.pause(1500)
+  bounce(c)
+  draw_scene(c)
+  print("close the window to exit")
+  c.wait_until_closed()
+end

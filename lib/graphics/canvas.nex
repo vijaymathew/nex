@@ -1,0 +1,608 @@
+-- Canvas: simple 2D drawing in user coordinates, on screen or off.
+--
+-- Modelled on Sedgewick & Wayne's StdDraw, but as a class: a program may hold
+-- several canvases, and one that never calls `show` never opens a window, so
+-- drawing and saving images works headless (in tests, on a server). Import
+-- with `intern graphics/Canvas`, which also brings in graphics/Color and
+-- graphics/Font.
+--
+--   let c := create Canvas.make(400, 400)
+--   c.set_pen_color(Color.BLUE)
+--   c.filled_circle(0.5, 0.5, 0.25)
+--   c.text(0.5, 0.9, "hello")
+--   c.save("circle.png")
+--   c.show()
+--   c.wait_until_closed()
+--
+-- Coordinates. Every position is in user coordinates, (0, 0) at the bottom
+-- left and (1, 1) at the top right until `set_x_scale`/`set_y_scale` change
+-- them; y grows upward. Shapes are centre-based: `square(x, y, half_side)`,
+-- `rectangle(x, y, half_width, half_height)`, `circle(x, y, radius)`. Lengths
+-- are scaled per axis, so with unequal x and y scales a circle is drawn as an
+-- ellipse. The pen radius is in pixels, not user units.
+--
+-- Buffering. Drawing always goes to an offscreen image; `show` copies it to
+-- the window, opening the window the first time. With double buffering off
+-- (the default), every drawing command also refreshes an already open window
+-- at once. With it on, nothing reaches the window until the next `show`,
+-- which is what a flicker-free animation wants:
+--
+--   c.enable_double_buffering()
+--   from let t := 0 until t = 100 do
+--     c.clear()
+--     c.filled_circle(t / 100.0, 0.5, 0.05)
+--     c.show()
+--     c.pause(20)
+--     t := t + 1
+--   end
+--
+-- Without a display (java.awt.headless, no X server) `show` only updates the
+-- onscreen image and `wait_until_closed` returns at once, so the same program
+-- runs unchanged in a test.
+--
+-- The window closes with the program: a script that should stay on screen
+-- ends with `wait_until_closed()`.
+
+intern graphics/Color
+intern graphics/Font
+
+import java.awt.AlphaComposite
+import java.awt.BasicStroke
+import java.awt.GraphicsEnvironment
+import java.awt.RenderingHints
+import java.awt.geom.GeneralPath
+import java.awt.image.BufferedImage
+import java.io.File
+import java.lang.Thread
+import javax.imageio.ImageIO
+import javax.swing.ImageIcon
+import javax.swing.JFrame
+import javax.swing.JLabel
+import javax.swing.plaf.ColorUIResource
+import javax.swing.plaf.FontUIResource
+
+class Canvas
+  note "2D drawing in user coordinates; draws offscreen, shows in a window on request."
+
+create
+  -- A W by H pixel canvas, cleared to white, with the default settings: scale
+  -- 0..1 on both axes, black pen of radius 1 pixel, Font.SANS, no double
+  -- buffering.
+  make(w, h: Integer)
+    require
+      positive_width: w > 0
+      positive_height: h > 0
+    do
+      width := w
+      height := h
+      x_min := 0.0
+      x_max := 1.0
+      y_min := 0.0
+      y_max := 1.0
+      pen_radius := 1.0
+      pen_color := Color.BLACK
+      font := Font.SANS
+      is_double_buffered := false
+      window_open := false
+      new_images()
+    ensure
+      sized: width = w and height = h
+    end
+
+feature
+  -- Size in pixels.
+  width: Integer
+  height: Integer
+
+  -- The user-coordinate rectangle the canvas shows.
+  x_min: Real
+  x_max: Real
+  y_min: Real
+  y_max: Real
+
+  -- Pen radius in pixels; lines and outlines are twice this wide.
+  pen_radius: Real
+  pen_color: Color
+  font: Font
+
+  -- Whether drawing waits for `show` before reaching the window.
+  is_double_buffered: Boolean
+
+  -- Whether a window can be opened at all.
+  has_display(): Boolean do
+    let headless: Boolean := true
+    with "java" do
+      headless := GraphicsEnvironment.isHeadless()
+    end
+    result := not headless
+  end
+
+  -- Whether this canvas currently has a window on screen.
+  is_window_open(): Boolean do
+    if window_open then
+      with "java" do
+        result := frame.isDisplayable()
+      end
+    else
+      result := false
+    end
+  end
+
+feature
+  -- Drawing commands.
+
+  line(x0, y0, x1, y1: Real) do
+    with "java" do
+      let p := GeneralPath.new()
+      p.moveTo(sx(x0), sy(y0))
+      p.lineTo(sx(x1), sy(y1))
+      graphics.draw(p)
+    end
+    drawn()
+  end
+
+  -- A dot of the pen's radius.
+  point(x, y: Real) do
+    let r: Real := pen_radius.max(0.5)
+    with "java" do
+      graphics.fill(ellipse_path(sx(x), sy(y), r, r))
+    end
+    drawn()
+  end
+
+  circle(x, y, radius: Real)
+    require
+      non_negative_radius: radius >= 0.0
+    do
+      with "java" do
+        graphics.draw(ellipse_path(sx(x), sy(y), sw(radius), sh(radius)))
+      end
+      drawn()
+    end
+
+  filled_circle(x, y, radius: Real)
+    require
+      non_negative_radius: radius >= 0.0
+    do
+      with "java" do
+        graphics.fill(ellipse_path(sx(x), sy(y), sw(radius), sh(radius)))
+      end
+      drawn()
+    end
+
+  -- An axis-aligned square centred on (X, Y), 2 * HALF_SIDE on a side.
+  square(x, y, half_side: Real)
+    require
+      non_negative_size: half_side >= 0.0
+    do
+      rectangle(x, y, half_side, half_side)
+    end
+
+  filled_square(x, y, half_side: Real)
+    require
+      non_negative_size: half_side >= 0.0
+    do
+      filled_rectangle(x, y, half_side, half_side)
+    end
+
+  -- An axis-aligned rectangle centred on (X, Y), 2 * HALF_WIDTH wide and
+  -- 2 * HALF_HEIGHT high.
+  rectangle(x, y, half_width, half_height: Real)
+    require
+      non_negative_width: half_width >= 0.0
+      non_negative_height: half_height >= 0.0
+    do
+      with "java" do
+        graphics.draw(rectangle_path(sx(x), sy(y), sw(half_width), sh(half_height)))
+      end
+      drawn()
+    end
+
+  filled_rectangle(x, y, half_width, half_height: Real)
+    require
+      non_negative_width: half_width >= 0.0
+      non_negative_height: half_height >= 0.0
+    do
+      with "java" do
+        graphics.fill(rectangle_path(sx(x), sy(y), sw(half_width), sh(half_height)))
+      end
+      drawn()
+    end
+
+  -- The closed polygon through (x[0], y[0]), (x[1], y[1]), ...
+  polygon(x, y: Array[Real])
+    require
+      same_length: x.length = y.length
+      at_least_three_points: x.length >= 3
+    do
+      with "java" do
+        graphics.draw(polygon_path(x, y))
+      end
+      drawn()
+    end
+
+  filled_polygon(x, y: Array[Real])
+    require
+      same_length: x.length = y.length
+      at_least_three_points: x.length >= 3
+    do
+      with "java" do
+        graphics.fill(polygon_path(x, y))
+      end
+      drawn()
+    end
+
+  -- S centred on (X, Y), in the current font and pen color.
+  text(x, y: Real, s: String) do
+    let w: Integer := text_width(s)
+    put_text(sx(x) - w / 2.0, sy(y), s)
+  end
+
+  -- S starting at (X, Y), vertically centred on it.
+  text_left(x, y: Real, s: String) do
+    put_text(sx(x), sy(y), s)
+  end
+
+  -- S ending at (X, Y), vertically centred on it.
+  text_right(x, y: Real, s: String) do
+    let w: Integer := text_width(s)
+    put_text(sx(x) - w, sy(y), s)
+  end
+
+feature
+  -- Control commands.
+
+  -- Make X0..X1 the visible x range. Does not change anything already drawn.
+  set_x_scale(x0, x1: Real)
+    require
+      increasing: x0 < x1
+    do
+      x_min := x0
+      x_max := x1
+    ensure
+      set: x_min = x0 and x_max = x1
+    end
+
+  -- Make Y0..Y1 the visible y range. Does not change anything already drawn.
+  set_y_scale(y0, y1: Real)
+    require
+      increasing: y0 < y1
+    do
+      y_min := y0
+      y_max := y1
+    ensure
+      set: y_min = y0 and y_max = y1
+    end
+
+  set_pen_radius(radius: Real)
+    require
+      non_negative_radius: radius >= 0.0
+    do
+      pen_radius := radius
+      apply_pen()
+    ensure
+      set: pen_radius = radius
+    end
+
+  set_pen_color(color: Color) do
+    pen_color := color
+    apply_pen()
+  ensure
+    set: pen_color = color
+  end
+
+  set_font(f: Font) do
+    font := f
+    apply_font()
+  ensure
+    set: font = f
+  end
+
+  -- Resize to W by H pixels. Clears the canvas to white; scale, pen and font
+  -- are kept.
+  set_canvas_size(w, h: Integer)
+    require
+      positive_width: w > 0
+      positive_height: h > 0
+    do
+      width := w
+      height := h
+      new_images()
+      if window_open then
+        with "java" do
+          label.setIcon(ImageIcon.new(onscreen))
+          frame.pack()
+        end
+      end
+    ensure
+      sized: width = w and height = h
+    end
+
+  enable_double_buffering() do
+    is_double_buffered := true
+  ensure
+    on: is_double_buffered
+  end
+
+  disable_double_buffering() do
+    is_double_buffered := false
+  ensure
+    off: not is_double_buffered
+  end
+
+  -- Copy the offscreen image to the window, opening the window if it is not
+  -- open yet (and a display exists).
+  show() do
+    with "java" do
+      offscreen.copyData(onscreen.getRaster())
+    end
+    if window_open then
+      with "java" do
+        label.repaint()
+      end
+    elseif has_display() then
+      open_window()
+    end
+  end
+
+  -- Fill the whole canvas with white.
+  clear() do
+    clear(Color.WHITE)
+  end
+
+  -- Fill the whole canvas with COLOR.
+  clear(color: Color) do
+    use_color(color)
+    with "java" do
+      graphics.fillRect(0, 0, width, height)
+    end
+    apply_pen()
+    drawn()
+  end
+
+  -- Sleep for MS milliseconds; for pacing an animation.
+  pause(ms: Integer)
+    require
+      non_negative: ms >= 0
+    do
+      with "java" do
+        Thread.sleep(ms)
+      end
+    end
+
+  -- Block until the user closes the window. Returns at once if no window is
+  -- open.
+  wait_until_closed() do
+    from
+    until
+      not is_window_open()
+    do
+      pause(50)
+    end
+  end
+
+  -- Write the canvas to FILENAME. The format comes from the extension: .png,
+  -- .jpg/.jpeg, .gif or .bmp.
+  save(filename: String)
+    require
+      known_format: is_image_file_name(filename)
+    do
+      let ok: Boolean := false
+      with "java" do
+        ok := ImageIO.write(offscreen, image_format(filename), File.new(filename))
+      end
+      if not ok then
+        raise "Canvas.save: no image writer for " + filename
+      end
+    end
+
+  -- Whether FILENAME ends in an extension `save` understands.
+  is_image_file_name(filename: String): Boolean do
+    result := image_format(filename) /= ""
+  end
+
+  -- The color of the pixel at (X, Y).
+  color_at(x, y: Real): Color
+    require
+      inside_x: x >= x_min and x <= x_max
+      inside_y: y >= y_min and y <= y_max
+    do
+      let px: Integer := (sx(x) - 0.5).round().max(0).min(width - 1)
+      let py: Integer := (sy(y) - 0.5).round().max(0).min(height - 1)
+      let rgb: Integer := 0
+      with "java" do
+        rgb := offscreen.getRGB(px, py)
+      end
+      rgb := rgb.bitwise_and(0xFFFFFF)
+      result := create Color.make(rgb / 65536, (rgb / 256) % 256, rgb % 256)
+    end
+
+private feature
+  -- The image drawing goes to.
+  offscreen: Any
+  -- Its Graphics2D, kept in step with pen_color, pen_radius and font.
+  graphics: Any
+  -- The image the window displays; `show` copies offscreen into it.
+  onscreen: Any
+  frame: Any
+  label: Any
+  window_open: Boolean
+
+  new_images() do
+    with "java" do
+      offscreen := BufferedImage.new(width, height, BufferedImage.TYPE_INT_RGB)
+      onscreen := BufferedImage.new(width, height, BufferedImage.TYPE_INT_RGB)
+      graphics := offscreen.createGraphics()
+      graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+      graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+      graphics.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
+    end
+    use_color(Color.WHITE)
+    with "java" do
+      graphics.fillRect(0, 0, width, height)
+    end
+    apply_pen()
+    apply_font()
+  end
+
+  open_window() do
+    with "java" do
+      frame := JFrame.new("Nex Canvas")
+      label := JLabel.new(ImageIcon.new(onscreen))
+      frame.getContentPane().add(label)
+      frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE)
+      frame.setResizable(false)
+      frame.pack()
+      frame.setLocationRelativeTo(nil)
+      frame.setVisible(true)
+    end
+    window_open := true
+  end
+
+  -- After a drawing command: without double buffering, an open window shows
+  -- it at once.
+  drawn() do
+    if not is_double_buffered and window_open then
+      show()
+    end
+  end
+
+  apply_pen() do
+    use_color(pen_color)
+    with "java" do
+      graphics.setStroke(BasicStroke.new(2.0 * pen_radius, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND))
+    end
+  end
+
+  apply_font() do
+    let style: Integer := 0
+    if font.is_bold then
+      style := style + 1
+    end
+    if font.is_italic then
+      style := style + 2
+    end
+    with "java" do
+      graphics.setFont(FontUIResource.new(font.family, style, font.size))
+    end
+  end
+
+  -- Paint with C from now on. The *UIResource classes are plain
+  -- java.awt.Color/Font subclasses, used because those names are taken by
+  -- graphics/Color and graphics/Font; alpha goes through the composite.
+  use_color(c: Color) do
+    with "java" do
+      graphics.setColor(ColorUIResource.new(c.red, c.green, c.blue))
+      graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, c.alpha / 255.0))
+    end
+  end
+
+  -- User coordinates to pixels; pixel y grows downward.
+  sx(x: Real): Real do
+    result := (x - x_min) / (x_max - x_min) * width
+  end
+
+  sy(y: Real): Real do
+    result := (y_max - y) / (y_max - y_min) * height
+  end
+
+  -- User lengths to pixels, per axis.
+  sw(w: Real): Real do
+    result := w / (x_max - x_min) * width
+  end
+
+  sh(h: Real): Real do
+    result := h / (y_max - y_min) * height
+  end
+
+  -- An ellipse centred on pixel (CX, CY) with pixel radii RX, RY, as four
+  -- cubic Bezier arcs (the standard approximation java.awt.geom uses).
+  ellipse_path(cx, cy, rx, ry: Real): Any do
+    let k: Real := 0.5522847498
+    with "java" do
+      let p := GeneralPath.new()
+      p.moveTo(cx + rx, cy)
+      p.curveTo(cx + rx, cy + k * ry, cx + k * rx, cy + ry, cx, cy + ry)
+      p.curveTo(cx - k * rx, cy + ry, cx - rx, cy + k * ry, cx - rx, cy)
+      p.curveTo(cx - rx, cy - k * ry, cx - k * rx, cy - ry, cx, cy - ry)
+      p.curveTo(cx + k * rx, cy - ry, cx + rx, cy - k * ry, cx + rx, cy)
+      p.closePath()
+      result := p
+    end
+  end
+
+  rectangle_path(cx, cy, hw, hh: Real): Any do
+    with "java" do
+      let p := GeneralPath.new()
+      p.moveTo(cx - hw, cy - hh)
+      p.lineTo(cx + hw, cy - hh)
+      p.lineTo(cx + hw, cy + hh)
+      p.lineTo(cx - hw, cy + hh)
+      p.closePath()
+      result := p
+    end
+  end
+
+  polygon_path(x, y: Array[Real]): Any do
+    with "java" do
+      let p := GeneralPath.new()
+      p.moveTo(sx(x.get(0)), sy(y.get(0)))
+      from
+        let i: Integer := 1
+      until
+        i = x.length
+      do
+        p.lineTo(sx(x.get(i)), sy(y.get(i)))
+        i := i + 1
+      end
+      p.closePath()
+      result := p
+    end
+  end
+
+  text_width(s: String): Integer do
+    with "java" do
+      result := graphics.getFontMetrics().stringWidth(s)
+    end
+  end
+
+  -- Draw S with its baseline placed so that it is vertically centred on
+  -- pixel row PY, starting at pixel column PX.
+  put_text(px, py: Real, s: String) do
+    let ascent: Integer := 0
+    let descent: Integer := 0
+    with "java" do
+      let metrics := graphics.getFontMetrics()
+      ascent := metrics.getAscent()
+      descent := metrics.getDescent()
+    end
+    let baseline: Real := py + (ascent - descent) / 2.0
+    with "java" do
+      graphics.drawString(s, px.round(), baseline.round())
+    end
+    drawn()
+  end
+
+  -- "png", "jpg", "gif" or "bmp" for a FILENAME `save` can write, else "".
+  image_format(filename: String): String do
+    let lower: String := filename.to_lower()
+    if lower.ends_with(".png") then
+      result := "png"
+    elseif lower.ends_with(".jpg") or lower.ends_with(".jpeg") then
+      result := "jpg"
+    elseif lower.ends_with(".gif") then
+      result := "gif"
+    elseif lower.ends_with(".bmp") then
+      result := "bmp"
+    else
+      result := ""
+    end
+  end
+
+invariant
+  positive_width: width > 0
+  positive_height: height > 0
+  x_range: x_min < x_max
+  y_range: y_min < y_max
+  non_negative_pen: pen_radius >= 0.0
+end

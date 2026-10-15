@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **`graphics/Canvas`: a 2D drawing library.** Lines, points, circles,
+  squares, rectangles, polygons and text in user coordinates, with
+  centre-based shapes, pen color and radius, fonts, double buffering for
+  animation, and saving as PNG, JPEG, GIF or BMP. It draws offscreen and opens
+  a window only on `show`, so it also runs headless. `graphics/Color` and
+  `graphics/Font` are immutable values with contracts and named constants
+  (`Color.RED`, `Font.SERIF`). Written in Nex on Java2D/Swing. See
+  `docs/ref/graphics.md` and `examples/graphics_example.nex`.
+- **Fix: a class constant may construct its own class.**
+  `RED = create Color.make(255, 0, 0)` inside `Color` failed to typecheck with
+  "Constructor not found", because constant types were inferred before the
+  class's constructors and routines were registered.
+- **Fix: a constructor can call its class's private routines on the
+  interpreter.** It failed with "Method not found in parent".
+- **Fix: mixed Integer/Real arithmetic on a field inside `with "java"`.** On
+  the compiled backend `k.a / 255.0` (an `Integer` field) was an integer
+  division, giving `0`, and at top level it failed with "Unsupported JVM stack
+  coercion".
 - **Local functions.** A `function` may be written inside a routine or any
   other block. It is a closure bound to its name — `function f(...) ... end`
   there means `let f := fn (...) ... end` — so it captures the enclosing
