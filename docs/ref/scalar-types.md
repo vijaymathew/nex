@@ -304,8 +304,26 @@ by contrast, raises.)
 | `abs` | none | `Real` | Absolute value. |
 | `min` | `other: Real` | `Real` | Smaller of two values. |
 | `max` | `other: Real` | `Real` | Larger of two values. |
-| `round` | none | `Integer` | Round to nearest integer. |
-| `to_fixed` | `places: Integer` | `Real` | Round to `places` decimal places. |
+| `round` | none | `Integer` | Round to the nearest integer, halves up (`2.5` to `3`, `-2.5` to `-2`). Raises as `floor` does. |
+| `floor` | none | `Integer` | Largest integer not above the value. Raises for `NaN`, an infinity, or a value outside the `Integer` range. |
+| `ceiling` | none | `Integer` | Smallest integer not below the value. Raises as `floor` does. |
+| `truncate` | none | `Integer` | The value with its fraction dropped (toward zero). Raises as `floor` does. |
+| `to_fixed` | `places: Integer` | `Real` | Round to `places` decimal places using half-up rounding. |
+| `sqrt` | none | `Real` | Square root. |
+| `cbrt` | none | `Real` | Cube root. |
+| `exp` | none | `Real` | *e* raised to the value. |
+| `log` | none | `Real` | Natural logarithm. |
+| `log10` | none | `Real` | Base-10 logarithm. |
+| `log2` | none | `Real` | Base-2 logarithm, exact for powers of two. |
+| `power` | `exponent: Real` | `Real` | The value raised to `exponent`; the method form of `^`. |
+| `sin`, `cos`, `tan` | none | `Real` | Trigonometric functions of an angle in radians. |
+| `asin`, `acos`, `atan` | none | `Real` | Inverse trigonometric functions, in radians. |
+| `atan2` | `x: Real` | `Real` | `y.atan2(x)` is the angle of the point (`x`, `y`), in radians, `-PI..PI`. |
+| `to_radians` | none | `Real` | Degrees to radians. |
+| `to_degrees` | none | `Real` | Radians to degrees. |
+| `sign` | none | `Real` | `-1.0`, `0.0` or `1.0` by the value's sign (`-0.0` and `NaN` are returned unchanged). |
+| `clamp` | `low: Real, high: Real` | `Real` | The value limited to `low..high`. Raises unless `low <= high`. |
+| `hypot` | `other: Real` | `Real` | `sqrt(value^2 + other^2)`, without overflowing in between. |
 | `is_nan` | none | `Boolean` | True if the value is `NaN`. |
 | `is_infinite` | none | `Boolean` | True if the value is `±Infinity`. |
 | `is_finite` | none | `Boolean` | True if the value is neither `NaN` nor infinite. |
@@ -321,6 +339,25 @@ by contrast, raises.)
 | `greater_than_or_equal` | `other: Real` | `Boolean` | Numeric `>=`. |
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
+
+The math methods follow IEEE-754 as division does: outside a function's domain
+the result is `NaN` or an infinity, not an error. `(-1.0).sqrt` and `2.0.asin`
+are `NaN`, `0.0.log` is `-Infinity`. Test with `is_nan`/`is_finite`. Only the
+`Integer`-returning `round`, `floor`, `ceiling` and `truncate` raise, since no
+`Integer` stands for `NaN`, an infinity, or a value outside the `Integer` range.
+
+### Constants
+
+| Constant | Value |
+|---|---|
+| `Real.PI` | π, `3.141592653589793` |
+| `Real.E` | *e*, `2.718281828459045` |
+
+```nex
+let area: Real := Real.PI * (r ^ 2)
+let angle: Real := 45.0.to_radians
+print(angle.sin)                  -- 0.7071067811865475
+```
 
 ## `Boolean`
 

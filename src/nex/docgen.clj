@@ -33,7 +33,7 @@
       :byte (str (:value expr) "u8")
       :int16 (str (:value expr) "i16")
       :int32 (str (:value expr) "i32")
-      :real (str (:value expr))
+      :real (or (:source expr) (str (:value expr)))
       :string (str "\"" (:value expr) "\"")
       :char (str "'" (:value expr) "'")
       :boolean (str (:value expr))

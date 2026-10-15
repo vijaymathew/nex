@@ -1,0 +1,87 @@
+-- Color: an immutable RGBA color value for graphics/Canvas.
+--
+-- Plain Nex fields, no Java types: Canvas converts to java.awt.Color only at
+-- the point of drawing. `=` compares colors by value (the default structural
+-- equals), so `c = Color.RED` holds for any opaque pure red. Import with
+-- `intern graphics/Color`.
+--
+--   let teal := create Color.make(0, 128, 128)
+--   let ghost := Color.WHITE.with_alpha(64)
+
+class Color
+  note "Immutable RGBA color value; each channel is 0..255."
+
+create
+  -- An opaque color.
+  make(r, g, b: Integer)
+    require
+      red_in_range: r >= 0 and r <= 255
+      green_in_range: g >= 0 and g <= 255
+      blue_in_range: b >= 0 and b <= 255
+    do
+      this.make_rgba(r, g, b, 255)
+    end
+
+  -- A color with explicit opacity: alpha 0 is transparent, 255 opaque.
+  make_rgba(r, g, b, a: Integer)
+    require
+      red_in_range: r >= 0 and r <= 255
+      green_in_range: g >= 0 and g <= 255
+      blue_in_range: b >= 0 and b <= 255
+      alpha_in_range: a >= 0 and a <= 255
+    do
+      red := r
+      green := g
+      blue := b
+      alpha := a
+    end
+
+feature
+  once red: Integer
+  once green: Integer
+  once blue: Integer
+  once alpha: Integer
+
+  BLACK = create Color.make(0, 0, 0)
+  WHITE = create Color.make(255, 255, 255)
+  RED = create Color.make(255, 0, 0)
+  GREEN = create Color.make(0, 255, 0)
+  BLUE = create Color.make(0, 0, 255)
+  YELLOW = create Color.make(255, 255, 0)
+  CYAN = create Color.make(0, 255, 255)
+  MAGENTA = create Color.make(255, 0, 255)
+  ORANGE = create Color.make(255, 200, 0)
+  PINK = create Color.make(255, 175, 175)
+  GRAY = create Color.make(128, 128, 128)
+  LIGHT_GRAY = create Color.make(192, 192, 192)
+  DARK_GRAY = create Color.make(64, 64, 64)
+
+  -- This color with its alpha replaced by A.
+  with_alpha(a: Integer): Color
+    require
+      alpha_in_range: a >= 0 and a <= 255
+    do
+      result := create Color.make_rgba(red, green, blue, a)
+    ensure
+      same_rgb: result.red = red and result.green = green and result.blue = blue
+      new_alpha: result.alpha = a
+    end
+
+  is_opaque(): Boolean do
+    result := alpha = 255
+  end
+
+  to_string(): String do
+    if alpha = 255 then
+      result := "Color(" + red + ", " + green + ", " + blue + ")"
+    else
+      result := "Color(" + red + ", " + green + ", " + blue + ", " + alpha + ")"
+    end
+  end
+
+invariant
+  red_in_range: red >= 0 and red <= 255
+  green_in_range: green >= 0 and green <= 255
+  blue_in_range: blue >= 0 and blue <= 255
+  alpha_in_range: alpha >= 0 and alpha <= 255
+end

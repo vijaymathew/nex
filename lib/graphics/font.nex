@@ -1,0 +1,82 @@
+-- Font: an immutable text font description for graphics/Canvas.
+--
+-- Plain Nex fields, no Java types: Canvas converts to java.awt.Font only at
+-- the point of drawing. FAMILY is a font family name ("Serif", "SansSerif",
+-- "Monospaced" are always available; others depend on the machine and fall
+-- back to a default when missing). Import with `intern graphics/Font`.
+--
+--   let title := Font.SERIF.with_size(32).bold()
+
+class Font
+  note "Immutable font description: family, point size, bold, italic."
+
+create
+  -- A plain (not bold, not italic) font.
+  make(family_name: String, point_size: Integer)
+    require
+      has_family: family_name.length > 0
+      positive_size: point_size > 0
+    do
+      this.make_styled(family_name, point_size, false, false)
+    end
+
+  make_styled(family_name: String, point_size: Integer, bold_flag, italic_flag: Boolean)
+    require
+      has_family: family_name.length > 0
+      positive_size: point_size > 0
+    do
+      family := family_name
+      size := point_size
+      is_bold := bold_flag
+      is_italic := italic_flag
+    end
+
+feature
+  once family: String
+  once size: Integer
+  once is_bold: Boolean
+  once is_italic: Boolean
+
+  SANS = create Font.make("SansSerif", 16)
+  SERIF = create Font.make("Serif", 16)
+  MONO = create Font.make("Monospaced", 16)
+
+  -- This font at point size N.
+  with_size(n: Integer): Font
+    require
+      positive_size: n > 0
+    do
+      result := create Font.make_styled(family, n, is_bold, is_italic)
+    ensure
+      resized: result.size = n
+    end
+
+  -- A bold version of this font.
+  bold(): Font do
+    result := create Font.make_styled(family, size, true, is_italic)
+  ensure
+    is_bold: result.is_bold
+  end
+
+  -- An italic version of this font.
+  italic(): Font do
+    result := create Font.make_styled(family, size, is_bold, true)
+  ensure
+    is_italic: result.is_italic
+  end
+
+  to_string(): String do
+    result := "Font(" + family + ", " + size
+    if is_bold then
+      result := result + ", bold"
+    end
+    if is_italic then
+      result := result + ", italic"
+    end
+    result := result + ")"
+  end
+
+invariant
+  has_family: family.length > 0
+  positive_size: size > 0
+end

@@ -40,6 +40,12 @@ read one is to run it alongside the source.
 
 ## Library and tooling
 
+- **graphics_example.nex** — `graphics/Canvas`: a scene saved as a PNG, then a
+  short bouncing-ball animation in a window
+- **graphics_input_example.nex** — a sketchpad: drawing with the mouse, keys to
+  change color and clear
+- **graphics_sprite_example.nex** — a rocket sprite (`assets/ship.png`) flown
+  with the arrow keys and dragged with the mouse
 - **io_text_example.nex**, **io_binary_example.nex** — file I/O
 - **echo_server.nex**, **echo_client.nex** — TCP sockets
 - **http_server.nex**, **http_client_to_server.nex** — HTTP

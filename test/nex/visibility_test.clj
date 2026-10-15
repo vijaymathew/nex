@@ -102,3 +102,23 @@ let c := create Counter.make(10)")]
                               :method "count"
                               :args []
                               :has-parens false}))))))
+
+(deftest constructor-can-call-own-private-routine-test
+  ;; The interpreter dispatches a constructor's self-calls without naming the
+  ;; calling class, so a private routine looked invisible to its own class:
+  ;; "Method not found in parent Widget: init".
+  (let [ctx (interp/make-context)]
+    (interp/eval-node ctx (p/ast "class Widget
+  create
+    make() do
+      init(4)
+    end
+  feature
+    size: Integer
+  private feature
+    init(n: Integer) do
+      size := n * 2
+    end
+end
+print((create Widget.make()).size)"))
+    (is (= ["8"] @(:output ctx)))))

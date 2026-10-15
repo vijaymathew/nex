@@ -2429,6 +2429,28 @@
 (def-builtin-method-wrapper builtin-method-real-min "min")
 (def-builtin-method-wrapper builtin-method-real-max "max")
 (def-builtin-method-wrapper builtin-method-real-round "round")
+(def-builtin-method-wrapper builtin-method-real-floor "floor")
+(def-builtin-method-wrapper builtin-method-real-ceiling "ceiling")
+(def-builtin-method-wrapper builtin-method-real-truncate "truncate")
+(def-builtin-method-wrapper builtin-method-real-sqrt "sqrt")
+(def-builtin-method-wrapper builtin-method-real-cbrt "cbrt")
+(def-builtin-method-wrapper builtin-method-real-exp "exp")
+(def-builtin-method-wrapper builtin-method-real-log "log")
+(def-builtin-method-wrapper builtin-method-real-log10 "log10")
+(def-builtin-method-wrapper builtin-method-real-log2 "log2")
+(def-builtin-method-wrapper builtin-method-real-power "power")
+(def-builtin-method-wrapper builtin-method-real-sin "sin")
+(def-builtin-method-wrapper builtin-method-real-cos "cos")
+(def-builtin-method-wrapper builtin-method-real-tan "tan")
+(def-builtin-method-wrapper builtin-method-real-asin "asin")
+(def-builtin-method-wrapper builtin-method-real-acos "acos")
+(def-builtin-method-wrapper builtin-method-real-atan "atan")
+(def-builtin-method-wrapper builtin-method-real-atan2 "atan2")
+(def-builtin-method-wrapper builtin-method-real-to-radians "to_radians")
+(def-builtin-method-wrapper builtin-method-real-to-degrees "to_degrees")
+(def-builtin-method-wrapper builtin-method-real-sign "sign")
+(def-builtin-method-wrapper builtin-method-real-clamp "clamp")
+(def-builtin-method-wrapper builtin-method-real-hypot "hypot")
 (def-builtin-method-wrapper builtin-method-real-to-fixed "to_fixed")
 (def-builtin-method-wrapper builtin-method-real-is-nan "is_nan")
 (def-builtin-method-wrapper builtin-method-real-is-infinite "is_infinite")
@@ -3230,6 +3252,22 @@
 
       (str/starts-with? name "user-field-set:")
       (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
+
+      ;; An Any-protocol name (`get`, `length`, ...) on an `Any` inside
+      ;; `with "java"`: the value may be a real Java object with a same-named
+      ;; method (`map.get(k)` on a ConcurrentHashMap, `n.get()` on an
+      ;; AtomicInteger) that the Nex builtin table does not cover. Try the
+      ;; builtin, then reflection -- as the interpreter's eval-call does.
+      (str/starts-with? name "builtin-or-java:")
+      (let [target (first args)
+            method (subs name (count "builtin-or-java:"))]
+        (try
+          (bi/call-builtin-method (builtin-ctx state) target target method (rest args))
+          (catch clojure.lang.ExceptionInfo e
+            (if (and (= method (:method (ex-data e)))
+                     (str/starts-with? (.getMessage e) "Method not found on type"))
+              (java-call-method state method target (vec (rest args)))
+              (throw e)))))
 
       (str/starts-with? name "method:")
       (let [target (first args)]

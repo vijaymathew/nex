@@ -7075,6 +7075,36 @@
   [env {:keys [name body] :as class-def}]
   (env-add-class env name class-def)
 
+  ;; Collect method and constructor signatures *before* inferring constant
+  ;; types: a constant's initializer may construct the class itself
+  ;; (`RED = create Color.make(255, 0, 0)`) or call one of its routines, and
+  ;; every signature here is declared, so none depends on a constant's type.
+  ;; Reads class-def directly rather than re-fetching it via
+  ;; (env-lookup-class env name): when `name` is a bare name flagged
+  ;; ambiguous (docs/proposals/namespaces.md, Phase 2), that lookup throws —
+  ;; and this pass runs unconditionally over every class in
+  ;; `visible-classes`, including the one that happens to win the bare-name
+  ;; collapse, regardless of whether the program ever actually references
+  ;; the bare name. Re-fetching through env-lookup-class turned that into an
+  ;; eager, presence-based throw for every ambiguous pair, defeating the
+  ;; reference-time design Phase 2 was built around; reading the local
+  ;; binding restores it.
+  (doseq [section body]
+    (cond
+      (= (:type section) :feature-section)
+      (doseq [member (:members section)]
+        (when (= (:type member) :method)
+          (env-add-method env name (:name member)
+                          {:params (:params member)
+                           :return-type (:return-type member)
+                           :alias (:alias member)})))
+
+      (= (:type section) :constructors)
+      (doseq [ctor (:constructors section)]
+        (env-add-method env name (:name ctor)
+                        {:params (:params ctor)
+                         :return-type name}))))
+
   ;; Collect fields/constants and infer constant types.
   ;;
   ;; A constant's initializer may name an earlier constant of the same class
@@ -7125,34 +7155,7 @@
                   section))
               body)
         updated-class-def (assoc class-def :body updated-body)]
-    (env-add-class env name updated-class-def)
-
-  ;; Collect method signatures. Reads updated-class-def directly rather than
-  ;; re-fetching it via (env-lookup-class env name): when `name` is a bare
-  ;; name flagged ambiguous (docs/proposals/namespaces.md, Phase 2), that
-  ;; lookup throws — and this pass runs unconditionally over every class in
-  ;; `visible-classes`, including the one that happens to win the bare-name
-  ;; collapse, regardless of whether the program ever actually references
-  ;; the bare name. Re-fetching through env-lookup-class turned that into an
-  ;; eager, presence-based throw for every ambiguous pair, defeating the
-  ;; reference-time design Phase 2 was built around; reading the local
-  ;; binding restores it — collect-class-info has this class-def already, it
-  ;; doesn't need to ask the (possibly ambiguous) registry for it back.
-    (doseq [section (:body updated-class-def)]
-      (cond
-        (= (:type section) :feature-section)
-        (doseq [member (:members section)]
-          (when (= (:type member) :method)
-            (env-add-method env name (:name member)
-                            {:params (:params member)
-                             :return-type (:return-type member)
-                             :alias (:alias member)})))
-
-        (= (:type section) :constructors)
-        (doseq [ctor (:constructors section)]
-          (env-add-method env name (:name ctor)
-                          {:params (:params ctor)
-                           :return-type name}))))))
+    (env-add-class env name updated-class-def)))
 
 (defn- java-type-parent
   "The reflected Class for parent-name, when it names an imported Java type

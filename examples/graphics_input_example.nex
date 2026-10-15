@@ -1,0 +1,80 @@
+-- graphics/Canvas input: a tiny sketchpad.
+--
+--   nex examples/graphics_input_example.nex
+--
+-- Drag with the mouse to draw. Type r, g, b or k for red, green, blue or
+-- black; c clears; hold Space for a thick pen; Escape (or closing the
+-- window) quits. Needs a display.
+
+intern graphics/Canvas
+
+function pen_for(key: String): ?Color do
+  if key = "r" then
+    result := Color.RED
+  elseif key = "g" then
+    result := Color.GREEN
+  elseif key = "b" then
+    result := Color.BLUE
+  elseif key = "k" then
+    result := Color.BLACK
+  else
+    result := nil
+  end
+end
+
+function draw_help(c: Canvas) do
+  c.set_font(Font.SANS.with_size(12))
+  c.set_pen_color(Color.GRAY)
+  c.text_left(0.01, 0.98, "drag to draw   r g b k: color   c: clear   space: thick   esc: quit")
+end
+
+let c := create Canvas.make(640, 480)
+if not c.has_display() then
+  print("no display: this example needs a window")
+else
+  draw_help(c)
+  c.show()
+
+  let ink: Color := Color.BLACK
+  let was_pressed: Boolean := false
+  let last_x: Real := 0.0
+  let last_y: Real := 0.0
+  from
+  until
+    not c.is_window_open() or c.is_key_pressed(Key.ESCAPE)
+  do
+    -- Typed keys: change color or clear.
+    from
+    until
+      not c.has_next_key_typed()
+    do
+      let key: String := c.next_key_typed()
+      if key = "c" then
+        c.clear()
+        draw_help(c)
+      elseif ?pen_for(key) as picked then
+        ink := picked
+      end
+    end
+
+    -- Mouse: a line from the last position while the button is held.
+    if c.is_mouse_pressed() then
+      let x: Real := c.mouse_x()
+      let y: Real := c.mouse_y()
+      c.set_pen_color(ink)
+      c.set_pen_radius(when c.is_key_pressed(Key.SPACE) then 6.0 else 2.0 end)
+      if was_pressed then
+        c.line(last_x, last_y, x, y)
+      else
+        c.point(x, y)
+      end
+      last_x := x
+      last_y := y
+      was_pressed := true
+    else
+      was_pressed := false
+    end
+
+    c.pause(10)
+  end
+end

@@ -2007,8 +2007,10 @@
                                                     parent-class-name)))))
   ([ctx current-obj parent-class-name method arg-values base-path]
   (let [parent-class-def (lookup-class ctx parent-class-name)
-        ;; Try method first
-        method-lookup (lookup-method-with-inheritance ctx parent-class-def method (count arg-values))
+        ;; Try method first. Pass the calling class so a class's own private
+        ;; routines are visible to it (e.g. a constructor's `init()` helper).
+        method-lookup (lookup-method-with-inheritance ctx parent-class-def method (count arg-values)
+                                                      (:current-class-name ctx))
         ;; If no method found, try constructor
         ctor-def (when-not method-lookup
                    (lookup-constructor parent-class-def method))]

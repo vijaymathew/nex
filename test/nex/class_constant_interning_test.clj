@@ -16,6 +16,7 @@
             [clojure.string :as str]
             [nex.parser :as p]
             [nex.interpreter :as interp]
+            [nex.typechecker :as tc]
             [nex.compiler.jvm.file :as file]
             [nex.compiler.jvm.classloader :as loader]))
 
@@ -182,3 +183,29 @@ print(Origin.POINT.greet())")
   ;; interpreter fix without weakening compiled-backend coverage.
   (testing "a paren'd method call chained off a class-constant access (X.CONST.method()) does not crash the interpreter"
     (is (= ["0" "\"hi\""] (run-interpreted constant-parens-call-program)))))
+
+(def self-constructing-constant-program
+  "class Shade
+  create
+    make(v: Integer)
+      require in_range: v >= 0 and v <= 255
+      do level := v end
+  feature
+    once level: Integer
+    BLACK = create Shade.make(0)
+    WHITE = create Shade.make(255)
+    brighter(): Shade do result := create Shade.make(level + 1) end
+    GRAY = create Shade.make(127).brighter()
+end
+print(Shade.BLACK.level)
+print(Shade.WHITE.level)
+print(Shade.GRAY.level)
+print(Shade.WHITE == Shade.WHITE)")
+
+(deftest constant-may-construct-its-own-class
+  ;; The typechecker inferred constant types before registering the class's
+  ;; constructors and methods, so `BLACK = create Shade.make(0)` inside Shade
+  ;; itself failed with "Constructor not found: Shade.make".
+  (is (empty? (:errors (tc/type-check (p/ast self-constructing-constant-program)))))
+  (is (= ["0" "255" "128" "true"] (run-compiled self-constructing-constant-program)))
+  (is (= ["0" "255" "128" "true"] (run-interpreted self-constructing-constant-program))))

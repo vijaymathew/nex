@@ -10,6 +10,7 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - [System Classes](system-classes.md)
 - [Exception Classes](exceptions.md)
 - [Data Libraries](data.md)
+- [Graphics Libraries](graphics.md)
 - [IO Libraries](io.md)
 - [Text Libraries](text.md)
 - [Time Libraries](time.md)

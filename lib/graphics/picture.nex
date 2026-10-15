@@ -1,0 +1,92 @@
+-- Picture: an image loaded from a file, for drawing with Canvas.picture.
+--
+-- Load once, draw as often as needed (every frame of an animation):
+--
+--   let ship := create Picture.load("ship.png")
+--   c.picture(0.5, 0.5, ship)                         -- natural size
+--   c.picture(0.5, 0.5, ship, 0.1, 0.1, 45.0)          -- scaled and rotated
+--
+-- PNG, JPEG, GIF and BMP files can be read; a PNG's transparency is kept. A
+-- relative path is resolved against the directory `nex` was started from
+-- (NEX_USER_DIR), not the Nex install directory the launcher runs in. Import
+-- with `intern graphics/Picture` (graphics/Canvas interns it for you).
+
+import java.io.File
+import javax.imageio.ImageIO
+
+class Picture
+  note "An image loaded from a PNG, JPEG, GIF or BMP file."
+
+create
+  -- Read the image in FILENAME.
+  load(filename: String)
+    require
+      has_name: filename.length > 0
+    do
+      let path: String := resolve(filename)
+      let found: Boolean := false
+      with "java" do
+        found := File.new(path).isFile()
+      end
+      if not found then
+        raise "Picture.load: no such file: " + path
+      end
+      let ok: Boolean := false
+      with "java" do
+        image := ImageIO.read(File.new(path))
+        ok := image /= nil
+      end
+      if not ok then
+        raise "Picture.load: not a readable image: " + path
+      end
+      with "java" do
+        width := image.getWidth()
+        height := image.getHeight()
+      end
+      source := path
+    end
+
+feature
+  -- Size in pixels.
+  width: Integer
+  height: Integer
+  -- The file it was read from, as resolved.
+  source: String
+
+  -- The java.awt.image.BufferedImage, for use inside `with "java"`.
+  to_java(): Any do
+    result := image
+  end
+
+  to_string(): String do
+    result := "Picture(" + source + ", " + width + "x" + height + ")"
+  end
+
+private feature
+  image: Any
+
+  -- FILENAME made absolute against NEX_USER_DIR when it is relative and the
+  -- launcher set that variable.
+  resolve(filename: String): String do
+    let absolute: Boolean := false
+    with "java" do
+      absolute := File.new(filename).isAbsolute()
+    end
+    let base: String := ""
+    if not absolute then
+      let p := create Process
+      base := p.getenv("NEX_USER_DIR")
+    end
+    if absolute or base = "" then
+      result := filename
+    else
+      with "java" do
+        result := File.new(base, filename).getPath()
+      end
+    end
+  end
+
+invariant
+  positive_width: width > 0
+  positive_height: height > 0
+end

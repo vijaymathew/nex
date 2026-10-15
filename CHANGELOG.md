@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+- **Pictures on `graphics/Canvas`.** `graphics/Picture` loads a PNG, JPEG, GIF
+  or BMP file, and `Canvas.picture` draws it centred on a point, at its
+  natural size or scaled and rotated, keeping PNG transparency. See
+  `examples/graphics_sprite_example.nex`.
+- **Fix: `Canvas.save` and `Picture.load` resolve relative file names against
+  the directory `nex` was started from**, not the Nex install directory the
+  launcher runs in.
+- **Math on `Real`.** `floor`, `ceiling` and `truncate` (to `Integer`);
+  `sqrt`, `cbrt`, `exp`, `log`, `log10`, `log2`, `power`; `sin`, `cos`,
+  `tan`, `asin`, `acos`, `atan`, `atan2`, `to_radians`, `to_degrees`; and
+  `sign`, `clamp`, `hypot`. Real results follow IEEE-754 like division, so
+  `(-1.0).sqrt` is `NaN`; the `Integer`-returning rounders raise for `NaN`,
+  infinities and out-of-range values. New constants `Real.PI` and `Real.E`.
+- **`Real.round` raises for `NaN`, infinities and out-of-range values.** It
+  used to return `0` for `NaN` and saturate out of range, as Java's
+  `Math.round` does. Rounding of ordinary values is unchanged.
+- **Mouse and keyboard input for `graphics/Canvas`.** `mouse_x`/`mouse_y`
+  (user coordinates), `is_mouse_pressed`, `has_next_key_typed`/`next_key_typed`
+  and `is_key_pressed(Key.LEFT)`, polled as in StdDraw. `graphics/Key` names
+  the key codes. `graphics/Canvas_Input` holds the state and can be fed
+  directly, to test input handling without a window. Works on both backends.
+  See `examples/graphics_input_example.nex`.
+- **Fix: `get`, `length` and the other Any-protocol names on a Java object
+  inside `with "java"`.** On the compiled backend, `table.get(k)` on an `Any`
+  holding a `ConcurrentHashMap` (or `n.get()` on an `AtomicInteger`) failed
+  with "Method not found on type: get". It now falls back to the Java method,
+  as the interpreter already did.
+- **Fix: a Java `int` result is a Nex `Integer` on the interpreter.** It
+  stayed a `java.lang.Integer`, which compared equal in Nex but did not match
+  an `Integer` used as a key in a Java collection.
+- **`graphics/Canvas`: a 2D drawing library.** Lines, points, circles,
+  squares, rectangles, polygons and text in user coordinates, with
+  centre-based shapes, pen color and radius, fonts, double buffering for
+  animation, and saving as PNG, JPEG, GIF or BMP. It draws offscreen and opens
+  a window only on `show`, so it also runs headless. `graphics/Color` and
+  `graphics/Font` are immutable values with contracts and named constants
+  (`Color.RED`, `Font.SERIF`). Written in Nex on Java2D/Swing. See
+  `docs/ref/graphics.md` and `examples/graphics_example.nex`.
+- **Fix: a class constant may construct its own class.**
+  `RED = create Color.make(255, 0, 0)` inside `Color` failed to typecheck with
+  "Constructor not found", because constant types were inferred before the
+  class's constructors and routines were registered.
+- **Fix: a constructor can call its class's private routines on the
+  interpreter.** It failed with "Method not found in parent".
+- **Fix: mixed Integer/Real arithmetic on a field inside `with "java"`.** On
+  the compiled backend `k.a / 255.0` (an `Integer` field) was an integer
+  division, giving `0`, and at top level it failed with "Unsupported JVM stack
+  coercion".
 - **Local functions.** A `function` may be written inside a routine or any
   other block. It is a closure bound to its name — `function f(...) ... end`
   there means `let f := fn (...) ... end` — so it captures the enclosing
