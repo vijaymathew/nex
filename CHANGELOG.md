@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.1 - 2026-10-15
+
 - **Pictures on `graphics/Canvas`.** `graphics/Picture` loads a PNG, JPEG, GIF
   or BMP file, and `Canvas.picture` draws it centred on a point, at its
   natural size or scaled and rotated, keeping PNG transparency. See
