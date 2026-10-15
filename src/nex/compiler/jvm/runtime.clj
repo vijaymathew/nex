@@ -3231,6 +3231,22 @@
       (str/starts-with? name "user-field-set:")
       (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
 
+      ;; An Any-protocol name (`get`, `length`, ...) on an `Any` inside
+      ;; `with "java"`: the value may be a real Java object with a same-named
+      ;; method (`map.get(k)` on a ConcurrentHashMap, `n.get()` on an
+      ;; AtomicInteger) that the Nex builtin table does not cover. Try the
+      ;; builtin, then reflection -- as the interpreter's eval-call does.
+      (str/starts-with? name "builtin-or-java:")
+      (let [target (first args)
+            method (subs name (count "builtin-or-java:"))]
+        (try
+          (bi/call-builtin-method (builtin-ctx state) target target method (rest args))
+          (catch clojure.lang.ExceptionInfo e
+            (if (and (= method (:method (ex-data e)))
+                     (str/starts-with? (.getMessage e) "Method not found on type"))
+              (java-call-method state method target (vec (rest args)))
+              (throw e)))))
+
       (str/starts-with? name "method:")
       (let [target (first args)]
         (bi/call-builtin-method (builtin-ctx state) target target

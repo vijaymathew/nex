@@ -11,6 +11,8 @@ runtime, typechecker or compiler support of their own.
 - `graphics/Canvas`: JVM interpreter, generated JVM
 - `graphics/Color`: JVM interpreter, generated JVM
 - `graphics/Font`: JVM interpreter, generated JVM
+- `graphics/Key`: JVM interpreter, generated JVM
+- `graphics/Canvas_Input`: JVM interpreter, generated JVM
 
 Opening a window needs a display. Everything else (drawing, reading pixels,
 saving images) also works headless, for example in tests or on a server.
@@ -18,7 +20,7 @@ saving images) also works headless, for example in tests or on a server.
 ## Load
 
 ```nex
-intern graphics/Canvas   -- also interns graphics/Color and graphics/Font
+intern graphics/Canvas   -- also interns Color, Font, Key and Canvas_Input
 ```
 
 ## Example
@@ -37,6 +39,8 @@ c.wait_until_closed()    -- keep it on screen until the user closes it
 ```
 
 `examples/graphics_example.nex` draws a scene and runs a short animation.
+`examples/graphics_input_example.nex` is a small sketchpad driven by the mouse
+and keyboard.
 
 ## `Canvas`
 
@@ -82,6 +86,7 @@ that image in a window on request.
 | `is_window_open()` | `Boolean` | Whether this canvas has a window on screen. |
 | `color_at(x, y: Real)` | `Color` | The color of the pixel at user position (x, y). Requires the point to be inside the scale. |
 | `is_image_file_name(filename: String)` | `Boolean` | Whether `save` understands the file's extension. |
+| `input` | `Canvas_Input` | The underlying mouse and keyboard state. See *Input*. |
 
 ### Drawing commands
 
@@ -115,6 +120,75 @@ Radii and half-lengths must be non-negative.
 | `pause` | `ms: Integer` | Sleep for `ms` milliseconds. For pacing an animation. |
 | `wait_until_closed` | none | Block until the user closes the window. Returns at once if none is open. |
 | `save` | `filename: String` | Write the image. The format comes from the extension: `.png`, `.jpg`/`.jpeg`, `.gif` or `.bmp`. |
+
+### Input
+
+While the window is open, the mouse and keyboard are polled, as in StdDraw. A
+program reads them once per pass through its loop:
+
+```nex
+from until c.is_key_pressed(Key.ESCAPE) or not c.is_window_open() do
+  if c.is_mouse_pressed() then
+    c.filled_circle(c.mouse_x(), c.mouse_y(), 0.01)
+  end
+  c.pause(16)
+end
+```
+
+| Feature | Returns | Description |
+|---|---|---|
+| `has_mouse_position()` | `Boolean` | Whether the mouse has been over the window yet. |
+| `mouse_x()`, `mouse_y()` | `Real` | Where the mouse was last seen over the window, in user coordinates. Require `has_mouse_position()`. |
+| `is_mouse_pressed()` | `Boolean` | Whether a mouse button is held down. |
+| `has_next_key_typed()` | `Boolean` | Whether a typed character is waiting. |
+| `next_key_typed()` | `String` | The oldest typed character not read yet, as a one-character string, removed from the queue. Requires `has_next_key_typed()`. |
+| `is_key_pressed(code: Integer)` | `Boolean` | Whether the key with this code is held down. Use the `Key` constants. |
+
+Typed characters are what the keyboard produced (`"A"` with Shift held, `"a"`
+without). Held keys are physical keys (`Key.A` either way, `Key.LEFT`,
+`Key.SHIFT`). Keys and buttons held when the window loses focus count as
+released, since their release would never be heard.
+
+Keyboard input goes to the window that has focus. A new window normally gets
+it. If it doesn't, click it.
+
+## `Canvas_Input`
+
+The state behind a canvas's input queries, in pixels (0, 0 at the top left).
+The window feeds it from Swing's event thread, so it is safe to read while
+events arrive. It can also be fed directly, to test input handling without a
+window or to replay a scripted session:
+
+```nex
+c.input.record_mouse_button(40, 60, true)    -- pixel (40, 60), button down
+c.input.record_key_typed("q")
+c.input.record_key(Key.LEFT, true)           -- LEFT held
+```
+
+| Feature | Description |
+|---|---|
+| `record_mouse_moved(px, py: Integer)` | The mouse is at pixel (px, py). |
+| `record_mouse_button(px, py: Integer, is_down: Boolean)` | A button went down or up at (px, py). |
+| `record_key_typed(s: String)` | A character was typed. Requires a one-character `s`. |
+| `record_key(code: Integer, is_down: Boolean)` | A key went down or up. |
+| `release_all()` | Forget held keys and buttons. |
+| `has_mouse_position()`, `mouse_px()`, `mouse_py()`, `is_mouse_pressed()`, `has_next_key_typed()`, `next_key_typed()`, `is_key_pressed(code)` | As on `Canvas`, with positions in pixels. |
+
+It also implements `java.awt.event.MouseListener`, `MouseMotionListener`,
+`KeyListener` and `WindowFocusListener`, which is how the window feeds it.
+
+## `Key`
+
+Key codes for `is_key_pressed`. They are `java.awt.event.KeyEvent`'s virtual
+key codes.
+
+- Letters `A` to `Z` and digits `DIGIT_0` to `DIGIT_9`.
+- Arrows `LEFT`, `RIGHT`, `UP`, `DOWN`.
+- `SPACE`, `ENTER`, `ESCAPE`, `TAB`, `BACKSPACE`, `DELETE`.
+- `SHIFT`, `CONTROL`, `ALT`.
+- `HOME`, `END_KEY`, `PAGE_UP`, `PAGE_DOWN`. (`END_KEY` because `end` is a
+  keyword.)
+- `F1` to `F12`.
 
 ## `Color`
 

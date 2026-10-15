@@ -15,7 +15,10 @@
    affected (it dispatches on the value's *static* Nex type, not runtime
    value shape), so these are interpreter-only regressions; the compiled
    assertions alongside them just confirm the two backends agree."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
+            [nex.compiler.jvm.classloader :as loader]
+            [nex.compiler.jvm.file :as file]
             [nex.interpreter :as interp]
             [nex.parser :as p]
             [nex.typechecker :as tc]))
@@ -71,3 +74,75 @@ print(a.size())")
                    (catch clojure.lang.ExceptionInfo e (:errors (ex-data e))))]
       (is (not= ::no-error errors))
       (is (some #(re-find #"`size` is not a feature of Array" (:message %)) errors)))))
+
+(defn- run-compiled
+  [code]
+  (let [{:keys [main-class classes]} (file/compile-ast "dispatch_test.nex" (p/ast code) {})
+        ldr (loader/make-loader)]
+    (doseq [[binary-name ^bytes bytecode] classes]
+      (loader/define-class! ldr binary-name bytecode))
+    (let [cls (loader/resolve-class ldr main-class)
+          m (.getMethod cls "main" (into-array Class [(Class/forName "[Ljava.lang.String;")]))
+          out (with-out-str
+                (.invoke m nil (object-array [(into-array String [])])))]
+      (->> (str/split-lines out)
+           (remove str/blank?)
+           vec))))
+
+(def any-held-java-get-program
+  "import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+
+class Holder
+  create
+    make() do
+      with \"java\" do
+        table := ConcurrentHashMap.new()
+        table.put(\"k\", 7)
+        counter := AtomicInteger.new(41)
+      end
+    end
+  feature
+    table: Any
+    counter: Any
+
+    show() do
+      with \"java\" do
+        counter.incrementAndGet()
+        print(table.get(\"k\"))
+        print(counter.get())
+      end
+    end
+end
+
+(create Holder.make()).show()")
+
+(deftest any-protocol-name-on-an-any-held-java-object-test
+  ;; `get` (and `length`, ...) on an `Any` is a Nex Any-protocol name, so the
+  ;; compiled backend sent `table.get(k)` on a ConcurrentHashMap and
+  ;; `counter.get()` on an AtomicInteger to the builtin table only, failing
+  ;; with "Method not found on type: get". Inside `with "java"` it now falls
+  ;; back to reflection, as the interpreter already did.
+  (is (= ["7" "42"] (run-compiled any-held-java-get-program)))
+  (is (= ["7" "42"] (run any-held-java-get-program))))
+
+(def java-int-as-collection-key-program
+  "import java.util.concurrent.ConcurrentHashMap
+
+let code: Integer := 0
+let found: Boolean := false
+with \"java\" do
+  let m := ConcurrentHashMap.new()
+  let text: String := \"hello\"
+  code := text.indexOf(\"l\")
+  m.put(code, true)
+  found := m.containsKey(2)
+end
+print(found)")
+
+(deftest java-int-result-is-a-nex-integer-test
+  ;; A Java `int` result reached interpreted Nex code as a java.lang.Integer
+  ;; (the compiled backend makes it a long). It compared equal in Nex, but as
+  ;; a key in a Java collection it did not match the Long a Nex literal is.
+  (is (= ["true"] (run java-int-as-collection-key-program)))
+  (is (= ["true"] (run-compiled java-int-as-collection-key-program))))

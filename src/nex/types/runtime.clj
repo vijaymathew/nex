@@ -419,9 +419,12 @@
   "Normalize a value coming back from a Java call. A Java `short` is a
    java.lang.Short, which Nex reserves as the tag for Byte (see nex-byte?); the
    typechecker types a Java short as Integer, so hand it back as the Long an
-   Integer is."
+   Integer is. A Java `int` likewise comes back as the Long the compiled
+   backend already makes of it: left a java.lang.Integer, it compared equal in
+   Nex but not as a key in a Java collection (`map.containsKey(Key.LEFT)` after
+   `map.put(e.getKeyCode(), ...)`), so the two backends disagreed."
   [v]
-  (if (instance? Short v) (long v) v))
+  (if (or (instance? Short v) (instance? Integer v)) (long v) v))
 
 ;; Integer16 and Integer32 are signed fixed-width integers. Unlike Byte (a
 ;; java.lang.Short, see nex-byte?) they cannot borrow a host boxed class as their

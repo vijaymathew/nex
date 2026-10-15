@@ -255,3 +255,90 @@
   (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
                                 "print(c.color_at(2.0, 0.5))")
                        "inside_x")))
+
+;; ---------------------------------------------------------------------------
+;; Input
+;; ---------------------------------------------------------------------------
+
+(deftest mouse-position-in-user-coordinates
+  (is (= ["false" "2.5" "0.75" "true" "false"]
+         (both (program
+                "let c := create Canvas.make(200, 100)"
+                "c.set_x_scale(0.0, 10.0)"
+                "print(c.has_mouse_position())"
+                ;; pixel (50, 25): a quarter across, a quarter down
+                "c.input.record_mouse_button(50, 25, true)"
+                "print(c.mouse_x())"
+                "print(c.mouse_y())"
+                "print(c.is_mouse_pressed())"
+                "c.input.record_mouse_button(50, 25, false)"
+                "print(c.is_mouse_pressed())")))))
+
+(deftest typed-keys-queue-in-order
+  (is (= ["true" "\"h\"" "\"i\"" "false"]
+         (both (program
+                "let c := create Canvas.make(10, 10)"
+                "c.input.record_key_typed(\"h\")"
+                "c.input.record_key_typed(\"i\")"
+                "print(c.has_next_key_typed())"
+                "print(c.next_key_typed())"
+                "print(c.next_key_typed())"
+                "print(c.has_next_key_typed())")))))
+
+(deftest held-keys-and-release-all
+  (is (= ["true" "false" "false" "true" "false" "false"]
+         (both (program
+                "let c := create Canvas.make(10, 10)"
+                "c.input.record_key(Key.LEFT, true)"
+                "print(c.is_key_pressed(Key.LEFT))"
+                "print(c.is_key_pressed(Key.RIGHT))"
+                "c.input.record_key(Key.LEFT, false)"
+                "print(c.is_key_pressed(Key.LEFT))"
+                "c.input.record_key(Key.A, true)"
+                "c.input.record_mouse_button(1, 1, true)"
+                "print(c.is_key_pressed(Key.A))"
+                "c.input.release_all()"
+                "print(c.is_key_pressed(Key.A))"
+                "print(c.is_mouse_pressed())")))))
+
+(deftest real-awt-events-reach-the-canvas
+  ;; The listener path a window uses, without a window: mouse events
+  ;; dispatched through a real component, key events handed to the listener
+  ;; methods (AWT routes keys only to a focused window).
+  (is (= ["0.25" "0.5" "true" "true" "\"z\"" "false"]
+         (both (str/join "\n"
+                         ["intern graphics/Canvas"
+                          "import java.awt.event.KeyEvent"
+                          "import java.awt.event.MouseEvent"
+                          "import javax.swing.JLabel"
+                          "let c := create Canvas.make(100, 100)"
+                          "with \"java\" do"
+                          "  let label := JLabel.new(\"x\")"
+                          "  label.setSize(100, 100)"
+                          "  label.addMouseListener(c.input)"
+                          "  label.addMouseMotionListener(c.input)"
+                          "  label.dispatchEvent(MouseEvent.new(label, MouseEvent.MOUSE_PRESSED, 0, 0, 25, 50, 1, false))"
+                          "  c.input.keyPressed(KeyEvent.new(label, KeyEvent.KEY_PRESSED, 0, 0, KeyEvent.VK_UP, KeyEvent.CHAR_UNDEFINED))"
+                          "  c.input.keyTyped(KeyEvent.new(label, KeyEvent.KEY_TYPED, 0, 0, KeyEvent.VK_UNDEFINED, #z))"
+                          "end"
+                          "print(c.mouse_x())"
+                          "print(c.mouse_y())"
+                          "print(c.is_mouse_pressed())"
+                          "print(c.is_key_pressed(Key.UP))"
+                          "print(c.next_key_typed())"
+                          "with \"java\" do"
+                          "  let source := JLabel.new(\"y\")"
+                          "  c.input.keyReleased(KeyEvent.new(source, KeyEvent.KEY_RELEASED, 0, 0, KeyEvent.VK_UP, KeyEvent.CHAR_UNDEFINED))"
+                          "end"
+                          "print(c.is_key_pressed(Key.UP))"])))))
+
+(deftest input-preconditions
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "print(c.mouse_x())")
+                       "seen"))
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "print(c.next_key_typed())")
+                       "key_waiting"))
+  (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
+                                "c.input.record_key_typed(\"ab\")")
+                       "one_character")))

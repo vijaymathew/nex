@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Mouse and keyboard input for `graphics/Canvas`.** `mouse_x`/`mouse_y`
+  (user coordinates), `is_mouse_pressed`, `has_next_key_typed`/`next_key_typed`
+  and `is_key_pressed(Key.LEFT)`, polled as in StdDraw. `graphics/Key` names
+  the key codes. `graphics/Canvas_Input` holds the state and can be fed
+  directly, to test input handling without a window. Works on both backends.
+  See `examples/graphics_input_example.nex`.
+- **Fix: `get`, `length` and the other Any-protocol names on a Java object
+  inside `with "java"`.** On the compiled backend, `table.get(k)` on an `Any`
+  holding a `ConcurrentHashMap` (or `n.get()` on an `AtomicInteger`) failed
+  with "Method not found on type: get". It now falls back to the Java method,
+  as the interpreter already did.
+- **Fix: a Java `int` result is a Nex `Integer` on the interpreter.** It
+  stayed a `java.lang.Integer`, which compared equal in Nex but did not match
+  an `Integer` used as a key in a Java collection.
 - **`graphics/Canvas`: a 2D drawing library.** Lines, points, circles,
   squares, rectangles, polygons and text in user coordinates, with
   centre-based shapes, pen color and radius, fonts, double buffering for

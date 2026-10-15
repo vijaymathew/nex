@@ -42,9 +42,26 @@
 --
 -- The window closes with the program: a script that should stay on screen
 -- ends with `wait_until_closed()`.
+--
+-- Input. While the window is open, the mouse and keyboard are polled, as in
+-- StdDraw: `mouse_x`/`mouse_y` (user coordinates), `is_mouse_pressed`,
+-- `has_next_key_typed`/`next_key_typed` (characters, oldest first) and
+-- `is_key_pressed(Key.LEFT)` (keys held down). An animation loop reads them
+-- once per frame:
+--
+--   from until c.is_key_pressed(Key.ESCAPE) or not c.is_window_open() do
+--     if c.is_mouse_pressed() then c.filled_circle(c.mouse_x(), c.mouse_y(), 0.01) end
+--     c.show()
+--     c.pause(16)
+--   end
+--
+-- `input` is the underlying Canvas_Input; its record_* commands feed it
+-- directly, to test input handling without a window.
 
 intern graphics/Color
 intern graphics/Font
+intern graphics/Key
+intern graphics/Canvas_Input
 
 import java.awt.AlphaComposite
 import java.awt.BasicStroke
@@ -84,6 +101,7 @@ create
       font := Font.SANS
       is_double_buffered := false
       window_open := false
+      input := create Canvas_Input.make()
       new_images()
     ensure
       sized: width = w and height = h
@@ -108,6 +126,9 @@ feature
   -- Whether drawing waits for `show` before reaching the window.
   is_double_buffered: Boolean
 
+  -- Mouse and keyboard state, fed by the window (or by its record_* calls).
+  input: Canvas_Input
+
   -- Whether a window can be opened at all.
   has_display(): Boolean do
     let headless: Boolean := true
@@ -115,6 +136,50 @@ feature
       headless := GraphicsEnvironment.isHeadless()
     end
     result := not headless
+  end
+
+  -- Whether the mouse has been over the window yet.
+  has_mouse_position(): Boolean do
+    result := input.has_mouse_position()
+  end
+
+  -- The mouse's last x position over the window, in user coordinates.
+  mouse_x(): Real
+    require
+      seen: has_mouse_position()
+    do
+      result := x_min + input.mouse_px() * (x_max - x_min) / width
+    end
+
+  -- The mouse's last y position over the window, in user coordinates.
+  mouse_y(): Real
+    require
+      seen: has_mouse_position()
+    do
+      result := y_max - input.mouse_py() * (y_max - y_min) / height
+    end
+
+  -- Whether a mouse button is held down.
+  is_mouse_pressed(): Boolean do
+    result := input.is_mouse_pressed()
+  end
+
+  -- Whether a typed character is waiting to be read.
+  has_next_key_typed(): Boolean do
+    result := input.has_next_key_typed()
+  end
+
+  -- The oldest typed character not read yet, removed from the queue.
+  next_key_typed(): String
+    require
+      key_waiting: has_next_key_typed()
+    do
+      result := input.next_key_typed()
+    end
+
+  -- Whether the key with this code (a Key constant) is held down.
+  is_key_pressed(code: Integer): Boolean do
+    result := input.is_key_pressed(code)
   end
 
   -- Whether this canvas currently has a window on screen.
@@ -454,7 +519,12 @@ private feature
       frame.setResizable(false)
       frame.pack()
       frame.setLocationRelativeTo(nil)
+      label.addMouseListener(input)
+      label.addMouseMotionListener(input)
+      frame.addKeyListener(input)
+      frame.addWindowFocusListener(input)
       frame.setVisible(true)
+      frame.requestFocus()
     end
     window_open := true
   end

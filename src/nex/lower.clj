@@ -6742,8 +6742,16 @@
         ;; same fix already applied to the known-user-class-without-override
         ;; case (`lower-instance-user-method-call`'s Any-protocol fallback).
         ;; Reuse that same state-aware path here instead.
-        helper (if (and (= base-type "Any") (contains? #{"to_string" "equals" "hash" "clone"} method))
+        helper (cond
+                 (and (= base-type "Any") (contains? #{"to_string" "equals" "hash" "clone"} method))
                  (str "any:" method)
+
+                 ;; Inside `with "java"` an `Any` may hold a real Java object
+                 ;; whose own `get`/`length`/... the builtin table misses.
+                 (and (= base-type "Any") (:with-java? env))
+                 (str "builtin-or-java:" method)
+
+                 :else
                  (str "builtin-method:" base-type ":" method))]
     (ir/call-runtime-node helper
                           (into [target-ir] arg-irs)

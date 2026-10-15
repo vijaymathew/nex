@@ -1,0 +1,248 @@
+-- Canvas_Input: mouse and keyboard state for graphics/Canvas.
+--
+-- A Canvas's window feeds its Canvas_Input from Swing's event thread; the
+-- program reads it, normally through the Canvas's own queries (which convert
+-- pixels to user coordinates). It can also be fed directly with the
+-- `record_*` commands -- to test input handling without a window, or to
+-- replay a scripted session:
+--
+--   c.input.record_mouse_button(40, 60, true)
+--   c.input.record_key_typed("q")
+--
+-- Positions here are in pixels, (0, 0) at the top left, as Swing reports
+-- them.
+--
+-- All state lives in Java concurrent collections held in `Any` fields rather
+-- than in plain Nex fields. That makes it safe to write from the event thread
+-- while the program reads, and it also keeps every copy of this object in
+-- step: the interpreter treats objects as values, so a plain field written by
+-- an event callback would never be seen by the Canvas holding the listener.
+
+import java.awt.event.KeyEvent
+import java.awt.event.KeyListener
+import java.awt.event.MouseEvent
+import java.awt.event.MouseListener
+import java.awt.event.MouseMotionListener
+import java.awt.event.WindowEvent
+import java.awt.event.WindowFocusListener
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
+
+class Canvas_Input
+  note "Mouse and keyboard state for a Canvas, fed by its window or by record_* calls."
+
+  inherit
+    MouseListener, MouseMotionListener, KeyListener, WindowFocusListener
+
+create
+  make() do
+    with "java" do
+      mouse := ConcurrentHashMap.new()
+      typed := ConcurrentLinkedQueue.new()
+      down := ConcurrentHashMap.new()
+      mouse.put("pressed", false)
+    end
+  end
+
+feature
+  -- Whether the mouse has been seen over the canvas yet.
+  has_mouse_position(): Boolean do
+    with "java" do
+      result := mouse.containsKey("position")
+    end
+  end
+
+  -- The last pixel column the mouse was seen at.
+  mouse_px(): Integer
+    require
+      seen: has_mouse_position()
+    do
+      result := position().get(0)
+    end
+
+  -- The last pixel row the mouse was seen at; 0 is the top.
+  mouse_py(): Integer
+    require
+      seen: has_mouse_position()
+    do
+      result := position().get(1)
+    end
+
+  -- Whether a mouse button is held down.
+  is_mouse_pressed(): Boolean do
+    with "java" do
+      result := mouse.get("pressed")
+    end
+  end
+
+  -- Whether a typed key is waiting to be read.
+  has_next_key_typed(): Boolean do
+    let empty: Boolean := true
+    with "java" do
+      empty := typed.isEmpty()
+    end
+    result := not empty
+  end
+
+  -- The oldest typed key not read yet, as a one-character string, removed
+  -- from the queue.
+  next_key_typed(): String
+    require
+      key_waiting: has_next_key_typed()
+    do
+      with "java" do
+        result := typed.poll()
+      end
+    end
+
+  -- Whether the key with this code (a graphics/Key constant) is held down.
+  is_key_pressed(code: Integer): Boolean do
+    with "java" do
+      result := down.containsKey(code)
+    end
+  end
+
+feature
+  -- Feeding input. The window's listeners use these; so can a test.
+
+  record_mouse_moved(px, py: Integer) do
+    with "java" do
+      mouse.put("position", [px, py])
+    end
+  ensure
+    seen: has_mouse_position()
+  end
+
+  record_mouse_button(px, py: Integer, is_down: Boolean) do
+    record_mouse_moved(px, py)
+    with "java" do
+      mouse.put("pressed", is_down)
+    end
+  ensure
+    pressed_state: is_mouse_pressed() = is_down
+  end
+
+  record_key_typed(s: String)
+    require
+      one_character: s.length = 1
+    do
+      with "java" do
+        typed.add(s)
+      end
+    ensure
+      waiting: has_next_key_typed()
+    end
+
+  record_key(code: Integer, is_down: Boolean) do
+    with "java" do
+      if is_down then
+        down.put(code, true)
+      else
+        down.remove(code)
+      end
+    end
+  ensure
+    key_state: is_key_pressed(code) = is_down
+  end
+
+  -- Forget held keys and buttons, e.g. when the window loses focus and so
+  -- would never hear them released.
+  release_all() do
+    with "java" do
+      down.clear()
+      mouse.put("pressed", false)
+    end
+  end
+
+feature
+  -- java.awt.event listener methods, called by Swing on its event thread.
+
+  mousePressed(e: MouseEvent) do
+    let px: Integer := 0
+    let py: Integer := 0
+    with "java" do
+      px := e.getX()
+      py := e.getY()
+    end
+    record_mouse_button(px, py, true)
+  end
+
+  mouseReleased(e: MouseEvent) do
+    let px: Integer := 0
+    let py: Integer := 0
+    with "java" do
+      px := e.getX()
+      py := e.getY()
+    end
+    record_mouse_button(px, py, false)
+  end
+
+  mouseMoved(e: MouseEvent) do
+    let px: Integer := 0
+    let py: Integer := 0
+    with "java" do
+      px := e.getX()
+      py := e.getY()
+    end
+    record_mouse_moved(px, py)
+  end
+
+  mouseDragged(e: MouseEvent) do
+    mouseMoved(e)
+  end
+
+  mouseClicked(e: MouseEvent) do
+  end
+
+  mouseEntered(e: MouseEvent) do
+  end
+
+  mouseExited(e: MouseEvent) do
+  end
+
+  keyTyped(e: KeyEvent) do
+    let s: String := ""
+    with "java" do
+      s := s + e.getKeyChar()
+    end
+    record_key_typed(s)
+  end
+
+  keyPressed(e: KeyEvent) do
+    let code: Integer := 0
+    with "java" do
+      code := e.getKeyCode()
+    end
+    record_key(code, true)
+  end
+
+  keyReleased(e: KeyEvent) do
+    let code: Integer := 0
+    with "java" do
+      code := e.getKeyCode()
+    end
+    record_key(code, false)
+  end
+
+  windowLostFocus(e: WindowEvent) do
+    release_all()
+  end
+
+  windowGainedFocus(e: WindowEvent) do
+  end
+
+private feature
+  -- "position" -> [px, py] (replaced whole, so x and y never tear) and
+  -- "pressed" -> Boolean.
+  mouse: Any
+  -- Typed keys, oldest first, as one-character strings.
+  typed: Any
+  -- Key codes currently held down -> true.
+  down: Any
+
+  position(): Array[Integer] do
+    with "java" do
+      result := mouse.get("position")
+    end
+  end
+end
