@@ -57,16 +57,27 @@
 --
 -- `input` is the underlying Canvas_Input; its record_* commands feed it
 -- directly, to test input handling without a window.
+--
+-- Pictures. A graphics/Picture loaded once from a PNG, JPEG, GIF or BMP file
+-- is drawn centred on a point, at its natural size or scaled and rotated:
+--
+--   let ship := create Picture.load("ship.png")
+--   c.picture(x, y, ship, 0.05, 0.05, heading)
+--
+-- Relative file names (for `Picture.load` and `save`) are resolved against
+-- the directory `nex` was started from.
 
 intern graphics/Color
 intern graphics/Font
 intern graphics/Key
 intern graphics/Canvas_Input
+intern graphics/Picture
 
 import java.awt.AlphaComposite
 import java.awt.BasicStroke
 import java.awt.GraphicsEnvironment
 import java.awt.RenderingHints
+import java.awt.geom.AffineTransform
 import java.awt.geom.GeneralPath
 import java.awt.image.BufferedImage
 import java.io.File
@@ -314,6 +325,31 @@ feature
     put_text(sx(x) - w, sy(y), s)
   end
 
+  -- P centred on (X, Y), at its natural size in pixels.
+  picture(x, y: Real, p: Picture) do
+    draw_picture(x, y, p, p.width / 2.0, p.height / 2.0, 0.0)
+  end
+
+  -- P centred on (X, Y), scaled to 2 * HALF_WIDTH by 2 * HALF_HEIGHT user
+  -- units.
+  picture(x, y: Real, p: Picture, half_width, half_height: Real)
+    require
+      non_negative_width: half_width >= 0.0
+      non_negative_height: half_height >= 0.0
+    do
+      draw_picture(x, y, p, sw(half_width), sh(half_height), 0.0)
+    end
+
+  -- P centred on (X, Y), scaled as above and turned DEGREES counterclockwise
+  -- about its centre.
+  picture(x, y: Real, p: Picture, half_width, half_height, degrees: Real)
+    require
+      non_negative_width: half_width >= 0.0
+      non_negative_height: half_height >= 0.0
+    do
+      draw_picture(x, y, p, sw(half_width), sh(half_height), degrees)
+    end
+
 feature
   -- Control commands.
 
@@ -447,14 +483,16 @@ feature
   end
 
   -- Write the canvas to FILENAME. The format comes from the extension: .png,
-  -- .jpg/.jpeg, .gif or .bmp.
+  -- .jpg/.jpeg, .gif or .bmp. A relative name is resolved against the
+  -- directory `nex` was started from.
   save(filename: String)
     require
       known_format: is_image_file_name(filename)
     do
       let ok: Boolean := false
+      let path: String := resolve_path(filename)
       with "java" do
-        ok := ImageIO.write(offscreen, image_format(filename), File.new(filename))
+        ok := ImageIO.write(offscreen, image_format(filename), File.new(path))
       end
       if not ok then
         raise "Canvas.save: no image writer for " + filename
@@ -501,6 +539,7 @@ private feature
       graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
       graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
       graphics.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
+      graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
     end
     use_color(Color.WHITE)
     with "java" do
@@ -651,6 +690,54 @@ private feature
       graphics.drawString(s, px.round(), baseline.round())
     end
     drawn()
+  end
+
+  -- P centred on user point (X, Y), drawn PW by PH pixels from its centre to
+  -- its edges, turned DEGREES counterclockwise. Drawn fully opaque (its own
+  -- transparency still applies), whatever the pen's alpha.
+  draw_picture(x, y: Real, p: Picture, pw, ph, degrees: Real) do
+    let cx: Real := sx(x)
+    let cy: Real := sy(y)
+    -- Pixel y grows downward, so counterclockwise on screen is a negative
+    -- rotation in pixel space.
+    let turn: Real := -degrees.to_radians
+    let scale_x: Real := 2.0 * pw / p.width
+    let scale_y: Real := 2.0 * ph / p.height
+    let half_w: Real := p.width / 2.0
+    let half_h: Real := p.height / 2.0
+    use_color(Color.BLACK)
+    with "java" do
+      let at := AffineTransform.new()
+      at.translate(cx, cy)
+      at.rotate(turn)
+      at.scale(scale_x, scale_y)
+      at.translate(-half_w, -half_h)
+      graphics.drawImage(p.to_java(), at, nil)
+    end
+    apply_pen()
+    drawn()
+  end
+
+  -- FILENAME made absolute against NEX_USER_DIR (the directory `nex` was
+  -- started from; the launcher itself runs in the install directory) when it
+  -- is relative and that variable is set.
+  resolve_path(filename: String): String do
+    let absolute: Boolean := false
+    with "java" do
+      absolute := File.new(filename).isAbsolute()
+    end
+    let base: String := ""
+    if not absolute then
+      let p := create Process
+      base := p.getenv("NEX_USER_DIR")
+    end
+    if absolute or base = "" then
+      result := filename
+    else
+      with "java" do
+        result := File.new(base, filename).getPath()
+      end
+    end
   end
 
   -- "png", "jpg", "gif" or "bmp" for a FILENAME `save` can write, else "".

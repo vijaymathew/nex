@@ -1,0 +1,104 @@
+-- graphics/Canvas pictures: a rocket you can fly and drag.
+--
+--   nex examples/graphics_sprite_example.nex      (from the repository root)
+--
+-- Left/Right turn, Up thrusts, Down brakes. Press on the rocket and drag it
+-- to move it by hand. The rocket wraps around the edges. Escape (or closing
+-- the window) quits. Needs a display.
+--
+-- The sprite is examples/assets/ship.png, a PNG with a transparent
+-- background, loaded once and drawn rotated every frame.
+
+intern graphics/Canvas
+
+let WIDTH: Real := 10.0
+let HEIGHT: Real := 7.5
+let SIZE: Real := 0.4           -- half the rocket's drawn width
+
+function draw_stars(c: Canvas) do
+  c.set_pen_color(Color.WHITE)
+  c.set_pen_radius(1.0)
+  from let i: Integer := 0 until i = 60 do
+    -- a fixed scatter, so the stars stay put from frame to frame; none in
+    -- the top strip, where the help text goes
+    c.point((i * 7.31) % WIDTH, (i * 3.17 + (i * i) % 7) % (HEIGHT - 0.5))
+    i := i + 1
+  end
+end
+
+function wrap(v, limit: Real): Real do
+  if v < 0.0 then
+    result := v + limit
+  elseif v > limit then
+    result := v - limit
+  else
+    result := v
+  end
+end
+
+let c := create Canvas.make(800, 600)
+if not c.has_display() then
+  print("no display: this example needs a window")
+else
+  let ship := create Picture.load("examples/assets/ship.png")
+  c.set_x_scale(0.0, WIDTH)
+  c.set_y_scale(0.0, HEIGHT)
+  c.enable_double_buffering()
+  c.show()
+
+  let x: Real := WIDTH / 2.0
+  let y: Real := HEIGHT / 2.0
+  let heading: Real := 90.0      -- degrees counterclockwise from east
+  let vx: Real := 0.0
+  let vy: Real := 0.0
+  let dragging: Boolean := false
+
+  from
+  until
+    not c.is_window_open() or c.is_key_pressed(Key.ESCAPE)
+  do
+    -- Keyboard: steer and thrust.
+    if c.is_key_pressed(Key.LEFT) then
+      heading := heading + 4.0
+    end
+    if c.is_key_pressed(Key.RIGHT) then
+      heading := heading - 4.0
+    end
+    if c.is_key_pressed(Key.UP) then
+      vx := vx + 0.004 * heading.to_radians.cos
+      vy := vy + 0.004 * heading.to_radians.sin
+    end
+    if c.is_key_pressed(Key.DOWN) then
+      vx := vx * 0.9
+      vy := vy * 0.9
+    end
+
+    -- Mouse: a press on the rocket picks it up until the button is let go.
+    if c.is_mouse_pressed() then
+      if not dragging and (c.mouse_x() - x).hypot(c.mouse_y() - y) < SIZE then
+        dragging := true
+      end
+    else
+      dragging := false
+    end
+
+    if dragging then
+      x := c.mouse_x()
+      y := c.mouse_y()
+      vx := 0.0
+      vy := 0.0
+    else
+      x := wrap(x + vx, WIDTH)
+      y := wrap(y + vy, HEIGHT)
+    end
+
+    c.clear(create Color.make(10, 12, 40))
+    draw_stars(c)
+    c.picture(x, y, ship, SIZE, SIZE, heading)
+    c.set_pen_color(Color.LIGHT_GRAY)
+    c.set_font(Font.SANS.with_size(13))
+    c.text_left(0.15, HEIGHT - 0.25, "arrows: fly   drag: move   esc: quit")
+    c.show()
+    c.pause(16)
+  end
+end

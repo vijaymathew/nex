@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Pictures on `graphics/Canvas`.** `graphics/Picture` loads a PNG, JPEG, GIF
+  or BMP file, and `Canvas.picture` draws it centred on a point, at its
+  natural size or scaled and rotated, keeping PNG transparency. See
+  `examples/graphics_sprite_example.nex`.
+- **Fix: `Canvas.save` and `Picture.load` resolve relative file names against
+  the directory `nex` was started from**, not the Nex install directory the
+  launcher runs in.
 - **Math on `Real`.** `floor`, `ceiling` and `truncate` (to `Integer`);
   `sqrt`, `cbrt`, `exp`, `log`, `log10`, `log2`, `power`; `sin`, `cos`,
   `tan`, `asin`, `acos`, `atan`, `atan2`, `to_radians`, `to_degrees`; and

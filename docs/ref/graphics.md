@@ -13,6 +13,7 @@ runtime, typechecker or compiler support of their own.
 - `graphics/Font`: JVM interpreter, generated JVM
 - `graphics/Key`: JVM interpreter, generated JVM
 - `graphics/Canvas_Input`: JVM interpreter, generated JVM
+- `graphics/Picture`: JVM interpreter, generated JVM
 
 Opening a window needs a display. Everything else (drawing, reading pixels,
 saving images) also works headless, for example in tests or on a server.
@@ -20,7 +21,7 @@ saving images) also works headless, for example in tests or on a server.
 ## Load
 
 ```nex
-intern graphics/Canvas   -- also interns Color, Font, Key and Canvas_Input
+intern graphics/Canvas   -- also interns Color, Font, Key, Canvas_Input and Picture
 ```
 
 ## Example
@@ -40,7 +41,8 @@ c.wait_until_closed()    -- keep it on screen until the user closes it
 
 `examples/graphics_example.nex` draws a scene and runs a short animation.
 `examples/graphics_input_example.nex` is a small sketchpad driven by the mouse
-and keyboard.
+and keyboard. `examples/graphics_sprite_example.nex` flies a rocket sprite with
+the arrow keys and drags it with the mouse.
 
 ## `Canvas`
 
@@ -65,6 +67,9 @@ that image in a window on request.
   on `show`. Turn it on for flicker-free animation.
 - **Program exit.** The window closes when the program ends. A script that
   should stay on screen ends with `wait_until_closed()`.
+- **File names.** A relative name given to `save` or `Picture.load` is resolved
+  against the directory `nex` was started from (`NEX_USER_DIR`), not the Nex
+  install directory the launcher runs in.
 
 ### Construction
 
@@ -101,6 +106,9 @@ that image in a window on request.
 | `text` | `x, y: Real, s: String` | `s` centred on (x, y). |
 | `text_left` | `x, y: Real, s: String` | `s` starting at (x, y), vertically centred. |
 | `text_right` | `x, y: Real, s: String` | `s` ending at (x, y), vertically centred. |
+| `picture` | `x, y: Real, p: Picture` | `p` centred on (x, y) at its natural size in pixels. |
+| `picture` | `x, y: Real, p: Picture, half_width, half_height: Real` | `p` centred on (x, y), scaled to `2 * half_width` by `2 * half_height` user units. |
+| `picture` | `x, y: Real, p: Picture, half_width, half_height, degrees: Real` | As above, turned `degrees` counterclockwise about its centre. |
 
 Radii and half-lengths must be non-negative.
 
@@ -152,6 +160,31 @@ released, since their release would never be heard.
 Keyboard input goes to the window that has focus. A new window normally gets
 it. If it doesn't, click it.
 
+### Pictures
+
+Load a `Picture` once and draw it as often as needed. A PNG's transparency is
+kept, so a sprite with a transparent background draws cleanly over the scene.
+Pictures are always drawn fully opaque, whatever the pen's alpha.
+
+```nex
+let ship := create Picture.load("ship.png")
+c.enable_double_buffering()
+from until c.is_key_pressed(Key.ESCAPE) or not c.is_window_open() do
+  if c.is_key_pressed(Key.LEFT) then heading := heading + 4.0 end
+  if c.is_mouse_pressed() then
+    x := c.mouse_x()
+    y := c.mouse_y()
+  end
+  c.clear()
+  c.picture(x, y, ship, 0.05, 0.05, heading)
+  c.show()
+  c.pause(16)
+end
+```
+
+To tell whether the mouse is over a picture, compare `mouse_x`/`mouse_y` with
+where you drew it, for example `(c.mouse_x() - x).hypot(c.mouse_y() - y) < r`.
+
 ## `Canvas_Input`
 
 The state behind a canvas's input queries, in pixels (0, 0 at the top left).
@@ -189,6 +222,20 @@ key codes.
 - `HOME`, `END_KEY`, `PAGE_UP`, `PAGE_DOWN`. (`END_KEY` because `end` is a
   keyword.)
 - `F1` to `F12`.
+
+## `Picture`
+
+An image read from a PNG, JPEG, GIF or BMP file.
+
+| Constructor | Arguments | Description |
+|---|---|---|
+| `load` | `filename: String` | Read the image. A relative name is resolved against the directory `nex` was started from. Raises `Picture.load: no such file: ...` or `Picture.load: not a readable image: ...`. |
+
+| Feature | Returns | Description |
+|---|---|---|
+| `width`, `height` | `Integer` | Size in pixels. |
+| `source` | `String` | The file it was read from, as resolved. |
+| `to_java()` | `Any` | The underlying `java.awt.image.BufferedImage`, for use inside `with "java"`. |
 
 ## `Color`
 

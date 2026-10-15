@@ -342,3 +342,86 @@
   (is (raises-on-both? (program "let c := create Canvas.make(10, 10)"
                                 "c.input.record_key_typed(\"ab\")")
                        "one_character")))
+
+;; ---------------------------------------------------------------------------
+;; Pictures
+;; ---------------------------------------------------------------------------
+
+(defn- with-red-png
+  "Run F with the absolute path of a fresh 20x10 all-red PNG, made by a
+   Canvas and saved, so loading also checks the save -> load round trip."
+  [f]
+  (let [png (java.io.File/createTempFile "picture" ".png")]
+    (try
+      (run-backend (program "let c := create Canvas.make(20, 10)"
+                            "c.clear(Color.RED)"
+                            (str "c.save(\"" (.getPath png) "\")"))
+                   false)
+      (f (.getPath png))
+      (finally (.delete png)))))
+
+(deftest picture-loads-with-its-size
+  (with-red-png
+    (fn [path]
+      (is (= ["20" "10" "true"]
+             (both (program (str "let p := create Picture.load(\"" path "\")")
+                            "print(p.width)"
+                            "print(p.height)"
+                            "print(p.to_string.starts_with(\"Picture(\"))")))))))
+
+(deftest picture-natural-scaled-and-rotated
+  ;; 100x100 canvas, unit scale: a pixel is 0.01. The picture is 20x10 px.
+  (with-red-png
+    (fn [path]
+      (is (= [;; natural size: 0.1 either side of x, 0.05 of y
+              "Color(255, 0, 0)" "Color(255, 255, 255)" "Color(255, 255, 255)"
+              ;; scaled to half sizes 0.3 x 0.05
+              "Color(255, 0, 0)" "Color(255, 255, 255)"
+              ;; scaled the same and turned 90 degrees: now tall and thin
+              "Color(255, 0, 0)" "Color(255, 255, 255)"]
+             (both (program (str "let p := create Picture.load(\"" path "\")")
+                            "let c := create Canvas.make(100, 100)"
+                            "c.picture(0.5, 0.5, p)"
+                            "print(c.color_at(0.58, 0.53))"
+                            "print(c.color_at(0.63, 0.5))"
+                            "print(c.color_at(0.5, 0.58))"
+                            "c.clear()"
+                            "c.picture(0.5, 0.5, p, 0.3, 0.05)"
+                            "print(c.color_at(0.77, 0.5))"
+                            "print(c.color_at(0.5, 0.58))"
+                            "c.clear()"
+                            "c.picture(0.5, 0.5, p, 0.3, 0.05, 90.0)"
+                            "print(c.color_at(0.5, 0.77))"
+                            "print(c.color_at(0.77, 0.5))")))))))
+
+(deftest picture-keeps-png-transparency
+  ;; The example sprite's corners are transparent: the black canvas shows
+  ;; through there, and the sprite's body (light grey-white) at its centre.
+  (let [ship (.getAbsolutePath (java.io.File. "examples/assets/ship.png"))]
+    (is (= ["Color(0, 0, 0)" "true"]
+           (both (program (str "let p := create Picture.load(\"" ship "\")")
+                          "let c := create Canvas.make(64, 64)"
+                          "c.clear(Color.BLACK)"
+                          "c.picture(0.5, 0.5, p)"
+                          "print(c.color_at(0.05, 0.95))"
+                          "print(c.color_at(0.5, 0.5).red > 200)"))))))
+
+(deftest picture-is-drawn-opaque-whatever-the-pen
+  (with-red-png
+    (fn [path]
+      (is (= ["Color(255, 0, 0)"]
+             (both (program (str "let p := create Picture.load(\"" path "\")")
+                            "let c := create Canvas.make(100, 100)"
+                            "c.set_pen_color(Color.BLUE.with_alpha(10))"
+                            "c.picture(0.5, 0.5, p)"
+                            "print(c.color_at(0.5, 0.5))")))))))
+
+(deftest picture-load-errors
+  (is (raises-on-both? (program "let p := create Picture.load(\"/no/such/dir/ship.png\")")
+                       "Picture.load: no such file: /no/such/dir/ship.png"))
+  (let [txt (java.io.File/createTempFile "not_an_image" ".png")]
+    (try
+      (spit txt "hello")
+      (is (raises-on-both? (program (str "let p := create Picture.load(\"" (.getPath txt) "\")"))
+                           "Picture.load: not a readable image"))
+      (finally (.delete txt)))))
