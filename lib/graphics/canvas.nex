@@ -472,8 +472,8 @@ feature
       inside_x: x >= x_min and x <= x_max
       inside_y: y >= y_min and y <= y_max
     do
-      let px: Integer := (sx(x) - 0.5).round().max(0).min(width - 1)
-      let py: Integer := (sy(y) - 0.5).round().max(0).min(height - 1)
+      let px: Integer := sx(x).floor.max(0).min(width - 1)
+      let py: Integer := sy(y).floor.max(0).min(height - 1)
       let rgb: Integer := 0
       with "java" do
         rgb := offscreen.getRGB(px, py)

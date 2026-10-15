@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Math on `Real`.** `floor`, `ceiling` and `truncate` (to `Integer`);
+  `sqrt`, `cbrt`, `exp`, `log`, `log10`, `log2`, `power`; `sin`, `cos`,
+  `tan`, `asin`, `acos`, `atan`, `atan2`, `to_radians`, `to_degrees`; and
+  `sign`, `clamp`, `hypot`. Real results follow IEEE-754 like division, so
+  `(-1.0).sqrt` is `NaN`; the `Integer`-returning rounders raise for `NaN`,
+  infinities and out-of-range values. New constants `Real.PI` and `Real.E`.
+- **`Real.round` raises for `NaN`, infinities and out-of-range values.** It
+  used to return `0` for `NaN` and saturate out of range, as Java's
+  `Math.round` does. Rounding of ordinary values is unchanged.
 - **Mouse and keyboard input for `graphics/Canvas`.** `mouse_x`/`mouse_y`
   (user coordinates), `is_mouse_pressed`, `has_next_key_typed`/`next_key_typed`
   and `is_key_pressed(Key.LEFT)`, polled as in StdDraw. `graphics/Key` names

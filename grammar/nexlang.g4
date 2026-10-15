@@ -492,8 +492,15 @@ primary
     | oldExpression
     | THIS
     | SUPER
+    | builtinTypeConstant
     | IDENTIFIER
     | '(' expression ')'
+    ;
+
+// A constant of a built-in type, `Real.PI`. `Real` is a keyword, not an
+// IDENTIFIER, so it needs its own rule; the walker folds it to a literal.
+builtinTypeConstant
+    : REAL_TYPE '.' IDENTIFIER
     ;
 
 convertExpression

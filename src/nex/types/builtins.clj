@@ -962,6 +962,29 @@
 (def integer32-type-methods
   (sized-int-methods "Integer32" 32 #(rt/->nex-int32 %) rt/nex-int32?))
 
+(defn- real->integer-checked
+  "D (already rounded by OP) as an Integer, raising where there is none: NaN,
+   an infinity, or a value outside the Integer range."
+  [op d]
+  (let [d (double d)]
+    (when-not (and (>= d -9.223372036854775808E18) (< d 9.223372036854775808E18))
+      (throw (ex-info (str "Real." op ": " d " has no Integer value")
+                      {:op op :value d})))
+    (->nex-integer (long d))))
+
+(defn- real-log2
+  "log2 exact on powers of two (log(8)/log(2) is not quite 3)."
+  [d]
+  (let [r (/ (Math/log d) (Math/log 2.0))
+        k (Math/rint r)]
+    (if (and (Double/isFinite k) (== d (Math/pow 2.0 k))) k r)))
+
+(defmacro ^:private real-fn
+  "A no-argument Real -> Real method backed by F."
+  [f]
+  `(with-meta (fn [n# & _#] (~f (double n#)))
+     {:signatures [{:params [] :return-type "Real"}]}))
+
 (def real-type-methods
   {"to_string"         ^{:signatures [{:params [] :return-type "String"}]}
    (fn [n & _] (str n))
@@ -971,8 +994,57 @@
    (fn [n other & _] (min (->nex-real n) (->nex-real other)))
    "max"               ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
    (fn [n other & _] (max (->nex-real n) (->nex-real other)))
+   ;; Rounding to an Integer raises when there is no Integer to give: NaN, an
+   ;; infinity, or a value out of range. (`round` used to be Java's bare
+   ;; Math.round, which makes NaN 0 and saturates.) Halves round up, as
+   ;; Math.round does: 2.5 -> 3, -2.5 -> -2. The range check runs on the
+   ;; unrounded value; Math.round is exact for every double inside it.
    "round"             ^{:signatures [{:params [] :return-type "Integer"}]}
-   (fn [n & _] (->nex-integer (nex-round n)))
+   (fn [n & _] (let [d (double n)]
+                 (real->integer-checked "round" d)
+                 (->nex-integer (nex-round d))))
+   "floor"             ^{:signatures [{:params [] :return-type "Integer"}]}
+   (fn [n & _] (real->integer-checked "floor" (Math/floor (double n))))
+   "ceiling"           ^{:signatures [{:params [] :return-type "Integer"}]}
+   (fn [n & _] (real->integer-checked "ceiling" (Math/ceil (double n))))
+   "truncate"          ^{:signatures [{:params [] :return-type "Integer"}]}
+   (fn [n & _] (let [d (double n)]
+                 (real->integer-checked "truncate" (if (neg? d) (Math/ceil d) (Math/floor d)))))
+   ;; Powers, logarithms and trigonometry. All follow IEEE-754 like Real
+   ;; division: an input outside the domain gives NaN or an infinity
+   ;; ((-1.0).sqrt is NaN, 0.0.log is -Infinity), never an exception.
+   "sqrt"              (real-fn Math/sqrt)
+   "cbrt"              (real-fn Math/cbrt)
+   "exp"               (real-fn Math/exp)
+   "log"               (real-fn Math/log)
+   "log10"             (real-fn Math/log10)
+   "log2"              (real-fn real-log2)
+   "power"             ^{:signatures [{:params [{:name "exponent" :type "Real"}] :return-type "Real"}]}
+   (fn [n exponent & _] (Math/pow (double n) (double exponent)))
+   "sin"               (real-fn Math/sin)
+   "cos"               (real-fn Math/cos)
+   "tan"               (real-fn Math/tan)
+   "asin"              (real-fn Math/asin)
+   "acos"              (real-fn Math/acos)
+   "atan"              (real-fn Math/atan)
+   ;; y.atan2(x): the angle of the point (x, y), in -PI..PI.
+   "atan2"             ^{:signatures [{:params [{:name "x" :type "Real"}] :return-type "Real"}]}
+   (fn [y x & _] (Math/atan2 (double y) (double x)))
+   "to_radians"        (real-fn Math/toRadians)
+   "to_degrees"        (real-fn Math/toDegrees)
+   ;; -1.0, 0.0 or 1.0 (keeping -0.0 and NaN as they are).
+   "sign"              (real-fn Math/signum)
+   "clamp"             ^{:signatures [{:params [{:name "low" :type "Real"} {:name "high" :type "Real"}]
+                                       :return-type "Real"}]}
+   (fn [n low high & _]
+     (let [low (double low) high (double high)]
+       (when-not (<= low high)
+         (throw (ex-info (str "Real.clamp: low " low " is not <= high " high)
+                         {:low low :high high})))
+       (Math/min high (Math/max low (double n)))))
+   ;; sqrt(this^2 + other^2) without intermediate overflow.
+   "hypot"             ^{:signatures [{:params [{:name "other" :type "Real"}] :return-type "Real"}]}
+   (fn [n other & _] (Math/hypot (double n) (double other)))
    "to_fixed"          ^{:signatures [{:params [{:name "places" :type "Integer"}]
                                        :return-type "Real"}]}
    (fn [n places & _]

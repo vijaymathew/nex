@@ -3010,6 +3010,20 @@
   {:type :real
    :value (Double/parseDouble value)})
 
+(def builtin-type-constants
+  "Constants of built-in types, `Type.NAME`, folded to literals by the walker."
+  {"Real" {"PI" Math/PI
+           "E" Math/E}})
+
+(defn- handle-builtin-type-constant
+  [[_ type-name _dot constant-name]]
+  (if-let [v (get-in builtin-type-constants [type-name constant-name])]
+    ;; :source keeps the spelling for the formatter and docgen.
+    {:type :real :value v :source (str type-name "." constant-name)}
+    (throw (ex-info (str type-name " has no constant " constant-name
+                         " (it has " (clojure.string/join ", " (sort (keys (get builtin-type-constants type-name)))) ")")
+                    {:type-name type-name :constant constant-name}))))
+
 (defn- handle-boolean-literal
   [[_ value]]
   {:type :boolean
@@ -3255,6 +3269,7 @@
    :mapEntry handle-map-entry
    :literal handle-literal
    :primary handle-primary
+   :builtinTypeConstant handle-builtin-type-constant
    :createExpression handle-create-expression
    :convertExpression handle-convert-expression
    :spawnExpression handle-spawn-expression

@@ -38,6 +38,18 @@ let remainder: Integer := 10 % 3 -- 1
 let power: Integer := 2 ^ 8     -- 256
 ```
 
+`Real` has the usual math as methods, and `Real.PI` and `Real.E`:
+
+```nex
+let hyp: Real := 3.0.hypot(4.0)          -- 5.0
+let root: Real := 2.0.sqrt               -- 1.4142135623730951
+let y: Real := (Real.PI / 6.0).sin       -- 0.49999999999999994
+let n: Integer := 2.7.floor              -- 2
+```
+
+See the scalar types reference for the full list (`floor`, `ceiling`,
+`truncate`, `sqrt`, `exp`, `log`, trigonometry, `clamp`, ...).
+
 Integer literals can also be written with explicit bases:
 
 ```nex
