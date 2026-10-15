@@ -63,6 +63,33 @@ print(adder(1)(2))"))))))
 let n: Integer := f.call1(4)
 print(n)")))))
 
+(deftest call-protocol-result-dispatches-on-its-type-test
+  (testing "a feature called on a callN result dispatches on the declared
+            result type, not the Any protocol (the compiled backend lowered
+            `xs.tail.call0().first` as an Any call and failed with an
+            unbound builtin-method-any-first)"
+    (is (= ["1" "1" "3"]
+           (both "class Cons[T]
+feature
+  head: T
+  tail: Function(): Cons[T]
+create
+  make(h: T, t: Function(): Cons[T]) do head := h tail := t end
+feature
+  first: T do result := head end
+  rest: Cons[T] do result := tail() end
+end
+
+function lseq(n: Integer): Cons[Integer]
+do
+  result := create Cons.make(n, fn(): Cons[Integer] do result := lseq(n + 1) end)
+end
+
+let xs := lseq(0)
+print(xs.tail.call0().first)
+print(xs.tail.call0().head)
+print(xs.tail.call0().tail.call0().rest.first)")))))
+
 (deftest call-protocol-arguments-are-checked-test
   (testing "argument types and count are held to the function's parameters,
             with the messages a direct call gets"
