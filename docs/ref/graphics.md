@@ -225,17 +225,81 @@ key codes.
 
 ## `Picture`
 
-An image read from a PNG, JPEG, GIF or BMP file.
+An image in memory: read from a PNG, JPEG, GIF or BMP file, or made blank, then
+read and changed pixel by pixel, transformed, drawn with `Canvas.picture` and
+saved.
+
+Pixels are addressed by `(col, row)`, with `(0, 0)` at the **top left** and rows
+growing downward, as in the image file. This is unlike a Canvas's user
+coordinates. Every pixel can hold any color and alpha exactly, whatever format
+the picture was loaded from.
 
 | Constructor | Arguments | Description |
 |---|---|---|
 | `load` | `filename: String` | Read the image. A relative name is resolved against the directory `nex` was started from. Raises `Picture.load: no such file: ...` or `Picture.load: not a readable image: ...`. |
+| `make` | `w, h: Integer` | A blank `w` by `h` picture, every pixel fully transparent. |
+| `from_java` | `raw: Any` | A copy of a `java.awt.image.BufferedImage`. |
 
 | Feature | Returns | Description |
 |---|---|---|
 | `width`, `height` | `Integer` | Size in pixels. |
-| `source` | `String` | The file it was read from, as resolved. |
-| `to_java()` | `Any` | The underlying `java.awt.image.BufferedImage`, for use inside `with "java"`. |
+| `source` | `String` | The file it was read from, as resolved; `""` for a picture made in memory. |
+| `get(col, row: Integer)` | `Color` | The pixel's color, alpha included. |
+| `set(col, row: Integer, color: Color)` | | Set the pixel, alpha included. |
+| `get_rgb(col, row: Integer)` | `Integer` | The pixel as `0xRRGGBB`, ignoring alpha. |
+| `set_rgb(col, row, rgb: Integer)` | | Set the pixel to the opaque color `rgb` (`0xRRGGBB`), so `0xFF0000` is red. |
+| `get_argb(col, row: Integer)` | `Integer` | The pixel as `0xAARRGGBB` (always non-negative); alpha `0x00` is transparent, `0xFF` opaque. |
+| `set_argb(col, row, argb: Integer)` | | Set the pixel from `0xAARRGGBB`. |
+| `fill(color: Color)` | | Set every pixel to `color`, alpha included. |
+| `cropped(col, row, w, h: Integer)` | `Picture` | The `w` by `h` region whose top-left pixel is `(col, row)`; it must lie inside the picture. |
+| `scaled(w, h: Integer)` | `Picture` | Resized to `w` by `h` pixels, smoothly (bilinear) interpolated. |
+| `flipped_horizontally()` | `Picture` | Mirror image, left and right swapped. |
+| `flipped_vertically()` | `Picture` | Upside down, top and bottom swapped. |
+| `rotated_left()` | `Picture` | A quarter turn counterclockwise; width and height swap. |
+| `rotated_right()` | `Picture` | A quarter turn clockwise; width and height swap. |
+| `grayscale()` | `Picture` | Shades of gray of the same brightness (ITU-R BT.601 luma: `0.299 R + 0.587 G + 0.114 B`), alpha kept. |
+| `save(filename: String)` | | Write the picture; the format comes from the extension (`.png`, `.jpg`/`.jpeg`, `.gif`, `.bmp`). Only PNG keeps transparency; for JPEG, GIF and BMP the picture is laid over white first. |
+| `is_image_file_name(filename: String)` | `Boolean` | Whether `save` understands the extension. |
+| `clone` | `Any` | An independent copy: changing its pixels leaves the original alone. |
+| `to_java()` | `Any` | The underlying `java.awt.image.BufferedImage` (`TYPE_INT_ARGB`), for use inside `with "java"`. It is shared, not copied. |
+
+Pixel coordinates are checked: `col` must be in `0..width-1` and `row` in
+`0..height-1`, and `rgb`/`argb` must be in range, or the call fails its
+precondition. The transformations return a new picture and leave this one
+unchanged. Only `set`, `set_rgb`, `set_argb` and `fill` change a picture.
+
+```nex
+intern graphics/Picture
+
+-- Red rises left to right, blue top to bottom.
+let p := create Picture.make(256, 256)
+from let row := 0 until row = 256 do
+  from let col := 0 until col = 256 do
+    p.set_rgb(col, row, col * 65536 + row)
+    col := col + 1
+  end
+  row := row + 1
+end
+p.save("gradient.png")
+
+-- Swap the red and blue channels of a photo.
+let photo := create Picture.load("photo.jpg")
+from let row := 0 until row = photo.height do
+  from let col := 0 until col = photo.width do
+    let c := photo.get(col, row)
+    photo.set(col, row, create Color.make_rgba(c.blue, c.green, c.red, c.alpha))
+    col := col + 1
+  end
+  row := row + 1
+end
+photo.grayscale().rotated_right().save("photo_gray.png")
+```
+
+A per-pixel loop is fine for small and medium images: on the compiled backend
+one `get` and one `set` per pixel over a 512x512 picture takes a second or two
+(`grayscale` is such a loop, so it costs about the same). `fill`, `cropped`,
+`scaled` and the flips and turns are done by Java2D in a single call, so they are
+much faster.
 
 ## `Color`
 

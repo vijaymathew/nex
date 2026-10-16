@@ -425,3 +425,148 @@
       (is (raises-on-both? (program (str "let p := create Picture.load(\"" (.getPath txt) "\")"))
                            "Picture.load: not a readable image"))
       (finally (.delete txt)))))
+
+;; ---------------------------------------------------------------------------
+;; Picture pixels and transformations
+;; ---------------------------------------------------------------------------
+
+(def ^:private three-by-two
+  "A 3x2 picture, (0, 0) top left:  red   green  blue
+                                     white black  half-transparent 0x102030"
+  ["let p := create Picture.make(3, 2)"
+   "p.set_rgb(0, 0, 0xFF0000)"
+   "p.set_rgb(1, 0, 0x00FF00)"
+   "p.set(2, 0, Color.BLUE)"
+   "p.set_rgb(0, 1, 0xFFFFFF)"
+   "p.set(1, 1, Color.BLACK)"
+   "p.set_argb(2, 1, 0x80102030)"])
+
+(defn- corners
+  "Print lines for the colors of picture Q's four corners, clockwise from the
+   top left."
+  [q]
+  [(str "print(" q ".get(0, 0))")
+   (str "print(" q ".get(" q ".width - 1, 0))")
+   (str "print(" q ".get(" q ".width - 1, " q ".height - 1))")
+   (str "print(" q ".get(0, " q ".height - 1))")])
+
+(deftest picture-made-blank-is-transparent
+  (is (= ["Picture(3x2)" "0" "Color(0, 0, 0, 0)"]
+         (both (program "let p := create Picture.make(3, 2)"
+                        "print(p)"
+                        "print(p.get_argb(2, 1))"
+                        "print(p.get(0, 0))")))))
+
+(deftest picture-pixels-as-rgb-argb-and-color
+  (is (= [;; get_rgb drops alpha; get_argb is unsigned 0xAARRGGBB
+          "16711680" "4294901760" "1056816" "2148540464"
+          "Color(0, 0, 255)" "Color(16, 32, 48, 128)"]
+         (both (apply program
+                      (concat three-by-two
+                              ["print(p.get_rgb(0, 0))"
+                               "print(p.get_argb(0, 0))"
+                               "print(p.get_rgb(2, 1))"
+                               "print(p.get_argb(2, 1))"
+                               "print(p.get(2, 0))"
+                               "print(p.get(2, 1))"]))))))
+
+(deftest picture-pixel-access-is-checked
+  (is (raises-on-both? (program "let p := create Picture.make(3, 2)" "print(p.get_rgb(3, 0))")
+                       "col_in_range"))
+  (is (raises-on-both? (program "let p := create Picture.make(3, 2)" "p.set(0, -1, Color.RED)")
+                       "row_in_range"))
+  (is (raises-on-both? (program "let p := create Picture.make(3, 2)" "p.set_rgb(0, 0, 0x1000000)")
+                       "rgb_in_range"))
+  (is (raises-on-both? (program "let p := create Picture.make(0, 2)")
+                       "positive_width")))
+
+(deftest picture-flips-and-quarter-turns
+  (is (= [;; flipped_horizontally
+          "Color(0, 0, 255)" "Color(255, 0, 0)" "Color(255, 255, 255)" "Color(16, 32, 48, 128)"
+          ;; flipped_vertically
+          "Color(255, 255, 255)" "Color(16, 32, 48, 128)" "Color(0, 0, 255)" "Color(255, 0, 0)"
+          ;; rotated_left (2x3)
+          "\"2x3\"" "Color(0, 0, 255)" "Color(16, 32, 48, 128)" "Color(255, 255, 255)" "Color(255, 0, 0)"
+          ;; rotated_right (2x3)
+          "\"2x3\"" "Color(255, 255, 255)" "Color(255, 0, 0)" "Color(0, 0, 255)" "Color(16, 32, 48, 128)"]
+         (both (apply program
+                      (concat three-by-two
+                              ["let h := p.flipped_horizontally()"] (corners "h")
+                              ["let v := p.flipped_vertically()"] (corners "v")
+                              ["let l := p.rotated_left()"
+                               "print(l.width.to_string + \"x\" + l.height.to_string)"] (corners "l")
+                              ["let r := p.rotated_right()"
+                               "print(r.width.to_string + \"x\" + r.height.to_string)"] (corners "r")))))))
+
+(deftest picture-crop-scale-and-grayscale
+  (is (= [;; cropped(1, 0, 2, 2)
+          "2" "2" "Color(0, 255, 0)" "Color(16, 32, 48, 128)"
+          ;; scaled: size changes, a block's centre keeps its color
+          "30" "20" "true" "true"
+          ;; grayscale: BT.601 luma, alpha kept
+          "Color(76, 76, 76)" "Color(150, 150, 150)" "Color(29, 29, 29, 128)"
+          ;; the original is untouched
+          "Color(255, 0, 0)"]
+         (both (apply program
+                      (concat three-by-two
+                              ["let c := p.cropped(1, 0, 2, 2)"
+                               "print(c.width)" "print(c.height)"
+                               "print(c.get(0, 0))" "print(c.get(1, 1))"
+                               "let s := p.scaled(30, 20)"
+                               "print(s.width)" "print(s.height)"
+                               "print(s.get(15, 5).green > 200)"
+                               "print(s.get(15, 5).red < 60)"
+                               "let g := p.grayscale()"
+                               "print(g.get(0, 0))" "print(g.get(1, 0))" "print(g.get(2, 1))"
+                               "print(p.get(0, 0))"]))))))
+
+(deftest picture-crop-must-fit
+  (is (raises-on-both? (program "let p := create Picture.make(3, 2)" "let c := p.cropped(2, 0, 2, 1)")
+                       "inside_x")))
+
+(deftest picture-fill-and-clone
+  (is (= ["Color(255, 0, 0, 100)" "0" "16711680"]
+         (both (program "let p := create Picture.make(4, 4)"
+                        "p.fill(Color.RED.with_alpha(100))"
+                        "print(p.get(3, 3))"
+                        "p.set_rgb(0, 0, 0xFF0000)"
+                        "if convert p.clone to q: Picture then"
+                        "  q.set_rgb(0, 0, 0)"
+                        "  print(q.get_rgb(0, 0))"
+                        "end"
+                        "print(p.get_rgb(0, 0))")))))
+
+(deftest picture-save-and-load-round-trip
+  (doseq [ext ["png" "bmp" "gif"]]
+    (let [f (java.io.File/createTempFile "picture" (str "." ext))]
+      (try
+        (testing ext
+          (is (= (if (= ext "png")
+                   ;; PNG keeps alpha
+                   ["Color(255, 0, 0)" "Color(0, 0, 0)" "Color(16, 32, 48, 128)"]
+                   ;; BMP and GIF are laid over white: opaque pixels stay
+                   ;; exact (black is not mistaken for GIF's transparent
+                   ;; entry), and nothing comes back transparent
+                   ["Color(255, 0, 0)" "Color(0, 0, 0)" "true"])
+                 (both (apply program
+                              (concat three-by-two
+                                      [(str "p.save(\"" (.getPath f) "\")")
+                                       (str "let back := create Picture.load(\"" (.getPath f) "\")")
+                                       "print(back.get(0, 0))"
+                                       "print(back.get(1, 1))"]
+                                      (if (= ext "png")
+                                        ["print(back.get(2, 1))"]
+                                        ["print(back.get(2, 1).is_opaque())"])))))))
+        (finally (.delete f))))))
+
+(deftest picture-from-a-canvas-image-and-drawn-back
+  ;; A picture made from pixels draws on a Canvas like a loaded one.
+  (is (= ["Color(255, 0, 0)" "Color(0, 0, 255)"]
+         (both (program "let p := create Picture.make(10, 10)"
+                        "p.fill(Color.RED)"
+                        "let q := create Picture.from_java(p.to_java())"
+                        "q.set_rgb(9, 0, 0x0000FF)"
+                        "let c := create Canvas.make(10, 10)"
+                        "c.picture(0.5, 0.5, q)"
+                        "print(c.color_at(0.05, 0.05))"
+                        "print(c.color_at(0.95, 0.95))")))))
