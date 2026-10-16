@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Pixel access and image operations on `graphics/Picture`.** Read and set
+  pixels by `(col, row)` from the top left, as a `Color` (`get`/`set`), as
+  `0xRRGGBB` (`get_rgb`/`set_rgb`) or as `0xAARRGGBB` (`get_argb`/`set_argb`).
+  `Picture.make(w, h)` makes a blank, transparent picture and
+  `Picture.from_java` copies a `BufferedImage`. New operations are `fill` and
+  `save`, plus `cropped`, `scaled`, `flipped_horizontally`,
+  `flipped_vertically`, `rotated_left`, `rotated_right` and `grayscale`, which
+  return a new picture. `clone` copies the pixels. A loaded picture is now
+  held as ARGB, so every pixel can take any color exactly.
+
 ## 0.6.1 - 2026-10-15
 
 - **Pictures on `graphics/Canvas`.** `graphics/Picture` loads a PNG, JPEG, GIF

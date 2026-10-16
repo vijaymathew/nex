@@ -1,4 +1,5 @@
--- Picture: an image loaded from a file, for drawing with Canvas.picture.
+-- Picture: an image in memory, loaded from a file or made blank, for reading
+-- and changing pixels and for drawing with Canvas.picture.
 --
 -- Load once, draw as often as needed (every frame of an animation):
 --
@@ -6,16 +7,42 @@
 --   c.picture(0.5, 0.5, ship)                         -- natural size
 --   c.picture(0.5, 0.5, ship, 0.1, 0.1, 45.0)          -- scaled and rotated
 --
--- PNG, JPEG, GIF and BMP files can be read; a PNG's transparency is kept. A
--- relative path is resolved against the directory `nex` was started from
--- (NEX_USER_DIR), not the Nex install directory the launcher runs in. Import
--- with `intern graphics/Picture` (graphics/Canvas interns it for you).
+-- Pixels. A pixel is addressed by (col, row), (0, 0) at the top left and row
+-- growing downward, as in the image file (unlike Canvas's user coordinates).
+-- `get`/`set` work with Color values; `get_rgb`/`set_rgb` with packed 0xRRGGBB
+-- integers (always opaque); `get_argb`/`set_argb` with packed 0xAARRGGBB:
+--
+--   let p := create Picture.make(256, 256)
+--   from let col := 0 until col = 256 do
+--     from let row := 0 until row = 256 do
+--       p.set_rgb(col, row, col * 65536 + row)        -- red across, blue down
+--       row := row + 1
+--     end
+--     col := col + 1
+--   end
+--   p.save("gradient.png")
+--
+-- The transformations (`cropped`, `scaled`, `flipped_horizontally`,
+-- `flipped_vertically`, `rotated_left`, `rotated_right`, `grayscale`) return a
+-- new Picture and leave this one unchanged. `clone` copies the pixels.
+--
+-- PNG, JPEG, GIF and BMP files can be read and written. A PNG's transparency
+-- is kept both ways; the other formats are saved laid over white. A relative path is resolved against the directory `nex` was started
+-- from (NEX_USER_DIR), not the Nex install directory the launcher runs in.
+-- Import with `intern graphics/Picture` (graphics/Canvas interns it for you).
 
+intern graphics/Color
+
+import java.awt.AlphaComposite
+import java.awt.RenderingHints
+import java.awt.geom.AffineTransform
+import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
+import javax.swing.plaf.ColorUIResource
 
 class Picture
-  note "An image loaded from a PNG, JPEG, GIF or BMP file."
+  note "An image of width x height pixels, read from or written to a PNG, JPEG, GIF or BMP file."
 
 create
   -- Read the image in FILENAME.
@@ -31,39 +58,345 @@ create
       if not found then
         raise "Picture.load: no such file: " + path
       end
+      let raw: Any := nil
       let ok: Boolean := false
       with "java" do
-        image := ImageIO.read(File.new(path))
-        ok := image /= nil
+        raw := ImageIO.read(File.new(path))
+        ok := raw /= nil
       end
       if not ok then
         raise "Picture.load: not a readable image: " + path
       end
-      with "java" do
-        width := image.getWidth()
-        height := image.getHeight()
-      end
+      adopt(raw)
       source := path
+    end
+
+  -- A W by H picture, every pixel fully transparent.
+  make(w, h: Integer)
+    require
+      positive_width: w > 0
+      positive_height: h > 0
+    do
+      width := w
+      height := h
+      with "java" do
+        image := BufferedImage.new(w, h, BufferedImage.TYPE_INT_ARGB)
+      end
+      source := ""
+    ensure
+      sized: width = w and height = h
+    end
+
+  -- A copy of RAW, a java.awt.image.BufferedImage; later changes to either
+  -- do not affect the other.
+  from_java(raw: Any)
+    require
+      has_image: raw /= nil
+    do
+      adopt(raw)
+      source := ""
     end
 
 feature
   -- Size in pixels.
   width: Integer
   height: Integer
-  -- The file it was read from, as resolved.
+  -- The file it was read from, as resolved; "" for a picture made in memory.
   source: String
 
-  -- The java.awt.image.BufferedImage, for use inside `with "java"`.
+  -- The color of the pixel at (COL, ROW).
+  get(col, row: Integer): Color
+    require
+      col_in_range: col >= 0 and col < width
+      row_in_range: row >= 0 and row < height
+    do
+      let argb: Integer := get_argb(col, row)
+      result := create Color.make_rgba((argb / 65536) % 256, (argb / 256) % 256, argb % 256, argb / 16777216)
+    end
+
+  -- Set the pixel at (COL, ROW) to COLOR, alpha included.
+  set(col, row: Integer, color: Color)
+    require
+      col_in_range: col >= 0 and col < width
+      row_in_range: row >= 0 and row < height
+    do
+      set_argb(col, row, ((color.alpha * 256 + color.red) * 256 + color.green) * 256 + color.blue)
+    end
+
+  -- The pixel at (COL, ROW) as 0xRRGGBB, ignoring its alpha.
+  get_rgb(col, row: Integer): Integer
+    require
+      col_in_range: col >= 0 and col < width
+      row_in_range: row >= 0 and row < height
+    do
+      result := get_argb(col, row) % 16777216
+    ensure
+      in_range: result >= 0 and result <= 0xFFFFFF
+    end
+
+  -- Set the pixel at (COL, ROW) to the opaque color RGB, given as 0xRRGGBB.
+  set_rgb(col, row, rgb: Integer)
+    require
+      col_in_range: col >= 0 and col < width
+      row_in_range: row >= 0 and row < height
+      rgb_in_range: rgb >= 0 and rgb <= 0xFFFFFF
+    do
+      set_argb(col, row, 0xFF000000 + rgb)
+    end
+
+  -- The pixel at (COL, ROW) as 0xAARRGGBB; alpha 0 is transparent, 0xFF opaque.
+  get_argb(col, row: Integer): Integer
+    require
+      col_in_range: col >= 0 and col < width
+      row_in_range: row >= 0 and row < height
+    do
+      let v: Integer := 0
+      with "java" do
+        v := image.getRGB(col, row)
+      end
+      -- Java returns the 32 bits as a signed int.
+      if v < 0 then
+        v := v + 0x100000000
+      end
+      result := v
+    ensure
+      in_range: result >= 0 and result <= 0xFFFFFFFF
+    end
+
+  -- Set the pixel at (COL, ROW) to ARGB, given as 0xAARRGGBB.
+  set_argb(col, row, argb: Integer)
+    require
+      col_in_range: col >= 0 and col < width
+      row_in_range: row >= 0 and row < height
+      argb_in_range: argb >= 0 and argb <= 0xFFFFFFFF
+    do
+      let v: Integer := argb
+      if v >= 0x80000000 then
+        v := v - 0x100000000
+      end
+      with "java" do
+        image.setRGB(col, row, v)
+      end
+    end
+
+  -- Set every pixel to COLOR, alpha included.
+  fill(color: Color) do
+    let g: Any := nil
+    with "java" do
+      g := image.createGraphics()
+      g.setColor(ColorUIResource.new(color.red, color.green, color.blue))
+      g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC, color.alpha / 255.0))
+      g.fillRect(0, 0, width, height)
+      g.dispose()
+    end
+  end
+
+  -- The W by H region whose top-left pixel is (COL, ROW).
+  cropped(col, row, w, h: Integer): Picture
+    require
+      positive_width: w > 0
+      positive_height: h > 0
+      inside_x: col >= 0 and col + w <= width
+      inside_y: row >= 0 and row + h <= height
+    do
+      let at: Any := nil
+      with "java" do
+        at := AffineTransform.getTranslateInstance(-col * 1.0, -row * 1.0)
+      end
+      result := transformed(w, h, at, false)
+    ensure
+      sized: result.width = w and result.height = h
+    end
+
+  -- This picture resized to W by H pixels, smoothly interpolated.
+  scaled(w, h: Integer): Picture
+    require
+      positive_width: w > 0
+      positive_height: h > 0
+    do
+      let at: Any := nil
+      with "java" do
+        at := AffineTransform.getScaleInstance(w / (width * 1.0), h / (height * 1.0))
+      end
+      result := transformed(w, h, at, true)
+    ensure
+      sized: result.width = w and result.height = h
+    end
+
+  -- The mirror image, left and right swapped.
+  flipped_horizontally(): Picture do
+    let at: Any := nil
+    with "java" do
+      at := AffineTransform.new(-1.0, 0.0, 0.0, 1.0, width * 1.0, 0.0)
+    end
+    result := transformed(width, height, at, false)
+  ensure
+    sized: result.width = width and result.height = height
+  end
+
+  -- Upside down, top and bottom swapped.
+  flipped_vertically(): Picture do
+    let at: Any := nil
+    with "java" do
+      at := AffineTransform.new(1.0, 0.0, 0.0, -1.0, 0.0, height * 1.0)
+    end
+    result := transformed(width, height, at, false)
+  ensure
+    sized: result.width = width and result.height = height
+  end
+
+  -- Turned a quarter turn counterclockwise; width and height swap.
+  rotated_left(): Picture do
+    let at: Any := nil
+    with "java" do
+      at := AffineTransform.new(0.0, -1.0, 1.0, 0.0, 0.0, width * 1.0)
+    end
+    result := transformed(height, width, at, false)
+  ensure
+    turned: result.width = height and result.height = width
+  end
+
+  -- Turned a quarter turn clockwise; width and height swap.
+  rotated_right(): Picture do
+    let at: Any := nil
+    with "java" do
+      at := AffineTransform.new(0.0, 1.0, -1.0, 0.0, height * 1.0, 0.0)
+    end
+    result := transformed(height, width, at, false)
+  ensure
+    turned: result.width = height and result.height = width
+  end
+
+  -- Shades of gray of the same brightness (ITU-R BT.601 luma), alpha kept.
+  grayscale(): Picture do
+    let out := create Picture.make(width, height)
+    let target: Any := out.to_java()
+    -- Straight to the images, not through get_argb/set_argb: the bounds are
+    -- known good, and their contract checks would dominate the run time.
+    from let row := 0 until row = height do
+      from let col := 0 until col = width do
+        let v: Integer := 0
+        with "java" do
+          v := image.getRGB(col, row)
+        end
+        if v < 0 then
+          v := v + 0x100000000
+        end
+        let y: Integer := (299 * ((v / 65536) % 256) + 587 * ((v / 256) % 256) + 114 * (v % 256) + 500) / 1000
+        v := (v / 16777216) * 16777216 + y * 65793
+        if v >= 0x80000000 then
+          v := v - 0x100000000
+        end
+        with "java" do
+          target.setRGB(col, row, v)
+        end
+        col := col + 1
+      end
+      row := row + 1
+    end
+    result := out
+  ensure
+    sized: result.width = width and result.height = height
+  end
+
+  -- Write the picture to FILENAME. The format comes from the extension: .png,
+  -- .jpg/.jpeg, .gif or .bmp. Only PNG keeps transparency: for the others the
+  -- picture is first laid over white (GIF's on/off transparency would let
+  -- Java's writer turn opaque pixels transparent). A relative name is
+  -- resolved against the directory `nex` was started from.
+  save(filename: String)
+    require
+      known_format: is_image_file_name(filename)
+    do
+      let format: String := image_format(filename)
+      let path: String := resolve(filename)
+      let out: Any := image
+      if format /= "png" then
+        with "java" do
+          out := BufferedImage.new(width, height, BufferedImage.TYPE_INT_RGB)
+          let g := out.createGraphics()
+          g.setColor(ColorUIResource.new(255, 255, 255))
+          g.fillRect(0, 0, width, height)
+          g.drawImage(image, 0, 0, nil)
+          g.dispose()
+        end
+      end
+      let ok: Boolean := false
+      with "java" do
+        ok := ImageIO.write(out, format, File.new(path))
+      end
+      if not ok then
+        raise "Picture.save: no image writer for " + filename
+      end
+    end
+
+  -- Whether FILENAME ends in an extension `save` understands.
+  is_image_file_name(filename: String): Boolean do
+    result := image_format(filename) /= ""
+  end
+
+  -- An independent copy: changing its pixels leaves this picture alone.
+  clone: Any do
+    result := create Picture.from_java(image)
+  end
+
+  -- The java.awt.image.BufferedImage (TYPE_INT_ARGB) holding the pixels, for
+  -- use inside `with "java"`. It is shared, not copied: drawing into it
+  -- changes the picture.
   to_java(): Any do
     result := image
   end
 
   to_string(): String do
-    result := "Picture(" + source + ", " + width + "x" + height + ")"
+    if source = "" then
+      result := "Picture(" + width + "x" + height + ")"
+    else
+      result := "Picture(" + source + ", " + width + "x" + height + ")"
+    end
   end
 
 private feature
+  -- Always TYPE_INT_ARGB, whatever the file held, so every pixel can take any
+  -- color and alpha exactly.
   image: Any
+
+  -- Take a TYPE_INT_ARGB copy of RAW as this picture's pixels.
+  adopt(raw: Any) do
+    with "java" do
+      width := raw.getWidth()
+      height := raw.getHeight()
+      image := BufferedImage.new(width, height, BufferedImage.TYPE_INT_ARGB)
+      let g := image.createGraphics()
+      g.setComposite(AlphaComposite.Src)
+      g.drawImage(raw, 0, 0, nil)
+      g.dispose()
+    end
+  end
+
+  -- A new W by H picture holding this one drawn through AT, pixels copied
+  -- exactly (nearest neighbour) unless SMOOTH asks for bilinear filtering.
+  transformed(w, h: Integer, at: Any, smooth: Boolean): Picture do
+    let out := create Picture.make(w, h)
+    let target: Any := out.to_java()
+    let interpolation: Any := nil
+    if smooth then
+      with "java" do
+        interpolation := RenderingHints.VALUE_INTERPOLATION_BILINEAR
+      end
+    else
+      with "java" do
+        interpolation := RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR
+      end
+    end
+    with "java" do
+      let g := target.createGraphics()
+      g.setComposite(AlphaComposite.Src)
+      g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, interpolation)
+      g.drawImage(image, at, nil)
+      g.dispose()
+    end
+    result := out
+  end
 
   -- FILENAME made absolute against NEX_USER_DIR when it is relative and the
   -- launcher set that variable.
@@ -83,6 +416,22 @@ private feature
       with "java" do
         result := File.new(base, filename).getPath()
       end
+    end
+  end
+
+  -- "png", "jpg", "gif" or "bmp" for a FILENAME `save` can write, else "".
+  image_format(filename: String): String do
+    let lower: String := filename.to_lower()
+    if lower.ends_with(".png") then
+      result := "png"
+    elseif lower.ends_with(".jpg") or lower.ends_with(".jpeg") then
+      result := "jpg"
+    elseif lower.ends_with(".gif") then
+      result := "gif"
+    elseif lower.ends_with(".bmp") then
+      result := "bmp"
+    else
+      result := ""
     end
   end
 
