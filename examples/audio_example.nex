@@ -1,0 +1,63 @@
+-- audio: a generated beep, notes played live, and a short tune written in
+-- code, played to its end.
+--
+--   nex examples/audio_example.nex
+--
+-- Needs no sound files. Without a sound device (or with NEX_AUDIO=off) it
+-- still runs to the end, silently, and prints the same counts.
+
+intern audio/Sound
+intern audio/Synth
+intern audio/Midi_Song
+
+import java.lang.Thread
+
+function pause_ms(ms: Integer) do
+  with "java" do
+    Thread.sleep(ms)
+  end
+end
+
+-- A sound effect made in memory: a short 880 Hz beep, played three times.
+let beep := create Sound.tone(880.0, 120)
+beep.set_volume(0.5)
+from let i := 0 until i = 3 do
+  beep.play()
+  pause_ms(200)
+  i := i + 1
+end
+print("beep played " + beep.play_count + " times (audible: " + beep.is_audible() + ")")
+
+-- Notes played live: a rising C major arpeggio on a square-wave lead.
+let synth := create Synth.make()
+synth.set_instrument(0, Midi.SQUARE_LEAD)
+across [60, 64, 67, 72] as pitch do
+  synth.play_note(0, pitch, 100, 150)
+  pause_ms(170)
+end
+synth.close()
+print("synth played " + synth.notes_played + " notes")
+
+-- A tune written note by note (4 ticks to a beat), with a drum on each beat.
+let score := create Midi_Score.make(4)
+score.set_instrument(0, Midi.VIBRAPHONE, 0)
+let melody := [67, 69, 71, 72, 74, 72, 71, 67]
+from let k := 0 until k = melody.length do
+  score.add_note(0, melody.get(k), 96, k * 2, 2)
+  k := k + 1
+end
+from let beat := 0 until beat = 4 do
+  score.add_note(Midi.DRUM_CHANNEL, Midi.BASS_DRUM, 110, beat * 4, 1)
+  beat := beat + 1
+end
+
+let tune := create Midi_Song.from_score(score)
+tune.set_speed(1.5)
+tune.play()
+-- Track's state changes only on our calls; update() notices the end.
+from until tune.is_stopped() do
+  tune.update()
+  pause_ms(20)
+end
+tune.close()
+print("tune of " + score.note_count + " notes played to its end")

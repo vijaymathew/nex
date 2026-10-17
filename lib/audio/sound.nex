@@ -1,0 +1,314 @@
+-- Sound: a short sound effect, held in memory, that starts the moment
+-- play() is called and may overlap itself.
+--
+--   let hit := create Sound.load("hit.wav")
+--   hit.play()                                  -- returns at once
+--
+--   let beep := create Sound.tone(880.0, 80)    -- no file needed
+--   beep.set_volume(0.5)
+--   beep.play()
+--
+-- Files. WAV, AIFF and AU files with uncompressed (PCM) audio can be loaded;
+-- MP3 and OGG cannot. A relative path is resolved against the directory
+-- `nex` was started from (NEX_USER_DIR), as Picture.load does.
+--
+-- Overlap. Each play() starts a fresh copy, so a burst of hits sounds like a
+-- burst rather than one cut-off hit. Up to `voices` copies (4 unless changed
+-- with set_voices) play at once; beyond that the copy that has played
+-- longest starts over.
+--
+-- No sound device. When Audio_Device reports none (or NEX_AUDIO=off), a
+-- Sound still loads, still knows its length and still counts its plays in
+-- play_count — it just makes no noise. A test can therefore drive a game
+-- headless and check, say, that the hit sound played three times.
+--
+-- Import with `intern audio/Sound`.
+
+intern audio/Audio_Device
+intern data/Byte_Array
+
+import java.io.ByteArrayInputStream
+import java.io.File
+import javax.sound.sampled.AudioFormat
+import javax.sound.sampled.AudioInputStream
+import javax.sound.sampled.AudioSystem
+
+class Sound
+  note "A short sound effect loaded into memory; play() starts it at once."
+
+create
+  -- The WAV, AIFF or AU file FILENAME (relative to NEX_USER_DIR).
+  load(filename: String)
+    require
+      has_name: filename.length > 0
+    do
+      let files := create Audio_Support.make()
+      let path: String := files.resolve(filename)
+      if not files.is_file(path) then
+        raise "Sound.load: no such file: " + path
+      end
+      let raw: Any := nil
+      let fmt: Any := nil
+      let frames: Integer := 0
+      let rate: Real := 0.0
+      do
+        with "java" do
+          let stream: Any := AudioSystem.getAudioInputStream(File.new(path))
+          fmt := stream.getFormat()
+          raw := stream.readAllBytes()
+          stream.close()
+          rate := fmt.getFrameRate()
+        end
+      rescue
+        raise "Sound.load: not a readable WAV, AIFF or AU file: " + path
+      end
+      let bytes := create Byte_Array.from_java(raw)
+      let frame_size: Integer := 1
+      with "java" do
+        frame_size := fmt.getFrameSize()
+      end
+      frames := bytes.length() / frame_size
+      source := filename
+      support := create Audio_Support.make()
+      copies := []
+      start(raw, fmt, frames, rate)
+    ensure
+      named: source = filename
+      ready: not is_closed
+    end
+
+  -- A sine tone of FREQUENCY hertz lasting DURATION_MS, made in memory. The
+  -- first and last few milliseconds fade, so the tone starts and stops
+  -- without a click.
+  tone(frequency: Real, duration_ms: Integer)
+    require
+      audible_pitch: frequency >= 20.0 and frequency <= 20000.0
+      positive_length: duration_ms > 0
+      short_enough: duration_ms <= 10000
+    do
+      let rate: Integer := 44100
+      let frames: Integer := rate * duration_ms / 1000
+      if frames < 1 then frames := 1 end
+      let fade: Integer := rate * 5 / 1000
+      if fade > frames / 2 then fade := frames / 2 end
+      let bytes := create Byte_Array.make(frames * 2)
+      let step: Real := 2.0 * 3.141592653589793 * frequency / rate.to_real
+      from let i := 0 until i >= frames do
+        let envelope: Real := 1.0
+        if fade > 0 and i < fade then
+          envelope := i.to_real / fade.to_real
+        elseif fade > 0 and frames - 1 - i < fade then
+          envelope := (frames - 1 - i).to_real / fade.to_real
+        end
+        let sample: Integer := (16000.0 * envelope * (step * i.to_real).sin).round
+        let unsigned: Integer := (sample + 65536) % 65536
+        bytes.set(2 * i, (unsigned % 256).to_byte)
+        bytes.set(2 * i + 1, (unsigned / 256).to_byte)
+        i := i + 1
+      end
+      let fmt: Any := nil
+      with "java" do
+        fmt := AudioFormat.new(44100.0, 16, 1, true, false)
+      end
+      source := ""
+      support := create Audio_Support.make()
+      copies := []
+      start(bytes.to_java, fmt, frames, rate.to_real)
+    ensure
+      sized: this.duration_ms = duration_ms
+      ready: not is_closed
+    end
+
+feature
+  -- The file it came from; "" for a generated tone.
+  source: String
+  duration_ms: Integer
+
+  -- How many copies may play at once; a play() beyond that restarts the
+  -- copy that has played longest.
+  voices: Integer
+
+  -- Loudness from 0.0 (silent) to 1.0 (as recorded).
+  volume: Real
+
+  -- How many times play() has been called. Counts even when nothing can be
+  -- heard, so a headless test can check which sounds a program asked for.
+  play_count: Integer
+
+  is_closed: Boolean
+
+  -- Whether this sound will actually be heard (a device is present).
+  is_audible(): Boolean do
+    result := audible
+  end
+
+  -- Whether the device honours volume changes; when it does not, volume is
+  -- still recorded but the sound plays as recorded.
+  has_volume_control(): Boolean do
+    result := false
+    if audible and copies.length > 0 then
+      result := support.gain_control(copies.get(0)) /= nil
+    end
+  end
+
+  -- Whether any copy is playing right now. Read live, so it is not used in
+  -- any postcondition: a copy can finish at any moment.
+  is_playing(): Boolean do
+    result := false
+    across copies as clip do
+      let running: Boolean := false
+      with "java" do
+        running := clip.isRunning()
+      end
+      if running then result := true end
+    end
+  end
+
+  -- Start a copy from the beginning, without waiting for it to finish.
+  play()
+    require
+      open: not is_closed
+    do
+      play_count := play_count + 1
+      if audible then
+        let clip: Any := free_copy()
+        support.apply_volume(clip, volume)
+        with "java" do
+          clip.stop()
+          clip.setFramePosition(0)
+          clip.start()
+        end
+      end
+    ensure
+      counted: play_count = old play_count + 1
+    end
+
+  -- Silence every copy.
+  stop()
+    require
+      open: not is_closed
+    do
+      across copies as clip do
+        with "java" do
+          clip.stop()
+        end
+      end
+    end
+
+  set_volume(v: Real)
+    require
+      in_range: v >= 0.0 and v <= 1.0
+    do
+      volume := v
+      across copies as clip do
+        support.apply_volume(clip, v)
+      end
+    ensure
+      set: volume = v
+    end
+
+  set_voices(n: Integer)
+    require
+      open: not is_closed
+      in_range: n >= 1 and n <= 16
+    do
+      from until copies.length <= n do
+        let clip: Any := copies.get(copies.length - 1)
+        with "java" do
+          clip.close()
+        end
+        copies.remove(copies.length - 1)
+      end
+      if next_copy >= n then next_copy := 0 end
+      voices := n
+    ensure
+      set: voices = n
+    end
+
+  -- Release the audio lines. A closed sound cannot be played again.
+  close() do
+    across copies as clip do
+      with "java" do
+        clip.close()
+      end
+    end
+    copies := []
+    is_closed := true
+  ensure
+    closed: is_closed
+  end
+
+  -- The audio data and its format, shared by every copy.
+  data: Any
+  format: Any
+  frame_count: Integer
+
+  -- The open Clips, at most `voices` of them, and which one plays next when
+  -- all are busy.
+  copies: Array[Any]
+  next_copy: Integer
+
+  audible: Boolean
+  support: Audio_Support
+
+  -- Common setup for both constructors.
+  start(raw: Any, fmt: Any, frames: Integer, rate: Real) do
+    data := raw
+    format := fmt
+    frame_count := frames
+    duration_ms := (frames.to_real * 1000.0 / rate).round
+    if duration_ms < 1 then duration_ms := 1 end
+    voices := 4
+    volume := 1.0
+    play_count := 0
+    next_copy := 0
+    audible := (create Audio_Device.make()).is_available()
+    if audible then
+      -- Open the first copy now, so a format the device cannot play is
+      -- reported here rather than on the first play().
+      do
+        copies.add(new_copy())
+      rescue
+        audible := false
+      end
+    end
+  end
+
+  -- A new Clip holding the sound.
+  new_copy(): Any do
+    with "java" do
+      result := AudioSystem.getClip()
+      result.open(AudioInputStream.new(ByteArrayInputStream.new(data), format, frame_count))
+    end
+  end
+
+  -- A copy that is not playing, opening another if the pool has room, or
+  -- else the one whose turn it is to start over.
+  free_copy(): Any do
+    result := nil
+    across copies as clip do
+      if result = nil then
+        let busy: Boolean := false
+        with "java" do
+          busy := clip.isRunning()
+        end
+        if not busy then result := clip end
+      end
+    end
+    if result = nil and copies.length < voices then
+      result := new_copy()
+      copies.add(result)
+    end
+    if result = nil then
+      result := copies.get(next_copy)
+      next_copy := (next_copy + 1) % copies.length
+    end
+  end
+
+invariant
+  positive_length: duration_ms > 0
+  voices_in_range: voices >= 1 and voices <= 16
+  volume_in_range: volume >= 0.0 and volume <= 1.0
+  count_non_negative: play_count >= 0
+  copies_within_voices: copies.length <= voices
+end

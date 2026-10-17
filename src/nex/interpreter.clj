@@ -589,8 +589,15 @@
     true))
 
 (defn- compiled-runtime-class-name
+  "The Nex class VALUE is a compiled instance of, or nil. Only classes the
+   compiler generated (package nex.file.* or nex.repl.*) qualify, so a Java
+   object reached through interop (say a javax.sound.midi.Track) is not taken
+   for a Nex object merely because its simple name matches a Nex class."
   [ctx value]
-  (when value
+  (when (and value
+             (let [n (.getName (.getClass value))]
+               (or (str/starts-with? n "nex.file.")
+                   (str/starts-with? n "nex.repl."))))
     (let [binary-name (.getName (.getClass value))
           simple-name (last (str/split binary-name #"\."))
           known-classes @(:classes ctx)]

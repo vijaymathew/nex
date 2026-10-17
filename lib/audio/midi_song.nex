@@ -1,0 +1,306 @@
+-- Midi_Song: a MIDI file, or a Midi_Score written in code, played by Java's
+-- sequencer on the built-in General MIDI synthesizer.
+--
+--   let song := create Midi_Song.load("level1.mid")
+--   song.set_looping(true)
+--   song.play()
+--   ...
+--   song.set_speed(1.5)           -- faster as the level heats up, same pitch
+--   song.set_channel_muted(Midi.DRUM_CHANNEL, true)
+--
+-- The state machine and its contracts come from Track; see track.nex for
+-- why the state follows the program's calls and why a game calls update()
+-- once per frame to notice a song that has played to its end.
+--
+-- Volume. set_volume sets the synthesizer's master volume, so it scales
+-- the whole song, whatever volumes the song sets on its own channels.
+--
+-- No sound device. Without one (or with NEX_AUDIO=off) the sequencer still
+-- runs in real time against no synthesizer: position_ticks advances and the
+-- song reaches its end as usual, silently.
+--
+-- Import with `intern audio/Midi_Song`.
+
+intern audio/Track
+intern audio/Midi_Score
+intern audio/Audio_Device
+intern data/Byte_Array
+
+import java.io.File
+import java.util.Arrays
+import javax.sound.midi.MidiSystem
+import javax.sound.midi.SysexMessage
+
+class Midi_Song
+  note "A MIDI song with play, pause, resume, stop, looping and tempo."
+  inherit Track
+
+create
+  -- The standard MIDI file FILENAME (relative to NEX_USER_DIR).
+  load(filename: String)
+    require
+      has_name: filename.length > 0
+    do
+      let files := create Audio_Support.make()
+      let path: String := files.resolve(filename)
+      if not files.is_file(path) then
+        raise "Midi_Song.load: no such file: " + path
+      end
+      let seq: Any := nil
+      do
+        with "java" do
+          seq := MidiSystem.getSequence(File.new(path))
+        end
+      rescue
+        raise "Midi_Song.load: not a readable MIDI file: " + path
+      end
+      source := filename
+      mutes := [false, false, false, false, false, false, false, false,
+                false, false, false, false, false, false, false, false]
+      sequencer := nil
+      synth := nil
+      length_ticks := 1
+      tempo_bpm := 120.0
+      speed := 1.0
+      connect(seq)
+      set_volume(1.0)
+    ensure
+      named: source = filename
+      stopped: is_stopped()
+    end
+
+  -- The notes of SCORE, as written so far.
+  from_score(score: Midi_Score)
+    require
+      has_notes: score.note_count > 0
+    do
+      source := ""
+      mutes := [false, false, false, false, false, false, false, false,
+                false, false, false, false, false, false, false, false]
+      sequencer := nil
+      synth := nil
+      length_ticks := 1
+      tempo_bpm := 120.0
+      speed := 1.0
+      connect(score.sequence)
+      set_volume(1.0)
+    ensure
+      stopped: is_stopped()
+    end
+
+feature
+  -- The file it came from; "" for a song made from a score.
+  source: String
+  length_ticks: Integer
+
+  -- Beats per minute; set from the song's own tempo when it loads.
+  tempo_bpm: Real
+
+  -- Playback rate: 2.0 plays twice as fast, at the same pitch.
+  speed: Real
+
+  -- Whether the song will actually be heard (a device is present).
+  is_audible(): Boolean do
+    result := synth /= nil
+  end
+
+  position_ticks(): Integer do
+    result := 0
+    if ?sequencer as q then
+      with "java" do
+        result := q.getTickPosition()
+      end
+      if result > length_ticks then result := length_ticks end
+    end
+  end
+
+  set_tempo(bpm: Real)
+    require
+      positive_tempo: bpm > 0.0
+    do
+      tempo_bpm := bpm
+      if ?sequencer as q then
+        with "java" do
+          q.setTempoInBPM(bpm)
+        end
+      end
+    ensure
+      set: tempo_bpm = bpm
+    end
+
+  set_speed(factor: Real)
+    require
+      sensible_speed: factor >= 0.25 and factor <= 4.0
+    do
+      speed := factor
+      if ?sequencer as q then
+        with "java" do
+          q.setTempoFactor(factor)
+        end
+      end
+    ensure
+      set: speed = factor
+    end
+
+  -- Mute or unmute one channel, e.g. to drop the drums.
+  set_channel_muted(channel: Integer, muted: Boolean)
+    require
+      valid_channel: channel >= 0 and channel <= 15
+    do
+      mutes.set(channel, muted)
+      if ?synth as s then
+        with "java" do
+          Arrays.asList(s.getChannels()).get(channel).setMute(muted)
+        end
+      end
+    ensure
+      set: is_channel_muted(channel) = muted
+    end
+
+  is_channel_muted(channel: Integer): Boolean
+    require
+      valid_channel: channel >= 0 and channel <= 15
+    do
+      result := mutes.get(channel)
+    end
+
+  reached_end(): Boolean do
+    result := false
+    if ?sequencer as q then
+      if not is_looping then
+        let running: Boolean := false
+        let at: Integer := 0
+        with "java" do
+          running := q.isRunning()
+          at := q.getTickPosition()
+        end
+        result := not running and at >= length_ticks
+      end
+    end
+  end
+
+  start_from_beginning() do
+    if ?sequencer as q then
+      with "java" do
+        q.setTickPosition(0)
+        q.start()
+      end
+    end
+  end
+
+  halt() do
+    if ?sequencer as q then
+      with "java" do
+        q.stop()
+      end
+    end
+  end
+
+  carry_on() do
+    if ?sequencer as q then
+      with "java" do
+        q.start()
+      end
+    end
+  end
+
+  rewind() do
+    if ?sequencer as q then
+      with "java" do
+        q.stop()
+        q.setTickPosition(0)
+      end
+    end
+  end
+
+  looping_changed() do
+    if ?sequencer as q then
+      let count: Integer := 0
+      if is_looping then count := -1 end
+      with "java" do
+        q.setLoopCount(count)
+      end
+    end
+  end
+
+  -- Universal SysEx "master volume": F0 7F 7F 04 01 lsb msb F7, 14 bits.
+  volume_changed() do
+    if ?synth as s then
+      let level: Integer := (volume * 16383.0).round
+      let bytes := create Byte_Array.from_array([0xF0.to_byte, 0x7F.to_byte, 0x7F.to_byte,
+        0x04.to_byte, 0x01.to_byte, (level % 128).to_byte, (level / 128).to_byte, 0xF7.to_byte])
+      let raw: Any := bytes.to_java
+      with "java" do
+        s.getReceiver().send(SysexMessage.new(raw, 8), -1)
+      end
+    end
+  end
+
+  release() do
+    if ?sequencer as q then
+      with "java" do
+        q.close()
+      end
+    end
+    if ?synth as s then
+      with "java" do
+        s.close()
+      end
+    end
+    sequencer := nil
+    synth := nil
+  end
+
+  -- The javax.sound.midi sequencer and synthesizer; nil when they cannot
+  -- be opened (the synthesizer is also nil without a sound device).
+  sequencer: ?Any
+  synth: ?Any
+
+  -- Each channel's mute switch, kept here so it works headless.
+  mutes: Array[Boolean]
+
+  -- Open a sequencer for SEQ and, when a device is present, a synthesizer
+  -- for it to play on.
+  connect(seq: Any) do
+    let ticks: Integer := 1
+    let bpm: Real := 120.0
+    with "java" do
+      ticks := seq.getTickLength()
+    end
+    if ticks > 0 then length_ticks := ticks end
+    let device := create Audio_Device.make()
+    do
+      with "java" do
+        let q: Any := MidiSystem.getSequencer(false)
+        q.open()
+        q.setSequence(seq)
+        bpm := q.getTempoInBPM()
+        sequencer := q
+      end
+    rescue
+      sequencer := nil
+    end
+    if bpm > 0.0 then tempo_bpm := bpm end
+    if device.is_available() then
+      if ?sequencer as q then
+        do
+          with "java" do
+            let s: Any := MidiSystem.getSynthesizer()
+            s.open()
+            q.getTransmitter().setReceiver(s.getReceiver())
+            synth := s
+          end
+        rescue
+          synth := nil
+        end
+      end
+    end
+  end
+
+invariant
+  positive_length: length_ticks > 0
+  positive_tempo: tempo_bpm > 0.0
+  speed_in_range: speed >= 0.25 and speed <= 4.0
+  position_in_song: position_ticks() >= 0 and position_ticks() <= length_ticks
+  sixteen_channels: mutes.length = 16
+end

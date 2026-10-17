@@ -1,0 +1,205 @@
+-- Synth: notes played live on Java's built-in General MIDI synthesizer — no
+-- sound files needed.
+--
+--   let s := create Synth.make()
+--   s.set_instrument(0, Midi.SQUARE_LEAD)
+--   s.play_note(0, Midi.MIDDLE_C, 100, 150)       -- returns at once
+--
+--   s.note_on(Midi.DRUM_CHANNEL, Midi.SNARE, 110)  -- sounds until note_off
+--   s.note_off(Midi.DRUM_CHANNEL, Midi.SNARE)
+--
+-- There are 16 channels (0..15), each set to one of 128 instruments (see
+-- audio/Midi for names); channel 9 plays drums. A note is 0..127 (60 is
+-- middle C) and its velocity, how hard it is struck, is 1..127.
+--
+-- No sound device. Without one (or with NEX_AUDIO=off) a Synth still keeps
+-- each channel's instrument and counts notes in notes_played, but plays
+-- nothing — so a headless test can check what a program asked to play.
+--
+-- Import with `intern audio/Synth`.
+
+intern audio/Audio_Device
+intern audio/Midi
+
+import java.util.Arrays
+import javax.sound.midi.MidiSystem
+import javax.sound.midi.ShortMessage
+
+class Synth
+  note "A General MIDI synthesizer: 16 channels, 128 instruments, notes on demand."
+
+create
+  -- Open the synthesizer with every channel on Midi.PIANO.
+  make() do
+    programs := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    notes_played := 0
+    synth := nil
+    receiver := nil
+    channels := nil
+    if (create Audio_Device.make()).is_available() then
+      do
+        with "java" do
+          let opened: Any := MidiSystem.getSynthesizer()
+          opened.open()
+          receiver := opened.getReceiver()
+          channels := Arrays.asList(opened.getChannels())
+          synth := opened
+        end
+      rescue
+        synth := nil
+        receiver := nil
+        channels := nil
+      end
+    end
+    is_open := true
+  ensure
+    open: is_open
+  end
+
+feature
+  is_open: Boolean
+
+  -- How many notes have been started. Counts even when nothing can be heard.
+  notes_played: Integer
+
+  -- Whether notes will actually be heard (a device is present).
+  is_audible(): Boolean do
+    result := synth /= nil
+  end
+
+  -- The General MIDI program CHANNEL is set to.
+  instrument(channel: Integer): Integer
+    require
+      valid_channel: channel >= 0 and channel <= 15
+    do
+      result := programs.get(channel)
+    ensure
+      valid_program: result >= 0 and result <= 127
+    end
+
+  set_instrument(channel, program: Integer)
+    require
+      open: is_open
+      valid_channel: channel >= 0 and channel <= 15
+      valid_program: program >= 0 and program <= 127
+    do
+      programs.set(channel, program)
+      send(PROGRAM_CHANGE, channel, program, 0, 0)
+    ensure
+      set: instrument(channel) = program
+    end
+
+  -- Start PITCH (60 is middle C) on CHANNEL, sounding until note_off.
+  note_on(channel, pitch, velocity: Integer)
+    require
+      open: is_open
+      valid_channel: channel >= 0 and channel <= 15
+      valid_pitch: pitch >= 0 and pitch <= 127
+      audible_velocity: velocity >= 1 and velocity <= 127
+    do
+      notes_played := notes_played + 1
+      send(NOTE_ON, channel, pitch, velocity, 0)
+    ensure
+      counted: notes_played = old notes_played + 1
+    end
+
+  note_off(channel, pitch: Integer)
+    require
+      open: is_open
+      valid_channel: channel >= 0 and channel <= 15
+      valid_pitch: pitch >= 0 and pitch <= 127
+    do
+      send(NOTE_OFF, channel, pitch, 0, 0)
+    end
+
+  -- note_on now and note_off after DURATION_MS, without waiting: the
+  -- synthesizer schedules the note_off itself.
+  play_note(channel, pitch, velocity, duration_ms: Integer)
+    require
+      open: is_open
+      valid_channel: channel >= 0 and channel <= 15
+      valid_pitch: pitch >= 0 and pitch <= 127
+      audible_velocity: velocity >= 1 and velocity <= 127
+      positive_length: duration_ms > 0
+    do
+      notes_played := notes_played + 1
+      send(NOTE_ON, channel, pitch, velocity, 0)
+      send(NOTE_OFF, channel, pitch, 0, duration_ms)
+    ensure
+      counted: notes_played = old notes_played + 1
+    end
+
+  -- The channel's loudness as a MIDI controller value, 0..127.
+  set_channel_volume(channel, level: Integer)
+    require
+      open: is_open
+      valid_channel: channel >= 0 and channel <= 15
+      valid_level: level >= 0 and level <= 127
+    do
+      send(CONTROL_CHANGE, channel, 7, level, 0)
+    end
+
+  -- Silence every note on every channel.
+  all_notes_off()
+    require
+      open: is_open
+    do
+      if ?channels as cs then
+        with "java" do
+          from let i := 0 until i >= cs.size() do
+            cs.get(i).allNotesOff()
+            i := i + 1
+          end
+        end
+      end
+    end
+
+  close() do
+    if ?synth as s then
+      with "java" do
+        s.close()
+      end
+    end
+    synth := nil
+    receiver := nil
+    channels := nil
+    is_open := false
+  ensure
+    closed: not is_open
+  end
+
+  -- The javax.sound.midi objects behind it; nil without a device.
+  synth: ?Any
+  receiver: ?Any
+  channels: ?Any
+
+  -- MIDI channel-message status bytes.
+  NOTE_OFF = 128
+  NOTE_ON = 144
+  CONTROL_CHANGE = 176
+  PROGRAM_CHANGE = 192
+
+  -- Each channel's instrument, kept here so instrument() works headless.
+  programs: Array[Integer]
+
+  -- Send a channel message DELAY_MS from now (0: at once).
+  send(command, channel, data1, data2, delay_ms: Integer) do
+    if ?synth as s then
+      if ?receiver as r then
+        with "java" do
+          let message: Any := ShortMessage.new(command, channel, data1, data2)
+          let at: Integer := -1
+          if delay_ms > 0 then
+            let now: Integer := s.getMicrosecondPosition()
+            at := now + delay_ms * 1000
+          end
+          r.send(message, at)
+        end
+      end
+    end
+  end
+
+invariant
+  count_non_negative: notes_played >= 0
+  sixteen_channels: programs.length = 16
+end

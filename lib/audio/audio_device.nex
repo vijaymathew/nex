@@ -1,0 +1,145 @@
+-- Audio_Device: whether this machine can play sound, and the plumbing the
+-- audio classes share.
+--
+-- Every audio class works with or without a sound device. Without one (a CI
+-- server, a headless box, or NEX_AUDIO=off) it keeps its state and counters
+-- exactly as usual but plays nothing, so a program that makes sounds still
+-- runs, and its tests can still check which sounds it asked for:
+--
+--   let device := create Audio_Device.make()
+--   if not device.is_available() then print("(sound is off)") end
+--
+-- Setting the environment variable NEX_AUDIO to "off" (or the Java system
+-- property nex.audio to "off") turns sound off even when a device is
+-- present — handy for running tests quietly. Import with
+-- `intern audio/Audio_Device`; every other audio class interns it for you.
+
+import java.io.File
+import java.lang.System
+import java.util.Arrays
+import java.util.logging.Level
+import java.util.logging.Logger
+import javax.sound.sampled.AudioFormat
+import javax.sound.sampled.AudioSystem
+
+class Audio_Device
+  note "Reports whether this machine has a sound output device."
+
+create
+  make() do
+    -- Java's MIDI classes log an INFO line the first time they touch the
+    -- user preferences store; that is noise in a Nex program's output.
+    with "java" do
+      Logger.getLogger("java.util.prefs").setLevel(Level.OFF)
+    end
+  end
+
+feature
+  -- Whether sound can be heard: a device is present and sound is not
+  -- switched off by NEX_AUDIO=off or -Dnex.audio=off.
+  is_available(): Boolean do
+    if is_switched_off() then
+      result := false
+    else
+      do
+        let line: Any := nil
+        with "java" do
+          line := AudioSystem.getSourceDataLine(AudioFormat.new(44100.0, 16, 1, true, false))
+        end
+        result := line /= nil
+      rescue
+        result := false
+      end
+    end
+  end
+
+  -- Whether NEX_AUDIO or the nex.audio property is "off".
+  is_switched_off(): Boolean do
+    let p := create Process
+    let env: String := p.getenv("NEX_AUDIO")
+    let prop: String := ""
+    with "java" do
+      prop := System.getProperty("nex.audio", "")
+    end
+    result := env.to_lower = "off" or prop.to_lower = "off"
+  end
+end
+
+-- Helpers shared by Sound and Music: file paths and the volume control of a
+-- javax.sound.sampled line. Not meant for programs to call directly.
+class Audio_Support
+  note "Plumbing shared by the audio classes."
+
+create
+  make() do
+  end
+
+feature
+  -- FILENAME made absolute against the directory nex was started from
+  -- (NEX_USER_DIR), as Picture.load does.
+  resolve(filename: String): String do
+    let absolute: Boolean := false
+    with "java" do
+      absolute := File.new(filename).isAbsolute()
+    end
+    let base: String := ""
+    if not absolute then
+      let p := create Process
+      base := p.getenv("NEX_USER_DIR")
+    end
+    if absolute or base = "" then
+      result := filename
+    else
+      with "java" do
+        result := File.new(base, filename).getPath()
+      end
+    end
+  end
+
+  is_file(path: String): Boolean do
+    with "java" do
+      result := File.new(path).isFile()
+    end
+  end
+
+  -- The line's "Master Gain" control, or nil when it has none.
+  gain_control(line: Any): Any do
+    result := nil
+    with "java" do
+      let controls: Any := Arrays.asList(line.getControls())
+      from let i := 0 until i >= controls.size() do
+        let c: Any := controls.get(i)
+        if c.getType().toString() = "Master Gain" then
+          result := c
+        end
+        i := i + 1
+      end
+    end
+  end
+
+  -- Set LINE's loudness from V in 0.0..1.0, mapped onto its gain in decibels.
+  -- Does nothing when the line has no gain control.
+  apply_volume(line: Any, v: Real)
+    require
+      in_range: v >= 0.0 and v <= 1.0
+    do
+      let control: Any := gain_control(line)
+      if control /= nil then
+        let low: Real := 0.0
+        let high: Real := 0.0
+        with "java" do
+          low := control.getMinimum()
+          high := control.getMaximum()
+        end
+        let db: Real := low
+        if v > 0.0 then
+          db := 20.0 * v.log10
+        end
+        if db < low then db := low end
+        if db > high then db := high end
+        with "java" do
+          control.setValue(db)
+        end
+      end
+    end
+end
