@@ -294,3 +294,32 @@
   (is (raises-on-both? (program "intern audio/Midi_Song"
                                 "let score := create Midi_Score.make(0)")
                        "positive_resolution")))
+
+;; ---------------------------------------------------------------------------
+;; Threads: a stopped song must not keep the JVM alive
+;; ---------------------------------------------------------------------------
+
+(defn- live-sequencer-threads []
+  (count (filter #(and (.isAlive ^Thread %)
+                       (not (.isDaemon ^Thread %))
+                       (= "Java Sound Sequencer" (.getName ^Thread %)))
+                 (keys (Thread/getAllStackTraces)))))
+
+(deftest stopped-songs-leave-no-sequencer-thread
+  ;; Java's sequencer thread is not a daemon, so one left open keeps the JVM
+  ;; from exiting. A song holds one only while playing or paused.
+  (let [before (live-sequencer-threads)]
+    (is (= ["\"STOPPED\"" "\"STOPPED\""]
+           (both (apply program "intern audio/Midi_Song"
+                        (concat three-note-score
+                                ["let song := create Midi_Song.from_score(score)"
+                                 "song.play()"
+                                 "song.pause()"
+                                 "song.stop()"
+                                 "print(song.state())"
+                                 "let other := create Midi_Song.from_score(score)"
+                                 "other.play()"
+                                 "other.close()"
+                                 "print(other.state())"])))))
+    (Thread/sleep 200)
+    (is (= before (live-sequencer-threads)))))

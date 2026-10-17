@@ -188,6 +188,7 @@ feature
     clip := nil
   end
 
+private feature
   -- The javax.sound.sampled.Clip holding the track; nil without a device.
   clip: ?Any
   support: Audio_Support

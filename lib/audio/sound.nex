@@ -92,7 +92,7 @@ create
       let fade: Integer := rate * 5 / 1000
       if fade > frames / 2 then fade := frames / 2 end
       let bytes := create Byte_Array.make(frames * 2)
-      let step: Real := 2.0 * 3.141592653589793 * frequency / rate.to_real
+      let step: Real := 2.0 * Real.PI * frequency / rate.to_real
       from let i := 0 until i >= frames do
         let envelope: Real := 1.0
         if fade > 0 and i < fade then
@@ -238,6 +238,7 @@ feature
     closed: is_closed
   end
 
+private feature
   -- The audio data and its format, shared by every copy.
   data: Any
   format: Any

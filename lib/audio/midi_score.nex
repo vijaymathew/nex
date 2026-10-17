@@ -97,6 +97,8 @@ feature
 
   -- The javax.sound.midi.Sequence being built; Midi_Song plays it.
   sequence: Any
+
+private feature
   track: Any
 
   NOTE_OFF = 128

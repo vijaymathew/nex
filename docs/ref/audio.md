@@ -243,3 +243,7 @@ synthesizer. Inherits `Track`.
 
 `set_volume` sets the synthesizer's master volume, so it scales the whole song
 whatever volumes the song sets on its own channels.
+
+Java's sequencer runs on a thread that would keep the JVM alive, so a song has
+one only while it is playing or paused: `play()` opens it, and `stop()`,
+`close()` and an `update()` that finds the song ended close it again.

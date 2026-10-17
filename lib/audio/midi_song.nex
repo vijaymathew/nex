@@ -15,6 +15,11 @@
 -- Volume. set_volume sets the synthesizer's master volume, so it scales
 -- the whole song, whatever volumes the song sets on its own channels.
 --
+-- Threads. Java's sequencer runs on a thread of its own that would keep the
+-- JVM alive, so it exists only while the song is playing or paused: play()
+-- opens it, and stop(), close() and an update() that finds the song ended
+-- close it again.
+--
 -- No sound device. Without one (or with NEX_AUDIO=off) the sequencer still
 -- runs in real time against no synthesizer: position_ticks advances and the
 -- song reaches its end as usual, silently.
@@ -55,6 +60,7 @@ create
         raise "Midi_Song.load: not a readable MIDI file: " + path
       end
       source := filename
+      song_data := seq
       mutes := [false, false, false, false, false, false, false, false,
                 false, false, false, false, false, false, false, false]
       sequencer := nil
@@ -62,7 +68,7 @@ create
       length_ticks := 1
       tempo_bpm := 120.0
       speed := 1.0
-      connect(seq)
+      connect()
       set_volume(1.0)
     ensure
       named: source = filename
@@ -75,6 +81,7 @@ create
       has_notes: score.note_count > 0
     do
       source := ""
+      song_data := score.sequence
       mutes := [false, false, false, false, false, false, false, false,
                 false, false, false, false, false, false, false, false]
       sequencer := nil
@@ -82,7 +89,7 @@ create
       length_ticks := 1
       tempo_bpm := 120.0
       speed := 1.0
-      connect(score.sequence)
+      connect()
       set_volume(1.0)
     ensure
       stopped: is_stopped()
@@ -180,6 +187,7 @@ feature
   end
 
   start_from_beginning() do
+    open_sequencer()
     if ?sequencer as q then
       with "java" do
         q.setTickPosition(0)
@@ -204,22 +212,20 @@ feature
     end
   end
 
+  -- Stopping closes the sequencer, ending its thread; play() opens a new one.
   rewind() do
     if ?sequencer as q then
       with "java" do
         q.stop()
-        q.setTickPosition(0)
+        q.close()
       end
     end
+    sequencer := nil
   end
 
   looping_changed() do
     if ?sequencer as q then
-      let count: Integer := 0
-      if is_looping then count := -1 end
-      with "java" do
-        q.setLoopCount(count)
-      end
+      apply_looping(q)
     end
   end
 
@@ -237,63 +243,91 @@ feature
   end
 
   release() do
-    if ?sequencer as q then
-      with "java" do
-        q.close()
-      end
-    end
+    rewind()
     if ?synth as s then
       with "java" do
         s.close()
       end
     end
-    sequencer := nil
     synth := nil
   end
 
-  -- The javax.sound.midi sequencer and synthesizer; nil when they cannot
-  -- be opened (the synthesizer is also nil without a sound device).
+private feature
+  -- The javax.sound.midi.Sequence being played.
+  song_data: Any
+
+  -- The sequencer while the song is playing or paused, else nil; the
+  -- synthesizer it plays on, nil without a sound device.
   sequencer: ?Any
   synth: ?Any
 
   -- Each channel's mute switch, kept here so it works headless.
   mutes: Array[Boolean]
 
-  -- Open a sequencer for SEQ and, when a device is present, a synthesizer
-  -- for it to play on.
-  connect(seq: Any) do
+  -- Read the song's length and tempo, and open a synthesizer when a device
+  -- is present. The sequencer used to read the tempo is closed again.
+  connect() do
     let ticks: Integer := 1
     let bpm: Real := 120.0
     with "java" do
-      ticks := seq.getTickLength()
+      ticks := song_data.getTickLength()
     end
     if ticks > 0 then length_ticks := ticks end
-    let device := create Audio_Device.make()
     do
       with "java" do
         let q: Any := MidiSystem.getSequencer(false)
         q.open()
-        q.setSequence(seq)
+        q.setSequence(song_data)
         bpm := q.getTempoInBPM()
+        q.close()
+      end
+    rescue
+      bpm := 120.0
+    end
+    if bpm > 0.0 then tempo_bpm := bpm end
+    if (create Audio_Device.make()).is_available() then
+      do
+        with "java" do
+          let s: Any := MidiSystem.getSynthesizer()
+          s.open()
+          synth := s
+        end
+      rescue
+        synth := nil
+      end
+    end
+  end
+
+  -- A sequencer for the song, with this song's tempo, speed and looping,
+  -- wired to the synthesizer when there is one.
+  open_sequencer() do
+    do
+      with "java" do
+        let q: Any := MidiSystem.getSequencer(false)
+        q.open()
+        q.setSequence(song_data)
+        q.setTempoInBPM(tempo_bpm)
+        q.setTempoFactor(speed)
         sequencer := q
       end
     rescue
       sequencer := nil
     end
-    if bpm > 0.0 then tempo_bpm := bpm end
-    if device.is_available() then
-      if ?sequencer as q then
-        do
-          with "java" do
-            let s: Any := MidiSystem.getSynthesizer()
-            s.open()
-            q.getTransmitter().setReceiver(s.getReceiver())
-            synth := s
-          end
-        rescue
-          synth := nil
+    if ?sequencer as q then
+      apply_looping(q)
+      if ?synth as s then
+        with "java" do
+          q.getTransmitter().setReceiver(s.getReceiver())
         end
       end
+    end
+  end
+
+  apply_looping(q: Any) do
+    let count: Integer := 0
+    if is_looping then count := -1 end
+    with "java" do
+      q.setLoopCount(count)
     end
   end
 

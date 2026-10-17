@@ -168,6 +168,7 @@ feature
     closed: not is_open
   end
 
+private feature
   -- The javax.sound.midi objects behind it; nil without a device.
   synth: ?Any
   receiver: ?Any
