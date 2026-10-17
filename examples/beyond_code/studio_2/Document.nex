@@ -62,13 +62,6 @@ feature
   from_doc_id: String
   to_doc_id: String
   link_type: String    -- references | related | contradicts
-
-  is_valid(): Boolean do
-    result :=
-      from_doc_id /= "" and to_doc_id /= "" and
-      from_doc_id /= to_doc_id and
-      (link_type = "references" or link_type = "related" or link_type = "contradicts")
-  end
 create
   -- Contracts block invalid links at construction — a self-link or unknown
   -- link type cannot be built, so it can never enter the model.

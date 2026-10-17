@@ -112,8 +112,10 @@ function main() do
   assert flat_n.find_by_tag("graphs") = "note_002"
 
   let good: Doc_Link := create Doc_Link.make("D1", "D2", "references")
-  c.print_line("after:  valid link D1->D2 references, is_valid = " + good.is_valid())
-  assert good.is_valid()
+  -- The invariant rejects an unknown type or a self-link at construction,
+  -- so any link that exists is valid.
+  c.print_line("after:  valid link " + good.from_doc_id + "->" + good.to_doc_id + " " + good.link_type)
+  assert good.link_type = "references"
   let self_link_blocked: Boolean := false
   do
     let bad: Doc_Link := create Doc_Link.make("D1", "D1", "references")

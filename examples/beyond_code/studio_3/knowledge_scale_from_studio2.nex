@@ -68,6 +68,9 @@ create
     end
 invariant
   endpoints_present: from_doc_id /= "" and to_doc_id /= ""
+  no_self_link: from_doc_id /= to_doc_id
+  valid_link_type:
+    link_type = "references" or link_type = "related" or link_type = "contradicts"
 end
 
 -- ----- BEFORE: each endpoint check is a scan (O(n) per endpoint) ------------
