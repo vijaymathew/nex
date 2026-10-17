@@ -1,0 +1,118 @@
+-- Midi_Score: a piece of music written in code, note by note, ready to be
+-- played as a Midi_Song or saved as a standard MIDI file.
+--
+--   let score := create Midi_Score.make(4)           -- 4 ticks per beat
+--   score.set_instrument(0, Midi.SQUARE_LEAD, 0)
+--   score.add_note(0, 60, 100, 0, 4)                 -- C, one beat
+--   score.add_note(0, 64, 100, 4, 4)                 -- E
+--   score.add_note(0, 67, 100, 8, 8)                 -- G, two beats
+--   let tune := create Midi_Song.from_score(score)
+--   tune.play()
+--
+-- Time is counted in ticks; a beat is ticks_per_beat ticks, and a song plays
+-- at 120 beats per minute unless Midi_Song.set_tempo says otherwise. Notes
+-- may overlap and may be added in any order.
+--
+-- Import with `intern audio/Midi_Score` (audio/Midi_Song interns it for you).
+
+intern audio/Midi
+intern audio/Audio_Device
+
+import java.io.File
+import javax.sound.midi.MidiEvent
+import javax.sound.midi.MidiSystem
+import javax.sound.midi.Sequence
+import javax.sound.midi.ShortMessage
+
+class Midi_Score
+  note "Notes placed on a timeline of ticks, ready to become a Midi_Song."
+
+create
+  -- An empty score with TICKS_PER_BEAT ticks in each beat.
+  make(ticks_per_beat: Integer)
+    require
+      positive_resolution: ticks_per_beat > 0
+    do
+      this.ticks_per_beat := ticks_per_beat
+      note_count := 0
+      length_ticks := 0
+      with "java" do
+        let s: Any := Sequence.new(Sequence.PPQ, ticks_per_beat)
+        track := s.createTrack()
+        sequence := s
+      end
+    ensure
+      empty: note_count = 0 and length_ticks = 0
+    end
+
+feature
+  ticks_per_beat: Integer
+  note_count: Integer
+
+  -- The tick at which the last note ends.
+  length_ticks: Integer
+
+  -- PITCH on CHANNEL from tick START for LENGTH ticks.
+  add_note(channel, pitch, velocity, start, length: Integer)
+    require
+      valid_channel: channel >= 0 and channel <= 15
+      valid_pitch: pitch >= 0 and pitch <= 127
+      audible_velocity: velocity >= 1 and velocity <= 127
+      not_before_start: start >= 0
+      positive_length: length > 0
+    do
+      add_event(NOTE_ON, channel, pitch, velocity, start)
+      add_event(NOTE_OFF, channel, pitch, 0, start + length)
+      note_count := note_count + 1
+      if start + length > length_ticks then
+        length_ticks := start + length
+      end
+    ensure
+      one_more: note_count = old note_count + 1
+      long_enough: length_ticks >= start + length
+    end
+
+  -- Switch CHANNEL to PROGRAM at tick AT.
+  set_instrument(channel, program, at: Integer)
+    require
+      valid_channel: channel >= 0 and channel <= 15
+      valid_program: program >= 0 and program <= 127
+      not_before_start: at >= 0
+    do
+      add_event(PROGRAM_CHANGE, channel, program, 0, at)
+    end
+
+  -- Write the score as a standard MIDI file (relative to NEX_USER_DIR).
+  save(filename: String)
+    require
+      has_name: filename.length > 0
+      has_notes: note_count > 0
+    do
+      let path: String := (create Audio_Support.make()).resolve(filename)
+      let written: Integer := 0
+      with "java" do
+        written := MidiSystem.write(sequence, 1, File.new(path))
+      end
+    end
+
+  -- The javax.sound.midi.Sequence being built; Midi_Song plays it.
+  sequence: Any
+
+private feature
+  track: Any
+
+  NOTE_OFF = 128
+  NOTE_ON = 144
+  PROGRAM_CHANGE = 192
+
+  add_event(command, channel, data1, data2, tick: Integer) do
+    with "java" do
+      let added: Boolean := track.add(MidiEvent.new(ShortMessage.new(command, channel, data1, data2), tick))
+    end
+  end
+
+invariant
+  positive_resolution: ticks_per_beat > 0
+  count_non_negative: note_count >= 0
+  length_non_negative: length_ticks >= 0
+end

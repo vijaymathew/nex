@@ -8450,13 +8450,19 @@
         (env-add-global env nm (or ty "Any"))))))
 
 (defn- body-let-names
-  "Names bound by a `let` anywhere in `body` — locals that shadow a like-named
-   global. Includes lets synthesized into a body (e.g. a refinement predicate
-   inlined as `let s := t; if not (s...) ...`), so those do not read as globals."
+  "Names bound locally anywhere in `body` — locals that shadow a like-named
+   global: every `let` (including lets synthesized into a body, e.g. a
+   refinement predicate inlined as `let s := t; if not (s...) ...`, or an
+   `across` loop's variable), and the name an attached test (`if ?x as s`) or
+   a `convert ... to s` binds. None of these read as globals."
   [body]
   (into #{}
-        (comp (filter #(and (map? %) (= :let (:type %))))
-              (keep :name))
+        (comp (filter map?)
+              (keep (fn [node]
+                      (case (:type node)
+                        :let (:name node)
+                        (:attached-test :convert) (:var-name node)
+                        nil))))
         (tree-seq coll? seq body)))
 
 (defn- body-bound-names

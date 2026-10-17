@@ -6,6 +6,7 @@ Unlike built-in runtime classes, these libraries may be platform-specific and mu
 
 ## Categories
 
+- [Audio Libraries](audio.md) - `audio/Sound` for short sound effects (loaded or generated tones), `audio/Music` for recorded tracks, `audio/Synth` for MIDI notes played live, `audio/Midi_Score` and `audio/Midi_Song` for music written in code or loaded from MIDI files, all working silently without a sound device
 - [Data Libraries](data.md) - `data/Json` for JSON parsing and serialization, `data/Sexpr`, `data/Byte_Array` for packed byte buffers, `data/Result`/`data/Option` for error handling and optional values, and `data/Mutex` for exclusive access to a shared value across tasks
 - [Graphics Libraries](graphics.md) - `graphics/Canvas` for 2D drawing in user coordinates, shown in a window or saved as an image, with mouse and keyboard input and pictures loaded from image files, plus `graphics/Color`, `graphics/Font`, `graphics/Key` and `graphics/Picture`
 - [IO Libraries](io.md) - `io/Path`, `io/Directory`, `io/Text_File`, and `io/Binary_File` for filesystem and file I/O

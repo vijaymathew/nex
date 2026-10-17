@@ -1,0 +1,64 @@
+-- Midi: General MIDI numbers, so a program writes Midi.TRUMPET, not 56.
+--
+-- Notes are numbered by semitone: 60 is middle C, 61 the C sharp above it,
+-- 72 the C an octave up. Channels are 0..15, and channel 9 (DRUM_CHANNEL)
+-- plays percussion, where each note number is a different drum.
+--
+-- Import with `intern audio/Midi` (audio/Synth and audio/Midi_Score intern
+-- it for you).
+
+class Midi
+  note "General MIDI constants: channels, notes, instruments and drums."
+
+feature
+  DRUM_CHANNEL = 9
+  MIDDLE_C = 60
+
+  -- Instruments (General MIDI programs 0..127). Each family of eight starts
+  -- at the number shown; the members in between are its variations.
+  PIANO = 0
+  ELECTRIC_PIANO = 4
+  GLOCKENSPIEL = 9
+  MUSIC_BOX = 10
+  VIBRAPHONE = 11
+  MARIMBA = 12
+  ORGAN = 19
+  ACCORDION = 21
+  HARMONICA = 22
+  GUITAR = 24
+  ELECTRIC_GUITAR = 27
+  DISTORTION_GUITAR = 30
+  BASS = 33
+  SYNTH_BASS = 38
+  VIOLIN = 40
+  CELLO = 42
+  HARP = 46
+  TIMPANI = 47
+  STRINGS = 48
+  CHOIR = 52
+  ORCHESTRA_HIT = 55
+  TRUMPET = 56
+  TROMBONE = 57
+  FRENCH_HORN = 60
+  SAXOPHONE = 65
+  CLARINET = 71
+  FLUTE = 73
+  PAN_FLUTE = 75
+  SQUARE_LEAD = 80
+  SAW_LEAD = 81
+  PAD = 88
+  STEEL_DRUMS = 114
+  SYNTH_DRUM = 118
+
+  -- Drums: note numbers on DRUM_CHANNEL.
+  BASS_DRUM = 36
+  SNARE = 38
+  CLOSED_HI_HAT = 42
+  OPEN_HI_HAT = 46
+  LOW_TOM = 45
+  HIGH_TOM = 50
+  CRASH_CYMBAL = 49
+  RIDE_CYMBAL = 51
+  HAND_CLAP = 39
+  COWBELL = 56
+end

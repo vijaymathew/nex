@@ -1,0 +1,160 @@
+-- Track: the play/pause/resume/stop life of anything that plays over time.
+-- Music and Midi_Song inherit it, and with it every contract below.
+--
+--        play            pause
+--   STOPPED ──► PLAYING ───────► PAUSED
+--      ▲          │  ▲  resume     │
+--      └── stop ──┘  └─────────────┘   (stop from PAUSED too)
+--
+-- The state changes only when the program calls one of these routines. The
+-- audio itself runs on a background thread, so a track can reach its end at
+-- any moment; that shows up at once in reached_end(), and the state follows
+-- it when update() is called — a game calls it once per frame:
+--
+--   music.update()
+--   if music.is_stopped() then next_level_music.play() end
+--
+-- Keeping the state in step with the program's calls, not with the audio
+-- thread, is what lets play() promise is_playing(): nothing can change the
+-- state between the body and the check.
+--
+-- Import with `intern audio/Track` (audio/Music and audio/Midi_Song intern it
+-- for you).
+
+intern audio/Audio_Device
+
+deferred class Track
+  note "Something that plays over time: stopped, playing or paused."
+
+feature
+  STOPPED = "STOPPED"
+  PLAYING = "PLAYING"
+  PAUSED = "PAUSED"
+
+  -- Whether the track starts again from the beginning when it ends.
+  is_looping: Boolean
+
+  -- Loudness from 0.0 (silent) to 1.0 (as recorded).
+  volume: Real
+
+  is_closed: Boolean
+
+  -- Only Track's own routines assign these; Nex does not let a subclass
+  -- assign a field it inherits, so Music and Midi_Song cannot bypass them.
+  playing: Boolean
+  paused: Boolean
+
+  is_playing(): Boolean do result := playing end
+  is_paused(): Boolean do result := paused end
+  is_stopped(): Boolean do result := not playing and not paused end
+
+  -- STOPPED, PLAYING or PAUSED.
+  state(): String do
+    if playing then
+      result := PLAYING
+    elseif paused then
+      result := PAUSED
+    else
+      result := STOPPED
+    end
+  end
+
+  -- Whether the audio has run out (never while looping). Read live: it can
+  -- turn true at any moment while the track plays.
+  reached_end(): Boolean deferred
+
+  -- Bring the state up to date: a track that has played to its end stops
+  -- and rewinds, ready to play again.
+  update() do
+    if playing and reached_end() then
+      rewind()
+      playing := false
+    end
+  end
+
+  -- Start from the beginning.
+  play()
+    require
+      open: not is_closed
+      stopped: is_stopped()
+    do
+      start_from_beginning()
+      playing := true
+    ensure
+      playing: is_playing()
+    end
+
+  pause()
+    require
+      playing: is_playing()
+    do
+      halt()
+      playing := false
+      paused := true
+    ensure
+      paused: is_paused()
+    end
+
+  -- Carry on from where pause() left off.
+  resume()
+    require
+      paused: is_paused()
+    do
+      carry_on()
+      paused := false
+      playing := true
+    ensure
+      playing: is_playing()
+    end
+
+  -- Stop and rewind. Allowed in any state.
+  stop() do
+    rewind()
+    playing := false
+    paused := false
+  ensure
+    stopped: is_stopped()
+  end
+
+  set_looping(b: Boolean) do
+    is_looping := b
+    looping_changed()
+  ensure
+    set: is_looping = b
+  end
+
+  set_volume(v: Real)
+    require
+      in_range: v >= 0.0 and v <= 1.0
+    do
+      volume := v
+      volume_changed()
+    ensure
+      set: volume = v
+    end
+
+  -- Stop and release the device. A closed track cannot be played again.
+  close() do
+    stop()
+    release()
+    is_closed := true
+  ensure
+    closed: is_closed
+    stopped: is_stopped()
+  end
+
+  -- How each kind of track does the work behind the state changes. They are
+  -- called only by Track's routines above.
+  start_from_beginning() deferred
+  halt() deferred
+  carry_on() deferred
+  rewind() deferred
+  looping_changed() deferred
+  volume_changed() deferred
+  release() deferred
+
+invariant
+  one_state: not (playing and paused)
+  volume_in_range: volume >= 0.0 and volume <= 1.0
+  closed_is_stopped: not is_closed or is_stopped()
+end

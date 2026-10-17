@@ -392,3 +392,28 @@ end")
     (is (= ["big"] (run-compiled trailing-if-calls-method-on-global))))
   (testing "same shape with value-returning branches still compiles"
     (is (= [] (run-compiled trailing-if-yields-value-from-global)))))
+
+(def attached-test-binder-shares-a-later-global-name
+  "class Holder
+create
+  make() do
+    x := \"held\"
+  end
+feature
+  x: ?String
+  show() do
+    if ?x as s then print(s) end
+  end
+end
+let h := create Holder.make()
+h.show()
+let s := 1
+print(s)")
+
+(deftest attached-test-binder-is-not-a-global-read
+  (testing "the name an attached test binds (`if ?x as s`) is local to the body,
+            so a global of the same name declared later is not reported as read
+            before it is initialized"
+    (is (:success (type-check attached-test-binder-shares-a-later-global-name)))
+    (is (= ["\"held\"" "1"] (run-compiled attached-test-binder-shares-a-later-global-name)))
+    (is (= ["\"held\"" "1"] (run-interpreted attached-test-binder-shares-a-later-global-name)))))

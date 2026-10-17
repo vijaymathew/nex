@@ -1348,9 +1348,20 @@
               (make kind message label)))
           (rt/nex-error-message throwable)))))
 
+(defn- generated-class-name?
+  "Whether BINARY-NAME is a class the Nex compiler generated: file programs
+   compile under nex.file.<stem>, REPL input under nex.repl."
+  [binary-name]
+  (or (str/starts-with? binary-name "nex.file.")
+      (str/starts-with? binary-name "nex.repl.")))
+
 (defn- compiled-runtime-class-name
+  "The Nex class VALUE is an instance of, or nil when it is not a compiled Nex
+   object. Only generated classes qualify: a Java object reached through
+   interop (say a javax.sound.midi.Track) is not a Nex object merely because
+   its simple name matches a Nex class (Track)."
   [state value]
-  (when value
+  (when (and value (generated-class-name? (.getName (.getClass ^Object value))))
     (let [binary-name (.getName (.getClass ^Object value))
           simple-name (last (str/split binary-name #"\."))]
       (cond

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Sound with `lib/audio`.** `audio/Sound` plays short effects loaded from
+  WAV, AIFF or AU files, or generated with `Sound.tone`, overlapping up to
+  `voices` copies. `audio/Music` plays recorded tracks and `audio/Midi_Song`
+  plays MIDI files or a `audio/Midi_Score` written note by note, both through
+  the stopped/playing/paused state machine of `audio/Track`. `audio/Synth`
+  plays notes live on Java's General MIDI synthesizer, with names for
+  instruments and drums in `audio/Midi`. Without a sound device, or with
+  `NEX_AUDIO=off`, everything still runs and counts what it was asked to
+  play, silently. See `docs/ref/audio.md` and `examples/audio_example.nex`.
+- **Fix: a Java object whose class shares a simple name with a Nex class is
+  called as a Java object.** Both backends recognised compiled Nex objects by
+  simple class name alone, so, for example, a `javax.sound.midi.Track` was
+  taken for an instance of a Nex class `Track`. Only classes the compiler
+  generated count now.
+- **Fix: the name bound by `if ?x as name` or `convert ... to name` is local.**
+  The def-before-use check for globals read it as a read of any global of the
+  same name declared later in the program, and rejected the program.
+
 - **Pixel access and image operations on `graphics/Picture`.** Read and set
   pixels by `(col, row)` from the top left, as a `Color` (`get`/`set`), as
   `0xRRGGBB` (`get_rgb`/`set_rgb`) or as `0xAARRGGBB` (`get_argb`/`set_argb`).

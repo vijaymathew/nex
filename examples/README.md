@@ -46,6 +46,8 @@ read one is to run it alongside the source.
   change color and clear
 - **graphics_sprite_example.nex** — a rocket sprite (`assets/ship.png`) flown
   with the arrow keys and dragged with the mouse
+- **audio_example.nex** — `audio/`: a generated beep, notes played live on the
+  MIDI synthesizer, and a tune written in code (no sound files needed)
 - **io_text_example.nex**, **io_binary_example.nex** — file I/O
 - **echo_server.nex**, **echo_client.nex** — TCP sockets
 - **http_server.nex**, **http_client_to_server.nex** — HTTP
