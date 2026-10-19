@@ -428,12 +428,13 @@ end"
           ast (p/ast code)
           ctx (interp/make-context)
           d-class (last (:classes ast))
-          labels-seen (atom nil)]
+          labels-seen (atom [])]
       (doseq [class-node (:classes ast)]
         (interp/register-class ctx class-node))
+      ;; Each class's clauses are checked in their own call (as that class).
       (with-redefs [interp/check-assertions
                     (fn [_ assertions _]
-                      (reset! labels-seen (mapv :label assertions)))]
+                      (swap! labels-seen into (map :label assertions)))]
         (interp/check-class-invariant ctx d-class))
       (is (= ["a_ok" "b_ok" "c_ok" "d_ok"] @labels-seen)))))
 
