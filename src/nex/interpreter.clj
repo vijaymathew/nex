@@ -901,11 +901,16 @@
                                 [[] seen']
                                 parents)
                         [[] seen'])
-                      local-invariants (or (:invariant class-def) [])]
-                  [(vec (concat parent-invariants local-invariants)) seen'']))))]
-    (let [[invariant-assertions _] (collect-invariants class-def #{})]
-      (when (seq invariant-assertions)
-        (check-assertions ctx invariant-assertions Class-invariant)))))
+                      local-invariants (when (seq (:invariant class-def))
+                                         [[class-name (:invariant class-def)]])]
+                  [(into parent-invariants local-invariants) seen'']))))]
+    ;; Each class's clauses run as code of that class, so a bare zero-argument
+    ;; query in a clause (`total = sum`) resolves even when the check is made
+    ;; from outside the class (at creation), and may name a private feature.
+    (let [[groups _] (collect-invariants class-def #{})]
+      (doseq [[class-name assertions] groups]
+        (check-assertions (cond-> ctx class-name (assoc :current-class-name class-name))
+                          assertions Class-invariant)))))
 
 ;;
 ;; Inheritance Support
@@ -1094,12 +1099,34 @@
                        (class-paths ctx parent-def)))
                 (get-parent-classes ctx class-def))))
 
+(def ^:dynamic *validating-invariant*
+  "True while an invariant is being checked. Calls an invariant clause makes
+   check no invariant themselves, so a clause may call a query qualified
+   (`this.q`) without recursing, as in the compiled runtime."
+  false)
+
+(declare check-object-invariant*)
+
 (defn check-object-invariant
   "Check CLASS-DEF's invariant on OBJ. Every clause is checked on the copies
    along each field's home path, as check-class-invariant does; then an
    ancestor reached along another path, whose copy of its fields is a
    different one, has its own clauses checked again on that copy. A clause
-   may call the object's queries, so OBJ is the current object meanwhile."
+   may call the object's queries, so OBJ is the current object meanwhile.
+   ON-ENTRY-OF names the routine (\"Class.name\") when this is the check on
+   entry to a qualified call."
+  ([ctx class-def obj] (check-object-invariant ctx class-def obj nil))
+  ([ctx class-def obj on-entry-of]
+   (when-not *validating-invariant*
+     (let [^ThreadLocal entry bi/invariant-entry-routine
+           outer (.get entry)]
+       (.set entry on-entry-of)
+       (try
+         (binding [*validating-invariant* true]
+           (check-object-invariant* ctx class-def obj))
+         (finally (.set entry outer)))))))
+
+(defn- check-object-invariant*
   [ctx class-def obj]
   (let [fields (:fields obj)
         inv-ctx (-> ctx
@@ -1115,7 +1142,8 @@
             :when (seq view)]
       (let [env (make-env (:current-env ctx))]
         (bind-fields! env fields view)
-        (check-assertions (assoc inv-ctx :current-env env :current-path path :current-view view)
+        (check-assertions (assoc inv-ctx :current-env env :current-path path :current-view view
+                                 :current-class-name (:name ancestor))
                           (:invariant ancestor) Class-invariant)))))
 
 (defn feature-members
@@ -2302,6 +2330,13 @@
                         ;; A closure's body runs as part of the routine that
                         ;; made it (see eval-node :anonymous-function).
                         (merge (:enclosing obj)))
+            ;; A qualified call checks the invariant on entry too, as
+            ;; Eiffel's run-time checking does: it fails when the object was
+            ;; changed since its last check on exit, by a callback into it
+            ;; mid-update or behind its back.
+            _ (when-not (:unchecked-call? ctx)
+                (check-object-invariant new-ctx class-def obj
+                                        (str (:name class-def) "." method)))
             _ (when-let [require-assertions effective-require]
                 (check-assertions new-ctx require-assertions Precondition))
             _ (if-let [rescue (:rescue method-def)]

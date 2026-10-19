@@ -274,3 +274,55 @@ feature
 end
 let k: Child := create Child.make
 k.bump"))))
+
+(def ^:private account
+  "class Account
+create
+  make do items := [] total := 0 end
+feature
+  items: Array[Integer]
+  total: Integer
+  deposit(v: Integer) do items.add(v) total := total + v end
+  sum: Integer do
+    result := 0
+    across items as x do result := result + x end
+  end
+invariant
+  same: total = sum
+end
+")
+
+(deftest bare-query-in-invariant-test
+  (testing "a clause naming a zero-argument query without parens, checked at
+            creation (from top-level code) and on exit from a qualified call"
+    (is (= ["10"]
+           (both (str account "let acc: Account := create Account.make
+acc.deposit(10)
+print(acc.sum)")))))
+  (testing "a leaked reference that breaks the clause is reported"
+    (violation-on-both (str account "let acc: Account := create Account.make
+acc.items.add(80)
+print(acc.sum)")))
+  (testing "an inherited clause naming a private query of its own class"
+    (is (= ["1"]
+           (both "class Base
+create
+  make do n := 0 end
+feature
+  n: Integer
+  inc do n := n + 1 end
+private feature
+  ok: Boolean do result := n >= 0 end
+invariant
+  same: ok
+end
+class Child
+inherit Base
+create
+  make do m := 0 end
+feature
+  m: Integer
+end
+let c: Child := create Child.make
+c.inc
+print(c.n)")))))

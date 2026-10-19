@@ -1671,6 +1671,19 @@
                           nex-type
                           (resolve-jvm-type env nex-type))))
 
+(defn- validate-object-state-on-entry-ir
+  "validate-object-state-ir, on entry to ROUTINE (\"Class.name\")."
+  [env class-name routine object-ir nex-type]
+  (if (function-root-class? env class-name)
+    object-ir
+    (ir/call-runtime-node "validate-object-state-on-entry"
+                          [(ir/const-node routine
+                                          "String"
+                                          (ir/object-jvm-type "java/lang/String"))
+                           object-ir]
+                          nex-type
+                          (resolve-jvm-type env nex-type))))
+
 (defn- default-const-node
   [nex-type jvm-type]
   (case jvm-type
@@ -4764,6 +4777,21 @@
                        nex-type
                        jvm-type)))
 
+(defn- user-method-call-ir
+  "IR for a qualified call `target.method(args)` on a user object, dispatched
+   at run time on the receiver's class (an heir's object need not be a JVM
+   subtype of the static type, so there is no direct call to emit). The
+   routine's JVM name is worked out here, once, rather than on every call."
+  [method target-ir arg-irs nex-type jvm-type]
+  (let [string-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
+    (ir/call-runtime-node "call-user-method"
+                          (into [(string-const (str "__method_" method "$arity" (count arg-irs)))
+                                 (string-const method)
+                                 target-ir]
+                                arg-irs)
+                          nex-type
+                          jvm-type)))
+
 (defn- lower-instance-user-field-get
   [env target-expr method base-type target-ir field-def type-map]
   (let [nex-type (tc/resolve-generic-type (:field-type field-def) type-map)
@@ -4799,10 +4827,8 @@
                              nex-type jvm-type true target-ir)
 
       :else
-      (ir/call-runtime-node (str "user-method:" method)
-                            (into [target-ir] (mapv #(lower-expression env %) args))
-                            nex-type
-                            jvm-type))))
+      (user-method-call-ir method target-ir (mapv #(lower-expression env %) args)
+                           nex-type jvm-type))))
 
 (defn- lower-instance-inherited-parent-call
   "`this.m(...)` where M is not declared/inherited on the class itself but is a
@@ -6799,10 +6825,7 @@
     ;; without parentheses (Nex allows `x.describe` for a no-arg call), so
     ;; resolution — not punctuation — decides method vs field.
     (if method-def
-      (ir/call-runtime-node (str "user-method:" (:method expr))
-                            (into [target-ir] arg-irs)
-                            nex-type
-                            jvm-type)
+      (user-method-call-ir (:method expr) target-ir arg-irs nex-type jvm-type)
       (ir/call-runtime-node (str "user-field-get:" (:method expr))
                             [target-ir]
                             nex-type
@@ -7545,8 +7568,75 @@
       [env (ir/pop-node call-ir)])
     [env (ir/pop-node (lower-expression env stmt))]))
 
+(defn- array-across->indexed
+  "STMT, the loop an `across` over an Array desugars to, rewritten to walk the
+   array by index; or STMT unchanged when it is not one. `across xs as x`
+   desugars to cursor calls (nex.walker/handle-across-statement):
+
+     init   let c := xs.cursor   c.start   [stop flag, with a rescue]
+     until  c.at_end             [or the stop flag]
+     body   let x := c.item   ...   c.next
+
+   which the runtime runs as three dynamic cursor calls per element. When xs
+   is statically an (attached) Array, the cursor's calls are replaced with the
+   ones a hand-written loop makes, on a local holding the array and an index:
+   `a.length`, `a.get(i)` and `i := i + 1`. The array is still evaluated once,
+   and its length is read on every test, as the cursor does."
+  [env stmt]
+  (let [[cursor-let & init-rest] (:init stmt)
+        cursor-name (:name cursor-let)
+        value (:value cursor-let)
+        target (:target value)
+        target-type (when (and (= :let (:type cursor-let))
+                               (:synthetic cursor-let)
+                               (string? cursor-name)
+                               (str/starts-with? cursor-name "__across_c_")
+                               (= :call (:type value))
+                               (= "cursor" (:method value))
+                               (empty? (:args value))
+                               (some? target))
+                      (infer-type env (normalize-call-target target)))]
+    (if-not (and (= "Array" (base-type-name target-type))
+                 (not (tc/detachable-type? target-type)))
+      stmt
+      (let [suffix (subs cursor-name (count "__across_c_"))
+            arr-name (str "__across_a_" suffix)
+            idx-name (str "__across_i_" suffix)
+            arr {:type :identifier :name arr-name}
+            idx {:type :identifier :name idx-name}
+            cursor-call? (fn [node]
+                           (and (map? node)
+                                (= :call (:type node))
+                                (empty? (:args node))
+                                (= cursor-name (let [t (:target node)]
+                                                 (if (map? t) (:name t) t)))))
+            set-idx (fn [v] {:type :assign :target idx-name :value v})
+            replace-call (fn [node]
+                           (if-not (cursor-call? node)
+                             node
+                             (case (:method node)
+                               "start"  (set-idx {:type :integer :value 0})
+                               "at_end" {:type :binary :operator ">=" :left idx
+                                         :right {:type :call :target arr-name :method "length"
+                                                 :args [] :has-parens false}}
+                               "item"   {:type :call :target arr-name :method "get"
+                                         :args [idx] :has-parens true}
+                               "next"   (set-idx {:type :binary :operator "+" :left idx
+                                                  :right {:type :integer :value 1}})
+                               node)))
+            rewrite (fn [x] (walk/postwalk replace-call x))]
+        (assoc stmt
+               :init (into [{:type :let :name arr-name :synthetic true
+                             :var-type target-type :value target}
+                            {:type :let :name idx-name :synthetic true
+                             :var-type "Integer" :value {:type :integer :value 0}}]
+                           (rewrite (vec init-rest)))
+               :until (rewrite (:until stmt))
+               :body (rewrite (:body stmt)))))))
+
 (defn- lower-loop-stmt [env stmt]
   (let [loop-env (scoped-child-env env)
+        stmt (array-across->indexed loop-env stmt)
         [env-after-init lowered-init] (lower-statements loop-env (:init stmt))
         [env-after-init invariant-start-stmts] (contract-assertions-ir env-after-init :invariant (:invariant stmt))
         [env-with-variant variant-init-stmts variant-prefix]
@@ -7886,14 +7976,29 @@
                                        (assoc (scoped-env env-after-rescue require-env)
                                               :old-field-locals old-field-locals)
                                        :ensure effective-ensure)
-            class-validation-stmts (if (and (:class-def fn-def)
-                                            (not (:unchecked-twin? fn-def))
-                                            (get (:compiled-classes fn-def) current-class))
+            ;; A class with no invariant anywhere in its hierarchy has
+            ;; nothing to check, so emits no calls to the checker.
+            checked? (and (:class-def fn-def)
+                          (not (:unchecked-twin? fn-def))
+                          (get (:compiled-classes fn-def) current-class)
+                          (class-declares-invariant-in-hierarchy? (visible-class-map env-with-old)
+                                                                  current-class))
+            this-ir (fn [env] (ir/this-node current-class (exact-class-jvm-type env current-class)))
+            ;; A qualified call checks the invariant on entry (before the
+            ;; precondition) and on exit, as Eiffel's run-time checking does.
+            entry-validation-stmts (if checked?
+                                     [(ir/pop-node
+                                       (validate-object-state-on-entry-ir require-env
+                                                                          current-class
+                                                                          (str current-class "." (:name fn-def))
+                                                                          (this-ir require-env)
+                                                                          current-class))]
+                                     [])
+            class-validation-stmts (if checked?
                                      [(ir/pop-node
                                        (validate-object-state-ir ensure-env
                                                                  current-class
-                                                                 (ir/this-node current-class
-                                                                               (exact-class-jvm-type ensure-env current-class))
+                                                                 (this-ir ensure-env)
                                                                  current-class))]
                                      [])
             return-stmt (if (:return-type fn-def)
@@ -7917,6 +8022,7 @@
                      :body (cond-> (into []
                                          (concat (when result-init-stmt [result-init-stmt])
                                                  old-snapshot-stmts
+                                                 entry-validation-stmts
                                                  require-stmts
                                                  lowered-body
                                                  ensure-stmts
@@ -8282,7 +8388,15 @@
                                                        class-name
                                                        (ir/this-node class-name
                                                                      (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                                       class-name))])]
+                                                       class-name))])
+        entry-validation (when validate?
+                           [(ir/pop-node
+                             (validate-object-state-on-entry-ir {:compiled-classes compiled-classes}
+                                                                class-name
+                                                                (str class-name "." (:name method-def))
+                                                                (ir/this-node class-name
+                                                                              (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                                                class-name))])]
     (ir/fn-node {:name (:name method-def)
                  :owner (:jvm-name class-meta)
                  :emitted-name emitted-name
@@ -8292,7 +8406,8 @@
                  :locals (vec params)
                  ;; Keyed off the coalesced type: an explicit `: Void` has no result.
                  :body (if (not= "Void" return-type)
-                         (vec (concat [(ir/set-local-node result-slot
+                         (vec (concat entry-validation
+                                      [(ir/set-local-node result-slot
                                                           call-ir
                                                           return-type
                                                           (resolve-jvm-type resolve-env return-type))]
@@ -8303,7 +8418,7 @@
                                                                       (resolve-jvm-type resolve-env return-type))
                                                        return-type
                                                        (ir/object-jvm-type "java/lang/Object"))]))
-                         (into [(ir/pop-node call-ir)] class-validation))
+                         (vec (concat entry-validation [(ir/pop-node call-ir)] class-validation)))
                  :override? false})))
 
 (defn- make-delegation-method-node
@@ -8316,7 +8431,8 @@
                           (assoc entry
                                  :callee-name (self-call-method-name env source-class method-def)
                                  :emitted-name (lowered-instance-method-name method-def)
-                                 :validate? true)))
+                                 :validate? (class-declares-invariant-in-hierarchy?
+                                             (visible-class-map env) class-name))))
 
 (defn- unchecked-delegation-method-node
   "The unchecked twin (see `self-call-method-name`) of

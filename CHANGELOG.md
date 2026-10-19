@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **Class invariants are checked on entry to qualified calls too.** As in
+  Eiffel's run-time checking, `x.f` checks `x`'s invariant before `f` runs as
+  well as after. This catches a callback into an object whose routine has
+  broken its invariant for a moment (furtive access), and a change made
+  through a shared reference (reference leak), before the called routine
+  runs on the inconsistent object; the error says the invariant was already
+  broken on entry instead of blaming the called routine. Calling `this.f`
+  while the invariant is broken now fails; call `f` unqualified instead.
+  Classes with no invariant in their hierarchy no longer pay for any check.
+  `--skip-contracts` turns both checks off.
+- **Fix: an invariant clause may name a zero-argument query without parens
+  in the interpreter** (`consistent: total = sum`), and a clause calling the
+  object's queries qualified (`this.q`) no longer recurses forever there.
+- **`across` over an Array is about 40x faster in compiled code.** When the
+  target is statically an `Array`, the loop is compiled as an indexed walk,
+  as fast as a hand-written `from` loop over `get`, instead of three dynamic
+  cursor calls per element. Other targets (strings, maps, sets, `Any`, user
+  cursors) still use the cursor, but the built-in cursors are now called
+  directly, about 12x faster than before. Array operations (`get`, `add`,
+  `length`, `slice` and the rest) no longer use reflection on either backend.
+- **Faster method calls and invariant checks in compiled code.** A call
+  `x.f(...)` on a user object no longer builds the routine's name or walks
+  its arguments on every call, and compiled code no longer looks up each
+  runtime helper by name on every call (the lookup is now done once per call
+  site). A class invariant check costs about a third of what it did.
+  Together these make a call in a tight loop about 3x faster, or about 7x
+  faster with a small invariant.
 - **Sound with `lib/audio`.** `audio/Sound` plays short effects loaded from
   WAV, AIFF or AU files, or generated with `Sound.tone`, overlapping up to
   `voices` copies. `audio/Music` plays recorded tracks and `audio/Midi_Song`

@@ -399,7 +399,7 @@ See [examples/README.md](examples/README.md) for the full list.
 |---|---|---|---|
 | Precondition | `require` | Method entry | Before execution |
 | Postcondition | `ensure` | Method exit | After execution |
-| Class invariant | `invariant` | Class | After every operation |
+| Class invariant | `invariant` | Class | After creation, and on entry to and exit from every qualified call |
 | Loop invariant | `invariant` | Loop body | Each iteration |
 | Loop variant | `variant` | Loop | Each iteration, must decrease and stay non-negative |
 

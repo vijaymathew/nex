@@ -222,6 +222,24 @@
 (def Class-invariant "Class invariant")
 (def Assertion "Assertion")
 
+(def ^ThreadLocal invariant-entry-routine
+  "Holds the routine (\"Class.name\") whose invariant check on entry is
+   running on this thread, or nil. A class invariant that fails meanwhile was
+   already broken before the call: by a callback into an object mid-update,
+   or by a change made behind the object's back. Both backends tag the
+   violation with :on-entry-of. A ThreadLocal, not a dynamic var: it is set
+   around every invariant check, and `binding` costs far more."
+  (ThreadLocal.))
+
+(defn on-entry-data
+  "DATA, tagged with the routine being entered when CONTRACT-TYPE is a class
+   invariant checked on entry (see invariant-entry-routine)."
+  [data contract-type]
+  (let [routine (.get invariant-entry-routine)]
+    (if (and routine (= contract-type "Class invariant"))
+      (assoc data :on-entry-of routine)
+      data)))
+
 (defn report-contract-violation
   "Throw a contract violation. Every clause names its assertion, so `label` is
    normally present; a bare `assert expr` has none, and reports its source line
@@ -233,9 +251,10 @@
                      label (str contract-type " violation: " label)
                      line  (str contract-type " violation (line " line ")")
                      :else (str contract-type " violation"))
-                   {:contract-type contract-type
-                    :label label
-                    :condition condition}))))
+                   (on-entry-data {:contract-type contract-type
+                                   :label label
+                                   :condition condition}
+                                  contract-type)))))
 
 (defn nex-format-value [value]
   (value/nex-format-value nex-object? nex-map-str nex-array-str nex-set-str value))
