@@ -66,7 +66,6 @@
   ([state target method-name args has-parens?]
    ((interpreter-op :call-method target) state target method-name (vec args) has-parens?)))
 
-(def ^:dynamic *validating-object-state* false)
 
 (defmacro ^:private def-builtin-method-wrapper
   [fn-name method-name]
@@ -1545,46 +1544,74 @@
    with a user-declared feature."
   "$invariant")
 
-(def ^:private invariant-method-present-cache
-  "Per-Class cache of whether a compiled class carries the synthetic invariant
-   method, so the reflective lookup runs once per class rather than per call."
+(def ^:private invariant-method-cache
+  "Per-Class cache of how to run a compiled class's synthetic invariant method:
+   the `Method` when the class declares it itself, ::inherited when only a
+   composition parent does, ::none when there is none. The lookup runs once
+   per class rather than on every check."
   (java.util.concurrent.ConcurrentHashMap.))
 
-(defn- has-invariant-method?
-  "Whether `value` is a compiled object whose class defines the synthetic
-   invariant method. Interpreter objects have no compiled method and validate
-   their own invariants when constructed, so they are skipped."
+(def ^:private invariant-lowered-name
+  (lowered-instance-method-name synthetic-invariant-method-name 0))
+
+(defn- invariant-method
+  "How VALUE's invariant runs (see invariant-method-cache), or nil when VALUE
+   has none. Interpreter objects have no compiled method and validate their
+   own invariants, so they are skipped."
   [value]
-  (and (some? value)
-       (not (interp-object? value))
-       (let [^java.util.concurrent.ConcurrentHashMap cache invariant-method-present-cache
-             cls (.getClass ^Object value)]
-         ;; A plain `.get` first: this runs on exit from every checked call,
-         ;; and the hit path should allocate nothing.
-         (if-some [present (.get cache cls)]
-           present
-           (.computeIfAbsent cache
-                             cls
-                             (reify java.util.function.Function
-                               (apply [_ _]
-                                 (boolean
-                                  (find-user-method
-                                   value
-                                   (lowered-instance-method-name synthetic-invariant-method-name 0))))))))))
+  (when (and (some? value) (not (interp-object? value)))
+    (let [^java.util.concurrent.ConcurrentHashMap cache invariant-method-cache
+          cls (.getClass ^Object value)
+          ;; A plain `.get` first: this runs on entry to and exit from every
+          ;; checked call, and the hit path should allocate nothing.
+          found (or (.get cache cls)
+                    (.computeIfAbsent cache
+                                      cls
+                                      (reify java.util.function.Function
+                                        (apply [_ _]
+                                          (or (declared-user-method cls invariant-lowered-name)
+                                              (when (find-user-method value invariant-lowered-name)
+                                                ::inherited)
+                                              ::none)))))]
+      (when-not (identical? found ::none) found))))
+
+(def ^:private ^ThreadLocal validating-object-state
+  "Holds true on a thread while it checks an invariant. Calls the invariant
+   makes check no invariant themselves, so a clause may call a public query
+   without re-entering. A ThreadLocal, not a dynamic var: it is set around
+   every check, and `binding` costs far more."
+  (ThreadLocal.))
+
+(def ^:private no-args (object-array 0))
+
+(defn- run-invariant!
+  "Run VALUE's invariant (METHOD from invariant-method), guarded against
+   re-entry, with ENTRY-ROUTINE (or nil) recorded for a violation's report."
+  [state value method entry-routine]
+  (let [^ThreadLocal validating validating-object-state
+        ^ThreadLocal entry bi/invariant-entry-routine
+        outer-entry (.get entry)]
+    (.set validating Boolean/TRUE)
+    (.set entry entry-routine)
+    (try
+      (if (instance? Method method)
+        (invoke-reflective! method value (object-array [state no-args]))
+        (invoke-user-method state value synthetic-invariant-method-name []))
+      (finally
+        (.set entry outer-entry)
+        (.set validating nil)))))
 
 (defn validate-object-state
   "Validate an object's class invariant after construction or a public call.
    The invariant is compiled to a native invariant method (structural `=`,
    no interpreter round-trip); this only dispatches it, guarded so an invariant
-   that calls a public method does not re-enter (matching the historical
-   `*validating-object-state*` semantics). Returns the object unchanged. The
-   `class-name` argument is retained for the call convention but no longer used —
-   dispatch is virtual off the runtime object."
+   that calls a public method does not re-enter. Returns the object unchanged.
+   The `class-name` argument is retained for the call convention but no longer
+   used — dispatch is virtual off the runtime object."
   [state _class-name value]
-  (when (and (not *validating-object-state*)
-             (has-invariant-method? value))
-    (binding [*validating-object-state* true]
-      (invoke-user-method state value synthetic-invariant-method-name [])))
+  (when-not (.get ^ThreadLocal validating-object-state)
+    (when-let [method (invariant-method value)]
+      (run-invariant! state value method nil)))
   value)
 
 (defn validate-object-state-on-entry
@@ -1593,11 +1620,9 @@
    failure here means it was broken in between: a callback into an object
    still in the middle of a routine, or a change made behind its back."
   [state routine value]
-  (when (and (not *validating-object-state*)
-             (has-invariant-method? value))
-    (binding [*validating-object-state* true
-              bi/*invariant-entry-routine* routine]
-      (invoke-user-method state value synthetic-invariant-method-name [])))
+  (when-not (.get ^ThreadLocal validating-object-state)
+    (when-let [method (invariant-method value)]
+      (run-invariant! state value method routine)))
   value)
 
 (defn- nex-object-render

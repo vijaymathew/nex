@@ -222,20 +222,23 @@
 (def Class-invariant "Class invariant")
 (def Assertion "Assertion")
 
-(def ^:dynamic *invariant-entry-routine*
-  "The routine (\"Class.name\") whose invariant check on entry is running, or
-   nil. A class invariant that fails meanwhile was already broken before the
-   call: by a callback into an object mid-update, or by a change made behind
-   the object's back. Both backends tag the violation with :on-entry-of."
-  nil)
+(def ^ThreadLocal invariant-entry-routine
+  "Holds the routine (\"Class.name\") whose invariant check on entry is
+   running on this thread, or nil. A class invariant that fails meanwhile was
+   already broken before the call: by a callback into an object mid-update,
+   or by a change made behind the object's back. Both backends tag the
+   violation with :on-entry-of. A ThreadLocal, not a dynamic var: it is set
+   around every invariant check, and `binding` costs far more."
+  (ThreadLocal.))
 
 (defn on-entry-data
   "DATA, tagged with the routine being entered when CONTRACT-TYPE is a class
-   invariant checked on entry (see *invariant-entry-routine*)."
+   invariant checked on entry (see invariant-entry-routine)."
   [data contract-type]
-  (if (and *invariant-entry-routine* (= contract-type "Class invariant"))
-    (assoc data :on-entry-of *invariant-entry-routine*)
-    data))
+  (let [routine (.get invariant-entry-routine)]
+    (if (and routine (= contract-type "Class invariant"))
+      (assoc data :on-entry-of routine)
+      data)))
 
 (defn report-contract-violation
   "Throw a contract violation. Every clause names its assertion, so `label` is
