@@ -1671,6 +1671,19 @@
                           nex-type
                           (resolve-jvm-type env nex-type))))
 
+(defn- validate-object-state-on-entry-ir
+  "validate-object-state-ir, on entry to ROUTINE (\"Class.name\")."
+  [env class-name routine object-ir nex-type]
+  (if (function-root-class? env class-name)
+    object-ir
+    (ir/call-runtime-node "validate-object-state-on-entry"
+                          [(ir/const-node routine
+                                          "String"
+                                          (ir/object-jvm-type "java/lang/String"))
+                           object-ir]
+                          nex-type
+                          (resolve-jvm-type env nex-type))))
+
 (defn- default-const-node
   [nex-type jvm-type]
   (case jvm-type
@@ -7886,14 +7899,29 @@
                                        (assoc (scoped-env env-after-rescue require-env)
                                               :old-field-locals old-field-locals)
                                        :ensure effective-ensure)
-            class-validation-stmts (if (and (:class-def fn-def)
-                                            (not (:unchecked-twin? fn-def))
-                                            (get (:compiled-classes fn-def) current-class))
+            ;; A class with no invariant anywhere in its hierarchy has
+            ;; nothing to check, so emits no calls to the checker.
+            checked? (and (:class-def fn-def)
+                          (not (:unchecked-twin? fn-def))
+                          (get (:compiled-classes fn-def) current-class)
+                          (class-declares-invariant-in-hierarchy? (visible-class-map env-with-old)
+                                                                  current-class))
+            this-ir (fn [env] (ir/this-node current-class (exact-class-jvm-type env current-class)))
+            ;; A qualified call checks the invariant on entry (before the
+            ;; precondition) and on exit, as Eiffel's run-time checking does.
+            entry-validation-stmts (if checked?
+                                     [(ir/pop-node
+                                       (validate-object-state-on-entry-ir require-env
+                                                                          current-class
+                                                                          (str current-class "." (:name fn-def))
+                                                                          (this-ir require-env)
+                                                                          current-class))]
+                                     [])
+            class-validation-stmts (if checked?
                                      [(ir/pop-node
                                        (validate-object-state-ir ensure-env
                                                                  current-class
-                                                                 (ir/this-node current-class
-                                                                               (exact-class-jvm-type ensure-env current-class))
+                                                                 (this-ir ensure-env)
                                                                  current-class))]
                                      [])
             return-stmt (if (:return-type fn-def)
@@ -7917,6 +7945,7 @@
                      :body (cond-> (into []
                                          (concat (when result-init-stmt [result-init-stmt])
                                                  old-snapshot-stmts
+                                                 entry-validation-stmts
                                                  require-stmts
                                                  lowered-body
                                                  ensure-stmts
@@ -8282,7 +8311,15 @@
                                                        class-name
                                                        (ir/this-node class-name
                                                                      (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
-                                                       class-name))])]
+                                                       class-name))])
+        entry-validation (when validate?
+                           [(ir/pop-node
+                             (validate-object-state-on-entry-ir {:compiled-classes compiled-classes}
+                                                                class-name
+                                                                (str class-name "." (:name method-def))
+                                                                (ir/this-node class-name
+                                                                              (exact-class-jvm-type {:compiled-classes compiled-classes} class-name))
+                                                                class-name))])]
     (ir/fn-node {:name (:name method-def)
                  :owner (:jvm-name class-meta)
                  :emitted-name emitted-name
@@ -8292,7 +8329,8 @@
                  :locals (vec params)
                  ;; Keyed off the coalesced type: an explicit `: Void` has no result.
                  :body (if (not= "Void" return-type)
-                         (vec (concat [(ir/set-local-node result-slot
+                         (vec (concat entry-validation
+                                      [(ir/set-local-node result-slot
                                                           call-ir
                                                           return-type
                                                           (resolve-jvm-type resolve-env return-type))]
@@ -8303,7 +8341,7 @@
                                                                       (resolve-jvm-type resolve-env return-type))
                                                        return-type
                                                        (ir/object-jvm-type "java/lang/Object"))]))
-                         (into [(ir/pop-node call-ir)] class-validation))
+                         (vec (concat entry-validation [(ir/pop-node call-ir)] class-validation)))
                  :override? false})))
 
 (defn- make-delegation-method-node
@@ -8316,7 +8354,8 @@
                           (assoc entry
                                  :callee-name (self-call-method-name env source-class method-def)
                                  :emitted-name (lowered-instance-method-name method-def)
-                                 :validate? true)))
+                                 :validate? (class-declares-invariant-in-hierarchy?
+                                             (visible-class-map env) class-name))))
 
 (defn- unchecked-delegation-method-node
   "The unchecked twin (see `self-call-method-name`) of

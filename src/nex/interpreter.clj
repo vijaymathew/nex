@@ -1099,12 +1099,30 @@
                        (class-paths ctx parent-def)))
                 (get-parent-classes ctx class-def))))
 
+(def ^:dynamic *validating-invariant*
+  "True while an invariant is being checked. Calls an invariant clause makes
+   check no invariant themselves, so a clause may call a query qualified
+   (`this.q`) without recursing, as in the compiled runtime."
+  false)
+
+(declare check-object-invariant*)
+
 (defn check-object-invariant
   "Check CLASS-DEF's invariant on OBJ. Every clause is checked on the copies
    along each field's home path, as check-class-invariant does; then an
    ancestor reached along another path, whose copy of its fields is a
    different one, has its own clauses checked again on that copy. A clause
-   may call the object's queries, so OBJ is the current object meanwhile."
+   may call the object's queries, so OBJ is the current object meanwhile.
+   ON-ENTRY-OF names the routine (\"Class.name\") when this is the check on
+   entry to a qualified call."
+  ([ctx class-def obj] (check-object-invariant ctx class-def obj nil))
+  ([ctx class-def obj on-entry-of]
+   (when-not *validating-invariant*
+     (binding [*validating-invariant* true
+               bi/*invariant-entry-routine* on-entry-of]
+       (check-object-invariant* ctx class-def obj)))))
+
+(defn- check-object-invariant*
   [ctx class-def obj]
   (let [fields (:fields obj)
         inv-ctx (-> ctx
@@ -2308,6 +2326,13 @@
                         ;; A closure's body runs as part of the routine that
                         ;; made it (see eval-node :anonymous-function).
                         (merge (:enclosing obj)))
+            ;; A qualified call checks the invariant on entry too, as
+            ;; Eiffel's run-time checking does: it fails when the object was
+            ;; changed since its last check on exit, by a callback into it
+            ;; mid-update or behind its back.
+            _ (when-not (:unchecked-call? ctx)
+                (check-object-invariant new-ctx class-def obj
+                                        (str (:name class-def) "." method)))
             _ (when-let [require-assertions effective-require]
                 (check-assertions new-ctx require-assertions Precondition))
             _ (if-let [rescue (:rescue method-def)]

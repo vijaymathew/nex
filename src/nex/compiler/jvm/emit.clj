@@ -1052,6 +1052,7 @@
    "java-call-static"                        ["java-call-static" [:state :b0 :b1 :args-drop2]]
    "java-get-static-field"                   ["java-get-static-field" [:state :b0 :b1]]
    "validate-object-state"                   ["validate-object-state" [:state :b0 :b1]]
+   "validate-object-state-on-entry"          ["validate-object-state-on-entry" [:state :b0 :b1]]
    "dispatch-self-call"                      ["dispatch-self-call" [:state :b0 :b1 :b2 :args-drop3]]
    "dispatch-path-call"                      ["dispatch-path-call" [:state :b0 :b1 :b2 :args-drop3]]
    "op:string-concat"                        ["string-concat" [:state :args]]

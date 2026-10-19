@@ -1440,9 +1440,10 @@
               ;; Only a bare `assert expr` is unlabelled; name it by its line.
               line                    (str kind " violation (line " line ")")
               :else                   (str kind " violation"))
-            {:type :nex-contract-violation
-             :kind kind
-             :label label})))
+            (bi/on-entry-data {:type :nex-contract-violation
+                               :kind kind
+                               :label label}
+                              kind))))
 
 (defn- class-def-by-name
   [state class-name]
@@ -1550,6 +1551,19 @@
   (when (and (not *validating-object-state*)
              (has-invariant-method? value))
     (binding [*validating-object-state* true]
+      (invoke-user-method state value synthetic-invariant-method-name [])))
+  value)
+
+(defn validate-object-state-on-entry
+  "validate-object-state, on entry to ROUTINE (\"Class.name\") from a
+   qualified call. The last check on exit left the invariant true, so a
+   failure here means it was broken in between: a callback into an object
+   still in the middle of a routine, or a change made behind its back."
+  [state routine value]
+  (when (and (not *validating-object-state*)
+             (has-invariant-method? value))
+    (binding [*validating-object-state* true
+              bi/*invariant-entry-routine* routine]
       (invoke-user-method state value synthetic-invariant-method-name [])))
   value)
 
@@ -3085,6 +3099,9 @@
    `infer-type-dispatch`'s `:call` entry needed in lower.clj."
   {"validate-object-state"
    (fn [state args] (validate-object-state state (first args) (second args)))
+
+   "validate-object-state-on-entry"
+   (fn [state args] (validate-object-state-on-entry state (first args) (second args)))
 
    "shallow-copy-collection"
    (fn [_state args] (shallow-copy-collection (first args)))

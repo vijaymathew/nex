@@ -295,7 +295,7 @@
    a precondition is the caller's, a postcondition or invariant the routine's.
    Returns [sentence frames-left-to-show], or nil when FRAMES do not have the
    shape it needs. FRAMES are innermost first."
-  [contract label frames place in]
+  [contract label frames place in & [on-entry?]]
   (let [[routine-frame & more] frames
         routine (:routine routine-frame)
         invariant-of (when (map? routine) (:invariant-of routine))
@@ -317,9 +317,17 @@
          outer]
 
         "Class invariant"
-        [(str routine ", called at " (place caller) (in caller) ", leaves the invariant `"
-              label "`" (when invariant-of (str " of " invariant-of)) " broken.")
-         outer]
+        (if on-entry?
+          ;; Not this routine's fault: the object was already inconsistent
+          ;; when the call reached it.
+          [(str routine ", called at " (place caller) (in caller) ", finds the invariant `"
+                label "`" (when invariant-of (str " of " invariant-of))
+                " already broken on entry: the object was changed since its last check,"
+                " by a call back into it mid-update or through a shared reference.")
+           outer]
+          [(str routine ", called at " (place caller) (in caller) ", leaves the invariant `"
+                label "`" (when invariant-of (str " of " invariant-of)) " broken.")
+           outer])
 
         nil))))
 
@@ -350,7 +358,8 @@
                        (str "  in " (:routine frame) (times frame)))))
         data (ex-data e)
         lines (if-let [[sentence outer] (contract-sentence (or (:kind data) (:contract-type data))
-                                                           (:label data) frames place in)]
+                                                           (:label data) frames place in
+                                                           (some? (:on-entry-of data)))]
                 (cons (str "  " sentence)
                       (keep-indexed (fn [i f] (describe (inc i) f)) outer))
                 (keep-indexed describe (remove #(map? (:routine %)) frames)))]
@@ -363,8 +372,15 @@
   "Print runtime or type error E as the `nex` command reports it."
   [e file]
   (println "Error:" (rt/nex-error-message e))
-  (doseq [line (runtime-error-trace e file)]
-    (println line)))
+  (let [lines (runtime-error-trace e file)
+        on-entry-of (:on-entry-of (ex-data e))]
+    (doseq [line lines]
+      (println line))
+    ;; The interpreter has no compiled frames to build a trace from.
+    (when (and (empty? lines) on-entry-of)
+      (println (str "  " on-entry-of " found the invariant already broken on entry: the object"
+                    " was changed since its last check, by a call back into it mid-update"
+                    " or through a shared reference.")))))
 
 (defn run-file
   "Run FILE the way the `nex <file.nex>` command does: evaluate it, reporting
