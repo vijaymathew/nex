@@ -15,7 +15,13 @@
 - **Fix: an invariant clause may name a zero-argument query without parens
   in the interpreter** (`consistent: total = sum`), and a clause calling the
   object's queries qualified (`this.q`) no longer recurses forever there.
-
+- **`across` over an Array is about 40x faster in compiled code.** When the
+  target is statically an `Array`, the loop is compiled as an indexed walk,
+  as fast as a hand-written `from` loop over `get`, instead of three dynamic
+  cursor calls per element. Other targets (strings, maps, sets, `Any`, user
+  cursors) still use the cursor, but the built-in cursors are now called
+  directly, about 12x faster than before. Array operations (`get`, `add`,
+  `length`, `slice` and the rest) no longer use reflection on either backend.
 - **Sound with `lib/audio`.** `audio/Sound` plays short effects loaded from
   WAV, AIFF or AU files, or generated with `Sound.tone`, overlapping up to
   `voices` copies. `audio/Music` plays recorded tracks and `audio/Midi_Song`
