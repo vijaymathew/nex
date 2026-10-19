@@ -860,7 +860,32 @@
   [state target method-name args]
   (invoke-user-method state target method-name (vec args)))
 
+(defn- builtin-cursor-op
+  "{cursor-type method-fn} for METHOD-NAME on the built-in cursors (an `across`
+   over an Array, String, Map or Set), keyed by the cursor's :nex-builtin-type."
+  [method-name]
+  (into {}
+        (keep (fn [type] (when-let [f (get-in bi/builtin-type-methods [type method-name])]
+                           [type f])))
+        [:ArrayCursor :StringCursor :MapCursor :SetCursor]))
+
+(declare ^:private dispatch-cursor-method*)
+
 (defn- dispatch-cursor-method
+  "Call cursor method METHOD-NAME on TARGET. A built-in cursor's method is
+   looked up in OP-FNS (see builtin-cursor-op) by the cursor's type and called
+   directly: `across` makes three cursor calls per element, and the general
+   path looks up the target's type, checks it conforms to Cursor, then finds
+   the method by name."
+  ([state target method-name args]
+   (dispatch-cursor-method* state target method-name args))
+  ([state target method-name args op-fns]
+   (if-let [method-fn (when (map? target)
+                        (get op-fns (:nex-builtin-type target)))]
+     (method-fn target)
+     (dispatch-cursor-method* state target method-name args))))
+
+(defn- dispatch-cursor-method*
   [state target method-name args]
   (let [runtime-name (runtime-type-name state target)]
     (if (and (string? runtime-name)
@@ -870,25 +895,33 @@
         (invoke-user-method state target method-name args))
       (bi/call-builtin-method nil target target method-name args))))
 
+(def ^:private builtin-cursor-start-fns (builtin-cursor-op "start"))
+
 (defn builtin-cursor-start
   [state target]
-  (dispatch-cursor-method state target "start" []))
+  (dispatch-cursor-method state target "start" [] builtin-cursor-start-fns))
 
 (defn builtin-cursor-cursor
   [state target]
   (dispatch-cursor-method state target "cursor" []))
 
+(def ^:private builtin-cursor-item-fns (builtin-cursor-op "item"))
+
 (defn builtin-cursor-item
   [state target]
-  (dispatch-cursor-method state target "item" []))
+  (dispatch-cursor-method state target "item" [] builtin-cursor-item-fns))
+
+(def ^:private builtin-cursor-next-fns (builtin-cursor-op "next"))
 
 (defn builtin-cursor-next
   [state target]
-  (dispatch-cursor-method state target "next" []))
+  (dispatch-cursor-method state target "next" [] builtin-cursor-next-fns))
+
+(def ^:private builtin-cursor-at-end-fns (builtin-cursor-op "at_end"))
 
 (defn builtin-cursor-at-end
   [state target]
-  (dispatch-cursor-method state target "at_end" []))
+  (dispatch-cursor-method state target "at_end" [] builtin-cursor-at-end-fns))
 
 (defn current-time-ms
   []

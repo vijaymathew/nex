@@ -7558,8 +7558,75 @@
       [env (ir/pop-node call-ir)])
     [env (ir/pop-node (lower-expression env stmt))]))
 
+(defn- array-across->indexed
+  "STMT, the loop an `across` over an Array desugars to, rewritten to walk the
+   array by index; or STMT unchanged when it is not one. `across xs as x`
+   desugars to cursor calls (nex.walker/handle-across-statement):
+
+     init   let c := xs.cursor   c.start   [stop flag, with a rescue]
+     until  c.at_end             [or the stop flag]
+     body   let x := c.item   ...   c.next
+
+   which the runtime runs as three dynamic cursor calls per element. When xs
+   is statically an (attached) Array, the cursor's calls are replaced with the
+   ones a hand-written loop makes, on a local holding the array and an index:
+   `a.length`, `a.get(i)` and `i := i + 1`. The array is still evaluated once,
+   and its length is read on every test, as the cursor does."
+  [env stmt]
+  (let [[cursor-let & init-rest] (:init stmt)
+        cursor-name (:name cursor-let)
+        value (:value cursor-let)
+        target (:target value)
+        target-type (when (and (= :let (:type cursor-let))
+                               (:synthetic cursor-let)
+                               (string? cursor-name)
+                               (str/starts-with? cursor-name "__across_c_")
+                               (= :call (:type value))
+                               (= "cursor" (:method value))
+                               (empty? (:args value))
+                               (some? target))
+                      (infer-type env (normalize-call-target target)))]
+    (if-not (and (= "Array" (base-type-name target-type))
+                 (not (tc/detachable-type? target-type)))
+      stmt
+      (let [suffix (subs cursor-name (count "__across_c_"))
+            arr-name (str "__across_a_" suffix)
+            idx-name (str "__across_i_" suffix)
+            arr {:type :identifier :name arr-name}
+            idx {:type :identifier :name idx-name}
+            cursor-call? (fn [node]
+                           (and (map? node)
+                                (= :call (:type node))
+                                (empty? (:args node))
+                                (= cursor-name (let [t (:target node)]
+                                                 (if (map? t) (:name t) t)))))
+            set-idx (fn [v] {:type :assign :target idx-name :value v})
+            replace-call (fn [node]
+                           (if-not (cursor-call? node)
+                             node
+                             (case (:method node)
+                               "start"  (set-idx {:type :integer :value 0})
+                               "at_end" {:type :binary :operator ">=" :left idx
+                                         :right {:type :call :target arr-name :method "length"
+                                                 :args [] :has-parens false}}
+                               "item"   {:type :call :target arr-name :method "get"
+                                         :args [idx] :has-parens true}
+                               "next"   (set-idx {:type :binary :operator "+" :left idx
+                                                  :right {:type :integer :value 1}})
+                               node)))
+            rewrite (fn [x] (walk/postwalk replace-call x))]
+        (assoc stmt
+               :init (into [{:type :let :name arr-name :synthetic true
+                             :var-type target-type :value target}
+                            {:type :let :name idx-name :synthetic true
+                             :var-type "Integer" :value {:type :integer :value 0}}]
+                           (rewrite (vec init-rest)))
+               :until (rewrite (:until stmt))
+               :body (rewrite (:body stmt)))))))
+
 (defn- lower-loop-stmt [env stmt]
   (let [loop-env (scoped-child-env env)
+        stmt (array-across->indexed loop-env stmt)
         [env-after-init lowered-init] (lower-statements loop-env (:init stmt))
         [env-after-init invariant-start-stmts] (contract-assertions-ir env-after-init :invariant (:invariant stmt))
         [env-with-variant variant-init-stmts variant-prefix]

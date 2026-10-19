@@ -4,71 +4,71 @@
 (declare nex-set? nex-integer? ->nex-integer nex-int->number nex-hash-code)
 
 (defn nex-array [] (java.util.ArrayList.))
-(defn nex-array-from [coll] (java.util.ArrayList. (vec coll)))
+(defn nex-array-from [coll] (java.util.ArrayList. ^java.util.Collection (vec coll)))
 (defn nex-array? [v] (instance? java.util.ArrayList v))
 ;; Nex Integer indices are BigInt on JS; convert to a plain number for the host
 ;; collection. nex-int->number is identity on the JVM (a long index works as-is).
-(defn nex-array-get [arr idx] (let [idx (nex-int->number idx)] (.get arr idx)))
+(defn nex-array-get [arr idx] (let [idx (nex-int->number idx)] (.get ^java.util.List arr (int idx))))
 (defn nex-array-add [arr val]
   (do
-    (.add arr val)
+    (.add ^java.util.List arr val)
     nil))
 (defn nex-array-add-at [arr idx val]
   (let [idx (nex-int->number idx)]
     (do
-      (.add arr idx val)
+      (.add ^java.util.List arr (int idx) val)
       nil)))
 (defn nex-array-set [arr idx val]
   (let [idx (nex-int->number idx)]
     (do
-      (.set arr idx val)
+      (.set ^java.util.List arr (int idx) val)
       nil)))
-(defn nex-array-size [arr] (.size arr))
-(defn nex-array-empty? [arr] (.isEmpty arr))
-(defn nex-array-contains [arr elem] (.contains arr elem))
-(defn nex-array-index-of [arr elem] (.indexOf arr elem))
+(defn nex-array-size [arr] (.size ^java.util.List arr))
+(defn nex-array-empty? [arr] (.isEmpty ^java.util.List arr))
+(defn nex-array-contains [arr elem] (.contains ^java.util.List arr elem))
+(defn nex-array-index-of [arr elem] (.indexOf ^java.util.List arr elem))
 (defn nex-array-remove [arr idx]
   (let [idx (nex-int->number idx)]
     (do
       (.remove ^java.util.ArrayList arr ^int (int idx))
       nil)))
-(defn nex-array-reverse [arr] (java.util.ArrayList. (.reversed arr)))
-(defn nex-array-sort [arr] (.sort arr nil))
+(defn nex-array-reverse [arr] (java.util.ArrayList. ^java.util.Collection (.reversed ^java.util.List arr)))
+(defn nex-array-sort [arr] (.sort ^java.util.List arr nil))
 (defn nex-array-slice [arr start end]
   (let [start (nex-int->number start)
         end (nex-int->number end)
-        len (.size arr)
+        len (.size ^java.util.List arr)
         resolve (fn [i] (-> (if (< i 0) (+ len i) i) (max 0) (min len)))
         s (resolve start)
         e (resolve end)]
-    (java.util.ArrayList. (.subList arr s e))))
+    (java.util.ArrayList. ^java.util.Collection (.subList ^java.util.List arr (int s) (int e)))))
 
 (defn nex-array-take [arr n]
   (let [n (nex-int->number n)
-        len (.size arr)
+        len (.size ^java.util.List arr)
         end (-> n (max 0) (min len))]
-    (java.util.ArrayList. (.subList arr 0 end))))
+    (java.util.ArrayList. ^java.util.Collection (.subList ^java.util.List arr (int 0) (int end)))))
 
 (defn nex-array-drop [arr n]
   (let [n (nex-int->number n)
-        len (.size arr)
+        len (.size ^java.util.List arr)
         start (-> n (max 0) (min len))]
-    (java.util.ArrayList. (.subList arr start len))))
+    (java.util.ArrayList. ^java.util.Collection (.subList ^java.util.List arr (int start) (int len)))))
 
 (defn nex-array-take-last [arr n]
   (let [n (nex-int->number n)
-        len (.size arr)
+        len (.size ^java.util.List arr)
         start (-> len (- (max 0 n)) (max 0))]
-    (java.util.ArrayList. (.subList arr start len))))
+    (java.util.ArrayList. ^java.util.Collection (.subList ^java.util.List arr (int start) (int len)))))
 
 (defn nex-array-drop-last [arr n]
   (let [n (nex-int->number n)
-        len (.size arr)
+        len (.size ^java.util.List arr)
         end (-> len (- (max 0 n)) (max 0))]
-    (java.util.ArrayList. (.subList arr 0 end))))
+    (java.util.ArrayList. ^java.util.Collection (.subList ^java.util.List arr (int 0) (int end)))))
 (defn nex-array-concat [arr other]
-  (doto (java.util.ArrayList. arr)
-    (.addAll other)))
+  (doto (java.util.ArrayList. ^java.util.Collection arr)
+    (.addAll ^java.util.Collection other)))
 (defn nex-array-str [formatter arr]
   (str "[" (str/join ", " (map formatter arr)) "]"))
 
