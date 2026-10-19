@@ -906,16 +906,35 @@
 (declare emit-boxed-expr!)
 (declare emit-boxed-arg-array!)
 
+(def ^:private constant-bootstraps-invoke
+  "java.lang.invoke.ConstantBootstraps/invoke: computes a dynamic constant by
+   calling a method handle, so no bootstrap method of our own is needed."
+  (org.objectweb.asm.Handle. Opcodes/H_INVOKESTATIC
+                             "java/lang/invoke/ConstantBootstraps"
+                             "invoke"
+                             (str "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/Class;"
+                                  "Ljava/lang/invoke/MethodHandle;[Ljava/lang/Object;)Ljava/lang/Object;")
+                             false))
+
+(def ^:private rt-var-handle
+  (org.objectweb.asm.Handle. Opcodes/H_INVOKESTATIC
+                             rt-internal-name
+                             "var"
+                             "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
+                             false))
+
 (defn- emit-runtime-var!
+  "Push the Var of runtime function FN-NAME. Loaded as a dynamic constant
+   (`RT.var(ns, name)` run once, on first use, then cached by the JVM in the
+   class's constant pool), not by calling RT.var on every call: that interns
+   a symbol and looks up the namespace each time, and every runtime helper
+   call goes through here."
   [^MethodVisitor mv fn-name]
-  (.visitLdcInsn mv "nex.compiler.jvm.runtime")
-  (.visitLdcInsn mv ^String fn-name)
-  (.visitMethodInsn mv
-                    Opcodes/INVOKESTATIC
-                    rt-internal-name
-                    "var"
-                    "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
-                    false))
+  (.visitLdcInsn mv (org.objectweb.asm.ConstantDynamic.
+                     "nexvar"
+                     "Lclojure/lang/Var;"
+                     constant-bootstraps-invoke
+                     (object-array [rt-var-handle "nex.compiler.jvm.runtime" fn-name]))))
 
 (defn- emit-runtime-invoke-0!
   [^MethodVisitor mv fn-name]
@@ -1053,6 +1072,7 @@
    "java-get-static-field"                   ["java-get-static-field" [:state :b0 :b1]]
    "validate-object-state"                   ["validate-object-state" [:state :b0 :b1]]
    "validate-object-state-on-entry"          ["validate-object-state-on-entry" [:state :b0 :b1]]
+   "call-user-method"                        ["call-user-method" [:state :b0 :b1 :b2 :args-drop3]]
    "dispatch-self-call"                      ["dispatch-self-call" [:state :b0 :b1 :b2 :args-drop3]]
    "dispatch-path-call"                      ["dispatch-path-call" [:state :b0 :b1 :b2 :args-drop3]]
    "op:string-concat"                        ["string-concat" [:state :args]]
@@ -2300,14 +2320,7 @@
   [^MethodVisitor mv expr state-slot]
   (or (emit-direct-runtime-helper-call! mv expr state-slot)
       (do
-        (.visitLdcInsn mv "nex.compiler.jvm.runtime")
-        (.visitLdcInsn mv "invoke-builtin")
-        (.visitMethodInsn mv
-                          Opcodes/INVOKESTATIC
-                          rt-internal-name
-                          "var"
-                          "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;"
-                          false)
+        (emit-runtime-var! mv "invoke-builtin")
         (.visitVarInsn mv Opcodes/ALOAD state-slot)
         (.visitLdcInsn mv ^String (:helper expr))
         (emit-boxed-arg-array! mv (:args expr) state-slot)

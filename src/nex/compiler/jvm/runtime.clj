@@ -172,6 +172,15 @@
         (throw (ex-info (str "Undefined Java class: " class-name)
                         {:class-name class-name})))))
 
+(defn- method-args
+  "The [state args] array a compiled routine takes, built without the vector
+   `(object-array [state args])` would allocate first."
+  ^objects [state args]
+  (let [a (object-array 2)]
+    (aset a 0 state)
+    (aset a 1 args)
+    a))
+
 (defn- invoke-reflective!
   [^Method method target args]
   (try
@@ -188,7 +197,7 @@
   (cond
     (instance? Method entry)
     (fn [& args]
-      (invoke-reflective! entry nil (object-array [state (object-array args)])))
+      (invoke-reflective! entry nil (method-args state (object-array args))))
 
     (map? entry)
     (let [{:keys [owner method]} entry]
@@ -198,7 +207,7 @@
                          cls method
                          (into-array Class [nex.compiler.jvm.runtime.NexReplState
                                             (class (object-array 0))]))]
-          (invoke-reflective! m nil (object-array [state (object-array args)])))))
+          (invoke-reflective! m nil (method-args state (object-array args))))))
 
     :else nil))
 
@@ -238,7 +247,7 @@
                                              lowered-name
                                              (into-array Class [nex.compiler.jvm.runtime.NexReplState
                                                                 (class (object-array 0))]))]
-      (invoke-reflective! method target (object-array [state (object-array args)])))))
+      (invoke-reflective! method target (method-args state (object-array args))))))
 
 (defn- make-task
   [future]
@@ -1190,7 +1199,7 @@
     (let [^Class cls (.getClass ^Object target)
           lowered-name (lowered-instance-method-name method-name (count args))]
       (if-let [[effective-target ^Method method] (find-user-method target lowered-name)]
-        (invoke-reflective! method effective-target (object-array [state (object-array args)]))
+        (invoke-reflective! method effective-target (method-args state (object-array args)))
         (let [runtime-name (runtime-type-name state target)]
           (if (and (= method-name "cursor")
                    (empty? args)
@@ -1209,6 +1218,21 @@
                                  :arity (count args)
                                  :class (.getName cls)}))))))))))
 
+(defn call-user-method
+  "A qualified call `x.f(args)` on a user object, as compiled code makes it.
+   The compiler passes LOWERED-NAME (`__method_f$arityN`) ready-made and ARGS
+   as an array, so when the receiver's class declares the routine itself
+   (the common case: a class's own and inherited routines are all emitted on
+   it) this is one cached lookup and the call. Anything else — a nil or
+   interpreter receiver, a routine found only on a composition parent, a
+   builtin fallback — takes the general invoke-user-method path."
+  [state ^String lowered-name method-name target ^objects args]
+  (if-let [method (and (some? target)
+                       (not (interp-object? target))
+                       (declared-user-method (.getClass ^Object target) lowered-name))]
+    (invoke-reflective! method target (method-args state args))
+    (invoke-user-method state target method-name (vec args))))
+
 (defn dispatch-self-call
   "An unqualified call made by code running on a composition carrier, so on
    behalf of the heir's object TARGET (the carrier's `__outer__`), which may
@@ -1219,7 +1243,7 @@
    cached per class, so a hot self-call allocates no more than its args."
   [state target ^String unchecked-name ^String checked-name ^objects args]
   (let [^Class cls (.getClass ^Object target)
-        call-args (object-array [state args])]
+        call-args (method-args state args)]
     (if-let [method (or (declared-user-method cls unchecked-name)
                         (declared-user-method cls checked-name))]
       (invoke-reflective! method target call-args)
@@ -1262,7 +1286,7 @@
    has one, CHECKED-NAME its ordinary routine; a qualified call passes the
    checked name for both."
   [state carrier ^String unchecked-name ^String checked-name ^objects args]
-  (let [call-args (object-array [state args])
+  (let [call-args (method-args state args)
         overrider (loop [x (container-of carrier) found nil]
                     (if (nil? x)
                       found
@@ -1595,7 +1619,7 @@
     (.set entry entry-routine)
     (try
       (if (instance? Method method)
-        (invoke-reflective! method value (object-array [state no-args]))
+        (invoke-reflective! method value (method-args state no-args))
         (invoke-user-method state value synthetic-invariant-method-name []))
       (finally
         (.set entry outer-entry)
@@ -3160,6 +3184,11 @@
 
    "validate-object-state-on-entry"
    (fn [state args] (validate-object-state-on-entry state (first args) (second args)))
+
+   "call-user-method"
+   (fn [state args]
+     (let [[lowered-name method-name target & call-args] args]
+       (call-user-method state lowered-name method-name target (object-array call-args))))
 
    "shallow-copy-collection"
    (fn [_state args] (shallow-copy-collection (first args)))

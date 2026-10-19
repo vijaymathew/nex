@@ -4777,6 +4777,21 @@
                        nex-type
                        jvm-type)))
 
+(defn- user-method-call-ir
+  "IR for a qualified call `target.method(args)` on a user object, dispatched
+   at run time on the receiver's class (an heir's object need not be a JVM
+   subtype of the static type, so there is no direct call to emit). The
+   routine's JVM name is worked out here, once, rather than on every call."
+  [method target-ir arg-irs nex-type jvm-type]
+  (let [string-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
+    (ir/call-runtime-node "call-user-method"
+                          (into [(string-const (str "__method_" method "$arity" (count arg-irs)))
+                                 (string-const method)
+                                 target-ir]
+                                arg-irs)
+                          nex-type
+                          jvm-type)))
+
 (defn- lower-instance-user-field-get
   [env target-expr method base-type target-ir field-def type-map]
   (let [nex-type (tc/resolve-generic-type (:field-type field-def) type-map)
@@ -4812,10 +4827,8 @@
                              nex-type jvm-type true target-ir)
 
       :else
-      (ir/call-runtime-node (str "user-method:" method)
-                            (into [target-ir] (mapv #(lower-expression env %) args))
-                            nex-type
-                            jvm-type))))
+      (user-method-call-ir method target-ir (mapv #(lower-expression env %) args)
+                           nex-type jvm-type))))
 
 (defn- lower-instance-inherited-parent-call
   "`this.m(...)` where M is not declared/inherited on the class itself but is a
@@ -6812,10 +6825,7 @@
     ;; without parentheses (Nex allows `x.describe` for a no-arg call), so
     ;; resolution — not punctuation — decides method vs field.
     (if method-def
-      (ir/call-runtime-node (str "user-method:" (:method expr))
-                            (into [target-ir] arg-irs)
-                            nex-type
-                            jvm-type)
+      (user-method-call-ir (:method expr) target-ir arg-irs nex-type jvm-type)
       (ir/call-runtime-node (str "user-field-get:" (:method expr))
                             [target-ir]
                             nex-type
