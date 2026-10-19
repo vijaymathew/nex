@@ -892,8 +892,8 @@ class Wallet
 end
 ```
 
-The invariant is checked when an object is created and on exit from every
-*qualified* call: `w.spend(1.0)`, or `this.spend(1.0)`. An unqualified call
+The invariant is checked when an object is created, and on entry to and exit
+from every *qualified* call: `w.spend(1.0)`, or `this.spend(1.0)`. An unqualified call
 (`spend(1.0)`), `super.spend(1.0)` or `Parent.spend(1.0)` is part of the
 routine that makes it, so it is not checked. A routine may break the
 invariant for a moment and call a helper, as long as the invariant holds
@@ -919,6 +919,39 @@ end
 
 A call made from inside a closure counts as qualified, since the closure may
 run long after the routine that made it has returned.
+
+The check on entry catches an object that was changed since its last check on
+exit, without one of its own routines finishing. That happens when a routine
+hands `this` to another object while the invariant is broken, and that object
+calls back into it:
+
+```nex
+class Account
+  feature
+    balance: Integer
+    logged: Integer
+
+    deposit(v: Integer, auditor: Auditor) do
+      balance := balance + v
+      auditor.on_deposit(this)   -- calls back a.statement: fails on entry
+      logged := logged + v
+    end
+
+    statement: String do result := balance.to_string end
+  invariant
+    consistent: balance = logged
+end
+```
+
+Finish the update before calling out (move `auditor.on_deposit(this)` to the
+end), or pass the values the other object needs instead of `this`. A call out
+that does not come back, such as writing to a log, may still be made while the
+invariant is broken. The same check catches a change made through a shared
+reference: if a client changes an array the object keeps in a field, the
+object's next qualified call reports the invariant as already broken on entry.
+
+Calls made while an invariant is being checked check no invariant themselves,
+so a clause may call the object's queries, even as `this.q`.
 
 `require`, `ensure`, and `invariant` speak about a routine's boundaries or a
 class. `assert` states what must be true at one point *inside* a body:

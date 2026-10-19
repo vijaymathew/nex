@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Class invariants are checked on entry to qualified calls too.** As in
+  Eiffel's run-time checking, `x.f` checks `x`'s invariant before `f` runs as
+  well as after. This catches a callback into an object whose routine has
+  broken its invariant for a moment (furtive access), and a change made
+  through a shared reference (reference leak), before the called routine
+  runs on the inconsistent object; the error says the invariant was already
+  broken on entry instead of blaming the called routine. Calling `this.f`
+  while the invariant is broken now fails; call `f` unqualified instead.
+  Classes with no invariant in their hierarchy no longer pay for any check.
+  `--skip-contracts` turns both checks off.
+- **Fix: an invariant clause may name a zero-argument query without parens
+  in the interpreter** (`consistent: total = sum`), and a clause calling the
+  object's queries qualified (`this.q`) no longer recurses forever there.
+
 - **Sound with `lib/audio`.** `audio/Sound` plays short effects loaded from
   WAV, AIFF or AU files, or generated with `Sound.tone`, overlapping up to
   `voices` copies. `audio/Music` plays recorded tracks and `audio/Midi_Song`
