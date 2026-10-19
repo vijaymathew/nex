@@ -901,11 +901,16 @@
                                 [[] seen']
                                 parents)
                         [[] seen'])
-                      local-invariants (or (:invariant class-def) [])]
-                  [(vec (concat parent-invariants local-invariants)) seen'']))))]
-    (let [[invariant-assertions _] (collect-invariants class-def #{})]
-      (when (seq invariant-assertions)
-        (check-assertions ctx invariant-assertions Class-invariant)))))
+                      local-invariants (when (seq (:invariant class-def))
+                                         [[class-name (:invariant class-def)]])]
+                  [(into parent-invariants local-invariants) seen'']))))]
+    ;; Each class's clauses run as code of that class, so a bare zero-argument
+    ;; query in a clause (`total = sum`) resolves even when the check is made
+    ;; from outside the class (at creation), and may name a private feature.
+    (let [[groups _] (collect-invariants class-def #{})]
+      (doseq [[class-name assertions] groups]
+        (check-assertions (cond-> ctx class-name (assoc :current-class-name class-name))
+                          assertions Class-invariant)))))
 
 ;;
 ;; Inheritance Support
@@ -1115,7 +1120,8 @@
             :when (seq view)]
       (let [env (make-env (:current-env ctx))]
         (bind-fields! env fields view)
-        (check-assertions (assoc inv-ctx :current-env env :current-path path :current-view view)
+        (check-assertions (assoc inv-ctx :current-env env :current-path path :current-view view
+                                 :current-class-name (:name ancestor))
                           (:invariant ancestor) Class-invariant)))))
 
 (defn feature-members
