@@ -22,6 +22,13 @@
   cursors) still use the cursor, but the built-in cursors are now called
   directly, about 12x faster than before. Array operations (`get`, `add`,
   `length`, `slice` and the rest) no longer use reflection on either backend.
+- **Faster method calls and invariant checks in compiled code.** A call
+  `x.f(...)` on a user object no longer builds the routine's name or walks
+  its arguments on every call, and compiled code no longer looks up each
+  runtime helper by name on every call (the lookup is now done once per call
+  site). A class invariant check costs about a third of what it did.
+  Together these make a call in a tight loop about 3x faster, or about 7x
+  faster with a small invariant.
 - **Sound with `lib/audio`.** `audio/Sound` plays short effects loaded from
   WAV, AIFF or AU files, or generated with `Sound.tone`, overlapping up to
   `voices` copies. `audio/Music` plays recorded tracks and `audio/Midi_Song`
