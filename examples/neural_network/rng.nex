@@ -1,0 +1,83 @@
+-- rng.nex: a small random number generator that can be seeded.
+--
+-- Neural networks start from random weights and learn from randomly
+-- chosen examples. With a seed, the "random" numbers are the same on every
+-- run, so a training run can be repeated exactly.
+--
+-- This is the Park-Miller "minimal standard" generator:
+--     state := state * 48271 mod (2^31 - 1)
+-- 2^31 - 1 is prime, and every state stays below it, so state * 48271 is
+-- less than 2^47 and never overflows a 64-bit Integer.
+
+class Rng
+  create
+    make(seed: Integer) do
+      -- Map any seed into the valid range 1 .. MODULUS - 1 (0 would stick).
+      state := 1 + seed.abs % (MODULUS - 1)
+    end
+  feature
+    MODULUS = 2147483647
+    MULTIPLIER = 48271
+
+    state: Integer
+
+    -- A real number spread evenly over the open interval (0, 1).
+    uniform(): Real
+      do
+        state := (state * MULTIPLIER) % MODULUS
+        result := state.to_real / MODULUS.to_real
+      ensure
+        open_interval: result > 0.0 and result < 1.0
+      end
+
+    -- A whole number in 0 .. n - 1, each equally likely.
+    below(n: Integer): Integer
+      require
+        positive: n > 0
+      do
+        result := (uniform() * n.to_real).floor
+      ensure
+        in_range: result >= 0 and result < n
+      end
+
+    -- Box-Muller (below) makes normal numbers in pairs; this holds the
+    -- second one until it is asked for.
+    has_spare: Boolean
+    spare: Real
+
+    -- A number from the standard normal ("bell curve") distribution, with
+    -- mean 0 and standard deviation 1, by the Box-Muller transform: two
+    -- uniform numbers u1, u2 give two independent normal numbers
+    --     sqrt(-2 ln u1) * cos(2 pi u2)   and   sqrt(-2 ln u1) * sin(2 pi u2)
+    gauss(): Real do
+      if has_spare then
+        has_spare := false
+        result := spare
+      else
+        let radius: Real := (-2.0 * uniform().log).sqrt
+        let angle: Real := 2.0 * Real.PI * uniform()
+        spare := radius * angle.sin
+        has_spare := true
+        result := radius * angle.cos
+      end
+    end
+
+  invariant
+    state_in_range: state >= 1 and state < MODULUS
+end
+
+-- Shuffle an array in place (Fisher-Yates): walk from the end, swapping
+-- each element with a randomly chosen one at or before it.
+function shuffle[T](rng: Rng, items: Array[T]) do
+  from
+    let i: Integer := items.length - 1
+  until
+    i <= 0
+  do
+    let j: Integer := rng.below(i + 1)
+    let tmp: T := items.get(i)
+    items.set(i, items.get(j))
+    items.set(j, tmp)
+    i := i - 1
+  end
+end

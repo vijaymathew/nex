@@ -33,6 +33,12 @@ read one is to run it alongside the source.
 - **arrays_maps_example.nex** — `Array [T]` and `Map [K, V]`, their literal
   syntax, and nesting them
 
+## Projects
+
+- **neural_network/** — a next-letter predictor: a small neural network with
+  hand-written backpropagation, trained on a word list, with an interactive
+  word-completion program and a step-by-step tutorial (PDF)
+
 ## Data structures
 
 - **stack.nex** — a generic array-backed stack with full contracts

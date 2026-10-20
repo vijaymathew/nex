@@ -1,0 +1,44 @@
+-- vocabulary.nex: the 27 symbols the model reads and predicts.
+--
+-- "." does two jobs:
+--   * padding at the start, so even the first letter has a full context
+--     ("...." -> "a" means "a word can start with a");
+--   * the end-of-word marker, so the model can learn when to stop
+--     ("appl" -> "e", then "pple" -> "." means "apple is complete").
+
+class Vocabulary
+  feature
+    END = "."
+    SYMBOLS = ".abcdefghijklmnopqrstuvwxyz"
+    SIZE = 27
+end
+
+-- The id of a symbol: "." is 0, "a" is 1, ..., "z" is 26.
+function symbol_id(ch: String): Integer
+  require
+    one_symbol: ch.length = 1 and Vocabulary.SYMBOLS.contains(ch)
+  do
+    result := Vocabulary.SYMBOLS.index_of(ch)
+  ensure
+    in_range: result >= 0 and result < Vocabulary.SIZE
+  end
+
+-- The symbol with a given id.
+function symbol_at(id: Integer): String
+  require
+    in_range: id >= 0 and id < Vocabulary.SIZE
+  do
+    result := Vocabulary.SYMBOLS.substring(id, id + 1)
+  ensure
+    one_symbol: result.length = 1
+  end
+
+-- True when every character of s is one of a..z.
+function is_lowercase_word(s: String): Boolean do
+  result := s.length > 0
+  across s as ch do
+    if ch < #a or ch > #z then
+      result := false
+    end
+  end
+end

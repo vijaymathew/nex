@@ -38,6 +38,26 @@
   (and (str/includes? (.getPath f) (str java.io.File/separator "contracts_at_work" java.io.File/separator))
        (not= (.getName f) "checks.nex")))
 
+(def ^:private excluded-neural-network-mains
+  "neural_network/'s two command-line programs, which its checks.nex covers:
+   play.nex loads a trained model.json from the folder it is run in and
+   train.nex trains on a word list (/usr/share/dict/words by default),
+   writing one; each calls `exit(1)` when it finds neither, which would end
+   this test's JVM, and train.nex takes minutes when it does."
+  #{"play.nex" "train.nex"})
+
+(defn- excluded-neural-network-path?
+  "neural_network/'s command-line mains, and anything under its tutorial's
+   build/ folder: the git-ignored output of tutorial/build.py, one copy of
+   the project per stage of the tutorial, present only where it has been
+   built and checked by that build itself."
+  [^java.io.File f]
+  (let [sep java.io.File/separator
+        path (.getPath f)]
+    (and (str/includes? path (str sep "neural_network" sep))
+         (or (contains? excluded-neural-network-mains (.getName f))
+             (str/includes? path (str sep "tutorial" sep "build" sep))))))
+
 ;; Relative directories the file-I/O examples create; they normally clean up
 ;; after themselves (delete_tree), but we remove these defensively in case an
 ;; example fails part-way through. tmp_dupcheck/tmp_radar_check come from
@@ -45,12 +65,17 @@
 ;; under NEX_USER_DIR (see run-failure-with-nex-user-dir).
 (def ^:private example-temp-dirs ["tmp_io" "tmp_bin_io" "tmp_dupcheck" "tmp_radar_check"])
 
+;; Files examples write into the folder they run in, which is the repository
+;; root here: graphics_example.nex saves the picture it draws as scene.png.
+(def ^:private example-temp-files ["scene.png"])
+
 (defn- example-files []
   (->> (file-seq (io/file "examples"))
        (filter #(.isFile ^java.io.File %))
        (filter #(str/ends-with? (.getName ^java.io.File %) ".nex"))
        (remove #(contains? excluded-network-examples (.getName ^java.io.File %)))
        (remove excluded-contracts-at-work-path?)
+       (remove excluded-neural-network-path?)
        (sort-by #(.getPath ^java.io.File %))))
 
 (defn- root-cause [^Throwable t]
@@ -116,4 +141,6 @@
                      (when failure (str "\n  " failure)))))))
       (finally
         (doseq [d example-temp-dirs]
-          (delete-recursively (io/file d)))))))
+          (delete-recursively (io/file d)))
+        (doseq [f example-temp-files]
+          (.delete (io/file f)))))))

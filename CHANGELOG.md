@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Fix: a class constant defined from another constant compiles.** With
+  `SIZE = SYMBOLS.length`, the compiled backend inferred `SIZE`'s type where
+  it was read without the declaring class's context, so the read named a
+  field the class did not have; the program failed to link and quietly ran
+  on the interpreter instead.
+- **Fix: `declare type` aliases are seen through.** A routine returning an
+  alias of a type with a zero value (`Vector = Array[Real]`) starts with that
+  zero value, an empty array, as one returning `Array[Real]` does, instead
+  of being rejected for not assigning `result` (and starting as nil in the
+  interpreter). `across` over an alias-typed value yields its element type
+  (Real), not Any. A field of an alias type starts at the zero value too.
+- **Fix: the interpreter interns a file without a class of its name.** A file
+  loaded with `intern` may hold only functions, or classes named otherwise,
+  as the compiled backend always allowed; the interpreter required a class
+  named after the file.
 - **Class invariants are checked on entry to qualified calls too.** As in
   Eiffel's run-time checking, `x.f` checks `x`'s invariant before `f` runs as
   well as after. This catches a callback into an object whose routine has

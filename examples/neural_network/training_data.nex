@@ -1,0 +1,113 @@
+-- training_data.nex: turning a word list into training examples, and
+-- measuring how well a model does on them.
+--
+-- Nobody labels anything by hand. Every word labels itself: in "apple",
+-- the letter after each prefix is the right answer for that prefix.
+--
+--   context "...." -> "a"
+--   context "...a" -> "p"
+--   context "..ap" -> "p"
+--   context ".app" -> "l"
+--   context "appl" -> "e"
+--   context "pple" -> "."   <- the word ends here
+
+intern Vocabulary
+intern Vector_Math
+intern Next_Letter_Model
+intern io/Path
+
+-- `intern Training_Data` finds this file by the name of this class.
+class Training_Data
+  feature
+    -- Keeps -log(p) finite even if a probability rounds to exactly 0.
+    TINY = 1.0e-12
+end
+
+-- One training example: a context and the symbol that follows it.
+class Example
+  create
+    make(ids: Array[Integer], target: Integer) do
+      this.ids := ids
+      this.target := target
+    end
+  feature
+    ids: Array[Integer]
+    target: Integer
+end
+
+-- The plain lowercase words (a..z only, 2 letters or more) in a file with
+-- one word per line, without repeats, in sorted order. Proper nouns
+-- ("Paris"), possessives ("apple's") and accented words are skipped, so
+-- the vocabulary stays at exactly 27 symbols.
+function load_words(path: String): Array[String] do
+  let keep: Set[String] := #{}
+  across create Path.make(path).read_text().split("\n") as line do
+    let w: String := line.trim()
+    if w.length >= 2 and is_lowercase_word(w) then
+      keep.add(w)
+    end
+  end
+  result := keep.to_array().sort()
+end
+
+-- Every (context, next symbol) pair in every word, as shown at the top.
+function make_examples(words: Array[String], context: Integer): Array[Example]
+  require
+    positive_context: context > 0
+  do
+    let pad: String := ""
+    repeat context do
+      pad := pad + Vocabulary.END
+    end
+    across words as word do
+      let padded: String := pad + word + Vocabulary.END
+      from
+        let i: Integer := 0
+      until
+        i = word.length + 1
+      do
+        let ids: Array[Integer] := []
+        across padded.substring(i, i + context) as ch do
+          ids.add(symbol_id(ch.to_string))
+        end
+        let target: Integer := symbol_id(padded.substring(i + context, i + context + 1))
+        result.add(create Example.make(ids, target))
+        i := i + 1
+      end
+    end
+  end
+
+-- The loss of one prediction: -log(probability given to the right answer).
+function cross_entropy(probs: Array[Real], target: Integer): Real do
+  result := -(probs.get(target) + Training_Data.TINY).log
+end
+
+-- Average loss and accuracy over a set of examples.
+class Evaluation
+  create
+    make(loss, accuracy: Real) do
+      this.loss := loss
+      this.accuracy := accuracy
+    end
+  feature
+    loss: Real       -- average cross-entropy: lower is better
+    accuracy: Real   -- fraction of examples where the top guess was right
+end
+
+-- Average cross-entropy and top-1 accuracy of a model on some examples.
+function evaluate(model: Next_Letter_Model, examples: Array[Example]): Evaluation
+  require
+    not_empty: examples.length > 0
+  do
+    let total_loss: Real := 0.0
+    let correct: Integer := 0
+    across examples as ex do
+      let probs: Array[Real] := model.forward(ex.ids).probs
+      total_loss := total_loss + cross_entropy(probs, ex.target)
+      if argmax(probs) = ex.target then
+        correct := correct + 1
+      end
+    end
+    let n: Real := examples.length.to_real
+    result := create Evaluation.make(total_loss / n, correct.to_real / n)
+  end

@@ -456,7 +456,10 @@
                (atom [])           ; imports registry
                (atom {})           ; specialized classes cache
                (atom nil)          ; compiled runtime state for fallback dispatch
-               (atom {}))]         ; evaluated class-constant cache (interning)
+               (atom {}))          ; evaluated class-constant cache (interning)
+          ;; `declare type` aliases, name -> type expression, so a value's
+          ;; zero value can see through one (alias-resolved-type).
+          ctx (assoc ctx :type-aliases (atom {}))]
       ;; Register built-in base classes
       (doseq [class-def (bootstrap/base-class-defs)]
         (register-class ctx class-def))
@@ -776,7 +779,7 @@
 (def channel-close conc/channel-close)
 
 (declare eval-node)
-(declare get-all-fields get-default-field-value lookup-method-in-class)
+(declare get-all-fields get-default-field-value lookup-method-in-class alias-resolved-type)
 (declare get-all-constants)
 (declare eval-body-with-rescue)
 (declare lookup-constructor)
@@ -1009,7 +1012,7 @@
                      (.put ^java.util.concurrent.ConcurrentHashMap field-layout-cache class-def layout)
                      layout))]
     (reduce (fn [m [k field-type]]
-              (assoc m k (get-default-field-value field-type)))
+              (assoc m k (get-default-field-value (alias-resolved-type ctx field-type))))
             {}
             layout)))
 
@@ -1673,6 +1676,23 @@
     (throw (ex-info (str "Unknown unary operator: " op)
                     {:operator op}))))
 
+(defn alias-resolved-type
+  "TYPE with any `declare type` alias it names replaced by what the alias
+   stands for (following chains), so that, say, a routine returning
+   `Vector = Array[Real]` starts with an empty array, as one returning
+   `Array[Real]` does. A detachable type is left as it is: its default is nil
+   whatever it names."
+  [ctx type]
+  (let [aliases (some-> (:type-aliases ctx) deref)]
+    (loop [t type seen #{}]
+      (let [alias-name (cond (string? t) t
+                             (and (map? t) (not (:detachable t))) (:base-type t))
+            body (when (and alias-name (not (contains? seen alias-name)))
+                   (get aliases alias-name))]
+        (if body
+          (recur body (conj seen alias-name))
+          t)))))
+
 (defn get-default-field-value
   "Get default value for a field type"
   [field-type]
@@ -1774,7 +1794,11 @@
           (swap! (:classes ctx) update name assoc :qualified-name qn))))))
 
 (defn process-intern
-  "Load and interpret an external file, then register the class with the given alias."
+  "Load and interpret an external file, bringing its classes and functions
+   into scope, and register the class it is named for under ALIAS, if it
+   declares one. A file need not declare a class of its own name: one that
+   only holds functions, or classes named otherwise, is interned all the
+   same, as the compiled backend does."
   [ctx {:keys [path class-name alias]}]
   (let [file-path (find-intern-file ctx path class-name)
            ;; Load and parse the external file
@@ -1800,18 +1824,15 @@
         registered-class (get @(:classes ctx) class-name)
            ;; Determine the name to use (alias or original)
         intern-name (or alias class-name)]
-    (when-not registered-class
-      (throw (ex-info (str "Class " class-name " not found in file " file-path)
-                      {:file file-path :class-name class-name})))
        ;; Register the class under the new name (if alias is provided)
-    (when alias
+    (when (and alias registered-class)
       (swap! (:classes ctx) assoc alias registered-class))
        ;; Return the class name that was registered
     intern-name))
 
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes functions statements calls duplicate-functions
-               function-signature-conflicts]}]
+               function-signature-conflicts type-aliases]}]
   ;; Free-function names must be unique within a program (Definition §4.8). The
   ;; walker collapses duplicate definitions last-wins before they reach here, so
   ;; the authoritative interpreter must reject them explicitly — otherwise the
@@ -1837,6 +1858,10 @@
       (doseq [import-node imports]
         (when (map? import-node)
           (swap! (:imports ctx) conj import-node)))
+
+      ;; `declare type` aliases, for zero values (alias-resolved-type).
+      (when-let [aliases (:type-aliases ctx)]
+        (swap! aliases into (map (juxt :name :type-expr)) type-aliases))
 
       ;; Then, process all intern statements
       (doseq [intern-node interns]
@@ -2065,7 +2090,8 @@
                 (doseq [[param arg-val] (map vector params arg-values)]
                   (env-define method-env (:name param) arg-val)))
             return-type (:return-type callable)
-            default-result (when return-type (get-default-field-value return-type))
+            default-result (when return-type
+                             (get-default-field-value (alias-resolved-type ctx return-type)))
             _ (env-define method-env "result" default-result)
             _ (env-define method-env "this" current-obj)
             new-ctx (-> ctx
@@ -2303,7 +2329,7 @@
             modified-fields (atom #{})
             return-type (:return-type method-def)
             default-result (if return-type
-                             (get-default-field-value return-type)
+                             (get-default-field-value (alias-resolved-type ctx return-type))
                              nil)
             _ (env-define method-env "result" default-result)
             _ (env-define method-env "this" obj)
