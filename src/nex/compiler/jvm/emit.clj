@@ -1656,8 +1656,70 @@
 (defn- static-math-call
   "Emit a call of java.lang.Math's static METHOD with DESCRIPTOR."
   [method descriptor]
-  (fn [^MethodVisitor mv]
+  (fn [^MethodVisitor mv & _]
     (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" method descriptor false)))
+
+(declare direct-derived-builtin-helper-name)
+
+(defn- real->integer-intrinsic
+  "Emitter for a Real -> Integer method (round, floor, ceiling, truncate):
+   ROUND! rounds the double on the stack. When CHECK-ROUNDED?, the range
+   check runs on the rounded value, else on the unrounded one, as the
+   builtin's does. In range the result is the rounded value as a long
+   (CONVERT! turns the double the check ran on into it); otherwise the
+   runtime's own method runs, so a value with no Integer raises exactly the
+   error it always has."
+  [round! check-rounded? convert!]
+  (fn [^MethodVisitor mv helper]
+    (let [bad (Label.)
+          done (Label.)]
+      (.visitInsn mv Opcodes/DUP2)                         ; d d
+      (when check-rounded? (round! mv))                    ; d r
+      (.visitInsn mv Opcodes/DUP2)
+      (.visitLdcInsn mv (double -9.223372036854775808E18))
+      (.visitInsn mv Opcodes/DCMPL)                        ; NaN -> -1: bad
+      (.visitJumpInsn mv Opcodes/IFLT bad)
+      (.visitInsn mv Opcodes/DUP2)
+      (.visitLdcInsn mv (double 9.223372036854775808E18))
+      (.visitInsn mv Opcodes/DCMPG)                        ; NaN -> 1: bad
+      (.visitJumpInsn mv Opcodes/IFGE bad)
+      (convert! mv)                                        ; d J
+      (.visitInsn mv Opcodes/DUP2_X2)
+      (.visitInsn mv Opcodes/POP2)
+      (.visitInsn mv Opcodes/POP2)                         ; J
+      (.visitJumpInsn mv Opcodes/GOTO done)
+      (.visitLabel mv bad)                                 ; d r
+      (.visitInsn mv Opcodes/POP2)                         ; d
+      (emit-box! mv :double)
+      (emit-runtime-var! mv (direct-derived-builtin-helper-name helper))
+      (.visitInsn mv Opcodes/SWAP)
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                        (runtime-invoke-descriptor 1) false)
+      (emit-unbox-or-cast! mv :long)
+      (.visitLabel mv done))))
+
+(defn- math-d->d!
+  [method]
+  (fn [^MethodVisitor mv]
+    (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" method "(D)D" false)))
+
+(defn- truncate!
+  "Round the double on the stack toward zero, as Real's truncate does:
+   ceiling below zero, floor otherwise (so NaN and -0.0 go to floor)."
+  [^MethodVisitor mv]
+  (let [non-neg (Label.)
+        done (Label.)]
+    (.visitInsn mv Opcodes/DUP2)
+    (.visitInsn mv Opcodes/DCONST_0)
+    (.visitInsn mv Opcodes/DCMPG)
+    (.visitJumpInsn mv Opcodes/IFGE non-neg)
+    ((math-d->d! "ceil") mv)
+    (.visitJumpInsn mv Opcodes/GOTO done)
+    (.visitLabel mv non-neg)
+    ((math-d->d! "floor") mv)
+    (.visitLabel mv done)))
+
+(defn- d2l! [^MethodVisitor mv] (.visitInsn mv Opcodes/D2L))
 
 (def ^:private numeric-intrinsics
   "Built-in Integer and Real methods emitted as JVM instructions, by IR
@@ -1677,9 +1739,25 @@
             "to_radians" "toRadians" "to_degrees" "toDegrees" "sign" "signum"})
      (into {} (map (fn [[nex m]] [(str "builtin-method:Real:" nex) (dd->d m)]))
            {"power" "pow" "atan2" "atan2" "hypot" "hypot"})
-     {"builtin-method:Real:abs"
+     {"builtin-method:Real:round"
+      [[:double] :long
+       (real->integer-intrinsic nil false
+                                (fn [^MethodVisitor mv]
+                                  (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" "round" "(D)J" false)))]
+      "builtin-method:Real:floor" [[:double] :long (real->integer-intrinsic (math-d->d! "floor") true d2l!)]
+      "builtin-method:Real:ceiling" [[:double] :long (real->integer-intrinsic (math-d->d! "ceil") true d2l!)]
+      "builtin-method:Real:truncate" [[:double] :long (real->integer-intrinsic truncate! true d2l!)]
+      "builtin-method:Real:to_string"
+      [[:double] (ir/object-jvm-type "java/lang/String")
+       (fn [^MethodVisitor mv & _]
+         (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Double" "toString" "(D)Ljava/lang/String;" false))]
+      "builtin-method:Integer:to_string"
+      [[:long] (ir/object-jvm-type "java/lang/String")
+       (fn [^MethodVisitor mv & _]
+         (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Long" "toString" "(J)Ljava/lang/String;" false))]
+      "builtin-method:Real:abs"
       [[:double] :double
-       (fn [^MethodVisitor mv]
+       (fn [^MethodVisitor mv & _]
          (let [keep (Label.)]
            (.visitInsn mv Opcodes/DUP2)
            (.visitInsn mv Opcodes/DCONST_0)
@@ -1689,14 +1767,14 @@
            (.visitLabel mv keep)))]
       "builtin-method:Real:is_nan"
       [[:double] :boolean
-       (fn [^MethodVisitor mv]
+       (fn [^MethodVisitor mv & _]
          (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Double" "isNaN" "(D)Z" false))]
       "builtin-method:Real:is_infinite"
       [[:double] :boolean
-       (fn [^MethodVisitor mv]
+       (fn [^MethodVisitor mv & _]
          (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Double" "isInfinite" "(D)Z" false))]
-      "builtin-method:Integer:to_real" [[:long] :double (fn [^MethodVisitor mv] (.visitInsn mv Opcodes/L2D))]
-      "builtin-method:Integer:to_integer" [[:long] :long (fn [_])]
+      "builtin-method:Integer:to_real" [[:long] :double (fn [^MethodVisitor mv & _] (.visitInsn mv Opcodes/L2D))]
+      "builtin-method:Integer:to_integer" [[:long] :long (fn [& _])]
       "builtin-method:Integer:min" [[:long :long] :long (static-math-call "min" "(JJ)J")]
       "builtin-method:Integer:max" [[:long :long] :long (static-math-call "max" "(JJ)J")]})))
 
@@ -1711,7 +1789,7 @@
                  (#{:long :double} (:jvm-type (first args))))
         (doseq [[arg t] (map vector args arg-types)]
           (emit-stack-coerce! mv (emit-expr! mv arg state-slot) t))
-        (emit-op mv)
+        (emit-op mv (:helper expr))
         (if (= :void (:jvm-type expr))
           (do (.visitInsn mv (if (#{:long :double} result) Opcodes/POP2 Opcodes/POP)) :void)
           (do (emit-stack-coerce! mv result (:jvm-type expr))

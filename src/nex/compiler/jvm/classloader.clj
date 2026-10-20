@@ -40,9 +40,21 @@
                       nil)
         (.put ^java.util.WeakHashMap dispatch-interfaces-defined loader (conj defined internal-name))))))
 
+(declare ^:private define-generated-class!)
+
 (defn define-class!
   "Define a generated class in the supplied loader, after any dispatch
-   interface it names that the loader does not have yet."
+   interface it names that the loader does not have yet. A dispatch
+   interface itself (a compiled file's classes include them, for a jar) is
+   defined only if the loader does not have it already, an earlier class
+   having named it: its bytes are the same either way."
+  [^DynamicClassLoader loader ^String class-name ^bytes bytecode]
+  (if (str/starts-with? class-name "nex.dispatch.")
+    (do (ensure-dispatch-interface! loader (.replace class-name \. \/))
+        (.loadClass loader class-name))
+    (define-generated-class! loader class-name bytecode)))
+
+(defn- define-generated-class!
   [^DynamicClassLoader loader class-name ^bytes bytecode]
   (doseq [iface (dispatch-interface-refs bytecode)]
     (ensure-dispatch-interface! loader iface))

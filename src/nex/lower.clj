@@ -7130,7 +7130,8 @@
                  (assoc-in env0 [:across-cursors (:name stmt)]
                            (across-item-type env0 target-type)))
                env0)]
-    (if (and (:top-level? env) (not (:scoped-locals? env)))
+    (if (and (:top-level? env) (not (:scoped-locals? env))
+             (not (contains? (:promoted-globals env) (:name stmt))))
       [(update env1 :var-types assoc (:name stmt) nex-type)
        (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env1 nex-type))]
       (let [[env' local] (env-add-local env1 (:name stmt) nex-type)]
@@ -9078,8 +9079,53 @@
       :else
       (conj lowered-body nil-return))))
 
+(defn- promotable-top-level-names
+  "Names of the top-level `let` variables of PROGRAM that its top-level code
+   alone uses, which a compiled file may keep in JVM locals rather than the
+   session's map of top-level values, read and written by name. A name is
+   left in the map when it occurs anywhere in a function, a class, a closure
+   or a `spawn` body (which may read it by name, or later, or on another
+   thread), or anywhere in top-level code other than as a variable read,
+   an assignment's target or a call's target (a `let` of a Function called
+   as `f(...)`, say). The test is by name alone, so it over-approximates:
+   a name merely shared with something unrelated stays in the map."
+  [program]
+  (let [nested-types #{:anonymous-function :spawn}
+        strings-in (fn [x]
+                     (let [acc (transient #{})]
+                       (walk/postwalk (fn [v] (when (string? v) (conj! acc v)) v) x)
+                       (persistent! acc)))
+        let-names (transient #{})
+        blocked (transient #{})
+        visit (fn visit [x]
+                (cond
+                  (and (map? x) (nested-types (:type x)))
+                  (doseq [n (strings-in x)] (conj! blocked n))
+
+                  (map? x)
+                  (do
+                    (when (and (= :let (:type x)) (string? (:name x)))
+                      (conj! let-names (:name x)))
+                    (doseq [[k v] x]
+                      (if (and (string? v) (not (#{:name :target} k)))
+                        (conj! blocked v)
+                        (visit v))))
+
+                  (sequential? x)
+                  (run! visit x)
+
+                  :else nil))]
+    (doseq [n (strings-in [(:functions program) (:classes program)])]
+      (conj! blocked n))
+    (run! visit (:statements program))
+    (let [blocked (persistent! blocked)]
+      (into #{} (remove blocked) (persistent! let-names)))))
+
 (defn lower-repl-cell
-  "Lower a narrow REPL/program body to a first compiler unit."
+  "Lower a narrow REPL/program body to a first compiler unit. With
+   :promote-locals? (a compiled file, whose top-level code runs once and
+   which no later input extends), a top-level `let` that only top-level code
+   uses is a JVM local (promotable-top-level-names)."
   [program opts]
   (binding [*type-aliases* (merge *type-aliases*
                                   (into {} (map (juxt :name :type-expr)
@@ -9107,15 +9153,18 @@
                                                  anonymous-classes
                                                  (:classes opts)
                                                  (keep :class-def visible-functions))
-          env (make-lowering-env {:classes visible-classes
-                                  :functions visible-functions
-                                  :imports visible-imports
-                                  :compiled-classes (:compiled-classes opts)
-                                  :var-types (:var-types opts)
-                                  :top-level? true
-                                  :repl? true
-                                  :state-slot 0
-                                  :next-slot 1})
+          env (assoc (make-lowering-env {:classes visible-classes
+                                         :functions visible-functions
+                                         :imports visible-imports
+                                         :compiled-classes (:compiled-classes opts)
+                                         :var-types (:var-types opts)
+                                         :top-level? true
+                                         :repl? true
+                                         :state-slot 0
+                                         :next-slot 1})
+                     :promoted-globals (if (:promote-locals? opts)
+                                         (promotable-top-level-names program)
+                                         #{}))
           statements (vec (:statements program))
           globals-map (compute-top-level-globals env (:var-types opts) statements)
           tail-stmt (last statements)

@@ -78,7 +78,20 @@
   ...), computing exactly what the runtime's methods compute, rather than
   calls into the runtime with boxed values. A loop of Real arithmetic calling
   `to_real` and `sqrt` went from about 1.1 s to about 75 ms for 20 million
-  iterations.
+  iterations. Real's `round`, `floor`, `ceiling` and `truncate`, and
+  `to_string` without a base on an Integer or Real, are emitted the same way;
+  a value with no Integer (NaN, an infinity, or out of range) still goes to
+  the runtime's method, so it raises exactly the error it always has.
+- **A compiled file's top-level variables are JVM locals when only its
+  top-level code uses them.** A top-level `let` that no function, class,
+  closure or `spawn` body mentions is no longer read and written by name in
+  the session's map of top-level values. A top-level loop over such
+  variables is about 3x faster. The REPL, whose variables later inputs see,
+  is unchanged.
+- **Fix: defining all of a compiled file's classes in one loader no longer
+  fails with a duplicate dispatch interface.** A compiled file includes its
+  dispatch interfaces for a jar; a class that names one defines it first,
+  and an explicit definition of it afterwards is now a no-op.
 - **Fix: Real's math methods (`sqrt`, `exp`, `log`, ...) no longer pay for a
   wrapper on every call.** Their signature was attached with `with-meta`,
   which wraps a function in one that rebuilds its arguments as a sequence on

@@ -296,6 +296,7 @@
                                                   :functions []
                                                   :imports (:imports prepared-ast)
                                                   :var-types {}
+                                                  :promote-locals? true
                                                   :skip-contracts? (:skip-contracts? opts)})
            class-asts (vec (concat (user-class-defs prepared-ast)
                                    (lower/collect-anonymous-class-defs prepared-ast)))
