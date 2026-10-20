@@ -222,20 +222,24 @@
 (def Class-invariant "Class invariant")
 (def Assertion "Assertion")
 
-(def ^ThreadLocal invariant-entry-routine
-  "Holds the routine (\"Class.name\") whose invariant check on entry is
-   running on this thread, or nil. A class invariant that fails meanwhile was
-   already broken before the call: by a callback into an object mid-update,
-   or by a change made behind the object's back. Both backends tag the
-   violation with :on-entry-of. A ThreadLocal, not a dynamic var: it is set
-   around every invariant check, and `binding` costs far more."
-  (ThreadLocal.))
+(def ^ThreadLocal invariant-check-state
+  "Per thread, a two-slot array for invariant checking: slot 0 is true while
+   the compiled runtime checks an invariant (calls the invariant makes then
+   check none themselves); slot 1 holds the routine (\"Class.name\") whose
+   invariant check on entry is running, or nil. A class invariant that fails
+   meanwhile was already broken before the call, by a callback into an object
+   mid-update or a change made behind its back, and both backends tag the
+   violation with :on-entry-of. One ThreadLocal holding a mutable array, since
+   every check sets and restores these: `binding`, or a ThreadLocal per value,
+   costs far more."
+  (ThreadLocal/withInitial (reify java.util.function.Supplier
+                             (get [_] (object-array 2)))))
 
 (defn on-entry-data
   "DATA, tagged with the routine being entered when CONTRACT-TYPE is a class
-   invariant checked on entry (see invariant-entry-routine)."
+   invariant checked on entry (see invariant-check-state)."
   [data contract-type]
-  (let [routine (.get invariant-entry-routine)]
+  (let [routine (aget ^objects (.get invariant-check-state) 1)]
     (if (and routine (= contract-type "Class invariant"))
       (assoc data :on-entry-of routine)
       data)))
@@ -999,10 +1003,13 @@
     (if (and (Double/isFinite k) (== d (Math/pow 2.0 k))) k r)))
 
 (defmacro ^:private real-fn
-  "A no-argument Real -> Real method backed by F."
+  "A no-argument Real -> Real method backed by F. The signature goes on the
+   `fn` form, as the reader's ^{...} does for the other methods, so the
+   function carries it itself: `with-meta` on a function wraps it in one
+   that calls it through `applyTo`, which made every call build a seq."
   [f]
-  `(with-meta (fn [n# & _#] (~f (double n#)))
-     {:signatures [{:params [] :return-type "Real"}]}))
+  (with-meta `(fn [n# & _#] (~f (double n#)))
+    {:signatures [{:params [] :return-type "Real"}]}))
 
 (def real-type-methods
   {"to_string"         ^{:signatures [{:params [] :return-type "String"}]}

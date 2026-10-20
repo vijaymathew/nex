@@ -67,11 +67,61 @@
    ((interpreter-op :call-method target) state target method-name (vec args) has-parens?)))
 
 
+(def ^:private builtin-wrapper-receivers
+  "Receiver type of a `builtin-method-<type>-<method>` helper, by the <type>
+   part of its name: [the type's key in bi/builtin-type-methods, a predicate
+   true of exactly that type's values]. Types missing here (Any, Cursor,
+   Comparable) have no one representation, so their helpers always dispatch
+   on the value."
+  {"string"    [:String `string?]
+   "real"      [:Real `(fn [v#] (instance? Double v#))]
+   "integer"   [:Integer `(fn [v#] (instance? Long v#))]
+   "integer32" [:Integer32 `rt/nex-int32?]
+   "integer16" [:Integer16 `rt/nex-int16?]
+   "byte"      [:Byte `rt/nex-byte?]
+   "char"      [:Char `char?]
+   "boolean"   [:Boolean `boolean?]
+   "console"   [:Console `rt/nex-console?]
+   "process"   [:Process `rt/nex-process?]
+   "map_entry" [:Map_Entry `rt/nex-map-entry?]})
+
 (defmacro ^:private def-builtin-method-wrapper
+  "Define FN-NAME (`builtin-method-<type>-<method>`), the helper compiled code
+   calls for METHOD-NAME on a receiver of static type <type>. The method is
+   looked up once, when this namespace loads, and called directly when the
+   receiver is a value of that type, rather than found by the value's type and
+   the method's name on every call (bi/call-builtin-method), which costs far
+   more than most of these methods do. Any other receiver, or a method the
+   type's own table lacks (so Any's applies), takes call-builtin-method."
   [fn-name method-name]
-  `(defn ~fn-name
-     [target# & args#]
-     (bi/call-builtin-method nil target# target# ~method-name (vec args#))))
+  (let [method-part (str/replace method-name "_" "-")
+        type-part (let [n (subs (name fn-name) (count "builtin-method-"))]
+                    (subs n 0 (- (count n) (count method-part) 1)))
+        [type-key pred] (get builtin-wrapper-receivers type-part)
+        generic (fn [t args] `(bi/call-builtin-method nil ~t ~t ~method-name ~args))]
+    (if-not type-key
+      (let [t (gensym "target")
+            args (gensym "args")]
+        `(defn ~fn-name
+           [~t & ~args]
+           ~(generic t `(vec ~args))))
+      (let [f (gensym "method-fn")
+            ok (gensym "receiver?")
+            t (gensym "target")
+            a (gensym "a")
+            b (gensym "b")
+            more (gensym "more")
+            direct? `(and ~f (~ok ~t))]
+        `(let [~f (get-in bi/builtin-type-methods [~type-key ~method-name])
+               ~ok ~pred]
+           (defn ~fn-name
+             ([~t] (if ~direct? (~f ~t) ~(generic t [])))
+             ([~t ~a] (if ~direct? (~f ~t ~a) ~(generic t [a])))
+             ([~t ~a ~b] (if ~direct? (~f ~t ~a ~b) ~(generic t [a b])))
+             ([~t ~a ~b & ~more]
+              (if ~direct?
+                (apply ~f ~t ~a ~b ~more)
+                ~(generic t `(into [~a ~b] ~more))))))))))
 
 (defn- ->java-array-list
   [value]
@@ -87,6 +137,23 @@
                          ^clojure.lang.Atom imports
                          ^clojure.lang.Atom counter
                          ^DynamicClassLoader loader])
+
+(definterface NexInvariant
+  ;; Implemented by every compiled class with an invariant, whose synthetic
+  ;; invariant method this is (nex.lower/invariant-method-def), so the
+  ;; runtime can call it directly rather than by reflection (run-invariant!).
+  ;; A fixed interface, unlike the per-loader dispatch interfaces, since this
+  ;; namespace's own code calls it.
+  (^Object __method_$invariant$arity0 [^nex.compiler.jvm.runtime.NexReplState state
+                                       ^"[Ljava.lang.Object;" args]))
+
+(definterface NexCarrier
+  ;; Implemented by every compiled user class: its `__container__` (the object
+  ;; it is a composition carrier of, one level up, or nil) and `__outer__`
+  ;; (the heir's object it lives in), read directly rather than by reflection
+  ;; when a path call looks for the object that runs a routine.
+  (^Object __container [])
+  (^Object __outer []))
 
 (defn make-repl-state
   ([] (make-repl-state nil))
@@ -1162,7 +1229,11 @@
                                     (reify java.util.function.Function
                                       (apply [_ _]
                                         (try
-                                          (.getDeclaredMethod cls lowered-name user-method-param-types)
+                                          ;; Accessible once, here: otherwise every reflective
+                                          ;; call re-runs Java's access check, which compares
+                                          ;; the caller's and the class's packages by name.
+                                          (doto (.getDeclaredMethod cls lowered-name user-method-param-types)
+                                            (.setAccessible true))
                                           (catch NoSuchMethodException _ false))))))]
     (when found found)))
 
@@ -1226,12 +1297,29 @@
    it) this is one cached lookup and the call. Anything else — a nil or
    interpreter receiver, a routine found only on a composition parent, a
    builtin fallback — takes the general invoke-user-method path."
-  [state ^String lowered-name method-name target ^objects args]
-  (if-let [method (and (some? target)
-                       (not (interp-object? target))
-                       (declared-user-method (.getClass ^Object target) lowered-name))]
-    (invoke-reflective! method target (method-args state args))
-    (invoke-user-method state target method-name (vec args))))
+  [state ^java.util.concurrent.atomic.AtomicReference site ^String lowered-name
+   method-name target ^objects args]
+  (if (nil? target)
+    (invoke-user-method state target method-name (vec args))
+    (let [cls (.getClass ^Object target)
+          ;; SITE remembers [class method] from this call site's last call.
+          ;; A site nearly always sees one class, so this skips the lookup.
+          ^objects hit (when site (.get site))]
+      (if (and hit (identical? cls (aget hit 0)))
+        (invoke-reflective! (aget hit 1) target (method-args state args))
+        (if-let [method (and (not (interp-object? target))
+                             (declared-user-method cls lowered-name))]
+          (do
+            (when site (.set site (object-array [cls method])))
+            (invoke-reflective! method target (method-args state args)))
+          (invoke-user-method state target method-name (vec args)))))))
+
+(defn call-user-method-fallback
+  "call-user-method with the target and arguments first: the order a compiled
+   call site has them in when the target does not implement the routine's
+   dispatch interface (see nex.compiler.jvm.emit/emit-user-method-call!)."
+  [target ^objects args state site lowered-name method-name]
+  (call-user-method state site lowered-name method-name target args))
 
 (defn dispatch-self-call
   "An unqualified call made by code running on a composition carrier, so on
@@ -1255,8 +1343,16 @@
 
 (def ^:private container-field-cache (java.util.concurrent.ConcurrentHashMap.))
 
+(declare ^:private container-of-by-reflection)
+
 (defn- container-of
   "The object CARRIER is a composition carrier of, one level up, or nil."
+  [carrier]
+  (if (instance? NexCarrier carrier)
+    (.__container ^NexCarrier carrier)
+    (container-of-by-reflection carrier)))
+
+(defn- container-of-by-reflection
   [carrier]
   (let [^Class cls (.getClass ^Object carrier)
         ^Field field (or (.get ^java.util.concurrent.ConcurrentHashMap container-field-cache cls)
@@ -1302,6 +1398,98 @@
         (invoke-reflective! method target call-args)
         (dispatch-self-call state (.get (.getField (.getClass ^Object carrier) "__outer__") carrier)
                             unchecked-name checked-name args)))))
+
+(def ^:private outer-field-cache (java.util.concurrent.ConcurrentHashMap.))
+
+(declare ^:private outer-of-by-reflection)
+
+(defn- outer-of
+  "The heir's object CARRIER lives in (its `__outer__`)."
+  [carrier]
+  (if (instance? NexCarrier carrier)
+    (.__outer ^NexCarrier carrier)
+    (outer-of-by-reflection carrier)))
+
+(defn- outer-of-by-reflection
+  [carrier]
+  (let [^Class cls (.getClass ^Object carrier)
+        ^Field field (or (.get ^java.util.concurrent.ConcurrentHashMap outer-field-cache cls)
+                         (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap outer-field-cache
+                                           cls
+                                           (reify java.util.function.Function
+                                             (apply [_ c] (.getField ^Class c "__outer__")))))]
+    (.get field carrier)))
+
+(defn- resolve-path-call-target
+  "[target choice] for a path call on CARRIER (see dispatch-path-call, which
+   this follows): the object whose own routine UNCHECKED-NAME, else
+   CHECKED-NAME, runs it, and how it was found, for path-call-target's cache:
+   an index into CHAIN (CARRIER, then its containers outwards), :outer for
+   CARRIER's `__outer__`, or nil when it is neither (a composition parent's
+   routine), which is not cached."
+  [carrier chain ^String unchecked-name ^String checked-name]
+  (let [overrider (loop [i 1 found nil]
+                    (if (>= i (count chain))
+                      found
+                      (recur (inc i)
+                             (let [x (nth chain i)]
+                               (if (or (own-user-method x unchecked-name)
+                                       (own-user-method x checked-name))
+                                 i
+                                 found)))))]
+    (if overrider
+      [(nth chain overrider) overrider]
+      (if-let [[target] (or (find-user-method carrier unchecked-name)
+                            (find-user-method carrier checked-name))]
+        [target (when (identical? target carrier) 0)]
+        (let [outer (outer-of carrier)]
+          (when-let [[target] (or (find-user-method outer unchecked-name)
+                                  (find-user-method outer checked-name))]
+            [target (when (identical? target outer) :outer)]))))))
+
+(defn path-call-target
+  "The object whose own routine UNCHECKED-NAME, else CHECKED-NAME, a path
+   call on CARRIER runs (see dispatch-path-call), or nil. A compiled call site
+   asks for it, then calls the routine through a dispatch interface
+   (nex.compiler.jvm.emit/emit-path-call!), instead of dispatch-path-call
+   calling it by reflection.
+
+   Which object runs it depends only on the classes of CARRIER and of its
+   containers, so SITE, the call site's cache, remembers that choice for the
+   classes it last saw: a hit costs a walk up the containers and no method
+   lookups."
+  [^java.util.concurrent.atomic.AtomicReference site carrier
+   ^String unchecked-name ^String checked-name]
+  (let [^objects hit (when site (.get site))
+        ^"[Ljava.lang.Class;" classes (when hit (aget hit 0))
+        same-classes? (and classes
+                           (loop [x carrier i 0]
+                             (cond
+                               (nil? x) (== i (alength classes))
+                               (== i (alength classes)) false
+                               (identical? (aget classes i) (.getClass ^Object x))
+                               (recur (container-of x) (inc i))
+                               :else false)))]
+    (if same-classes?
+      (let [choice (aget hit 1)]
+        (if (identical? :outer choice)
+          (outer-of carrier)
+          (loop [x carrier k (long choice)]
+            (if (zero? k) x (recur (container-of x) (dec k))))))
+      (let [chain (loop [x carrier acc []]
+                    (if (nil? x) acc (recur (container-of x) (conj acc x))))
+            [target choice] (resolve-path-call-target carrier chain unchecked-name checked-name)]
+        (when (and site (some? choice))
+          (.set site (object-array [(into-array Class (map #(.getClass ^Object %) chain))
+                                    choice])))
+        target))))
+
+(defn dispatch-path-call-fallback
+  "dispatch-path-call with the carrier and arguments first: the order a
+   compiled call site has them in when the target it was given does not
+   implement a dispatch interface for the routine."
+  [carrier ^objects args state unchecked-name checked-name]
+  (dispatch-path-call state carrier unchecked-name checked-name args))
 
 (defn- get-user-field
   [target field-name]
@@ -1599,31 +1787,40 @@
                                               ::none)))))]
       (when-not (identical? found ::none) found))))
 
-(def ^:private ^ThreadLocal validating-object-state
-  "Holds true on a thread while it checks an invariant. Calls the invariant
-   makes check no invariant themselves, so a clause may call a public query
-   without re-entering. A ThreadLocal, not a dynamic var: it is set around
-   every check, and `binding` costs far more."
-  (ThreadLocal.))
-
 (def ^:private no-args (object-array 0))
 
 (defn- run-invariant!
-  "Run VALUE's invariant (METHOD from invariant-method), guarded against
-   re-entry, with ENTRY-ROUTINE (or nil) recorded for a violation's report."
-  [state value method entry-routine]
-  (let [^ThreadLocal validating validating-object-state
-        ^ThreadLocal entry bi/invariant-entry-routine
-        outer-entry (.get entry)]
-    (.set validating Boolean/TRUE)
-    (.set entry entry-routine)
+  "Run VALUE's invariant (METHOD from invariant-method, unused when VALUE
+   implements NexInvariant), with ST, this thread's invariant-check state
+   (bi/invariant-check-state), marking a check in progress, so calls the
+   invariant makes check none themselves, and recording ENTRY-ROUTINE (or nil)
+   for a violation's report."
+  [^objects st state value method entry-routine]
+  (let [outer-entry (aget st 1)]
+    (aset st 0 Boolean/TRUE)
+    (aset st 1 entry-routine)
     (try
-      (if (instance? Method method)
+      (cond
+        (instance? NexInvariant value)
+        (.__method_$invariant$arity0 ^NexInvariant value state no-args)
+
+        (instance? Method method)
         (invoke-reflective! method value (method-args state no-args))
+
+        :else
         (invoke-user-method state value synthetic-invariant-method-name []))
       (finally
-        (.set entry outer-entry)
-        (.set validating nil)))))
+        (aset st 1 outer-entry)
+        (aset st 0 nil)))))
+
+(defn- check-invariant!
+  [state value entry-routine]
+  (let [^objects st (.get ^ThreadLocal bi/invariant-check-state)]
+    (when-not (aget st 0)
+      (if (instance? NexInvariant value)
+        (run-invariant! st state value nil entry-routine)
+        (when-let [method (invariant-method value)]
+          (run-invariant! st state value method entry-routine))))))
 
 (defn validate-object-state
   "Validate an object's class invariant after construction or a public call.
@@ -1633,9 +1830,7 @@
    The `class-name` argument is retained for the call convention but no longer
    used — dispatch is virtual off the runtime object."
   [state _class-name value]
-  (when-not (.get ^ThreadLocal validating-object-state)
-    (when-let [method (invariant-method value)]
-      (run-invariant! state value method nil)))
+  (check-invariant! state value nil)
   value)
 
 (defn validate-object-state-on-entry
@@ -1644,9 +1839,7 @@
    failure here means it was broken in between: a callback into an object
    still in the middle of a routine, or a change made behind its back."
   [state routine value]
-  (when-not (.get ^ThreadLocal validating-object-state)
-    (when-let [method (invariant-method value)]
-      (run-invariant! state value method routine)))
+  (check-invariant! state value routine)
   value)
 
 (defn- nex-object-render
@@ -2591,7 +2784,11 @@
 (def-builtin-method-wrapper builtin-method-boolean-compare "compare")
 (def-builtin-method-wrapper builtin-method-boolean-hash "hash")
 
-(def-builtin-method-wrapper builtin-method-string-length "length")
+(defn builtin-method-string-length
+  "`s.length`, called directly rather than through call-builtin-method's
+   lookup by type and name: an `across` over a String tests it per element."
+  [^String s & _]
+  (long (.length s)))
 (def-builtin-method-wrapper builtin-method-string-index-of "index_of")
 (def-builtin-method-wrapper builtin-method-string-substring "substring")
 (def-builtin-method-wrapper builtin-method-string-to-upper "to_upper")
@@ -2607,7 +2804,16 @@
 (def-builtin-method-wrapper builtin-method-string-pad-end "pad_end")
 (def-builtin-method-wrapper builtin-method-string-pad-start "pad_start")
 (def-builtin-method-wrapper builtin-method-string-replicate "replicate")
-(def-builtin-method-wrapper builtin-method-string-char-at "char_at")
+(defn builtin-method-string-char-at
+  "`s.char_at(i)`, called directly (see builtin-method-string-length). Out of
+   range is an Index_Out_Of_Bounds error, as the builtin's is."
+  [^String s idx & _]
+  (let [i (long idx)
+        n (.length s)]
+    (if (and (<= 0 i) (< i n))
+      (.charAt s (int i))
+      (throw (ex-info (str "Index " i " out of bounds for length " n)
+                      {:builtin-kind "Index_Out_Of_Bounds"})))))
 (def-builtin-method-wrapper builtin-method-string-chars "chars")
 (def-builtin-method-wrapper builtin-method-string-to-bytes "to_bytes")
 (def-builtin-method-wrapper builtin-method-string-compare "compare")
@@ -3188,7 +3394,7 @@
    "call-user-method"
    (fn [state args]
      (let [[lowered-name method-name target & call-args] args]
-       (call-user-method state lowered-name method-name target (object-array call-args))))
+       (call-user-method state nil lowered-name method-name target (object-array call-args))))
 
    "shallow-copy-collection"
    (fn [_state args] (shallow-copy-collection (first args)))

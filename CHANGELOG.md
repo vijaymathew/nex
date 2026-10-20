@@ -15,20 +15,95 @@
 - **Fix: an invariant clause may name a zero-argument query without parens
   in the interpreter** (`consistent: total = sum`), and a clause calling the
   object's queries qualified (`this.q`) no longer recurses forever there.
-- **`across` over an Array is about 40x faster in compiled code.** When the
-  target is statically an `Array`, the loop is compiled as an indexed walk,
-  as fast as a hand-written `from` loop over `get`, instead of three dynamic
-  cursor calls per element. Other targets (strings, maps, sets, `Any`, user
-  cursors) still use the cursor, but the built-in cursors are now called
-  directly, about 12x faster than before. Array operations (`get`, `add`,
-  `length`, `slice` and the rest) no longer use reflection on either backend.
+- **`across` over an Array, String or Set is much faster in compiled code.**
+  When the target is statically an `Array`, `String` or `Set`, the loop is
+  compiled as an indexed walk, as fast as a hand-written `from` loop, instead
+  of three dynamic cursor calls per element: about 40x faster for an Array
+  than before. A Set is walked through a copy taken once, so adding to it
+  inside the loop does not extend the loop, as before. Other targets (maps,
+  `Any`, user cursors) still use the cursor, but the built-in cursors are now
+  called directly, about 12x faster than before. Array operations (`get`,
+  `add`, `length`, `slice` and the rest) no longer use reflection on either
+  backend.
 - **Faster method calls and invariant checks in compiled code.** A call
   `x.f(...)` on a user object no longer builds the routine's name or walks
   its arguments on every call, and compiled code no longer looks up each
   runtime helper by name on every call (the lookup is now done once per call
-  site). A class invariant check costs about a third of what it did.
+  site). Each call site also remembers the routine it last called and for
+  which class, so a call on an object of the same class as last time skips
+  the lookup altogether, and Java's per-call access check is no longer run;
+  a call between two objects inside a routine went from about 33 ns to about
+  20 ns. A class invariant check costs about a third of what it did.
   Together these make a call in a tight loop about 3x faster, or about 7x
   faster with a small invariant.
+- **Calls between user objects are JVM interface calls in compiled code.**
+  For each routine name and arity a program uses, the compiler generates a
+  small interface (`nex/dispatch/F_<name>$<arity>`, and `U_...` for a
+  routine's unchecked twin) that every class with that routine implements, its
+  own or inherited. A call `x.f(...)` is then an interface call that the JVM
+  can inline, rather than a call by reflection: about 5 ns instead of 20 ns.
+  `this.f(...)` and an unqualified call in inherited code, which may reach an
+  heir's override, now find the object that runs the routine through the
+  object's own links (and a per-call-site cache) and call it the same way:
+  about 2.5x faster. A class invariant is checked through a fixed runtime
+  interface, also without reflection, about 2.5x faster. A nil, interpreter or
+  Java receiver takes the general path as before. A jar carries the
+  interfaces it uses as class files; two Nex jars on one classpath carry
+  identical copies, and either serves both.
+- **Routines take and return Integer, Real, Boolean and Char unboxed in
+  compiled code.** Each class routine is compiled to a typed method, whose
+  parameters and result are JVM `long`, `double`, `boolean` or `char` where
+  declared as one of these types, and a wrapper of the general
+  `(state, Object[]) -> Object` signature that interfaces and the runtime
+  call. An unqualified call to a routine of the object's own class, and a
+  call `x.f(...)` whose receiver has the routine as `x`'s static type
+  declares it (through a typed dispatch interface,
+  `nex/dispatch/T_<name>$<arity>$<types>`), call the typed method directly:
+  no argument array and no boxing. A recursive `fib(32)` went from about
+  48 ms to about 7 ms, about what the same code takes in Java, and a loop of
+  two calls between objects is about 2x faster. An heir's forwarding stub for
+  an inherited routine, and the checked routine of a class with an
+  invariant, are typed the same way, so calls to them are typed too, and so
+  are `this.f(...)` and an unqualified call in inherited code (through
+  `nex/dispatch/S_...` for a routine's unchecked twin), and calls made from
+  top-level code and top-level functions. A receiver that redeclares the
+  routine with other types takes the general call as before. Error traces
+  are unchanged.
+- **Integer and Real math methods compile to JVM instructions.** On an
+  Integer or Real value, `to_real`, `to_integer`, Integer's `min` and `max`,
+  and Real's `sqrt`, `cbrt`, `exp`, `log`, `log10`, `power`, `sin`, `cos`,
+  `tan`, `asin`, `acos`, `atan`, `atan2`, `hypot`, `to_radians`,
+  `to_degrees`, `sign`, `abs`, `is_nan` and `is_infinite` are emitted as the
+  JVM operations they stand for (`Math.sqrt`, a long-to-double conversion,
+  ...), computing exactly what the runtime's methods compute, rather than
+  calls into the runtime with boxed values. A loop of Real arithmetic calling
+  `to_real` and `sqrt` went from about 1.1 s to about 75 ms for 20 million
+  iterations. Real's `round`, `floor`, `ceiling` and `truncate`, and
+  `to_string` without a base on an Integer or Real, are emitted the same way;
+  a value with no Integer (NaN, an infinity, or out of range) still goes to
+  the runtime's method, so it raises exactly the error it always has.
+- **A compiled file's top-level variables are JVM locals when only its
+  top-level code uses them.** A top-level `let` that no function, class,
+  closure or `spawn` body mentions is no longer read and written by name in
+  the session's map of top-level values. A top-level loop over such
+  variables is about 3x faster. The REPL, whose variables later inputs see,
+  is unchanged.
+- **Fix: defining all of a compiled file's classes in one loader no longer
+  fails with a duplicate dispatch interface.** A compiled file includes its
+  dispatch interfaces for a jar; a class that names one defines it first,
+  and an explicit definition of it afterwards is now a no-op.
+- **Fix: Real's math methods (`sqrt`, `exp`, `log`, ...) no longer pay for a
+  wrapper on every call.** Their signature was attached with `with-meta`,
+  which wraps a function in one that rebuilds its arguments as a sequence on
+  each call.
+- **Built-in methods are called directly in compiled code.** A method of a
+  String, Integer, Real, Char, Boolean, Byte, sized integer, Console, Process
+  or Map_Entry value (`abs`, `to_upper`, `char_at`, ...) is looked up once,
+  when the runtime loads, and called directly, rather than found by the
+  value's type and the method's name on every call. That cut the cost of a
+  call like `n.abs` from about 100 ns to about 20 ns. Methods on `Any`,
+  `Cursor` and `Comparable` values, whose runtime type varies, are looked up
+  as before.
 - **Sound with `lib/audio`.** `audio/Sound` plays short effects loaded from
   WAV, AIFF or AU files, or generated with `Sound.tone`, overlapping up to
   `voices` copies. `audio/Music` plays recorded tracks and `audio/Midi_Song`

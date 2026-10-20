@@ -28,7 +28,7 @@
 (declare lower-statements)
 (declare lower-create-expr)
 (declare lower-call-expr)
-(declare dispatch-path-call-ir lower-expr-identifier*)
+(declare dispatch-path-call-ir lower-expr-identifier* typed-call-virtual-node typed-method-descriptor)
 (declare lower-member-assign-stmt)
 (declare lower-call-stmt)
 (declare lower-loop-stmt)
@@ -4781,16 +4781,22 @@
   "IR for a qualified call `target.method(args)` on a user object, dispatched
    at run time on the receiver's class (an heir's object need not be a JVM
    subtype of the static type, so there is no direct call to emit). The
-   routine's JVM name is worked out here, once, rather than on every call."
-  [method target-ir arg-irs nex-type jvm-type]
-  (let [string-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
-    (ir/call-runtime-node "call-user-method"
-                          (into [(string-const (str "__method_" method "$arity" (count arg-irs)))
-                                 (string-const method)
-                                 target-ir]
-                                arg-irs)
-                          nex-type
-                          jvm-type)))
+   routine's JVM name is worked out here, once, rather than on every call.
+   METHOD-DEF, the routine as the target's static type declares it, gives
+   the typed method's descriptor (typed-method-descriptor), which the call
+   tries first so its arguments and result need no boxing."
+  ([method target-ir arg-irs nex-type jvm-type]
+   (user-method-call-ir method target-ir arg-irs nex-type jvm-type nil))
+  ([method target-ir arg-irs nex-type jvm-type method-def]
+   (let [string-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
+     (cond-> (ir/call-runtime-node "call-user-method"
+                                   (into [(string-const (str "__method_" method "$arity" (count arg-irs)))
+                                          (string-const method)
+                                          target-ir]
+                                         arg-irs)
+                                   nex-type
+                                   jvm-type)
+       method-def (assoc :typed-descriptor (typed-method-descriptor method-def))))))
 
 (defn- lower-instance-user-field-get
   [env target-expr method base-type target-ir field-def type-map]
@@ -4828,7 +4834,7 @@
 
       :else
       (user-method-call-ir method target-ir (mapv #(lower-expression env %) args)
-                           nex-type jvm-type))))
+                           nex-type jvm-type method-def))))
 
 (defn- lower-instance-inherited-parent-call
   "`this.m(...)` where M is not declared/inherited on the class itself but is a
@@ -5812,15 +5818,18 @@
   ([env method-def arg-irs nex-type jvm-type qualified? carrier-ir]
    (let [name-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))
          checked (lowered-instance-method-name method-def)]
-     (ir/call-runtime-node "dispatch-path-call"
-                           (into [carrier-ir
-                                  (name-const (if qualified?
-                                                checked
-                                                (unchecked-instance-method-name method-def)))
-                                  (name-const checked)]
-                                 arg-irs)
-                           nex-type
-                           jvm-type))))
+     (assoc (ir/call-runtime-node "dispatch-path-call"
+                                  (into [carrier-ir
+                                         (name-const (if qualified?
+                                                       checked
+                                                       (unchecked-instance-method-name method-def)))
+                                         (name-const checked)]
+                                        arg-irs)
+                                  nex-type
+                                  jvm-type)
+            ;; The routine's typed method (typed-method-descriptor), which
+            ;; the call tries first so its arguments and result stay unboxed.
+            :typed-descriptor (typed-method-descriptor method-def)))))
 
 (defn- overridable-self-call-ir
   "An unqualified call to an own or inherited routine an heir may override.
@@ -5857,14 +5866,16 @@
       ;; it links fine, since the bytecode for it lives right here.
       (and own-method-def (not (lowered-deferred-method? (current-class-def env) own-method-def)))
       (overridable-self-call-ir env method-def arg-irs nex-type jvm-type
-                                (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                                      (self-call-method-name env (:this-type env) method-def)
-                                                      (desc/repl-instance-method-descriptor)
-                                                      (ir/this-node (:this-type env)
-                                                                    (exact-class-jvm-type env (:this-type env)))
-                                                      arg-irs
-                                                      nex-type
-                                                      jvm-type))
+                                (typed-call-virtual-node
+                                 (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                                       (self-call-method-name env (:this-type env) method-def)
+                                                       (desc/repl-instance-method-descriptor)
+                                                       (ir/this-node (:this-type env)
+                                                                     (exact-class-jvm-type env (:this-type env)))
+                                                       arg-irs
+                                                       nex-type
+                                                       jvm-type)
+                                 method-def))
 
       ;; Declared on this class but deferred (no body compiled here) — e.g. a
       ;; deferred class's own routine calling one of its sibling deferred
@@ -6825,7 +6836,7 @@
     ;; without parentheses (Nex allows `x.describe` for a no-arg call), so
     ;; resolution — not punctuation — decides method vs field.
     (if method-def
-      (user-method-call-ir (:method expr) target-ir arg-irs nex-type jvm-type)
+      (user-method-call-ir (:method expr) target-ir arg-irs nex-type jvm-type method-def)
       (ir/call-runtime-node (str "user-field-get:" (:method expr))
                             [target-ir]
                             nex-type
@@ -7119,7 +7130,8 @@
                  (assoc-in env0 [:across-cursors (:name stmt)]
                            (across-item-type env0 target-type)))
                env0)]
-    (if (and (:top-level? env) (not (:scoped-locals? env)))
+    (if (and (:top-level? env) (not (:scoped-locals? env))
+             (not (contains? (:promoted-globals env) (:name stmt))))
       [(update env1 :var-types assoc (:name stmt) nex-type)
        (ir/top-set-node (:name stmt) value-ir nex-type (resolve-jvm-type env1 nex-type))]
       (let [[env' local] (env-add-local env1 (:name stmt) nex-type)]
@@ -7568,41 +7580,62 @@
       [env (ir/pop-node call-ir)])
     [env (ir/pop-node (lower-expression env stmt))]))
 
-(defn- array-across->indexed
-  "STMT, the loop an `across` over an Array desugars to, rewritten to walk the
-   array by index; or STMT unchanged when it is not one. `across xs as x`
-   desugars to cursor calls (nex.walker/handle-across-statement):
+(defn- indexed-across-plan
+  "How an `across` over a target of static type TARGET-TYPE walks it by index,
+   or nil when it keeps the cursor: {:source (fn [target] expr)
+   :source-type type :item-method name}. An Array is walked as it is, with
+   `get`; a String with `char_at`; a Set through `to_array`, a copy taken once,
+   as the Set cursor takes one at `start`. A detachable target keeps the
+   cursor, which reports a void target as it always has."
+  [target-type]
+  (when-not (tc/detachable-type? target-type)
+    (case (base-type-name target-type)
+      "Array"  {:source identity :source-type target-type :item-method "get"}
+      "String" {:source identity :source-type "String" :item-method "char_at"}
+      "Set"    {:source (fn [target] {:type :call :target target :method "to_array"
+                                      :args [] :has-parens true})
+                :source-type (cond-> {:base-type "Array"}
+                               (map? target-type)
+                               (assoc :type-args (or (:type-args target-type)
+                                                     (:type-params target-type))))
+                :item-method "get"}
+      nil)))
+
+(defn- indexed-across
+  "STMT, the loop an `across` over an Array, String or Set desugars to,
+   rewritten to walk the target by index; or STMT unchanged when it is not
+   one. `across xs as x` desugars to cursor calls
+   (nex.walker/handle-across-statement):
 
      init   let c := xs.cursor   c.start   [stop flag, with a rescue]
      until  c.at_end             [or the stop flag]
      body   let x := c.item   ...   c.next
 
-   which the runtime runs as three dynamic cursor calls per element. When xs
-   is statically an (attached) Array, the cursor's calls are replaced with the
-   ones a hand-written loop makes, on a local holding the array and an index:
-   `a.length`, `a.get(i)` and `i := i + 1`. The array is still evaluated once,
-   and its length is read on every test, as the cursor does."
+   which the runtime runs as three dynamic cursor calls per element. When the
+   target's static type has an indexed-across-plan, the cursor's calls are
+   replaced with the ones a hand-written loop makes, on a local holding the
+   source and an index: `a.length`, `a.get(i)` (or `char_at`) and
+   `i := i + 1`. The target is still evaluated once, and the length is read
+   on every test, as the cursor does."
   [env stmt]
   (let [[cursor-let & init-rest] (:init stmt)
         cursor-name (:name cursor-let)
         value (:value cursor-let)
         target (:target value)
-        target-type (when (and (= :let (:type cursor-let))
-                               (:synthetic cursor-let)
-                               (string? cursor-name)
-                               (str/starts-with? cursor-name "__across_c_")
-                               (= :call (:type value))
-                               (= "cursor" (:method value))
-                               (empty? (:args value))
-                               (some? target))
-                      (infer-type env (normalize-call-target target)))]
-    (if-not (and (= "Array" (base-type-name target-type))
-                 (not (tc/detachable-type? target-type)))
+        plan (when (and (= :let (:type cursor-let))
+                        (:synthetic cursor-let)
+                        (string? cursor-name)
+                        (str/starts-with? cursor-name "__across_c_")
+                        (= :call (:type value))
+                        (= "cursor" (:method value))
+                        (empty? (:args value))
+                        (some? target))
+               (indexed-across-plan (infer-type env (normalize-call-target target))))]
+    (if-not plan
       stmt
       (let [suffix (subs cursor-name (count "__across_c_"))
-            arr-name (str "__across_a_" suffix)
+            src-name (str "__across_a_" suffix)
             idx-name (str "__across_i_" suffix)
-            arr {:type :identifier :name arr-name}
             idx {:type :identifier :name idx-name}
             cursor-call? (fn [node]
                            (and (map? node)
@@ -7617,17 +7650,17 @@
                              (case (:method node)
                                "start"  (set-idx {:type :integer :value 0})
                                "at_end" {:type :binary :operator ">=" :left idx
-                                         :right {:type :call :target arr-name :method "length"
+                                         :right {:type :call :target src-name :method "length"
                                                  :args [] :has-parens false}}
-                               "item"   {:type :call :target arr-name :method "get"
+                               "item"   {:type :call :target src-name :method (:item-method plan)
                                          :args [idx] :has-parens true}
                                "next"   (set-idx {:type :binary :operator "+" :left idx
                                                   :right {:type :integer :value 1}})
                                node)))
             rewrite (fn [x] (walk/postwalk replace-call x))]
         (assoc stmt
-               :init (into [{:type :let :name arr-name :synthetic true
-                             :var-type target-type :value target}
+               :init (into [{:type :let :name src-name :synthetic true
+                             :var-type (:source-type plan) :value ((:source plan) target)}
                             {:type :let :name idx-name :synthetic true
                              :var-type "Integer" :value {:type :integer :value 0}}]
                            (rewrite (vec init-rest)))
@@ -7636,7 +7669,7 @@
 
 (defn- lower-loop-stmt [env stmt]
   (let [loop-env (scoped-child-env env)
-        stmt (array-across->indexed loop-env stmt)
+        stmt (indexed-across loop-env stmt)
         [env-after-init lowered-init] (lower-statements loop-env (:init stmt))
         [env-after-init invariant-start-stmts] (contract-assertions-ir env-after-init :invariant (:invariant stmt))
         [env-with-variant variant-init-stmts variant-prefix]
@@ -7897,6 +7930,36 @@
                         :state-slot 1
                         :next-slot 3})))
 
+(def ^:private typed-descriptor-by-type
+  "JVM descriptor of a routine parameter or result in its typed method, by
+   the Nex type as declared. Anything else, including an alias or a
+   detachable type, is an Object."
+  {"Integer" "J" "Real" "D" "Boolean" "Z" "Char" "C"})
+
+(defn typed-method-descriptor
+  "Descriptor of the typed method a class routine METHOD-DEF compiles to
+   (`<emitted name>$t`): the routine's body, taking its arguments and
+   returning its result unboxed where the declared type is Integer, Real,
+   Boolean or Char, rather than in an Object[] and an Object. A function of
+   the declaration alone, so the routine's own lowering and any call site
+   computing it agree."
+  [method-def]
+  (let [desc (fn [t] (get typed-descriptor-by-type t "Ljava/lang/Object;"))
+        ret (function-return-type method-def)]
+    (str "(Lnex/compiler/jvm/runtime/NexReplState;"
+         (apply str (map (comp desc :type) (:params method-def)))
+         ")"
+         (if (= "Void" ret) "Ljava/lang/Object;" (desc ret)))))
+
+(defn- typed-call-virtual-node
+  "CALL-VIRTUAL-NODE, a direct call of a routine compiled with a typed
+   method (see typed-method-descriptor), turned into a call of that typed
+   method."
+  [call-virtual-node method-def]
+  (assoc call-virtual-node
+         :method (str (:method call-virtual-node) "$t")
+         :typed-descriptor (typed-method-descriptor method-def)))
+
 (defn- lowered-routine-emitted-name
   "The JVM method name `lower-function` emits FN-DEF under: a free function's
    or class routine's ordinary name, or a class routine's unchecked twin's
@@ -8015,6 +8078,8 @@
                      :qualified-name (:qualified-name fn-def)
                      :owner unit-name
                      :emitted-name (lowered-routine-emitted-name fn-def)
+                     :typed-descriptor (when (:class-name fn-def)
+                                         (typed-method-descriptor fn-def))
                      :params params
                      :return-type return-type
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
@@ -8375,13 +8440,18 @@
         target-ir (carrier-path-target-ir {:compiled-classes compiled-classes} carrier-path
                                           (ir/this-node class-name
                                                         (exact-class-jvm-type {:compiled-classes compiled-classes} class-name)))
-        call-ir (ir/call-virtual-node owner-internal-name
-                                      callee-name
-                                      (desc/repl-instance-method-descriptor)
-                                      target-ir
-                                      call-args
-                                      return-type
-                                      (resolve-jvm-type resolve-env return-type))
+        ;; The callee, a routine of the carrier's class (or that class's
+        ;; own stub), has a typed method of the same declaration: call it,
+        ;; so the arguments and result stay unboxed.
+        call-ir (typed-call-virtual-node
+                 (ir/call-virtual-node owner-internal-name
+                                       callee-name
+                                       (desc/repl-instance-method-descriptor)
+                                       target-ir
+                                       call-args
+                                       return-type
+                                       (resolve-jvm-type resolve-env return-type))
+                 method-def)
         class-validation (when validate?
                            [(ir/pop-node
                              (validate-object-state-ir {:compiled-classes compiled-classes}
@@ -8400,6 +8470,10 @@
     (ir/fn-node {:name (:name method-def)
                  :owner (:jvm-name class-meta)
                  :emitted-name emitted-name
+                 ;; A typed method too (nex.lower/typed-method-descriptor),
+                 ;; so an heir has one for each routine it inherits, and
+                 ;; implements the routine's typed dispatch interface.
+                 :typed-descriptor (typed-method-descriptor method-def)
                  :params params
                  :return-type return-type
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")
@@ -9005,8 +9079,53 @@
       :else
       (conj lowered-body nil-return))))
 
+(defn- promotable-top-level-names
+  "Names of the top-level `let` variables of PROGRAM that its top-level code
+   alone uses, which a compiled file may keep in JVM locals rather than the
+   session's map of top-level values, read and written by name. A name is
+   left in the map when it occurs anywhere in a function, a class, a closure
+   or a `spawn` body (which may read it by name, or later, or on another
+   thread), or anywhere in top-level code other than as a variable read,
+   an assignment's target or a call's target (a `let` of a Function called
+   as `f(...)`, say). The test is by name alone, so it over-approximates:
+   a name merely shared with something unrelated stays in the map."
+  [program]
+  (let [nested-types #{:anonymous-function :spawn}
+        strings-in (fn [x]
+                     (let [acc (transient #{})]
+                       (walk/postwalk (fn [v] (when (string? v) (conj! acc v)) v) x)
+                       (persistent! acc)))
+        let-names (transient #{})
+        blocked (transient #{})
+        visit (fn visit [x]
+                (cond
+                  (and (map? x) (nested-types (:type x)))
+                  (doseq [n (strings-in x)] (conj! blocked n))
+
+                  (map? x)
+                  (do
+                    (when (and (= :let (:type x)) (string? (:name x)))
+                      (conj! let-names (:name x)))
+                    (doseq [[k v] x]
+                      (if (and (string? v) (not (#{:name :target} k)))
+                        (conj! blocked v)
+                        (visit v))))
+
+                  (sequential? x)
+                  (run! visit x)
+
+                  :else nil))]
+    (doseq [n (strings-in [(:functions program) (:classes program)])]
+      (conj! blocked n))
+    (run! visit (:statements program))
+    (let [blocked (persistent! blocked)]
+      (into #{} (remove blocked) (persistent! let-names)))))
+
 (defn lower-repl-cell
-  "Lower a narrow REPL/program body to a first compiler unit."
+  "Lower a narrow REPL/program body to a first compiler unit. With
+   :promote-locals? (a compiled file, whose top-level code runs once and
+   which no later input extends), a top-level `let` that only top-level code
+   uses is a JVM local (promotable-top-level-names)."
   [program opts]
   (binding [*type-aliases* (merge *type-aliases*
                                   (into {} (map (juxt :name :type-expr)
@@ -9034,15 +9153,18 @@
                                                  anonymous-classes
                                                  (:classes opts)
                                                  (keep :class-def visible-functions))
-          env (make-lowering-env {:classes visible-classes
-                                  :functions visible-functions
-                                  :imports visible-imports
-                                  :compiled-classes (:compiled-classes opts)
-                                  :var-types (:var-types opts)
-                                  :top-level? true
-                                  :repl? true
-                                  :state-slot 0
-                                  :next-slot 1})
+          env (assoc (make-lowering-env {:classes visible-classes
+                                         :functions visible-functions
+                                         :imports visible-imports
+                                         :compiled-classes (:compiled-classes opts)
+                                         :var-types (:var-types opts)
+                                         :top-level? true
+                                         :repl? true
+                                         :state-slot 0
+                                         :next-slot 1})
+                     :promoted-globals (if (:promote-locals? opts)
+                                         (promotable-top-level-names program)
+                                         #{}))
           statements (vec (:statements program))
           globals-map (compute-top-level-globals env (:var-types opts) statements)
           tail-stmt (last statements)

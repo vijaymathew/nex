@@ -165,7 +165,10 @@
    output is flushed."
   [{:keys [main-class classes]} program-args]
   (let [ldr (loader/make-loader)]
-    (doseq [[binary-name ^bytes bytecode] classes]
+    ;; Not the dispatch interfaces, which are for a jar: the loader makes
+    ;; each when first needed (loader/make-loader).
+    (doseq [[binary-name ^bytes bytecode] classes
+            :when (not (str/starts-with? binary-name "nex.dispatch."))]
       (loader/define-class! ldr binary-name bytecode))
     (let [cls (loader/resolve-class ldr main-class)
           m (.getMethod cls "main" (into-array Class [(Class/forName "[Ljava.lang.String;")]))
@@ -264,23 +267,35 @@
     (cond
       (str/starts-with? cls "AnonymousFunction") "an anonymous function"
       :else
-      (when-let [[_ kind name] (re-matches #"__(i?method|ctor)_(.+)\$arity\d+" method)]
+      (when-let [[_ kind name] (re-matches #"__(i?method|ctor)_(.+)\$arity\d+(?:\$t)?" method)]
         (cond
           (str/starts-with? name "$invariant") {:invariant-of cls}
           (and (= cls "Program") (not= kind "ctor")) name
           :else (str cls "." name))))))
 
+(defn- typed-wrapper-frame?
+  "Whether OUTER is the boxing wrapper of a routine's typed method, called
+   just inside it as INNER (see nex.compiler.jvm.emit/
+   emit-typed-routine-methods!): one call of the routine, not two."
+  [^StackTraceElement inner ^StackTraceElement outer]
+  (and inner
+       (= (.getClassName inner) (.getClassName outer))
+       (= (.getMethodName inner) (str (.getMethodName outer) "$t"))
+       (not (pos? (.getLineNumber outer)))))
+
 (defn- nex-frames
   "The frames of compiled Nex code in T's stack trace, innermost first:
    [{:file :line :routine}], :line nil for contract-checking code."
   [^Throwable t]
-  (for [^StackTraceElement fr (.getStackTrace t)
-        :let [file (.getFileName fr)
-              method (.getMethodName fr)]
-        :when (and file (str/ends-with? file ".nex") (not= method "main"))]
-    {:file file
-     :line (when (pos? (.getLineNumber fr)) (.getLineNumber fr))
-     :routine (frame-routine (.getClassName fr) method)}))
+  (let [trace (vec (.getStackTrace t))]
+    (for [[i ^StackTraceElement fr] (map-indexed vector trace)
+          :let [file (.getFileName fr)
+                method (.getMethodName fr)]
+          :when (and file (str/ends-with? file ".nex") (not= method "main")
+                     (not (typed-wrapper-frame? (when (pos? i) (nth trace (dec i))) fr)))]
+      {:file file
+       :line (when (pos? (.getLineNumber fr)) (.getLineNumber fr))
+       :routine (frame-routine (.getClassName fr) method)})))
 
 (defn- collapse-repeats
   "Runs of identical frames — a recursion — as one frame with a :times count."

@@ -296,6 +296,7 @@
                                                   :functions []
                                                   :imports (:imports prepared-ast)
                                                   :var-types {}
+                                                  :promote-locals? true
                                                   :skip-contracts? (:skip-contracts? opts)})
            class-asts (vec (concat (user-class-defs prepared-ast)
                                    (lower/collect-anonymous-class-defs prepared-ast)))
@@ -349,7 +350,9 @@
                                launcher-internal-name "java/lang/Object"}
                               (map (fn [c] [(:internal-name c) (or (:java-super-class c) "java/lang/Object")]))
                               (:classes unit))
-           class-bytes (into {(desc/binary-class-name program-internal-name)
+           dispatch-keys (atom #{})
+           class-bytes (binding [emit/*dispatch-keys* dispatch-keys]
+                        (into {(desc/binary-class-name program-internal-name)
                               (emit/compile-unit->bytes unit {:known-supers known-supers})
                               (desc/binary-class-name launcher-internal-name)
                               (emit/compile-launcher->bytes
@@ -374,7 +377,14 @@
                                        (mapv #(select-keys % [:name :qualified-name :emitted-name])
                                              (:functions unit))}
                                       {:known-supers known-supers})])
-                                  (:classes unit)))]
+                                  (:classes unit))))
+           ;; The interfaces the classes implement and the call sites call
+           ;; through (see nex.compiler.jvm.emit/*dispatch-keys*).
+           class-bytes (into class-bytes
+                             (map (fn [k]
+                                    [(desc/binary-class-name (apply emit/dispatch-interface-name k))
+                                     (apply emit/compile-dispatch-interface->bytes k)]))
+                             @dispatch-keys)]
        {:program-class (desc/binary-class-name program-internal-name)
         :main-class (desc/binary-class-name launcher-internal-name)
         :classes class-bytes})

@@ -11,6 +11,7 @@
   and debug metadata such as source files, line tables, and local variables."
   (:require [clojure.set :as set]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir]
             [nex.types.builtins :as bi])
@@ -142,6 +143,137 @@
                       :fn-node fn-node})
                    (:functions unit))))})
 
+(def ^:dynamic *dispatch-keys*
+  "While bound (to an atom of a set), collects the [name arity] of every
+   dispatch interface the emitted code names: one per routine a class emits,
+   and one per call site that calls through one. A compiler binds it around
+   emission and then emits exactly those interfaces (see
+   compile-dispatch-interface->bytes), since a call site's `instanceof` needs
+   its interface to exist even when no class implements it."
+  nil)
+
+(defn- note-dispatch-key!
+  [k]
+  (when-let [keys *dispatch-keys*]
+    (swap! keys conj k))
+  k)
+
+(def ^:private dispatch-kinds
+  "Dispatch interface kind -> the prefix of the routine method it declares:
+   F for a routine (`__method_`), whose qualified calls check the invariant,
+   U for its unchecked twin (`__imethod_`), which a class whose hierarchy has
+   an invariant also emits, and an unqualified call prefers
+   (nex.lower/self-call-method-name)."
+  {"F" "__method_" "U" "__imethod_"})
+
+(defn routine-dispatch-key
+  "[kind name arity] of an emitted user routine, `__method_<name>$arity<N>`
+   (kind F) or its unchecked twin `__imethod_<name>$arity<N>` (kind U); nil
+   for any other method (a constructor, or the synthetic `$invariant`, whose
+   `$` no Nex identifier has)."
+  [emitted-name]
+  (some (fn [[kind prefix]]
+          (when-let [[_ name arity] (re-matches (re-pattern (str prefix "([A-Za-z_][A-Za-z0-9_]*)\\$arity(\\d+)"))
+                                                (str emitted-name))]
+            [kind name (Long/parseLong arity)]))
+        dispatch-kinds))
+
+(defn dispatch-interface-name
+  "Internal name of the interface every class with routine NAME of ARITY
+   implements (kind F, the default), or its unchecked twin (kind U), so that
+   a call of it can be a JVM interface call whatever the receiver's class:
+   an heir is not a JVM subclass of its parent (it holds the parent as a
+   composition carrier), but it has the routine itself, its own or a
+   forwarding stub, with the same signature. Kinds T and S, with CODE (see
+   typed-dispatch-code), are for the typed methods of a routine and of its
+   unchecked twin."
+  ([name arity] (dispatch-interface-name "F" name arity))
+  ([kind name arity] (str "nex/dispatch/" kind "_" name "$" arity))
+  ([kind name arity code] (str "nex/dispatch/" kind "_" name "$" arity "$" code)))
+
+(defn typed-dispatch-code
+  "A typed method descriptor (nex.lower/typed-method-descriptor) as a short
+   code for its T interface's name: a letter per parameter after the state,
+   `_`, then the result's (J long, D double, Z boolean, C char, L Object)."
+  [^String typed-desc]
+  (let [letter (fn [^Type t] (if (= Type/OBJECT (.getSort t)) "L" (.getDescriptor t)))]
+    (str (apply str (map letter (rest (Type/getArgumentTypes typed-desc))))
+         "_"
+         (letter (Type/getReturnType typed-desc)))))
+
+(defn- typed-dispatch-descriptor
+  "The typed method descriptor a T interface's CODE stands for."
+  [^String code]
+  (let [[params ret] (str/split code #"_" -1)
+        desc (fn [c] (if (= "L" (str c)) "Ljava/lang/Object;" (str c)))]
+    (str "(Lnex/compiler/jvm/runtime/NexReplState;" (apply str (map desc params)) ")" (desc ret))))
+
+(defn dispatch-routine-name
+  "The method a dispatch interface of KIND declares for routine NAME of ARITY."
+  [kind name arity]
+  (str (get dispatch-kinds kind) name "$arity" arity))
+
+(defn typed-kind
+  "The dispatch interface kind for the typed method of a routine of KIND:
+   T for a routine's (F), S for its unchecked twin's (U)."
+  [kind]
+  (if (= "U" kind) "S" "T"))
+
+(defn class-dispatch-keys
+  "[kind name arity] of each routine LOWERED-CLASS emits a callable method
+   for, and [kind name arity code] of each one's typed method (typed-kind)."
+  [lowered-class]
+  (into (sorted-set)
+        (mapcat (fn [fn-node]
+                  (when-not (:deferred? fn-node)
+                    (when-let [[kind name arity :as k] (routine-dispatch-key (:emitted-name fn-node))]
+                      (cond-> [k]
+                        (:typed-descriptor fn-node)
+                        (conj [(typed-kind kind) name arity
+                               (typed-dispatch-code (:typed-descriptor fn-node))]))))))
+        (:methods lowered-class)))
+
+(def ^:private invariant-interface
+  "nex.compiler.jvm.runtime/NexInvariant, which a class with an invariant
+   implements so the runtime can call its invariant method directly."
+  "nex/compiler/jvm/runtime/NexInvariant")
+
+(def ^:private carrier-interface
+  "nex.compiler.jvm.runtime/NexCarrier, which every user class implements
+   (its `__container__`/`__outer__` getters, below)."
+  "nex/compiler/jvm/runtime/NexCarrier")
+
+(defn- has-invariant-method?
+  [lowered-class]
+  (some #(and (not (:deferred? %)) (= "__method_$invariant$arity0" (:emitted-name %)))
+        (:methods lowered-class)))
+
+(defn- interface-bytes
+  [internal-name method-name descriptor]
+  (let [cw (ClassWriter. 0)]
+    (.visit cw class-version
+            (+ Opcodes/ACC_PUBLIC Opcodes/ACC_INTERFACE Opcodes/ACC_ABSTRACT)
+            internal-name nil "java/lang/Object" nil)
+    (-> (.visitMethod cw (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT) method-name descriptor nil nil)
+        (.visitEnd))
+    (.visitEnd cw)
+    (.toByteArray cw)))
+
+(defn compile-dispatch-interface->bytes
+  "The dispatch interface of KIND (F by default) for routine NAME of ARITY
+   (see dispatch-interface-name): one abstract method, with the signature
+   every compiled routine has; or, for kind T and CODE, the routine's typed
+   method."
+  ([name arity] (compile-dispatch-interface->bytes "F" name arity))
+  ([kind name arity]
+   (interface-bytes (dispatch-interface-name kind name arity)
+                    (dispatch-routine-name kind name arity)
+                    (repl-fn-method-descriptor)))
+  ([kind name arity code]
+   (interface-bytes (dispatch-interface-name kind name arity code)
+                    (str (dispatch-routine-name (if (= "S" kind) "U" "F") name arity) "$t")
+                    (typed-dispatch-descriptor code))))
+
 (defn user-class-spec
   ([class-spec] (user-class-spec class-spec {}))
   ([class-spec {:keys [classes-edn imports-edn program-owner program-functions]}]
@@ -149,7 +281,14 @@
     :binary-name (desc/binary-class-name (:jvm-name class-spec))
     :source-file (:source-file class-spec)
     :super-name (or (:java-super-class class-spec) "java/lang/Object")
-    :interfaces (vec (:interfaces class-spec))
+    :interfaces (vec (concat (:interfaces class-spec)
+                             (map (fn [k]
+                                    (note-dispatch-key! k)
+                                    (apply dispatch-interface-name k))
+                                  (class-dispatch-keys class-spec))
+                             (when (has-invariant-method? class-spec)
+                               [invariant-interface])
+                             [carrier-interface]))
     :flags Opcodes/ACC_PUBLIC
     :fields (vec
              (concat
@@ -246,7 +385,19 @@
                        :runtime-type-fields (:runtime-type-fields class-spec)
                        :fields (:fields class-spec)})
                     (:java-super-ctor-forwards class-spec))
-               [{:name "set_outer"
+               [{:name "__container"
+                 :descriptor "()Ljava/lang/Object;"
+                 :flags Opcodes/ACC_PUBLIC
+                 :kind :field-getter
+                 :field "__container__"
+                 :owner (:internal-name class-spec)}
+                {:name "__outer"
+                 :descriptor "()Ljava/lang/Object;"
+                 :flags Opcodes/ACC_PUBLIC
+                 :kind :field-getter
+                 :field "__outer__"
+                 :owner (:internal-name class-spec)}
+                {:name "set_outer"
                  :descriptor "(Ljava/lang/Object;)V"
                  :flags Opcodes/ACC_PUBLIC
                  :kind :set-outer
@@ -735,6 +886,21 @@
                     {:from-jvm-type from-jvm-type
                      :to-jvm-type to-jvm-type}))))
 
+
+(defn- emit-value-coerce!
+  "emit-stack-coerce!, except that between two object types it only casts,
+   as emit-unbox-or-cast! does. For moving a value that is already what its
+   Nex type says between a call's arguments or result and a method's locals
+   (a typed method's parameters and result, see emit-typed-routine-methods!):
+   emit-stack-coerce! converts a value going to a Map- or Set-typed slot to
+   the compiled representation, which copies it, so an update made through
+   the copy would be lost to the caller."
+  [^MethodVisitor mv from-jvm-type to-jvm-type]
+  (cond
+    (= from-jvm-type to-jvm-type) nil
+    (and (ir/object-jvm-type? from-jvm-type) (ir/object-jvm-type? to-jvm-type))
+    (emit-unbox-or-cast! mv to-jvm-type)
+    :else (emit-stack-coerce! mv from-jvm-type to-jvm-type)))
 (defn- emit-as-int!
   "Emit `expr` and narrow its result to a 32-bit int, inserting L2I when it is a
    64-bit Nex Integer (:long). Used for the JVM int positions: collection indices,
@@ -1014,6 +1180,30 @@
     :else
     nil))
 
+(def ^:private call-site-counter
+  "Numbers the call-site caches, so that each is a distinct constant: ASM
+   merges identical dynamic constants into one constant-pool entry, which
+   would make every call site in a class share one cache."
+  (atom 0))
+
+(def ^:private atomic-reference-ctor
+  (org.objectweb.asm.Handle. Opcodes/H_NEWINVOKESPECIAL
+                             "java/util/concurrent/atomic/AtomicReference"
+                             "<init>"
+                             "()V"
+                             false))
+
+(defn- emit-call-site-cache!
+  "Push this call site's own cache, an empty AtomicReference made the first
+   time the site runs and kept by the JVM as a dynamic constant (see
+   nex.compiler.jvm.runtime/call-user-method)."
+  [^MethodVisitor mv]
+  (.visitLdcInsn mv (org.objectweb.asm.ConstantDynamic.
+                     (str "site" (swap! call-site-counter inc))
+                     "Ljava/util/concurrent/atomic/AtomicReference;"
+                     constant-bootstraps-invoke
+                     (object-array [atomic-reference-ctor]))))
+
 (defn- runtime-helper-emitters
   "Build the ordered emitter list for a direct runtime-helper call from a
    compact spec (see direct-runtime-helper-specs)."
@@ -1022,6 +1212,7 @@
         (fn [tok]
           (case tok
             :state      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
+            :site-cache [(fn [] (emit-call-site-cache! mv))]
             :e0         [(fn [] (emit-expr! mv (first args) state-slot))]
             :b0         [(fn [] (emit-boxed-expr! mv (first args) state-slot))]
             :b1         [(fn [] (emit-boxed-expr! mv (second args) state-slot))]
@@ -1072,7 +1263,7 @@
    "java-get-static-field"                   ["java-get-static-field" [:state :b0 :b1]]
    "validate-object-state"                   ["validate-object-state" [:state :b0 :b1]]
    "validate-object-state-on-entry"          ["validate-object-state-on-entry" [:state :b0 :b1]]
-   "call-user-method"                        ["call-user-method" [:state :b0 :b1 :b2 :args-drop3]]
+   "call-user-method"                        ["call-user-method" [:state :site-cache :b0 :b1 :b2 :args-drop3]]
    "dispatch-self-call"                      ["dispatch-self-call" [:state :b0 :b1 :b2 :args-drop3]]
    "dispatch-path-call"                      ["dispatch-path-call" [:state :b0 :b1 :b2 :args-drop3]]
    "op:string-concat"                        ["string-concat" [:state :args]]
@@ -1105,7 +1296,528 @@
    "select-sleep-step"                       ["select-sleep-step!" []]
    "__datetime_make"                           ["builtin-datetime-make-from-array" [:args]]})
 
+(declare descriptor-jvm-type)
+
+(def ^:dynamic *scratch-slot*
+  "While a routine's method is emitted, an atom of the next local slot free
+   for scratch values (above every slot its IR uses, see
+   with-scratch-slots); nil elsewhere, where code that wants one does without."
+  nil)
+
+(defn- max-ir-slot
+  "One past the highest local slot that IR (any nested node) names, by a
+   :slot or :*-slot key, counting a long or double as two."
+  [ir]
+  (let [hi (atom 0)]
+    (walk/postwalk (fn [x]
+                     (when (map? x)
+                       (doseq [[k v] x
+                               :when (and (integer? v) (keyword? k)
+                                          (or (= k :slot) (str/ends-with? (name k) "-slot")))]
+                         (swap! hi max (+ v (if (#{:long :double} (:jvm-type x)) 2 1)))))
+                     x)
+                   ir)
+    @hi))
+
+(defn- alloc-scratch!
+  "A scratch local for a value of JVM-TYPE (see *scratch-slot*)."
+  [jvm-type]
+  (let [slot @*scratch-slot*]
+    (swap! *scratch-slot* + (if (#{:long :double} jvm-type) 2 1))
+    slot))
+
+(defn- emit-typed-user-method-call!
+  "emit-user-method-call! when the target's static type gives the routine a
+   typed method (:typed-descriptor) and scratch locals are at hand. The
+   target and each argument, converted to the typed parameter's type, are
+   evaluated once into scratch locals; then, when the target implements the
+   routine's T interface, the call is to its typed method, the arguments
+   passed and the result returned unboxed. Otherwise the arguments are boxed
+   into an array and the call goes on as emit-user-method-call!'s does."
+  [^MethodVisitor mv expr state-slot]
+  (let [[lowered-ir name-ir target-ir & arg-irs] (:args expr)
+        method-name (:value name-ir)
+        arity (count arg-irs)
+        typed-desc (:typed-descriptor expr)
+        code (typed-dispatch-code typed-desc)
+        t-iface (dispatch-interface-name "T" method-name arity code)
+        f-iface (dispatch-interface-name method-name arity)
+        param-types (map descriptor-jvm-type (rest (Type/getArgumentTypes ^String typed-desc)))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String typed-desc))
+        void? (= :void (:jvm-type expr))
+        boxed (Label.)
+        slow (Label.)
+        done (Label.)
+        end (Label.)
+        target-slot (alloc-scratch! (ir/object-jvm-type "java/lang/Object"))
+        arg-slots (mapv alloc-scratch! param-types)]
+    (note-dispatch-key! ["T" method-name arity code])
+    (note-dispatch-key! ["F" method-name arity])
+    (emit-boxed-expr! mv target-ir state-slot)
+    (.visitVarInsn mv Opcodes/ASTORE target-slot)
+    (doseq [[arg t slot] (map vector arg-irs param-types arg-slots)]
+      (emit-value-coerce! mv (emit-expr! mv arg state-slot) t)
+      (.visitVarInsn mv (local-store-op t) slot))
+    ;; The typed call.
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF t-iface)
+    (.visitJumpInsn mv Opcodes/IFEQ boxed)
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitTypeInsn mv Opcodes/CHECKCAST t-iface)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (doseq [[t slot] (map vector param-types arg-slots)]
+      (.visitVarInsn mv (local-load-op t) slot))
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE t-iface
+                      (str "__method_" method-name "$arity" arity "$t") typed-desc true)
+    (if void?
+      (.visitInsn mv (if (#{:long :double} return-type) Opcodes/POP2 Opcodes/POP))
+      (emit-value-coerce! mv return-type (:jvm-type expr)))
+    (.visitJumpInsn mv Opcodes/GOTO end)
+    ;; Boxed: the arguments into an array, then the routine's interface or
+    ;; the runtime.
+    (.visitLabel mv boxed)
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitLdcInsn mv (int arity))
+    (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+    (doseq [[i t slot] (map vector (range) param-types arg-slots)]
+      (.visitInsn mv Opcodes/DUP)
+      (.visitLdcInsn mv (int i))
+      (.visitVarInsn mv (local-load-op t) slot)
+      (emit-value-coerce! mv t (ir/object-jvm-type "java/lang/Object"))
+      (.visitInsn mv Opcodes/AASTORE))                     ; target args
+    (.visitInsn mv Opcodes/DUP2)
+    (.visitInsn mv Opcodes/POP)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF f-iface)
+    (.visitJumpInsn mv Opcodes/IFEQ slow)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitTypeInsn mv Opcodes/CHECKCAST f-iface)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE f-iface
+                      (str "__method_" method-name "$arity" arity)
+                      (repl-fn-method-descriptor) true)
+    (.visitJumpInsn mv Opcodes/GOTO done)
+    (.visitLabel mv slow)
+    (emit-runtime-var! mv "call-user-method-fallback")
+    (.visitInsn mv Opcodes/DUP_X2)
+    (.visitInsn mv Opcodes/POP)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (emit-call-site-cache! mv)
+    (emit-boxed-expr! mv lowered-ir state-slot)
+    (emit-boxed-expr! mv name-ir state-slot)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 6) false)
+    (.visitLabel mv done)
+    (if void?
+      (.visitInsn mv Opcodes/POP)
+      (emit-unbox-or-cast! mv (:jvm-type expr)))
+    (.visitLabel mv end)
+    (if void? :void (:jvm-type expr))))
+
+(declare emit-boxed-user-method-call!)
+
+(defn- emit-user-method-call!
+  "A qualified call `x.f(args)` on a user object (IR helper
+   \"call-user-method\": args are the routine's JVM name, its Nex name, the
+   target, then the call's own arguments). When the target implements f's
+   dispatch interface, the call is a JVM interface call, which the JIT can
+   inline; otherwise (nil, an interpreter object, a Java object) it is
+   runtime/call-user-method, as before. The target and the arguments are
+   evaluated once, before the test. Returns the result's JVM type."
+  [^MethodVisitor mv expr state-slot]
+  (if (and (:typed-descriptor expr) *scratch-slot*)
+    (emit-typed-user-method-call! mv expr state-slot)
+    (emit-boxed-user-method-call! mv expr state-slot)))
+
+(defn- emit-boxed-user-method-call!
+  [^MethodVisitor mv expr state-slot]
+  (let [[lowered-ir name-ir target-ir & arg-irs] (:args expr)
+        method-name (:value name-ir)
+        arity (count arg-irs)
+        iface (dispatch-interface-name method-name arity)
+        slow (Label.)
+        done (Label.)]
+    (note-dispatch-key! ["F" method-name arity])
+    (emit-boxed-expr! mv target-ir state-slot)          ; target
+    (emit-boxed-arg-array! mv (vec arg-irs) state-slot)  ; target args
+    (.visitInsn mv Opcodes/DUP2)                         ; target args target args
+    (.visitInsn mv Opcodes/POP)                          ; target args target
+    (.visitTypeInsn mv Opcodes/INSTANCEOF iface)         ; target args bool
+    (.visitJumpInsn mv Opcodes/IFEQ slow)
+    ;; target args -> iface state args
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitTypeInsn mv Opcodes/CHECKCAST iface)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE iface
+                      (str "__method_" method-name "$arity" arity)
+                      (repl-fn-method-descriptor) true)
+    (.visitJumpInsn mv Opcodes/GOTO done)
+    (.visitLabel mv slow)
+    ;; target args -> var target args, then state, site, names
+    (emit-runtime-var! mv "call-user-method-fallback")
+    (.visitInsn mv Opcodes/DUP_X2)
+    (.visitInsn mv Opcodes/POP)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (emit-call-site-cache! mv)
+    (emit-boxed-expr! mv lowered-ir state-slot)
+    (emit-boxed-expr! mv name-ir state-slot)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 6) false)
+    (.visitLabel mv done)
+    (if (= :void (:jvm-type expr))
+      (do (.visitInsn mv Opcodes/POP) :void)
+      (do (emit-unbox-or-cast! mv (:jvm-type expr))
+          (:jvm-type expr)))))
+
+(defn- emit-typed-path-call!
+  "emit-path-call! when the routine has a typed method (:typed-descriptor)
+   and scratch locals are at hand. The carrier and each argument, converted
+   to the typed parameter's type, are evaluated once into scratch locals, and
+   the object that runs the routine is found as emit-path-call! finds it.
+   Then, for each method the routine may run as, in emit-path-call!'s order
+   (the unchecked twin before the routine itself), its typed interface (S or
+   T) is tried before its boxed one (U or F), so the arguments and result
+   stay unboxed whenever the object has the typed method. Anything else is
+   runtime/dispatch-path-call, as before."
+  [^MethodVisitor mv expr state-slot]
+  (let [[carrier-ir unchecked-ir checked-ir & arg-irs] (:args expr)
+        unchecked (:value unchecked-ir)
+        checked (:value checked-ir)
+        typed-desc (:typed-descriptor expr)
+        code (typed-dispatch-code typed-desc)
+        param-types (map descriptor-jvm-type (rest (Type/getArgumentTypes ^String typed-desc)))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String typed-desc))
+        void? (= :void (:jvm-type expr))
+        object-type (ir/object-jvm-type "java/lang/Object")
+        try-keys (distinct (keep routine-dispatch-key [unchecked checked]))
+        resolve (Label.)
+        have-target (Label.)
+        end (Label.)
+        carrier-slot (alloc-scratch! object-type)
+        target-slot (alloc-scratch! object-type)
+        arg-slots (mapv alloc-scratch! param-types)
+        load-args! (fn []
+                     (doseq [[t slot] (map vector param-types arg-slots)]
+                       (.visitVarInsn mv (local-load-op t) slot)))
+        load-arg-array! (fn []
+                          (.visitLdcInsn mv (int (count arg-slots)))
+                          (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+                          (doseq [[i t slot] (map vector (range) param-types arg-slots)]
+                            (.visitInsn mv Opcodes/DUP)
+                            (.visitLdcInsn mv (int i))
+                            (.visitVarInsn mv (local-load-op t) slot)
+                            (emit-value-coerce! mv t object-type)
+                            (.visitInsn mv Opcodes/AASTORE)))
+        finish! (fn [from]                                 ; result of type FROM -> the call's value
+                  (if void?
+                    (.visitInsn mv (if (#{:long :double} from) Opcodes/POP2 Opcodes/POP))
+                    (emit-value-coerce! mv from (:jvm-type expr)))
+                  (.visitJumpInsn mv Opcodes/GOTO end))]
+    (emit-boxed-expr! mv carrier-ir state-slot)
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Object")
+    (.visitVarInsn mv Opcodes/ASTORE carrier-slot)
+    (doseq [[arg t slot] (map vector arg-irs param-types arg-slots)]
+      (emit-value-coerce! mv (emit-expr! mv arg state-slot) t)
+      (.visitVarInsn mv (local-store-op t) slot))
+    ;; The object that runs it: the carrier itself when it is inside no
+    ;; other object, else the runtime's answer.
+    (.visitVarInsn mv Opcodes/ALOAD carrier-slot)
+    (.visitInsn mv Opcodes/DUP)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF carrier-interface)
+    (.visitJumpInsn mv Opcodes/IFEQ resolve)
+    (.visitInsn mv Opcodes/DUP)
+    (.visitTypeInsn mv Opcodes/CHECKCAST carrier-interface)
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE carrier-interface "__container"
+                      "()Ljava/lang/Object;" true)
+    (.visitJumpInsn mv Opcodes/IFNULL have-target)
+    (.visitLabel mv resolve)                               ; carrier
+    (emit-runtime-var! mv "path-call-target")
+    (.visitInsn mv Opcodes/SWAP)
+    (emit-call-site-cache! mv)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitLdcInsn mv ^String unchecked)
+    (.visitLdcInsn mv ^String checked)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 4) false)
+    (.visitLabel mv have-target)                           ; target
+    (.visitVarInsn mv Opcodes/ASTORE target-slot)
+    (doseq [[kind name arity] try-keys
+            :let [typed-iface (dispatch-interface-name (typed-kind kind) name arity code)
+                  boxed-iface (dispatch-interface-name kind name arity)
+                  routine (dispatch-routine-name kind name arity)
+                  no-typed (Label.)
+                  no-boxed (Label.)]]
+      (note-dispatch-key! [(typed-kind kind) name arity code])
+      (note-dispatch-key! [kind name arity])
+      (.visitVarInsn mv Opcodes/ALOAD target-slot)
+      (.visitTypeInsn mv Opcodes/INSTANCEOF typed-iface)
+      (.visitJumpInsn mv Opcodes/IFEQ no-typed)
+      (.visitVarInsn mv Opcodes/ALOAD target-slot)
+      (.visitTypeInsn mv Opcodes/CHECKCAST typed-iface)
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (load-args!)
+      (.visitMethodInsn mv Opcodes/INVOKEINTERFACE typed-iface (str routine "$t") typed-desc true)
+      (finish! return-type)
+      (.visitLabel mv no-typed)
+      (.visitVarInsn mv Opcodes/ALOAD target-slot)
+      (.visitTypeInsn mv Opcodes/INSTANCEOF boxed-iface)
+      (.visitJumpInsn mv Opcodes/IFEQ no-boxed)
+      (.visitVarInsn mv Opcodes/ALOAD target-slot)
+      (.visitTypeInsn mv Opcodes/CHECKCAST boxed-iface)
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (load-arg-array!)
+      (.visitMethodInsn mv Opcodes/INVOKEINTERFACE boxed-iface routine (repl-fn-method-descriptor) true)
+      (finish! object-type)
+      (.visitLabel mv no-boxed))
+    ;; The runtime, as before.
+    (emit-runtime-var! mv "dispatch-path-call-fallback")
+    (.visitVarInsn mv Opcodes/ALOAD carrier-slot)
+    (load-arg-array!)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitLdcInsn mv ^String unchecked)
+    (.visitLdcInsn mv ^String checked)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 5) false)
+    (finish! object-type)
+    (.visitLabel mv end)
+    (if void? :void (:jvm-type expr))))
+
+(defn- emit-path-call!
+  "A call on the current object made by code running on its carrier (IR
+   helper \"dispatch-path-call\": args are the carrier, the routine's
+   unchecked and checked JVM names, then the call's own arguments): `this.f`,
+   or an unqualified call an heir may override. The runtime picks the object
+   that runs it (runtime/path-call-target); the call is then a JVM interface
+   call on that object, through the unchecked twin's interface when the
+   unchecked name is one and the object has it, else the routine's. Anything
+   else is runtime/dispatch-path-call, as before. The carrier and the
+   arguments are evaluated once. Returns the result's JVM type."
+  [^MethodVisitor mv expr state-slot]
+  (let [[carrier-ir unchecked-ir checked-ir & arg-irs] (:args expr)
+        unchecked (:value unchecked-ir)
+        checked (:value checked-ir)
+        try-keys (distinct (keep routine-dispatch-key [unchecked checked]))
+        resolve (Label.)
+        dispatch (Label.)
+        slow (Label.)
+        done (Label.)]
+    (emit-boxed-expr! mv carrier-ir state-slot)            ; carrier
+    ;; Typed Object from here on: the carrier and the runtime's answer meet at
+    ;; `dispatch`, and a frame merging the carrier's own class with Object
+    ;; makes ASM look that class up, which may not be loaded yet.
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Object")
+    (emit-boxed-arg-array! mv (vec arg-irs) state-slot)    ; carrier args
+    (.visitInsn mv Opcodes/DUP2)
+    (.visitInsn mv Opcodes/POP)                            ; carrier args carrier
+    ;; A carrier inside no other object (any object not part of an heir's)
+    ;; runs the routine itself: no need to ask the runtime.
+    (.visitInsn mv Opcodes/DUP)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF carrier-interface)
+    (.visitJumpInsn mv Opcodes/IFEQ resolve)
+    (.visitInsn mv Opcodes/DUP)
+    (.visitTypeInsn mv Opcodes/CHECKCAST carrier-interface)
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE carrier-interface "__container"
+                      "()Ljava/lang/Object;" true)
+    (.visitJumpInsn mv Opcodes/IFNULL dispatch)            ; carrier args carrier(=target)
+    (.visitLabel mv resolve)                               ; carrier args carrier
+    (emit-runtime-var! mv "path-call-target")
+    (.visitInsn mv Opcodes/SWAP)                           ; carrier args var carrier
+    (emit-call-site-cache! mv)
+    (.visitInsn mv Opcodes/SWAP)                           ; carrier args var site carrier
+    (.visitLdcInsn mv ^String unchecked)
+    (.visitLdcInsn mv ^String checked)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 4) false) ; carrier args target
+    (.visitLabel mv dispatch)
+    (doseq [[kind name arity :as k] try-keys
+            :let [iface (dispatch-interface-name kind name arity)
+                  next-try (Label.)]]
+      (note-dispatch-key! k)
+      (.visitInsn mv Opcodes/DUP)
+      (.visitTypeInsn mv Opcodes/INSTANCEOF iface)
+      (.visitJumpInsn mv Opcodes/IFEQ next-try)
+      ;; carrier args target -> iface state args
+      (.visitTypeInsn mv Opcodes/CHECKCAST iface)
+      (.visitInsn mv Opcodes/DUP_X2)                       ; iface carrier args iface
+      (.visitInsn mv Opcodes/POP)                          ; iface carrier args
+      (.visitInsn mv Opcodes/SWAP)                         ; iface args carrier
+      (.visitInsn mv Opcodes/POP)                          ; iface args
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (.visitInsn mv Opcodes/SWAP)                         ; iface state args
+      (.visitMethodInsn mv Opcodes/INVOKEINTERFACE iface
+                        (dispatch-routine-name kind name arity)
+                        (repl-fn-method-descriptor) true)
+      (.visitJumpInsn mv Opcodes/GOTO done)
+      (.visitLabel mv next-try))
+    (.visitLabel mv slow)
+    (.visitInsn mv Opcodes/POP)                            ; carrier args
+    (emit-runtime-var! mv "dispatch-path-call-fallback")
+    (.visitInsn mv Opcodes/DUP_X2)
+    (.visitInsn mv Opcodes/POP)                            ; var carrier args
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitLdcInsn mv ^String unchecked)
+    (.visitLdcInsn mv ^String checked)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 5) false)
+    (.visitLabel mv done)
+    (if (= :void (:jvm-type expr))
+      (do (.visitInsn mv Opcodes/POP) :void)
+      (do (emit-unbox-or-cast! mv (:jvm-type expr))
+          (:jvm-type expr)))))
+
+(defn- static-math-call
+  "Emit a call of java.lang.Math's static METHOD with DESCRIPTOR."
+  [method descriptor]
+  (fn [^MethodVisitor mv & _]
+    (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" method descriptor false)))
+
+(declare direct-derived-builtin-helper-name)
+
+(defn- real->integer-intrinsic
+  "Emitter for a Real -> Integer method (round, floor, ceiling, truncate):
+   ROUND! rounds the double on the stack. When CHECK-ROUNDED?, the range
+   check runs on the rounded value, else on the unrounded one, as the
+   builtin's does. In range the result is the rounded value as a long
+   (CONVERT! turns the double the check ran on into it); otherwise the
+   runtime's own method runs, so a value with no Integer raises exactly the
+   error it always has."
+  [round! check-rounded? convert!]
+  (fn [^MethodVisitor mv helper]
+    (let [bad (Label.)
+          done (Label.)]
+      (.visitInsn mv Opcodes/DUP2)                         ; d d
+      (when check-rounded? (round! mv))                    ; d r
+      (.visitInsn mv Opcodes/DUP2)
+      (.visitLdcInsn mv (double -9.223372036854775808E18))
+      (.visitInsn mv Opcodes/DCMPL)                        ; NaN -> -1: bad
+      (.visitJumpInsn mv Opcodes/IFLT bad)
+      (.visitInsn mv Opcodes/DUP2)
+      (.visitLdcInsn mv (double 9.223372036854775808E18))
+      (.visitInsn mv Opcodes/DCMPG)                        ; NaN -> 1: bad
+      (.visitJumpInsn mv Opcodes/IFGE bad)
+      (convert! mv)                                        ; d J
+      (.visitInsn mv Opcodes/DUP2_X2)
+      (.visitInsn mv Opcodes/POP2)
+      (.visitInsn mv Opcodes/POP2)                         ; J
+      (.visitJumpInsn mv Opcodes/GOTO done)
+      (.visitLabel mv bad)                                 ; d r
+      (.visitInsn mv Opcodes/POP2)                         ; d
+      (emit-box! mv :double)
+      (emit-runtime-var! mv (direct-derived-builtin-helper-name helper))
+      (.visitInsn mv Opcodes/SWAP)
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                        (runtime-invoke-descriptor 1) false)
+      (emit-unbox-or-cast! mv :long)
+      (.visitLabel mv done))))
+
+(defn- math-d->d!
+  [method]
+  (fn [^MethodVisitor mv]
+    (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" method "(D)D" false)))
+
+(defn- truncate!
+  "Round the double on the stack toward zero, as Real's truncate does:
+   ceiling below zero, floor otherwise (so NaN and -0.0 go to floor)."
+  [^MethodVisitor mv]
+  (let [non-neg (Label.)
+        done (Label.)]
+    (.visitInsn mv Opcodes/DUP2)
+    (.visitInsn mv Opcodes/DCONST_0)
+    (.visitInsn mv Opcodes/DCMPG)
+    (.visitJumpInsn mv Opcodes/IFGE non-neg)
+    ((math-d->d! "ceil") mv)
+    (.visitJumpInsn mv Opcodes/GOTO done)
+    (.visitLabel mv non-neg)
+    ((math-d->d! "floor") mv)
+    (.visitLabel mv done)))
+
+(defn- d2l! [^MethodVisitor mv] (.visitInsn mv Opcodes/D2L))
+
+(def ^:private numeric-intrinsics
+  "Built-in Integer and Real methods emitted as JVM instructions, by IR
+   helper name: [argument JVM types (receiver first), result JVM type, an
+   emitter of the operation on those arguments]. Only methods whose builtin
+   (nex.types.builtins) computes exactly this: Real's math methods are
+   java.lang.Math's own; Real's `abs` negates only below zero, as nex-abs
+   does, so -0.0 stays -0.0. Real's min/max (Clojure's, which treat NaN
+   differently) and Integer's abs (whose overflow error is Clojure's) are
+   left to the runtime."
+  (let [d->d (fn [m] [[:double] :double (static-math-call m "(D)D")])
+        dd->d (fn [m] [[:double :double] :double (static-math-call m "(DD)D")])]
+    (merge
+     (into {} (map (fn [[nex m]] [(str "builtin-method:Real:" nex) (d->d m)]))
+           {"sqrt" "sqrt" "cbrt" "cbrt" "exp" "exp" "log" "log" "log10" "log10"
+            "sin" "sin" "cos" "cos" "tan" "tan" "asin" "asin" "acos" "acos" "atan" "atan"
+            "to_radians" "toRadians" "to_degrees" "toDegrees" "sign" "signum"})
+     (into {} (map (fn [[nex m]] [(str "builtin-method:Real:" nex) (dd->d m)]))
+           {"power" "pow" "atan2" "atan2" "hypot" "hypot"})
+     {"builtin-method:Real:round"
+      [[:double] :long
+       (real->integer-intrinsic nil false
+                                (fn [^MethodVisitor mv]
+                                  (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" "round" "(D)J" false)))]
+      "builtin-method:Real:floor" [[:double] :long (real->integer-intrinsic (math-d->d! "floor") true d2l!)]
+      "builtin-method:Real:ceiling" [[:double] :long (real->integer-intrinsic (math-d->d! "ceil") true d2l!)]
+      "builtin-method:Real:truncate" [[:double] :long (real->integer-intrinsic truncate! true d2l!)]
+      "builtin-method:Real:to_string"
+      [[:double] (ir/object-jvm-type "java/lang/String")
+       (fn [^MethodVisitor mv & _]
+         (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Double" "toString" "(D)Ljava/lang/String;" false))]
+      "builtin-method:Integer:to_string"
+      [[:long] (ir/object-jvm-type "java/lang/String")
+       (fn [^MethodVisitor mv & _]
+         (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Long" "toString" "(J)Ljava/lang/String;" false))]
+      "builtin-method:Real:abs"
+      [[:double] :double
+       (fn [^MethodVisitor mv & _]
+         (let [keep (Label.)]
+           (.visitInsn mv Opcodes/DUP2)
+           (.visitInsn mv Opcodes/DCONST_0)
+           (.visitInsn mv Opcodes/DCMPG)
+           (.visitJumpInsn mv Opcodes/IFGE keep)
+           (.visitInsn mv Opcodes/DNEG)
+           (.visitLabel mv keep)))]
+      "builtin-method:Real:is_nan"
+      [[:double] :boolean
+       (fn [^MethodVisitor mv & _]
+         (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Double" "isNaN" "(D)Z" false))]
+      "builtin-method:Real:is_infinite"
+      [[:double] :boolean
+       (fn [^MethodVisitor mv & _]
+         (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Double" "isInfinite" "(D)Z" false))]
+      "builtin-method:Integer:to_real" [[:long] :double (fn [^MethodVisitor mv & _] (.visitInsn mv Opcodes/L2D))]
+      "builtin-method:Integer:to_integer" [[:long] :long (fn [& _])]
+      "builtin-method:Integer:min" [[:long :long] :long (static-math-call "min" "(JJ)J")]
+      "builtin-method:Integer:max" [[:long :long] :long (static-math-call "max" "(JJ)J")]})))
+
+(defn- emit-numeric-intrinsic!
+  "EXPR, a call of a built-in Integer or Real method (numeric-intrinsics),
+   as JVM instructions, when its receiver is an unboxed number, so never
+   nil. Returns the result's JVM type, or nil when it does not apply."
+  [^MethodVisitor mv expr state-slot]
+  (when-let [[arg-types result emit-op] (get numeric-intrinsics (:helper expr))]
+    (let [args (:args expr)]
+      (when (and (= (count args) (count arg-types))
+                 (#{:long :double} (:jvm-type (first args))))
+        (doseq [[arg t] (map vector args arg-types)]
+          (emit-value-coerce! mv (emit-expr! mv arg state-slot) t))
+        (emit-op mv (:helper expr))
+        (if (= :void (:jvm-type expr))
+          (do (.visitInsn mv (if (#{:long :double} result) Opcodes/POP2 Opcodes/POP)) :void)
+          (do (emit-value-coerce! mv result (:jvm-type expr))
+              (:jvm-type expr)))))))
+
+(declare emit-direct-runtime-helper-call*)
+
 (defn- emit-direct-runtime-helper-call!
+  [^MethodVisitor mv expr state-slot]
+  (or (emit-numeric-intrinsic! mv expr state-slot)
+      (emit-direct-runtime-helper-call* mv expr state-slot)))
+
+(defn- emit-direct-runtime-helper-call*
   [^MethodVisitor mv expr state-slot]
   (let [helper (:helper expr)
         args (:args expr)
@@ -1114,6 +1826,11 @@
                         (do (.visitInsn mv Opcodes/POP) :void)
                         (do (emit-unbox-or-cast! mv jvm-type)
                             jvm-type)))]
+    (case helper
+      "call-user-method" (emit-user-method-call! mv expr state-slot)
+      "dispatch-path-call" (if (and (:typed-descriptor expr) *scratch-slot*)
+                             (emit-typed-path-call! mv expr state-slot)
+                             (emit-path-call! mv expr state-slot))
     (if-let [[runtime-fn spec] (get direct-runtime-helper-specs helper)]
       (do
         (emit-runtime-call! mv runtime-fn (runtime-helper-emitters mv args state-slot spec))
@@ -1124,7 +1841,7 @@
                               (mapv (fn [arg]
                                       (fn [] (emit-boxed-expr! mv arg state-slot)))
                                     args))
-          (emit-return (:jvm-type expr)))))))
+          (emit-return (:jvm-type expr))))))))
 
 (defn- emit-boolean-short-circuit!
   [^MethodVisitor mv operator left-expr right-expr state-slot]
@@ -2251,7 +2968,46 @@
       (emit-unbox-or-cast! mv (:jvm-type expr))
       (:jvm-type expr))))
 
+(defn- descriptor-jvm-type
+  "The IR JVM type of an ASM Type in a typed method descriptor."
+  [^Type t]
+  (condp = (.getSort t)
+    Type/LONG :long
+    Type/DOUBLE :double
+    Type/BOOLEAN :boolean
+    Type/CHAR :char
+    Type/INT :int
+    (ir/object-jvm-type (.getInternalName t))))
+
+(declare emit-expr-call-virtual-boxed!)
+
+(defn- emit-typed-call-virtual!
+  "A direct call of a routine's typed method (:typed-descriptor): each
+   argument passed as the descriptor's type, unboxed where it is a
+   primitive, and the result converted to the type the call expects."
+  [^MethodVisitor mv expr state-slot]
+  (let [descriptor (:typed-descriptor expr)
+        param-types (map descriptor-jvm-type (Type/getArgumentTypes ^String descriptor))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String descriptor))]
+    (emit-expr! mv (:target expr) state-slot)
+    (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (doseq [[arg to] (map vector (:args expr) (rest param-types))]
+      (emit-value-coerce! mv (emit-expr! mv arg state-slot) to))
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL (:owner expr) (:method expr) descriptor false)
+    (if (= :void (:jvm-type expr))
+      (do (emit-value-coerce! mv return-type (ir/object-jvm-type "java/lang/Object"))
+          (ir/object-jvm-type "java/lang/Object"))
+      (do (emit-value-coerce! mv return-type (:jvm-type expr))
+          (:jvm-type expr)))))
+
 (defn- emit-expr-call-virtual!
+  [^MethodVisitor mv expr state-slot]
+  (if (:typed-descriptor expr)
+    (emit-typed-call-virtual! mv expr state-slot)
+    (emit-expr-call-virtual-boxed! mv expr state-slot)))
+
+(defn- emit-expr-call-virtual-boxed!
   [^MethodVisitor mv expr state-slot]
   (emit-expr! mv (:target expr) state-slot)
   (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
@@ -2623,12 +3379,29 @@
                   Opcodes/POP2
                   Opcodes/POP))))
 
+(def ^:dynamic *typed-return*
+  "The JVM type a `return` in the method being emitted returns: bound while
+   a routine's typed method (see emit-typed-routine-methods!) is emitted;
+   otherwise nil, and a return is a boxed Object."
+  nil)
+
+(defn- return-op
+  [jvm-type]
+  (cond
+    (#{:int :boolean :char} jvm-type) Opcodes/IRETURN
+    (= :long jvm-type) Opcodes/LRETURN
+    (= :double jvm-type) Opcodes/DRETURN
+    :else Opcodes/ARETURN))
+
 (defn- emit-return!
   [^MethodVisitor mv expr state-slot]
   (let [jvm-type (emit-expr! mv expr state-slot)]
-    (when (contains? ir/primitive-jvm-types jvm-type)
-      (emit-box! mv jvm-type))
-    (.visitInsn mv Opcodes/ARETURN)))
+    (if-let [typed *typed-return*]
+      (do (emit-value-coerce! mv jvm-type typed)
+          (.visitInsn mv (return-op typed)))
+      (do (when (contains? ir/primitive-jvm-types jvm-type)
+            (emit-box! mv jvm-type))
+          (.visitInsn mv Opcodes/ARETURN)))))
 
 (defn- emit-raise!
   [^MethodVisitor mv expr builtin state-slot]
@@ -2915,7 +3688,9 @@
     (let [start-label (Label.)
           end-label (Label.)
           local-ranges (atom {})]
-      (binding [*local-debug-ranges* local-ranges]
+      (binding [*local-debug-ranges* local-ranges
+                ;; Top-level code: state in slot 0, its own locals above.
+                *scratch-slot* (atom (max 2 (max-ir-slot [body locals])))]
         (.visitLabel mv start-label)
         (doseq [fn-node functions
                 key-name (distinct [(:name fn-node) (:qualified-name fn-node)])
@@ -2969,7 +3744,10 @@
     (let [start-label (Label.)
           end-label (Label.)
           local-ranges (atom {})]
-      (binding [*local-debug-ranges* local-ranges]
+      (binding [*local-debug-ranges* local-ranges
+                ;; A top-level function: state in slot 0, its arguments in
+                ;; slot 1, its own locals above.
+                *scratch-slot* (atom (max 3 (max-ir-slot fn-node)))]
         (.visitLabel mv start-label)
         (emit-repl-fn-arity-check! mv fn-node 1)
         (emit-function-arg-prologue! mv fn-node 1)
@@ -2990,14 +3768,106 @@
         (.visitMaxs mv 0 0)
         (.visitEnd mv)))))
 
+(declare emit-instance-fn-method-boxed!)
+
+(defn- emit-typed-routine-methods!
+  "A class routine FN-NODE with a :typed-descriptor (nex.lower/
+   typed-method-descriptor), as two methods. `NAME$t`, of that descriptor,
+   holds the body: its arguments arrive unboxed where they are primitives
+   and are moved into the body's own locals, and it returns its result the
+   same way. NAME, of the uniform (state, Object[]) -> Object descriptor that
+   interfaces, stubs and the runtime call, unpacks its arguments, calls
+   `NAME$t` and boxes the result. A direct call (nex.lower/
+   typed-call-virtual-node) calls `NAME$t` and allocates neither."
+  [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
+  (let [typed-desc (:typed-descriptor fn-node)
+        owner (:owner fn-node)
+        params (:params fn-node)
+        param-types (map descriptor-jvm-type (rest (Type/getArgumentTypes ^String typed-desc)))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String typed-desc))
+        width (fn [t] (if (#{:long :double} t) 2 1))
+        ;; Incoming argument slots: this 0, state 1, then the arguments.
+        in-slots (reductions + 2 (map width param-types))
+        ;; Above every local the body uses, for the two-phase move below.
+        temp-base (+ 4 (reduce max 3 (map (fn [{:keys [slot jvm-type]}] (+ slot (width jvm-type)))
+                                          (concat params (:locals fn-node)))))
+        temp-slots (reductions + temp-base (map width param-types))]
+    ;; NAME$t: the body.
+    (let [^MethodVisitor mv (.visitMethod cw flags (str name "$t") typed-desc nil nil)
+          start-label (Label.)
+          end-label (Label.)
+          local-ranges (atom {})]
+      (.visitCode mv)
+      (binding [*local-debug-ranges* local-ranges
+                *typed-return* return-type
+                *scratch-slot* (atom (max (last temp-slots) (max-ir-slot fn-node)))]
+        (.visitLabel mv start-label)
+        ;; The incoming slots overlap the body's: move each argument out to a
+        ;; temporary first, then into its local, converting it to the
+        ;; local's type.
+        (doseq [[t in tmp] (map vector param-types in-slots temp-slots)]
+          (.visitVarInsn mv (local-load-op t) in)
+          (.visitVarInsn mv (local-store-op t) tmp))
+        (doseq [[{:keys [slot jvm-type]} t tmp] (map vector params param-types temp-slots)]
+          (.visitVarInsn mv (local-load-op t) tmp)
+          (emit-value-coerce! mv t jvm-type)
+          (mark-local-debug-before! mv slot)
+          (.visitVarInsn mv (local-store-op jvm-type) slot)
+          (mark-local-debug-after! mv slot))
+        (doseq [stmt (:body fn-node)]
+          (emit-stmt! mv stmt 1))
+        ;; A routine with a result ends in a return; one without returns nil.
+        (if (contains? ir/primitive-jvm-types return-type)
+          (do (.visitInsn mv (case return-type
+                               :long Opcodes/LCONST_0
+                               :double Opcodes/DCONST_0
+                               Opcodes/ICONST_0))
+              (.visitInsn mv (return-op return-type)))
+          (do (.visitInsn mv Opcodes/ACONST_NULL)
+              (.visitInsn mv Opcodes/ARETURN)))
+        (.visitLabel mv end-label)
+        (emit-local-variable-table! mv start-label end-label
+                                    (concat [{:name "this" :slot 0 :jvm-type (ir/object-jvm-type owner)}
+                                             {:name "state" :slot 1
+                                              :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
+                                            (:locals fn-node))
+                                    @local-ranges))
+      (.visitMaxs mv 0 0)
+      (.visitEnd mv))
+    ;; NAME: unpack, call NAME$t, box.
+    (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+      (.visitCode mv)
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitVarInsn mv Opcodes/ALOAD 1)
+      (doseq [[i t] (map-indexed vector param-types)]
+        (.visitVarInsn mv Opcodes/ALOAD 2)
+        (.visitLdcInsn mv (int i))
+        (.visitInsn mv Opcodes/AALOAD)
+        (emit-unbox-or-cast! mv t))
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL owner (str name "$t") typed-desc false)
+      (when (contains? ir/primitive-jvm-types return-type)
+        (emit-box! mv return-type))
+      (.visitInsn mv Opcodes/ARETURN)
+      (.visitMaxs mv 0 0)
+      (.visitEnd mv))))
+
 (defn- emit-instance-fn-method!
+  [^ClassWriter cw {:keys [name descriptor flags fn-node kind] :as method-spec}]
+  (if (and (= kind :instance-fn)
+           (:typed-descriptor fn-node)
+           (routine-dispatch-key name))
+    (emit-typed-routine-methods! cw method-spec)
+    (emit-instance-fn-method-boxed! cw method-spec)))
+
+(defn- emit-instance-fn-method-boxed!
   [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
     (let [start-label (Label.)
           end-label (Label.)
           local-ranges (atom {})]
-      (binding [*local-debug-ranges* local-ranges]
+      (binding [*local-debug-ranges* local-ranges
+                *scratch-slot* (atom (max 3 (max-ir-slot fn-node)))]
         (.visitLabel mv start-label)
         (emit-function-arg-prologue! mv fn-node 2)
         (doseq [stmt (:body fn-node)]
@@ -3279,9 +4149,21 @@
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
 
+(defn- emit-field-getter!
+  "A no-argument method returning the Object-typed field (:field) of `this`."
+  [^ClassWriter cw {:keys [name descriptor owner field]}]
+  (let [^MethodVisitor mv (.visitMethod cw Opcodes/ACC_PUBLIC name descriptor nil nil)]
+    (.visitCode mv)
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (.visitFieldInsn mv Opcodes/GETFIELD owner field "Ljava/lang/Object;")
+    (.visitInsn mv Opcodes/ARETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
 (defn emit-method!
   [^ClassWriter cw method-spec]
   (case (:kind method-spec)
+    :field-getter (emit-field-getter! cw method-spec)
     :object-equals (emit-object-equals! cw method-spec)
     :object-hash-code (emit-object-hash-code! cw method-spec)
     :default-constructor (emit-default-constructor! cw method-spec)
