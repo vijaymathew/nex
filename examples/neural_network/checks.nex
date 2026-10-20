@@ -1,0 +1,176 @@
+-- checks.nex: executable checks for every piece of the project.
+-- Run: nex checks.nex
+--
+-- The most important one is the gradient check. It compares the gradients
+-- that backward computes with the chain rule against gradients measured
+-- directly, by nudging one parameter a tiny bit and watching the loss.
+-- If backpropagation has a bug, the two disagree.
+
+intern Vector_Math
+intern Vocabulary
+intern Rng
+intern Next_Letter_Model
+intern Training_Data
+intern Helpers
+intern io/Path
+
+class Checker
+  create
+    make() do
+      con := create Console
+    end
+  feature
+    con: Console
+    passed: Integer
+    failed: Integer
+
+    check(label: String, ok: Boolean) do
+      if ok then
+        passed := passed + 1
+        con.print_line("PASS " + label)
+      else
+        failed := failed + 1
+        con.print_line("FAIL " + label)
+      end
+    end
+
+    close_to(label: String, expected, actual, tolerance: Real) do
+      check(label + " (expected " + expected.to_string
+          + ", got " + actual.to_string + ")",
+        (expected - actual).abs <= tolerance)
+    end
+
+    summary() do
+      con.print_line("---")
+      con.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
+      if failed > 0 then
+        exit(1)
+      end
+    end
+end
+
+-- The loss of a model on one example.
+function loss_on(model: Next_Letter_Model, ex: Example): Real do
+  result := cross_entropy(model.forward(ex.ids).probs, ex.target)
+end
+
+-- Compare backward's gradient for parameter row[col] with a measured one:
+--     dL/dp  is about  (L(p + eps) - L(p - eps)) / (2 eps)
+function gradient_matches(model: Next_Letter_Model, ex: Example, row: Array[Real],
+                          col: Integer, analytic: Real): Boolean do
+  let eps: Real := 1.0e-5
+  let saved: Real := row.get(col)
+  row.set(col, saved + eps)
+  let up: Real := loss_on(model, ex)
+  row.set(col, saved - eps)
+  let down: Real := loss_on(model, ex)
+  row.set(col, saved)
+  let numeric: Real := (up - down) / (2.0 * eps)
+  result := (numeric - analytic).abs <= 1.0e-6 + 1.0e-4 * numeric.abs
+end
+
+let c: Checker := create Checker.make()
+
+-- Vector math
+c.close_to("dot", 32.0, dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]), 0.0)
+let a: Array[Real] := affine([[1.0, 0.0], [1.0, 1.0]], [2.0, 3.0], [0.5, -1.0])
+c.check("affine", a.get(0) = 2.5 and a.get(1) = 4.0)
+let s: Array[Real] := softmax([1.0, 2.0, 3.0])
+c.close_to("softmax sums to 1", 1.0, sum(s), 1.0e-12)
+c.close_to("softmax[2]", 0.6652409557748219, s.get(2), 1.0e-12)
+c.close_to("softmax of huge scores", 0.5, softmax([1000.0, 1000.0]).get(0), 1.0e-12)
+c.close_to("tanh(0.5)", 0.46211715726000974, tanh(0.5), 1.0e-12)
+c.close_to("tanh(100)", 1.0, tanh(100.0), 0.0)
+c.close_to("tanh(-100)", -1.0, tanh(-100.0), 0.0)
+c.check("argmax", argmax([0.1, 0.7, 0.2]) = 1)
+c.check("fixed", fixed(2.5, 3) = "2.500" and fixed(-0.0499, 2) = "-0.05"
+  and fixed(3.14159, 0) = "3")
+c.check("percent", percent(0.257) = "26%")
+
+-- Random numbers
+let rng: Rng := create Rng.make(42)
+let mean: Real := 0.0
+let square: Real := 0.0
+repeat 20000 do
+  let z: Real := rng.gauss()
+  mean := mean + z / 20000.0
+  square := square + z * z / 20000.0
+end
+c.close_to("gauss mean", 0.0, mean, 0.03)
+c.close_to("gauss variance", 1.0, square - mean * mean, 0.05)
+let r1: Rng := create Rng.make(7)
+let r2: Rng := create Rng.make(7)
+c.check("same seed, same numbers", r1.uniform() = r2.uniform())
+
+-- Vocabulary
+c.check("symbol_id", symbol_id(".") = 0 and symbol_id("a") = 1 and symbol_id("z") = 26)
+c.check("symbol_at", symbol_at(16) = "p")
+c.check("is_lowercase_word", is_lowercase_word("apple") and not is_lowercase_word("Apple")
+  and not is_lowercase_word("it's"))
+
+-- Training examples
+let examples: Array[Example] := make_examples(["apple"], 4)
+c.check("apple gives 6 examples", examples.length = 6)
+c.check("first example", examples.get(0).ids = [0, 0, 0, 0]
+  and examples.get(0).target = 1)
+c.check("last example ends the word", examples.get(5).ids = [16, 16, 12, 5]
+  and examples.get(5).target = 0)
+
+-- The model
+let model: Next_Letter_Model := create Next_Letter_Model.make(4, 8, 64, 42)
+c.check("4083 parameters", model.num_parameters = 4083)
+c.check("context_ids", model.context_ids("app") = [0, 1, 16, 16])
+c.check("context_ids keeps the last letters",
+  model.context_ids("banana") = [14, 1, 14, 1])
+c.close_to("untrained loss is near ln 27", 27.0.log, evaluate(model, examples).loss, 0.1)
+
+-- The gradient check, on one example, for a few parameters of every kind.
+let ex: Example := examples.get(3)            -- ".app" -> "l"
+let grads: Gradients := create Gradients.make(model)
+model.backward(model.forward(ex.ids), ex.target, grads)
+c.check("gradient of b2",
+  gradient_matches(model, ex, model.b2, 12, grads.b2.get(12))
+  and gradient_matches(model, ex, model.b2, 5, grads.b2.get(5)))
+c.check("gradient of W2",
+  gradient_matches(model, ex, model.w2.get(12), 3, grads.w2.get(12).get(3))
+  and gradient_matches(model, ex, model.w2.get(0), 40, grads.w2.get(0).get(40)))
+c.check("gradient of b1",
+  gradient_matches(model, ex, model.b1, 7, grads.b1.get(7)))
+c.check("gradient of W1",
+  gradient_matches(model, ex, model.w1.get(7), 30, grads.w1.get(7).get(30))
+  and gradient_matches(model, ex, model.w1.get(63), 0, grads.w1.get(63).get(0)))
+-- "p" (id 16) appears twice in ".app", so its embedding gets two gradients.
+c.check("gradient of C",
+  gradient_matches(model, ex, model.c.get(16), 2, grads.c.get(16).get(2))
+  and gradient_matches(model, ex, model.c.get(1), 5, grads.c.get(1).get(5)))
+
+-- Training lowers the loss: learn three words by heart.
+let tiny: Array[Example] := make_examples(["apple", "apply", "maple"], 4)
+let before: Real := evaluate(model, tiny).loss
+repeat 300 do
+  let g: Gradients := create Gradients.make(model)
+  across tiny as t do
+    model.backward(model.forward(t.ids), t.target, g)
+  end
+  model.step(g, 0.5, tiny.length)
+end
+let after: Real := evaluate(model, tiny).loss
+c.check("training lowers the loss (" + fixed(before, 3) + " -> " + fixed(after, 3) + ")",
+  after < before / 4.0)
+
+-- Saving and loading give back the same model.
+let file: String := user_path("checks_model.json")
+model.save(file)
+let loaded: Next_Letter_Model := create Next_Letter_Model.from_file(file)
+c.check("save and load", loaded.w1 = model.w1 and loaded.c = model.c
+  and loaded.b2 = model.b2)
+create Path.make(file).delete()
+
+-- Predictions come sorted, and say what was learned.
+let ranked: Array[Prediction] := model.predict("appl")
+c.check("predictions are sorted", ranked.get(0).probability >= ranked.get(1).probability
+  and ranked.get(1).probability >= ranked.get(26).probability)
+c.check("it learned: after \"appl\" comes e or y",
+  ranked.get(0).symbol = "e" or ranked.get(0).symbol = "y")
+
+c.summary()

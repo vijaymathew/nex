@@ -1,0 +1,78 @@
+-- helpers.nex: printing numbers neatly, and finding the user's files.
+
+-- `intern Helpers` finds this file by the name of this class.
+class Helpers
+end
+
+-- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
+-- is "2.500".
+function fixed(r: Real, places: Integer): String
+  require
+    non_negative: places >= 0
+  do
+    let scale: Integer := 10 ^ places
+    let scaled: Integer := (r.abs * scale.to_real).round
+    let whole: String := (scaled / scale).to_string
+    let frac: String := (scaled % scale).to_string
+    from
+    until
+      frac.length >= places
+    do
+      frac := "0" + frac
+    end
+    result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
+    if places > 0 then
+      result := result + "." + frac
+    end
+  end
+
+-- A probability as a whole percentage: percent(0.257) is "26%".
+function percent(p: Real): String do
+  result := (p * 100.0).round.to_string + "%"
+end
+
+-- s padded with spaces on the left to at least `width` characters.
+function pad_left(s: String, width: Integer): String do
+  result := s
+  from
+  until
+    result.length >= width
+  do
+    result := " " + result
+  end
+end
+
+-- s padded with spaces on the right to at least `width` characters.
+function pad_right(s: String, width: Integer): String do
+  result := s
+  from
+  until
+    result.length >= width
+  do
+    result := result + " "
+  end
+end
+
+-- A list of numbers as text, each with `places` decimals:
+-- vector_text([0.5, 0.25], 2) is "[0.50, 0.25]".
+function vector_text(v: Array[Real], places: Integer): String do
+  result := "["
+  across v as x do
+    if result /= "[" then
+      result := result + ", "
+    end
+    result := result + fixed(x, places)
+  end
+  result := result + "]"
+end
+
+-- The full path of a file the user named. The `nex` launcher runs
+-- programs from its own installation folder, so a relative name is
+-- resolved against the folder `nex` was started from, NEX_USER_DIR.
+function user_path(raw: String): String do
+  if raw.starts_with("/") then
+    result := raw
+  else
+    result := (create Process).getenv("NEX_USER_DIR") + "/" + raw
+  end
+end

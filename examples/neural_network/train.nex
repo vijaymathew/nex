@@ -1,0 +1,169 @@
+-- train.nex: train the next-letter model on a list of words.
+--
+--   nex train.nex                         -- uses /usr/share/dict/words
+--   nex train.nex --words mywords.txt     -- any file with one word per line
+--   nex train.nex --steps 5000            -- quicker, rougher model
+--
+-- It saves the trained model to model.json (change this with --out). The
+-- model is also saved at every progress report, so stopping early with
+-- Ctrl-C keeps the model as of the last report.
+--
+-- Each training step is the classic loop:
+--   forward pass -> loss -> backpropagation -> parameter update
+-- on a small random minibatch (stochastic gradient descent).
+
+intern Vector_Math
+intern Vocabulary
+intern Rng
+intern Next_Letter_Model
+intern Training_Data
+intern Helpers
+intern io/Path
+intern time/Date_Time
+
+-- The settings of one training run, read from the command line.
+class Options
+  create
+    from_command_line(args: Array[String]) do
+      words := "/usr/share/dict/words"
+      out := "model.json"
+      steps := 20000
+      batch := 32
+      lr := 0.3
+      context := 4
+      emb := 8
+      hidden := 64
+      seed := 42
+
+      from
+        let i: Integer := 0
+      until
+        i >= args.length
+      do
+        if i + 1 >= args.length then
+          raise "missing value after " + args.get(i)
+        end
+        let value: String := args.get(i + 1)
+        case args.get(i) of
+          "--words"   then words := value
+          "--out"     then out := value
+          "--steps"   then steps := value.to_integer
+          "--batch"   then batch := value.to_integer
+          "--lr"      then lr := value.to_real
+          "--context" then context := value.to_integer
+          "--emb"     then emb := value.to_integer
+          "--hidden"  then hidden := value.to_integer
+          "--seed"    then seed := value.to_integer
+          else raise "unknown option " + args.get(i)
+        end
+        i := i + 2
+      end
+    end
+  feature
+    words: String    -- word list, one word per line
+    out: String      -- where to save the trained model
+    steps: Integer   -- number of minibatch updates
+    batch: Integer   -- minibatch size
+    lr: Real         -- learning rate (a tenth of it for the last 25%)
+    context: Integer -- how many previous letters the model sees
+    emb: Integer     -- embedding size
+    hidden: Integer  -- hidden neurons
+    seed: Integer    -- random seed, so runs can be repeated
+  invariant
+    positive_sizes: steps > 0 and batch > 0 and context > 0 and emb > 0 and hidden > 0
+    positive_rate: lr > 0.0
+end
+
+-- Seconds since `start`, a time in milliseconds.
+function seconds_since(start: Integer): Real do
+  result := (create Date_Time.now().epoch_millis() - start).to_real / 1000.0
+end
+
+function main() do
+  let con: Console := create Console
+  let opts: Options := create Options.from_command_line((create Process).command_line())
+  let rng: Rng := create Rng.make(opts.seed)
+
+  let words_path: Path := create Path.make(user_path(opts.words))
+  if not words_path.exists() then
+    con.print_line("Word list not found: " + opts.words)
+    con.print_line("Pass one with --words (one word per line).")
+    exit(1)
+  end
+  let words: Array[String] := load_words(words_path.path)
+  if words.length < 10 then
+    con.print_line("Too few usable lowercase words in " + opts.words)
+    exit(1)
+  end
+
+  -- Hold back 10% of the WORDS for validation. Then we measure how well
+  -- the model does on words it has never seen.
+  shuffle(rng, words)
+  let n_val: Integer := words.length / 10
+  let val_words: Array[String] := words.take(n_val)
+  let train_words: Array[String] := words.drop(n_val)
+
+  let train: Array[Example] := make_examples(train_words, opts.context)
+  let val: Array[Example] := make_examples(val_words, opts.context)
+  -- Evaluating on 3000 random validation examples is quick and close enough.
+  shuffle(rng, val)
+  let val_sample: Array[Example] := val.take(3000)
+
+  let model: Next_Letter_Model :=
+    create Next_Letter_Model.make(opts.context, opts.emb, opts.hidden, opts.seed)
+  con.print_line(train_words.length.to_string + " training words -> "
+    + train.length.to_string + " examples; "
+    + val_words.length.to_string + " validation words")
+  con.print_line("model has " + model.num_parameters.to_string + " parameters (context="
+    + opts.context.to_string + ", emb=" + opts.emb.to_string
+    + ", hidden=" + opts.hidden.to_string + ")")
+
+  let before: Evaluation := evaluate(model, val_sample)
+  con.print_line("before training: val loss " + fixed(before.loss, 3)
+    + " (guessing uniformly would give " + fixed(Vocabulary.SIZE.to_real.log, 3) + ")")
+  con.print_line("")
+
+  let report_every: Integer := (opts.steps / 20).max(1)
+  let running_loss: Real := 0.0
+  let start: Integer := create Date_Time.now().epoch_millis()
+
+  from
+    let step: Integer := 1
+  until
+    step > opts.steps
+  do
+    -- Learning-rate schedule: big steps first for fast progress, then
+    -- smaller steps to settle into the bottom of the valley.
+    let lr: Real := when step * 4 <= opts.steps * 3 then opts.lr else opts.lr / 10.0 end
+
+    -- One minibatch of randomly chosen examples: the "stochastic" in
+    -- stochastic gradient descent.
+    let grads: Gradients := create Gradients.make(model)
+    repeat opts.batch do
+      let ex: Example := train.get(rng.below(train.length))
+      let fp: Forward_Pass := model.forward(ex.ids)                     -- forward
+      running_loss := running_loss + cross_entropy(fp.probs, ex.target) -- loss
+      model.backward(fp, ex.target, grads)                              -- backprop
+    end
+    model.step(grads, lr, opts.batch)                                   -- update
+
+    if step % report_every = 0 or step = opts.steps then
+      let train_loss: Real := running_loss / (report_every * opts.batch).to_real
+      running_loss := 0.0
+      let val_now: Evaluation := evaluate(model, val_sample)
+      con.print_line("step " + pad_left(step.to_string, 6) + "/" + opts.steps.to_string
+        + "  lr " + fixed(lr, 3)
+        + "  train loss " + fixed(train_loss, 3)
+        + "  val loss " + fixed(val_now.loss, 3)
+        + "  val accuracy " + pad_left(fixed(val_now.accuracy * 100.0, 1), 4) + "%"
+        + "  [" + pad_left(fixed(seconds_since(start), 0), 5) + "s]")
+      model.save(user_path(opts.out))
+    end
+    step := step + 1
+  end
+
+  con.print_line("")
+  con.print_line("saved to " + opts.out + ". Try:  nex play.nex")
+end
+
+main()

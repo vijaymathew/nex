@@ -1,0 +1,197 @@
+-- play.nex: type the start of a word and let the model finish it, letter
+-- by letter.
+--
+--   nex play.nex                    -- interactive
+--   nex play.nex app hel qu         -- complete each prefix and exit
+--   nex play.nex --model other.json
+--
+-- Interactive keys, after each suggestion:
+--   Enter      accept the suggested letter
+--   n          show the next most likely letter instead
+--   letters    type them yourself (e.g. "r" to steer "app" toward "appr...")
+--   q          give up on this word and start a new one
+
+intern Vocabulary
+intern Next_Letter_Model
+intern Helpers
+intern io/Path
+
+class Play
+  feature
+    MAX_LEN = 30        -- safety stop, in case the model never predicts "."
+    ALTERNATIVES = 5    -- how many suggestions "n" cycles through
+end
+
+function describe(symbol: String): String do
+  result := when symbol = Vocabulary.END then "<end of word>" else symbol end
+end
+
+-- Always take the single most likely symbol until the model says ".".
+function greedy_complete(model: Next_Letter_Model, prefix: String): String do
+  result := prefix
+  let done: Boolean := false
+  from
+  until
+    done or result.length >= Play.MAX_LEN
+  do
+    let best: String := model.predict(result).get(0).symbol
+    if best = Vocabulary.END then
+      done := true
+    else
+      result := result + best
+    end
+  end
+end
+
+-- The other top choices, e.g. "r 21%, e 5%, end 3%".
+function others(ranked: Array[Prediction], skip: String): String do
+  across ranked.take(Play.ALTERNATIVES) as p do
+    if p.symbol /= skip then
+      if result /= "" then
+        result := result + ", "
+      end
+      result := result + when p.symbol = Vocabulary.END then "end" else p.symbol end
+        + " " + percent(p.probability)
+    end
+  end
+end
+
+-- Read a line, lowercased and trimmed; nil at end of input (Ctrl-D).
+function ask(con: Console, prompt: String): ?String do
+  let line: ?String := con.read_line(prompt)
+  if ?line as text then
+    result := text.trim().to_lower()
+  end
+end
+
+-- Suggest letters for one word until it is finished or abandoned.
+-- Returns false when the input has ended.
+function complete_interactively(con: Console, model: Next_Letter_Model,
+                                start: String): Boolean do
+  result := true
+  let word: String := start
+  let choice: Integer := 0     -- which of the ranked options to show
+  let finished: Boolean := false
+  let abandoned: Boolean := false
+  from
+  until
+    finished or abandoned or not result or word.length >= Play.MAX_LEN
+  do
+    let ranked: Array[Prediction] := model.predict(word)
+    let shown: Prediction := ranked.get(choice)
+    let prompt: String := when shown.symbol = Vocabulary.END then
+      "  " + word + "   -> looks complete (" + percent(shown.probability) + ")   "
+    else
+      "  " + word + "[" + shown.symbol + "]   (" + percent(shown.probability) + ")   "
+    end
+    con.print_line(prompt + "   others: " + others(ranked, shown.symbol))
+
+    let answer: ?String := ask(con, "  > ")
+    if ?answer as ans then
+      if ans = "" then                          -- accept the suggestion
+        if shown.symbol = Vocabulary.END then
+          finished := true
+        else
+          word := word + shown.symbol
+          choice := 0
+        end
+      elseif ans = "n" then                     -- show the next option
+        choice := (choice + 1) % Play.ALTERNATIVES
+      elseif ans = "q" then                     -- abandon this word
+        abandoned := true
+      elseif is_lowercase_word(ans) then        -- the user types letters
+        word := word + ans
+        choice := 0
+      else
+        con.print_line("  Enter = accept, n = next option, letters = type your own, "
+          + "q = new word")
+      end
+    else
+      result := false                           -- end of input
+    end
+  end
+  if abandoned or not result then
+    con.print_line("")
+  else
+    con.print_line("  ==> " + word)
+    con.print_line("")
+  end
+end
+
+function interactive(con: Console, model: Next_Letter_Model) do
+  con.print_line("Next-letter predictor. Type the start of a word "
+    + "(empty line or Ctrl-D to quit).")
+  con.print_line("After each suggestion: Enter = accept, n = next option, "
+    + "letters = type your own, q = new word.")
+  con.print_line("")
+  let going: Boolean := true
+  from
+  until
+    not going
+  do
+    let line: ?String := ask(con, "start of word> ")
+    if ?line as word then
+      if word = "" then
+        going := false
+      elseif not is_lowercase_word(word) then
+        con.print_line("  please use letters a-z only")
+        con.print_line("")
+      else
+        going := complete_interactively(con, model, word)
+      end
+    else
+      con.print_line("")
+      going := false
+    end
+  end
+end
+
+function main() do
+  let con: Console := create Console
+  let args: Array[String] := (create Process).command_line()
+  let model_file: String := "model.json"
+  let prefixes: Array[String] := []
+  from
+    let i: Integer := 0
+  until
+    i >= args.length
+  do
+    if args.get(i) = "--model" and i + 1 < args.length then
+      model_file := args.get(i + 1)
+      i := i + 2
+    else
+      prefixes.add(args.get(i).to_lower())
+      i := i + 1
+    end
+  end
+
+  if not create Path.make(user_path(model_file)).exists() then
+    con.print_line("No model at " + model_file + ". Train one first: nex train.nex")
+    exit(1)
+  end
+  let model: Next_Letter_Model :=
+    create Next_Letter_Model.from_file(user_path(model_file))
+
+  if prefixes.is_empty then
+    interactive(con, model)
+  else
+    across prefixes as prefix do
+      if is_lowercase_word(prefix) then
+        let ranked: Array[Prediction] := model.predict(prefix)
+        let top: String := ""
+        across ranked.take(3) as p do
+          if top /= "" then
+            top := top + ", "
+          end
+          top := top + describe(p.symbol) + " " + percent(p.probability)
+        end
+        con.print_line(pad_left(prefix, 12) + " -> "
+          + pad_right(greedy_complete(model, prefix), 16) + "(next letter: " + top + ")")
+      else
+        con.print_line(pad_left(prefix, 12) + " -> please use letters a-z only")
+      end
+    end
+  end
+end
+
+main()
