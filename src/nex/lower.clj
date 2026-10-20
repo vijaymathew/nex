@@ -8436,13 +8436,18 @@
         target-ir (carrier-path-target-ir {:compiled-classes compiled-classes} carrier-path
                                           (ir/this-node class-name
                                                         (exact-class-jvm-type {:compiled-classes compiled-classes} class-name)))
-        call-ir (ir/call-virtual-node owner-internal-name
-                                      callee-name
-                                      (desc/repl-instance-method-descriptor)
-                                      target-ir
-                                      call-args
-                                      return-type
-                                      (resolve-jvm-type resolve-env return-type))
+        ;; The callee, a routine of the carrier's class (or that class's
+        ;; own stub), has a typed method of the same declaration: call it,
+        ;; so the arguments and result stay unboxed.
+        call-ir (typed-call-virtual-node
+                 (ir/call-virtual-node owner-internal-name
+                                       callee-name
+                                       (desc/repl-instance-method-descriptor)
+                                       target-ir
+                                       call-args
+                                       return-type
+                                       (resolve-jvm-type resolve-env return-type))
+                 method-def)
         class-validation (when validate?
                            [(ir/pop-node
                              (validate-object-state-ir {:compiled-classes compiled-classes}
@@ -8461,6 +8466,10 @@
     (ir/fn-node {:name (:name method-def)
                  :owner (:jvm-name class-meta)
                  :emitted-name emitted-name
+                 ;; A typed method too (nex.lower/typed-method-descriptor),
+                 ;; so an heir has one for each routine it inherits, and
+                 ;; implements the routine's typed dispatch interface.
+                 :typed-descriptor (typed-method-descriptor method-def)
                  :params params
                  :return-type return-type
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")

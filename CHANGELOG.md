@@ -61,9 +61,11 @@
   `nex/dispatch/T_<name>$<arity>$<types>`), call the typed method directly:
   no argument array and no boxing. A recursive `fib(32)` went from about
   48 ms to about 7 ms, about what the same code takes in Java, and a loop of
-  two calls between objects is about 2x faster. A receiver that inherits the
-  routine, or redeclares it with other types, takes the general call as
-  before. Error traces are unchanged.
+  two calls between objects is about 2x faster. An heir's forwarding stub for
+  an inherited routine, and the checked routine of a class with an
+  invariant, are typed the same way, so calls to them are typed too. A
+  receiver that redeclares the routine with other types takes the general
+  call as before. Error traces are unchanged.
 - **Fix: Real's math methods (`sqrt`, `exp`, `log`, ...) no longer pay for a
   wrapper on every call.** Their signature was attached with `with-meta`,
   which wraps a function in one that rebuilds its arguments as a sequence on
