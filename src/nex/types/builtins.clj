@@ -1003,10 +1003,13 @@
     (if (and (Double/isFinite k) (== d (Math/pow 2.0 k))) k r)))
 
 (defmacro ^:private real-fn
-  "A no-argument Real -> Real method backed by F."
+  "A no-argument Real -> Real method backed by F. The signature goes on the
+   `fn` form, as the reader's ^{...} does for the other methods, so the
+   function carries it itself: `with-meta` on a function wraps it in one
+   that calls it through `applyTo`, which made every call build a seq."
   [f]
-  `(with-meta (fn [n# & _#] (~f (double n#)))
-     {:signatures [{:params [] :return-type "Real"}]}))
+  (with-meta `(fn [n# & _#] (~f (double n#)))
+    {:signatures [{:params [] :return-type "Real"}]}))
 
 (def real-type-methods
   {"to_string"         ^{:signatures [{:params [] :return-type "String"}]}

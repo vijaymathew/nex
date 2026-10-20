@@ -2521,7 +2521,46 @@
       (emit-unbox-or-cast! mv (:jvm-type expr))
       (:jvm-type expr))))
 
+(defn- descriptor-jvm-type
+  "The IR JVM type of an ASM Type in a typed method descriptor."
+  [^Type t]
+  (condp = (.getSort t)
+    Type/LONG :long
+    Type/DOUBLE :double
+    Type/BOOLEAN :boolean
+    Type/CHAR :char
+    Type/INT :int
+    (ir/object-jvm-type (.getInternalName t))))
+
+(declare emit-expr-call-virtual-boxed!)
+
+(defn- emit-typed-call-virtual!
+  "A direct call of a routine's typed method (:typed-descriptor): each
+   argument passed as the descriptor's type, unboxed where it is a
+   primitive, and the result converted to the type the call expects."
+  [^MethodVisitor mv expr state-slot]
+  (let [descriptor (:typed-descriptor expr)
+        param-types (map descriptor-jvm-type (Type/getArgumentTypes ^String descriptor))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String descriptor))]
+    (emit-expr! mv (:target expr) state-slot)
+    (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (doseq [[arg to] (map vector (:args expr) (rest param-types))]
+      (emit-stack-coerce! mv (emit-expr! mv arg state-slot) to))
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL (:owner expr) (:method expr) descriptor false)
+    (if (= :void (:jvm-type expr))
+      (do (emit-stack-coerce! mv return-type (ir/object-jvm-type "java/lang/Object"))
+          (ir/object-jvm-type "java/lang/Object"))
+      (do (emit-stack-coerce! mv return-type (:jvm-type expr))
+          (:jvm-type expr)))))
+
 (defn- emit-expr-call-virtual!
+  [^MethodVisitor mv expr state-slot]
+  (if (:typed-descriptor expr)
+    (emit-typed-call-virtual! mv expr state-slot)
+    (emit-expr-call-virtual-boxed! mv expr state-slot)))
+
+(defn- emit-expr-call-virtual-boxed!
   [^MethodVisitor mv expr state-slot]
   (emit-expr! mv (:target expr) state-slot)
   (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
@@ -2893,12 +2932,29 @@
                   Opcodes/POP2
                   Opcodes/POP))))
 
+(def ^:dynamic *typed-return*
+  "The JVM type a `return` in the method being emitted returns: bound while
+   a routine's typed method (see emit-typed-routine-methods!) is emitted;
+   otherwise nil, and a return is a boxed Object."
+  nil)
+
+(defn- return-op
+  [jvm-type]
+  (cond
+    (#{:int :boolean :char} jvm-type) Opcodes/IRETURN
+    (= :long jvm-type) Opcodes/LRETURN
+    (= :double jvm-type) Opcodes/DRETURN
+    :else Opcodes/ARETURN))
+
 (defn- emit-return!
   [^MethodVisitor mv expr state-slot]
   (let [jvm-type (emit-expr! mv expr state-slot)]
-    (when (contains? ir/primitive-jvm-types jvm-type)
-      (emit-box! mv jvm-type))
-    (.visitInsn mv Opcodes/ARETURN)))
+    (if-let [typed *typed-return*]
+      (do (emit-stack-coerce! mv jvm-type typed)
+          (.visitInsn mv (return-op typed)))
+      (do (when (contains? ir/primitive-jvm-types jvm-type)
+            (emit-box! mv jvm-type))
+          (.visitInsn mv Opcodes/ARETURN)))))
 
 (defn- emit-raise!
   [^MethodVisitor mv expr builtin state-slot]
@@ -3260,7 +3316,97 @@
         (.visitMaxs mv 0 0)
         (.visitEnd mv)))))
 
+(declare emit-instance-fn-method-boxed!)
+
+(defn- emit-typed-routine-methods!
+  "A class routine FN-NODE with a :typed-descriptor (nex.lower/
+   typed-method-descriptor), as two methods. `NAME$t`, of that descriptor,
+   holds the body: its arguments arrive unboxed where they are primitives
+   and are moved into the body's own locals, and it returns its result the
+   same way. NAME, of the uniform (state, Object[]) -> Object descriptor that
+   interfaces, stubs and the runtime call, unpacks its arguments, calls
+   `NAME$t` and boxes the result. A direct call (nex.lower/
+   typed-call-virtual-node) calls `NAME$t` and allocates neither."
+  [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
+  (let [typed-desc (:typed-descriptor fn-node)
+        owner (:owner fn-node)
+        params (:params fn-node)
+        param-types (map descriptor-jvm-type (rest (Type/getArgumentTypes ^String typed-desc)))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String typed-desc))
+        width (fn [t] (if (#{:long :double} t) 2 1))
+        ;; Incoming argument slots: this 0, state 1, then the arguments.
+        in-slots (reductions + 2 (map width param-types))
+        ;; Above every local the body uses, for the two-phase move below.
+        temp-base (+ 4 (reduce max 3 (map (fn [{:keys [slot jvm-type]}] (+ slot (width jvm-type)))
+                                          (concat params (:locals fn-node)))))
+        temp-slots (reductions + temp-base (map width param-types))]
+    ;; NAME$t: the body.
+    (let [^MethodVisitor mv (.visitMethod cw flags (str name "$t") typed-desc nil nil)
+          start-label (Label.)
+          end-label (Label.)
+          local-ranges (atom {})]
+      (.visitCode mv)
+      (binding [*local-debug-ranges* local-ranges
+                *typed-return* return-type]
+        (.visitLabel mv start-label)
+        ;; The incoming slots overlap the body's: move each argument out to a
+        ;; temporary first, then into its local, converting it to the
+        ;; local's type.
+        (doseq [[t in tmp] (map vector param-types in-slots temp-slots)]
+          (.visitVarInsn mv (local-load-op t) in)
+          (.visitVarInsn mv (local-store-op t) tmp))
+        (doseq [[{:keys [slot jvm-type]} t tmp] (map vector params param-types temp-slots)]
+          (.visitVarInsn mv (local-load-op t) tmp)
+          (emit-stack-coerce! mv t jvm-type)
+          (mark-local-debug-before! mv slot)
+          (.visitVarInsn mv (local-store-op jvm-type) slot)
+          (mark-local-debug-after! mv slot))
+        (doseq [stmt (:body fn-node)]
+          (emit-stmt! mv stmt 1))
+        ;; A routine with a result ends in a return; one without returns nil.
+        (if (contains? ir/primitive-jvm-types return-type)
+          (do (.visitInsn mv (case return-type
+                               :long Opcodes/LCONST_0
+                               :double Opcodes/DCONST_0
+                               Opcodes/ICONST_0))
+              (.visitInsn mv (return-op return-type)))
+          (do (.visitInsn mv Opcodes/ACONST_NULL)
+              (.visitInsn mv Opcodes/ARETURN)))
+        (.visitLabel mv end-label)
+        (emit-local-variable-table! mv start-label end-label
+                                    (concat [{:name "this" :slot 0 :jvm-type (ir/object-jvm-type owner)}
+                                             {:name "state" :slot 1
+                                              :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
+                                            (:locals fn-node))
+                                    @local-ranges))
+      (.visitMaxs mv 0 0)
+      (.visitEnd mv))
+    ;; NAME: unpack, call NAME$t, box.
+    (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+      (.visitCode mv)
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (.visitVarInsn mv Opcodes/ALOAD 1)
+      (doseq [[i t] (map-indexed vector param-types)]
+        (.visitVarInsn mv Opcodes/ALOAD 2)
+        (.visitLdcInsn mv (int i))
+        (.visitInsn mv Opcodes/AALOAD)
+        (emit-unbox-or-cast! mv t))
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL owner (str name "$t") typed-desc false)
+      (when (contains? ir/primitive-jvm-types return-type)
+        (emit-box! mv return-type))
+      (.visitInsn mv Opcodes/ARETURN)
+      (.visitMaxs mv 0 0)
+      (.visitEnd mv))))
+
 (defn- emit-instance-fn-method!
+  [^ClassWriter cw {:keys [name descriptor flags fn-node kind] :as method-spec}]
+  (if (and (= kind :instance-fn)
+           (:typed-descriptor fn-node)
+           (routine-dispatch-key name))
+    (emit-typed-routine-methods! cw method-spec)
+    (emit-instance-fn-method-boxed! cw method-spec)))
+
+(defn- emit-instance-fn-method-boxed!
   [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)

@@ -28,7 +28,7 @@
 (declare lower-statements)
 (declare lower-create-expr)
 (declare lower-call-expr)
-(declare dispatch-path-call-ir lower-expr-identifier*)
+(declare dispatch-path-call-ir lower-expr-identifier* typed-call-virtual-node)
 (declare lower-member-assign-stmt)
 (declare lower-call-stmt)
 (declare lower-loop-stmt)
@@ -5857,14 +5857,16 @@
       ;; it links fine, since the bytecode for it lives right here.
       (and own-method-def (not (lowered-deferred-method? (current-class-def env) own-method-def)))
       (overridable-self-call-ir env method-def arg-irs nex-type jvm-type
-                                (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
-                                                      (self-call-method-name env (:this-type env) method-def)
-                                                      (desc/repl-instance-method-descriptor)
-                                                      (ir/this-node (:this-type env)
-                                                                    (exact-class-jvm-type env (:this-type env)))
-                                                      arg-irs
-                                                      nex-type
-                                                      jvm-type))
+                                (typed-call-virtual-node
+                                 (ir/call-virtual-node (:internal-name (class-jvm-meta env (:this-type env)))
+                                                       (self-call-method-name env (:this-type env) method-def)
+                                                       (desc/repl-instance-method-descriptor)
+                                                       (ir/this-node (:this-type env)
+                                                                     (exact-class-jvm-type env (:this-type env)))
+                                                       arg-irs
+                                                       nex-type
+                                                       jvm-type)
+                                 method-def))
 
       ;; Declared on this class but deferred (no body compiled here) — e.g. a
       ;; deferred class's own routine calling one of its sibling deferred
@@ -7918,6 +7920,36 @@
                         :state-slot 1
                         :next-slot 3})))
 
+(def ^:private typed-descriptor-by-type
+  "JVM descriptor of a routine parameter or result in its typed method, by
+   the Nex type as declared. Anything else, including an alias or a
+   detachable type, is an Object."
+  {"Integer" "J" "Real" "D" "Boolean" "Z" "Char" "C"})
+
+(defn typed-method-descriptor
+  "Descriptor of the typed method a class routine METHOD-DEF compiles to
+   (`<emitted name>$t`): the routine's body, taking its arguments and
+   returning its result unboxed where the declared type is Integer, Real,
+   Boolean or Char, rather than in an Object[] and an Object. A function of
+   the declaration alone, so the routine's own lowering and any call site
+   computing it agree."
+  [method-def]
+  (let [desc (fn [t] (get typed-descriptor-by-type t "Ljava/lang/Object;"))
+        ret (function-return-type method-def)]
+    (str "(Lnex/compiler/jvm/runtime/NexReplState;"
+         (apply str (map (comp desc :type) (:params method-def)))
+         ")"
+         (if (= "Void" ret) "Ljava/lang/Object;" (desc ret)))))
+
+(defn- typed-call-virtual-node
+  "CALL-VIRTUAL-NODE, a direct call of a routine compiled with a typed
+   method (see typed-method-descriptor), turned into a call of that typed
+   method."
+  [call-virtual-node method-def]
+  (assoc call-virtual-node
+         :method (str (:method call-virtual-node) "$t")
+         :typed-descriptor (typed-method-descriptor method-def)))
+
 (defn- lowered-routine-emitted-name
   "The JVM method name `lower-function` emits FN-DEF under: a free function's
    or class routine's ordinary name, or a class routine's unchecked twin's
@@ -8036,6 +8068,8 @@
                      :qualified-name (:qualified-name fn-def)
                      :owner unit-name
                      :emitted-name (lowered-routine-emitted-name fn-def)
+                     :typed-descriptor (when (:class-name fn-def)
+                                         (typed-method-descriptor fn-def))
                      :params params
                      :return-type return-type
                      :return-jvm-type (ir/object-jvm-type "java/lang/Object")
