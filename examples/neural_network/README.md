@@ -189,14 +189,6 @@ Each step:
    and `checks.nex` verifies it against gradients measured numerically.
 4. **Update:** `p := p - lr * gradient`, for every parameter.
 
-## Compatibility with the Python version
-
-This is a translation of a pure-Python project. `model.json` uses the same
-format, so a model trained by either version can be loaded by the other, and
-on the same model both give the same predictions. The random number
-generators differ, so a training run with the same seed does not give the
-same model.
-
 ## Limitations
 
 - **It only ever sees the last 4 letters.** In a long word, it has forgotten
