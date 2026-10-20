@@ -886,6 +886,21 @@
                     {:from-jvm-type from-jvm-type
                      :to-jvm-type to-jvm-type}))))
 
+
+(defn- emit-value-coerce!
+  "emit-stack-coerce!, except that between two object types it only casts,
+   as emit-unbox-or-cast! does. For moving a value that is already what its
+   Nex type says between a call's arguments or result and a method's locals
+   (a typed method's parameters and result, see emit-typed-routine-methods!):
+   emit-stack-coerce! converts a value going to a Map- or Set-typed slot to
+   the compiled representation, which copies it, so an update made through
+   the copy would be lost to the caller."
+  [^MethodVisitor mv from-jvm-type to-jvm-type]
+  (cond
+    (= from-jvm-type to-jvm-type) nil
+    (and (ir/object-jvm-type? from-jvm-type) (ir/object-jvm-type? to-jvm-type))
+    (emit-unbox-or-cast! mv to-jvm-type)
+    :else (emit-stack-coerce! mv from-jvm-type to-jvm-type)))
 (defn- emit-as-int!
   "Emit `expr` and narrow its result to a 32-bit int, inserting L2I when it is a
    64-bit Nex Integer (:long). Used for the JVM int positions: collection indices,
@@ -1341,7 +1356,7 @@
     (emit-boxed-expr! mv target-ir state-slot)
     (.visitVarInsn mv Opcodes/ASTORE target-slot)
     (doseq [[arg t slot] (map vector arg-irs param-types arg-slots)]
-      (emit-stack-coerce! mv (emit-expr! mv arg state-slot) t)
+      (emit-value-coerce! mv (emit-expr! mv arg state-slot) t)
       (.visitVarInsn mv (local-store-op t) slot))
     ;; The typed call.
     (.visitVarInsn mv Opcodes/ALOAD target-slot)
@@ -1356,7 +1371,7 @@
                       (str "__method_" method-name "$arity" arity "$t") typed-desc true)
     (if void?
       (.visitInsn mv (if (#{:long :double} return-type) Opcodes/POP2 Opcodes/POP))
-      (emit-stack-coerce! mv return-type (:jvm-type expr)))
+      (emit-value-coerce! mv return-type (:jvm-type expr)))
     (.visitJumpInsn mv Opcodes/GOTO end)
     ;; Boxed: the arguments into an array, then the routine's interface or
     ;; the runtime.
@@ -1368,7 +1383,7 @@
       (.visitInsn mv Opcodes/DUP)
       (.visitLdcInsn mv (int i))
       (.visitVarInsn mv (local-load-op t) slot)
-      (emit-stack-coerce! mv t (ir/object-jvm-type "java/lang/Object"))
+      (emit-value-coerce! mv t (ir/object-jvm-type "java/lang/Object"))
       (.visitInsn mv Opcodes/AASTORE))                     ; target args
     (.visitInsn mv Opcodes/DUP2)
     (.visitInsn mv Opcodes/POP)
@@ -1494,18 +1509,18 @@
                             (.visitInsn mv Opcodes/DUP)
                             (.visitLdcInsn mv (int i))
                             (.visitVarInsn mv (local-load-op t) slot)
-                            (emit-stack-coerce! mv t object-type)
+                            (emit-value-coerce! mv t object-type)
                             (.visitInsn mv Opcodes/AASTORE)))
         finish! (fn [from]                                 ; result of type FROM -> the call's value
                   (if void?
                     (.visitInsn mv (if (#{:long :double} from) Opcodes/POP2 Opcodes/POP))
-                    (emit-stack-coerce! mv from (:jvm-type expr)))
+                    (emit-value-coerce! mv from (:jvm-type expr)))
                   (.visitJumpInsn mv Opcodes/GOTO end))]
     (emit-boxed-expr! mv carrier-ir state-slot)
     (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Object")
     (.visitVarInsn mv Opcodes/ASTORE carrier-slot)
     (doseq [[arg t slot] (map vector arg-irs param-types arg-slots)]
-      (emit-stack-coerce! mv (emit-expr! mv arg state-slot) t)
+      (emit-value-coerce! mv (emit-expr! mv arg state-slot) t)
       (.visitVarInsn mv (local-store-op t) slot))
     ;; The object that runs it: the carrier itself when it is inside no
     ;; other object, else the runtime's answer.
@@ -1788,11 +1803,11 @@
       (when (and (= (count args) (count arg-types))
                  (#{:long :double} (:jvm-type (first args))))
         (doseq [[arg t] (map vector args arg-types)]
-          (emit-stack-coerce! mv (emit-expr! mv arg state-slot) t))
+          (emit-value-coerce! mv (emit-expr! mv arg state-slot) t))
         (emit-op mv (:helper expr))
         (if (= :void (:jvm-type expr))
           (do (.visitInsn mv (if (#{:long :double} result) Opcodes/POP2 Opcodes/POP)) :void)
-          (do (emit-stack-coerce! mv result (:jvm-type expr))
+          (do (emit-value-coerce! mv result (:jvm-type expr))
               (:jvm-type expr)))))))
 
 (declare emit-direct-runtime-helper-call*)
@@ -2978,12 +2993,12 @@
     (.visitTypeInsn mv Opcodes/CHECKCAST (:owner expr))
     (.visitVarInsn mv Opcodes/ALOAD state-slot)
     (doseq [[arg to] (map vector (:args expr) (rest param-types))]
-      (emit-stack-coerce! mv (emit-expr! mv arg state-slot) to))
+      (emit-value-coerce! mv (emit-expr! mv arg state-slot) to))
     (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL (:owner expr) (:method expr) descriptor false)
     (if (= :void (:jvm-type expr))
-      (do (emit-stack-coerce! mv return-type (ir/object-jvm-type "java/lang/Object"))
+      (do (emit-value-coerce! mv return-type (ir/object-jvm-type "java/lang/Object"))
           (ir/object-jvm-type "java/lang/Object"))
-      (do (emit-stack-coerce! mv return-type (:jvm-type expr))
+      (do (emit-value-coerce! mv return-type (:jvm-type expr))
           (:jvm-type expr)))))
 
 (defn- emit-expr-call-virtual!
@@ -3382,7 +3397,7 @@
   [^MethodVisitor mv expr state-slot]
   (let [jvm-type (emit-expr! mv expr state-slot)]
     (if-let [typed *typed-return*]
-      (do (emit-stack-coerce! mv jvm-type typed)
+      (do (emit-value-coerce! mv jvm-type typed)
           (.visitInsn mv (return-op typed)))
       (do (when (contains? ir/primitive-jvm-types jvm-type)
             (emit-box! mv jvm-type))
@@ -3795,7 +3810,7 @@
           (.visitVarInsn mv (local-store-op t) tmp))
         (doseq [[{:keys [slot jvm-type]} t tmp] (map vector params param-types temp-slots)]
           (.visitVarInsn mv (local-load-op t) tmp)
-          (emit-stack-coerce! mv t jvm-type)
+          (emit-value-coerce! mv t jvm-type)
           (mark-local-debug-before! mv slot)
           (.visitVarInsn mv (local-store-op jvm-type) slot)
           (mark-local-debug-after! mv slot))
