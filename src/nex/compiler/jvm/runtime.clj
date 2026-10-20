@@ -67,11 +67,61 @@
    ((interpreter-op :call-method target) state target method-name (vec args) has-parens?)))
 
 
+(def ^:private builtin-wrapper-receivers
+  "Receiver type of a `builtin-method-<type>-<method>` helper, by the <type>
+   part of its name: [the type's key in bi/builtin-type-methods, a predicate
+   true of exactly that type's values]. Types missing here (Any, Cursor,
+   Comparable) have no one representation, so their helpers always dispatch
+   on the value."
+  {"string"    [:String `string?]
+   "real"      [:Real `(fn [v#] (instance? Double v#))]
+   "integer"   [:Integer `(fn [v#] (instance? Long v#))]
+   "integer32" [:Integer32 `rt/nex-int32?]
+   "integer16" [:Integer16 `rt/nex-int16?]
+   "byte"      [:Byte `rt/nex-byte?]
+   "char"      [:Char `char?]
+   "boolean"   [:Boolean `boolean?]
+   "console"   [:Console `rt/nex-console?]
+   "process"   [:Process `rt/nex-process?]
+   "map_entry" [:Map_Entry `rt/nex-map-entry?]})
+
 (defmacro ^:private def-builtin-method-wrapper
+  "Define FN-NAME (`builtin-method-<type>-<method>`), the helper compiled code
+   calls for METHOD-NAME on a receiver of static type <type>. The method is
+   looked up once, when this namespace loads, and called directly when the
+   receiver is a value of that type, rather than found by the value's type and
+   the method's name on every call (bi/call-builtin-method), which costs far
+   more than most of these methods do. Any other receiver, or a method the
+   type's own table lacks (so Any's applies), takes call-builtin-method."
   [fn-name method-name]
-  `(defn ~fn-name
-     [target# & args#]
-     (bi/call-builtin-method nil target# target# ~method-name (vec args#))))
+  (let [method-part (str/replace method-name "_" "-")
+        type-part (let [n (subs (name fn-name) (count "builtin-method-"))]
+                    (subs n 0 (- (count n) (count method-part) 1)))
+        [type-key pred] (get builtin-wrapper-receivers type-part)
+        generic (fn [t args] `(bi/call-builtin-method nil ~t ~t ~method-name ~args))]
+    (if-not type-key
+      (let [t (gensym "target")
+            args (gensym "args")]
+        `(defn ~fn-name
+           [~t & ~args]
+           ~(generic t `(vec ~args))))
+      (let [f (gensym "method-fn")
+            ok (gensym "receiver?")
+            t (gensym "target")
+            a (gensym "a")
+            b (gensym "b")
+            more (gensym "more")
+            direct? `(and ~f (~ok ~t))]
+        `(let [~f (get-in bi/builtin-type-methods [~type-key ~method-name])
+               ~ok ~pred]
+           (defn ~fn-name
+             ([~t] (if ~direct? (~f ~t) ~(generic t [])))
+             ([~t ~a] (if ~direct? (~f ~t ~a) ~(generic t [a])))
+             ([~t ~a ~b] (if ~direct? (~f ~t ~a ~b) ~(generic t [a b])))
+             ([~t ~a ~b & ~more]
+              (if ~direct?
+                (apply ~f ~t ~a ~b ~more)
+                ~(generic t `(into [~a ~b] ~more))))))))))
 
 (defn- ->java-array-list
   [value]

@@ -15,13 +15,16 @@
 - **Fix: an invariant clause may name a zero-argument query without parens
   in the interpreter** (`consistent: total = sum`), and a clause calling the
   object's queries qualified (`this.q`) no longer recurses forever there.
-- **`across` over an Array is about 40x faster in compiled code.** When the
-  target is statically an `Array`, the loop is compiled as an indexed walk,
-  as fast as a hand-written `from` loop over `get`, instead of three dynamic
-  cursor calls per element. Other targets (strings, maps, sets, `Any`, user
-  cursors) still use the cursor, but the built-in cursors are now called
-  directly, about 12x faster than before. Array operations (`get`, `add`,
-  `length`, `slice` and the rest) no longer use reflection on either backend.
+- **`across` over an Array, String or Set is much faster in compiled code.**
+  When the target is statically an `Array`, `String` or `Set`, the loop is
+  compiled as an indexed walk, as fast as a hand-written `from` loop, instead
+  of three dynamic cursor calls per element: about 40x faster for an Array
+  than before. A Set is walked through a copy taken once, so adding to it
+  inside the loop does not extend the loop, as before. Other targets (maps,
+  `Any`, user cursors) still use the cursor, but the built-in cursors are now
+  called directly, about 12x faster than before. Array operations (`get`,
+  `add`, `length`, `slice` and the rest) no longer use reflection on either
+  backend.
 - **Faster method calls and invariant checks in compiled code.** A call
   `x.f(...)` on a user object no longer builds the routine's name or walks
   its arguments on every call, and compiled code no longer looks up each
@@ -29,6 +32,14 @@
   site). A class invariant check costs about a third of what it did.
   Together these make a call in a tight loop about 3x faster, or about 7x
   faster with a small invariant.
+- **Built-in methods are called directly in compiled code.** A method of a
+  String, Integer, Real, Char, Boolean, Byte, sized integer, Console, Process
+  or Map_Entry value (`abs`, `to_upper`, `char_at`, ...) is looked up once,
+  when the runtime loads, and called directly, rather than found by the
+  value's type and the method's name on every call. That cut the cost of a
+  call like `n.abs` from about 100 ns to about 20 ns. Methods on `Any`,
+  `Cursor` and `Comparable` values, whose runtime type varies, are looked up
+  as before.
 - **Sound with `lib/audio`.** `audio/Sound` plays short effects loaded from
   WAV, AIFF or AU files, or generated with `Sound.tone`, overlapping up to
   `voices` copies. `audio/Music` plays recorded tracks and `audio/Midi_Song`
