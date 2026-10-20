@@ -142,6 +142,64 @@
                       :fn-node fn-node})
                    (:functions unit))))})
 
+(def ^:dynamic *dispatch-keys*
+  "While bound (to an atom of a set), collects the [name arity] of every
+   dispatch interface the emitted code names: one per routine a class emits,
+   and one per call site that calls through one. A compiler binds it around
+   emission and then emits exactly those interfaces (see
+   compile-dispatch-interface->bytes), since a call site's `instanceof` needs
+   its interface to exist even when no class implements it."
+  nil)
+
+(defn- note-dispatch-key!
+  [k]
+  (when-let [keys *dispatch-keys*]
+    (swap! keys conj k))
+  k)
+
+(defn routine-dispatch-key
+  "[name arity] of an emitted user routine `__method_<name>$arity<N>`, or nil
+   for any other method (a constructor, the synthetic `$invariant`, whose `$`
+   no Nex identifier has, or an unchecked `__imethod_` twin)."
+  [emitted-name]
+  (when-let [[_ name arity] (re-matches #"__method_([A-Za-z_][A-Za-z0-9_]*)\$arity(\d+)"
+                                        (str emitted-name))]
+    [name (Long/parseLong arity)]))
+
+(defn dispatch-interface-name
+  "Internal name of the interface every class with a routine NAME of ARITY
+   implements, so that a call `x.name(...)` can be a JVM interface call
+   whatever x's class: an heir is not a JVM subclass of its parent (it holds
+   the parent as a composition carrier), but it has the routine itself, its
+   own or a forwarding stub, with the same signature."
+  [name arity]
+  (str "nex/dispatch/F_" name "$" arity))
+
+(defn class-dispatch-keys
+  "[name arity] of each routine LOWERED-CLASS emits a callable method for."
+  [lowered-class]
+  (into (sorted-set)
+        (keep (fn [fn-node]
+                (when-not (:deferred? fn-node)
+                  (routine-dispatch-key (:emitted-name fn-node)))))
+        (:methods lowered-class)))
+
+(defn compile-dispatch-interface->bytes
+  "The interface for routine NAME of ARITY (see dispatch-interface-name): one
+   abstract method, `__method_<name>$arity<N>`, with the signature every
+   compiled routine has."
+  [name arity]
+  (let [cw (ClassWriter. 0)]
+    (.visit cw class-version
+            (+ Opcodes/ACC_PUBLIC Opcodes/ACC_INTERFACE Opcodes/ACC_ABSTRACT)
+            (dispatch-interface-name name arity) nil "java/lang/Object" nil)
+    (-> (.visitMethod cw (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
+                      (str "__method_" name "$arity" arity)
+                      (repl-fn-method-descriptor) nil nil)
+        (.visitEnd))
+    (.visitEnd cw)
+    (.toByteArray cw)))
+
 (defn user-class-spec
   ([class-spec] (user-class-spec class-spec {}))
   ([class-spec {:keys [classes-edn imports-edn program-owner program-functions]}]
@@ -149,7 +207,11 @@
     :binary-name (desc/binary-class-name (:jvm-name class-spec))
     :source-file (:source-file class-spec)
     :super-name (or (:java-super-class class-spec) "java/lang/Object")
-    :interfaces (vec (:interfaces class-spec))
+    :interfaces (vec (concat (:interfaces class-spec)
+                             (map (fn [[name arity :as k]]
+                                    (note-dispatch-key! k)
+                                    (dispatch-interface-name name arity))
+                                  (class-dispatch-keys class-spec))))
     :flags Opcodes/ACC_PUBLIC
     :fields (vec
              (concat
@@ -1130,6 +1192,55 @@
    "select-sleep-step"                       ["select-sleep-step!" []]
    "__datetime_make"                           ["builtin-datetime-make-from-array" [:args]]})
 
+(defn- emit-user-method-call!
+  "A qualified call `x.f(args)` on a user object (IR helper
+   \"call-user-method\": args are the routine's JVM name, its Nex name, the
+   target, then the call's own arguments). When the target implements f's
+   dispatch interface, the call is a JVM interface call, which the JIT can
+   inline; otherwise (nil, an interpreter object, a Java object) it is
+   runtime/call-user-method, as before. The target and the arguments are
+   evaluated once, before the test. Returns the result's JVM type."
+  [^MethodVisitor mv expr state-slot]
+  (let [[lowered-ir name-ir target-ir & arg-irs] (:args expr)
+        method-name (:value name-ir)
+        arity (count arg-irs)
+        iface (dispatch-interface-name method-name arity)
+        slow (Label.)
+        done (Label.)]
+    (note-dispatch-key! [method-name arity])
+    (emit-boxed-expr! mv target-ir state-slot)          ; target
+    (emit-boxed-arg-array! mv (vec arg-irs) state-slot)  ; target args
+    (.visitInsn mv Opcodes/DUP2)                         ; target args target args
+    (.visitInsn mv Opcodes/POP)                          ; target args target
+    (.visitTypeInsn mv Opcodes/INSTANCEOF iface)         ; target args bool
+    (.visitJumpInsn mv Opcodes/IFEQ slow)
+    ;; target args -> iface state args
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitTypeInsn mv Opcodes/CHECKCAST iface)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE iface
+                      (str "__method_" method-name "$arity" arity)
+                      (repl-fn-method-descriptor) true)
+    (.visitJumpInsn mv Opcodes/GOTO done)
+    (.visitLabel mv slow)
+    ;; target args -> var target args, then state, site, names
+    (emit-runtime-var! mv "call-user-method-fallback")
+    (.visitInsn mv Opcodes/DUP_X2)
+    (.visitInsn mv Opcodes/POP)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (emit-call-site-cache! mv)
+    (emit-boxed-expr! mv lowered-ir state-slot)
+    (emit-boxed-expr! mv name-ir state-slot)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 6) false)
+    (.visitLabel mv done)
+    (if (= :void (:jvm-type expr))
+      (do (.visitInsn mv Opcodes/POP) :void)
+      (do (emit-unbox-or-cast! mv (:jvm-type expr))
+          (:jvm-type expr)))))
+
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
   (let [helper (:helper expr)
@@ -1139,6 +1250,8 @@
                         (do (.visitInsn mv Opcodes/POP) :void)
                         (do (emit-unbox-or-cast! mv jvm-type)
                             jvm-type)))]
+    (if (= helper "call-user-method")
+      (emit-user-method-call! mv expr state-slot)
     (if-let [[runtime-fn spec] (get direct-runtime-helper-specs helper)]
       (do
         (emit-runtime-call! mv runtime-fn (runtime-helper-emitters mv args state-slot spec))
@@ -1149,7 +1262,7 @@
                               (mapv (fn [arg]
                                       (fn [] (emit-boxed-expr! mv arg state-slot)))
                                     args))
-          (emit-return (:jvm-type expr)))))))
+          (emit-return (:jvm-type expr))))))))
 
 (defn- emit-boolean-short-circuit!
   [^MethodVisitor mv operator left-expr right-expr state-slot]

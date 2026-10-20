@@ -1297,6 +1297,13 @@
             (invoke-reflective! method target (method-args state args)))
           (invoke-user-method state target method-name (vec args)))))))
 
+(defn call-user-method-fallback
+  "call-user-method with the target and arguments first: the order a compiled
+   call site has them in when the target does not implement the routine's
+   dispatch interface (see nex.compiler.jvm.emit/emit-user-method-call!)."
+  [target ^objects args state site lowered-name method-name]
+  (call-user-method state site lowered-name method-name target args))
+
 (defn dispatch-self-call
   "An unqualified call made by code running on a composition carrier, so on
    behalf of the heir's object TARGET (the carrier's `__outer__`), which may

@@ -30,6 +30,9 @@
     {:loader ldr
      :state (rt/make-repl-state ldr)
      :counter (atom 0)
+     ;; [name arity] of the dispatch interfaces defined in :loader so far
+     ;; (see emitting!).
+     :dispatch-interfaces (atom #{})
      :compiled-classes (atom {})
      :function-asts (atom {})
      :class-asts (atom {})
@@ -801,6 +804,24 @@
   (rt/clear-output! state)
   state)
 
+(defn- emitting!
+  "Run EMIT (a thunk producing bytecode) and first define, in SESSION's loader,
+   every dispatch interface that bytecode names and the loader lacks: a class
+   implementing one cannot be defined before it, and a call site's
+   `instanceof` needs it to exist (see nex.compiler.jvm.emit/*dispatch-keys*).
+   Returns EMIT's result."
+  [session emit]
+  (let [keys (atom #{})
+        result (binding [emit/*dispatch-keys* keys] (emit))
+        defined (or (:dispatch-interfaces session) (atom #{}))]
+    (doseq [[name arity :as k] @keys
+            :when (not (contains? @defined k))]
+      (loader/define-class! (:loader session)
+                            (desc/binary-class-name (emit/dispatch-interface-name name arity))
+                            (emit/compile-dispatch-interface->bytes name arity))
+      (swap! defined conj k))
+    result))
+
 (defn- session-function-name-set
   [session]
   (set (keys @(:function-asts session))))
@@ -957,7 +978,7 @@
                            :imports-edn (pr-str visible-imports)}]
         (doseq [class-def compiled-class-defs]
           (let [lowered (some #(when (= (:name %) (:name class-def)) %) lowered-classes)
-                bytecode (emit/compile-user-class->bytes lowered bootstrap-edn)]
+                bytecode (emitting! session #(emit/compile-user-class->bytes lowered bootstrap-edn))]
             (loader/define-class! (:loader session)
               (desc/binary-class-name (:jvm-name lowered))
               bytecode)))
@@ -1112,7 +1133,7 @@
                                                  :compiled-classes (compiled-classes-for-lowering session)
                                                  :functions other-functions
                                                  :var-types (session-var-types session)})
-          bytecode (emit/compile-unit->bytes unit)
+          bytecode (emitting! session #(emit/compile-unit->bytes unit))
           binary-name (desc/binary-class-name class-name)
           cls (loader/define-class! (:loader session) binary-name bytecode)
           state (:state session)
@@ -1292,7 +1313,7 @@
                                                                      :imports (:imports prepared-ast)
                                                                      :source-file source-id
                                                                      :var-types (session-var-types session)})
-                 bytecode (emit/compile-unit->bytes unit)
+                 bytecode (emitting! session #(emit/compile-unit->bytes unit))
                  binary-name (desc/binary-class-name class-name)
                  cls (loader/define-class! (:loader session) binary-name bytecode)
                  state (:state session)

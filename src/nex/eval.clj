@@ -165,7 +165,10 @@
    output is flushed."
   [{:keys [main-class classes]} program-args]
   (let [ldr (loader/make-loader)]
-    (doseq [[binary-name ^bytes bytecode] classes]
+    ;; Dispatch interfaces first: defining a class loads the interfaces it
+    ;; implements, and CLASSES is an unordered map.
+    (doseq [[binary-name ^bytes bytecode] (sort-by (fn [[n _]] (not (str/starts-with? n "nex.dispatch.")))
+                                                   classes)]
       (loader/define-class! ldr binary-name bytecode))
     (let [cls (loader/resolve-class ldr main-class)
           m (.getMethod cls "main" (into-array Class [(Class/forName "[Ljava.lang.String;")]))
