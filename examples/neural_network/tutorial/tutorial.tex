@@ -2953,17 +2953,22 @@ programs from its own installation folder, so a file name like
 \code{model.json} would be looked for there, not in our project folder.
 \code{nex} records the folder it was started from in the environment
 variable \code{NEX_USER_DIR}, and we use that to turn a relative file name
-into a full one:
+into a full one. A program run some other way has no \code{NEX_USER_DIR}
+(\code{getenv} gives the empty string), and then we leave the name as it is,
+relative to the current folder:
 
 \begin{append}{helpers.nex}
 -- The full path of a file the user named. The `nex` launcher runs
 -- programs from its own installation folder, so a relative name is
 -- resolved against the folder `nex` was started from, NEX_USER_DIR.
+-- Run some other way (no NEX_USER_DIR), a relative name is left as it is,
+-- relative to the current folder.
 function user_path(raw: String): String do
-  if raw.starts_with("/") then
+  let user_dir: String := (create Process).getenv("NEX_USER_DIR")
+  if raw.starts_with("/") or user_dir = "" then
     result := raw
   else
-    result := (create Process).getenv("NEX_USER_DIR") + "/" + raw
+    result := user_dir + "/" + raw
   end
 end
 \end{append}

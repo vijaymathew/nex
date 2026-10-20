@@ -47,9 +47,16 @@
   #{"play.nex" "train.nex"})
 
 (defn- excluded-neural-network-path?
+  "neural_network/'s command-line mains, and anything under its tutorial's
+   build/ folder: the git-ignored output of tutorial/build.py, one copy of
+   the project per stage of the tutorial, present only where it has been
+   built and checked by that build itself."
   [^java.io.File f]
-  (and (str/includes? (.getPath f) (str java.io.File/separator "neural_network" java.io.File/separator))
-       (contains? excluded-neural-network-mains (.getName f))))
+  (let [sep java.io.File/separator
+        path (.getPath f)]
+    (and (str/includes? path (str sep "neural_network" sep))
+         (or (contains? excluded-neural-network-mains (.getName f))
+             (str/includes? path (str sep "tutorial" sep "build" sep))))))
 
 ;; Relative directories the file-I/O examples create; they normally clean up
 ;; after themselves (delete_tree), but we remove these defensively in case an
