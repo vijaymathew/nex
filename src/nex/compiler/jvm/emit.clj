@@ -184,8 +184,9 @@
    a call of it can be a JVM interface call whatever the receiver's class:
    an heir is not a JVM subclass of its parent (it holds the parent as a
    composition carrier), but it has the routine itself, its own or a
-   forwarding stub, with the same signature. Kind T, with CODE (see
-   typed-dispatch-code), is for the routine's typed method."
+   forwarding stub, with the same signature. Kinds T and S, with CODE (see
+   typed-dispatch-code), are for the typed methods of a routine and of its
+   unchecked twin."
   ([name arity] (dispatch-interface-name "F" name arity))
   ([kind name arity] (str "nex/dispatch/" kind "_" name "$" arity))
   ([kind name arity code] (str "nex/dispatch/" kind "_" name "$" arity "$" code)))
@@ -212,17 +213,24 @@
   [kind name arity]
   (str (get dispatch-kinds kind) name "$arity" arity))
 
+(defn typed-kind
+  "The dispatch interface kind for the typed method of a routine of KIND:
+   T for a routine's (F), S for its unchecked twin's (U)."
+  [kind]
+  (if (= "U" kind) "S" "T"))
+
 (defn class-dispatch-keys
   "[kind name arity] of each routine LOWERED-CLASS emits a callable method
-   for, and [\"T\" name arity code] of each routine's typed method."
+   for, and [kind name arity code] of each one's typed method (typed-kind)."
   [lowered-class]
   (into (sorted-set)
         (mapcat (fn [fn-node]
                   (when-not (:deferred? fn-node)
                     (when-let [[kind name arity :as k] (routine-dispatch-key (:emitted-name fn-node))]
                       (cond-> [k]
-                        (and (= "F" kind) (:typed-descriptor fn-node))
-                        (conj ["T" name arity (typed-dispatch-code (:typed-descriptor fn-node))]))))))
+                        (:typed-descriptor fn-node)
+                        (conj [(typed-kind kind) name arity
+                               (typed-dispatch-code (:typed-descriptor fn-node))]))))))
         (:methods lowered-class)))
 
 (def ^:private invariant-interface
@@ -263,7 +271,7 @@
                     (repl-fn-method-descriptor)))
   ([kind name arity code]
    (interface-bytes (dispatch-interface-name kind name arity code)
-                    (str (dispatch-routine-name "F" name arity) "$t")
+                    (str (dispatch-routine-name (if (= "S" kind) "U" "F") name arity) "$t")
                     (typed-dispatch-descriptor code))))
 
 (defn user-class-spec
@@ -1449,6 +1457,119 @@
       (do (emit-unbox-or-cast! mv (:jvm-type expr))
           (:jvm-type expr)))))
 
+(defn- emit-typed-path-call!
+  "emit-path-call! when the routine has a typed method (:typed-descriptor)
+   and scratch locals are at hand. The carrier and each argument, converted
+   to the typed parameter's type, are evaluated once into scratch locals, and
+   the object that runs the routine is found as emit-path-call! finds it.
+   Then, for each method the routine may run as, in emit-path-call!'s order
+   (the unchecked twin before the routine itself), its typed interface (S or
+   T) is tried before its boxed one (U or F), so the arguments and result
+   stay unboxed whenever the object has the typed method. Anything else is
+   runtime/dispatch-path-call, as before."
+  [^MethodVisitor mv expr state-slot]
+  (let [[carrier-ir unchecked-ir checked-ir & arg-irs] (:args expr)
+        unchecked (:value unchecked-ir)
+        checked (:value checked-ir)
+        typed-desc (:typed-descriptor expr)
+        code (typed-dispatch-code typed-desc)
+        param-types (map descriptor-jvm-type (rest (Type/getArgumentTypes ^String typed-desc)))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String typed-desc))
+        void? (= :void (:jvm-type expr))
+        object-type (ir/object-jvm-type "java/lang/Object")
+        try-keys (distinct (keep routine-dispatch-key [unchecked checked]))
+        resolve (Label.)
+        have-target (Label.)
+        end (Label.)
+        carrier-slot (alloc-scratch! object-type)
+        target-slot (alloc-scratch! object-type)
+        arg-slots (mapv alloc-scratch! param-types)
+        load-args! (fn []
+                     (doseq [[t slot] (map vector param-types arg-slots)]
+                       (.visitVarInsn mv (local-load-op t) slot)))
+        load-arg-array! (fn []
+                          (.visitLdcInsn mv (int (count arg-slots)))
+                          (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+                          (doseq [[i t slot] (map vector (range) param-types arg-slots)]
+                            (.visitInsn mv Opcodes/DUP)
+                            (.visitLdcInsn mv (int i))
+                            (.visitVarInsn mv (local-load-op t) slot)
+                            (emit-stack-coerce! mv t object-type)
+                            (.visitInsn mv Opcodes/AASTORE)))
+        finish! (fn [from]                                 ; result of type FROM -> the call's value
+                  (if void?
+                    (.visitInsn mv (if (#{:long :double} from) Opcodes/POP2 Opcodes/POP))
+                    (emit-stack-coerce! mv from (:jvm-type expr)))
+                  (.visitJumpInsn mv Opcodes/GOTO end))]
+    (emit-boxed-expr! mv carrier-ir state-slot)
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Object")
+    (.visitVarInsn mv Opcodes/ASTORE carrier-slot)
+    (doseq [[arg t slot] (map vector arg-irs param-types arg-slots)]
+      (emit-stack-coerce! mv (emit-expr! mv arg state-slot) t)
+      (.visitVarInsn mv (local-store-op t) slot))
+    ;; The object that runs it: the carrier itself when it is inside no
+    ;; other object, else the runtime's answer.
+    (.visitVarInsn mv Opcodes/ALOAD carrier-slot)
+    (.visitInsn mv Opcodes/DUP)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF carrier-interface)
+    (.visitJumpInsn mv Opcodes/IFEQ resolve)
+    (.visitInsn mv Opcodes/DUP)
+    (.visitTypeInsn mv Opcodes/CHECKCAST carrier-interface)
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE carrier-interface "__container"
+                      "()Ljava/lang/Object;" true)
+    (.visitJumpInsn mv Opcodes/IFNULL have-target)
+    (.visitLabel mv resolve)                               ; carrier
+    (emit-runtime-var! mv "path-call-target")
+    (.visitInsn mv Opcodes/SWAP)
+    (emit-call-site-cache! mv)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitLdcInsn mv ^String unchecked)
+    (.visitLdcInsn mv ^String checked)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 4) false)
+    (.visitLabel mv have-target)                           ; target
+    (.visitVarInsn mv Opcodes/ASTORE target-slot)
+    (doseq [[kind name arity] try-keys
+            :let [typed-iface (dispatch-interface-name (typed-kind kind) name arity code)
+                  boxed-iface (dispatch-interface-name kind name arity)
+                  routine (dispatch-routine-name kind name arity)
+                  no-typed (Label.)
+                  no-boxed (Label.)]]
+      (note-dispatch-key! [(typed-kind kind) name arity code])
+      (note-dispatch-key! [kind name arity])
+      (.visitVarInsn mv Opcodes/ALOAD target-slot)
+      (.visitTypeInsn mv Opcodes/INSTANCEOF typed-iface)
+      (.visitJumpInsn mv Opcodes/IFEQ no-typed)
+      (.visitVarInsn mv Opcodes/ALOAD target-slot)
+      (.visitTypeInsn mv Opcodes/CHECKCAST typed-iface)
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (load-args!)
+      (.visitMethodInsn mv Opcodes/INVOKEINTERFACE typed-iface (str routine "$t") typed-desc true)
+      (finish! return-type)
+      (.visitLabel mv no-typed)
+      (.visitVarInsn mv Opcodes/ALOAD target-slot)
+      (.visitTypeInsn mv Opcodes/INSTANCEOF boxed-iface)
+      (.visitJumpInsn mv Opcodes/IFEQ no-boxed)
+      (.visitVarInsn mv Opcodes/ALOAD target-slot)
+      (.visitTypeInsn mv Opcodes/CHECKCAST boxed-iface)
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (load-arg-array!)
+      (.visitMethodInsn mv Opcodes/INVOKEINTERFACE boxed-iface routine (repl-fn-method-descriptor) true)
+      (finish! object-type)
+      (.visitLabel mv no-boxed))
+    ;; The runtime, as before.
+    (emit-runtime-var! mv "dispatch-path-call-fallback")
+    (.visitVarInsn mv Opcodes/ALOAD carrier-slot)
+    (load-arg-array!)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitLdcInsn mv ^String unchecked)
+    (.visitLdcInsn mv ^String checked)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 5) false)
+    (finish! object-type)
+    (.visitLabel mv end)
+    (if void? :void (:jvm-type expr))))
+
 (defn- emit-path-call!
   "A call on the current object made by code running on its carrier (IR
    helper \"dispatch-path-call\": args are the carrier, the routine's
@@ -1532,7 +1653,78 @@
       (do (emit-unbox-or-cast! mv (:jvm-type expr))
           (:jvm-type expr)))))
 
+(defn- static-math-call
+  "Emit a call of java.lang.Math's static METHOD with DESCRIPTOR."
+  [method descriptor]
+  (fn [^MethodVisitor mv]
+    (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" method descriptor false)))
+
+(def ^:private numeric-intrinsics
+  "Built-in Integer and Real methods emitted as JVM instructions, by IR
+   helper name: [argument JVM types (receiver first), result JVM type, an
+   emitter of the operation on those arguments]. Only methods whose builtin
+   (nex.types.builtins) computes exactly this: Real's math methods are
+   java.lang.Math's own; Real's `abs` negates only below zero, as nex-abs
+   does, so -0.0 stays -0.0. Real's min/max (Clojure's, which treat NaN
+   differently) and Integer's abs (whose overflow error is Clojure's) are
+   left to the runtime."
+  (let [d->d (fn [m] [[:double] :double (static-math-call m "(D)D")])
+        dd->d (fn [m] [[:double :double] :double (static-math-call m "(DD)D")])]
+    (merge
+     (into {} (map (fn [[nex m]] [(str "builtin-method:Real:" nex) (d->d m)]))
+           {"sqrt" "sqrt" "cbrt" "cbrt" "exp" "exp" "log" "log" "log10" "log10"
+            "sin" "sin" "cos" "cos" "tan" "tan" "asin" "asin" "acos" "acos" "atan" "atan"
+            "to_radians" "toRadians" "to_degrees" "toDegrees" "sign" "signum"})
+     (into {} (map (fn [[nex m]] [(str "builtin-method:Real:" nex) (dd->d m)]))
+           {"power" "pow" "atan2" "atan2" "hypot" "hypot"})
+     {"builtin-method:Real:abs"
+      [[:double] :double
+       (fn [^MethodVisitor mv]
+         (let [keep (Label.)]
+           (.visitInsn mv Opcodes/DUP2)
+           (.visitInsn mv Opcodes/DCONST_0)
+           (.visitInsn mv Opcodes/DCMPG)
+           (.visitJumpInsn mv Opcodes/IFGE keep)
+           (.visitInsn mv Opcodes/DNEG)
+           (.visitLabel mv keep)))]
+      "builtin-method:Real:is_nan"
+      [[:double] :boolean
+       (fn [^MethodVisitor mv]
+         (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Double" "isNaN" "(D)Z" false))]
+      "builtin-method:Real:is_infinite"
+      [[:double] :boolean
+       (fn [^MethodVisitor mv]
+         (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Double" "isInfinite" "(D)Z" false))]
+      "builtin-method:Integer:to_real" [[:long] :double (fn [^MethodVisitor mv] (.visitInsn mv Opcodes/L2D))]
+      "builtin-method:Integer:to_integer" [[:long] :long (fn [_])]
+      "builtin-method:Integer:min" [[:long :long] :long (static-math-call "min" "(JJ)J")]
+      "builtin-method:Integer:max" [[:long :long] :long (static-math-call "max" "(JJ)J")]})))
+
+(defn- emit-numeric-intrinsic!
+  "EXPR, a call of a built-in Integer or Real method (numeric-intrinsics),
+   as JVM instructions, when its receiver is an unboxed number, so never
+   nil. Returns the result's JVM type, or nil when it does not apply."
+  [^MethodVisitor mv expr state-slot]
+  (when-let [[arg-types result emit-op] (get numeric-intrinsics (:helper expr))]
+    (let [args (:args expr)]
+      (when (and (= (count args) (count arg-types))
+                 (#{:long :double} (:jvm-type (first args))))
+        (doseq [[arg t] (map vector args arg-types)]
+          (emit-stack-coerce! mv (emit-expr! mv arg state-slot) t))
+        (emit-op mv)
+        (if (= :void (:jvm-type expr))
+          (do (.visitInsn mv (if (#{:long :double} result) Opcodes/POP2 Opcodes/POP)) :void)
+          (do (emit-stack-coerce! mv result (:jvm-type expr))
+              (:jvm-type expr)))))))
+
+(declare emit-direct-runtime-helper-call*)
+
 (defn- emit-direct-runtime-helper-call!
+  [^MethodVisitor mv expr state-slot]
+  (or (emit-numeric-intrinsic! mv expr state-slot)
+      (emit-direct-runtime-helper-call* mv expr state-slot)))
+
+(defn- emit-direct-runtime-helper-call*
   [^MethodVisitor mv expr state-slot]
   (let [helper (:helper expr)
         args (:args expr)
@@ -1543,7 +1735,9 @@
                             jvm-type)))]
     (case helper
       "call-user-method" (emit-user-method-call! mv expr state-slot)
-      "dispatch-path-call" (emit-path-call! mv expr state-slot)
+      "dispatch-path-call" (if (and (:typed-descriptor expr) *scratch-slot*)
+                             (emit-typed-path-call! mv expr state-slot)
+                             (emit-path-call! mv expr state-slot))
     (if-let [[runtime-fn spec] (get direct-runtime-helper-specs helper)]
       (do
         (emit-runtime-call! mv runtime-fn (runtime-helper-emitters mv args state-slot spec))
@@ -3401,7 +3595,9 @@
     (let [start-label (Label.)
           end-label (Label.)
           local-ranges (atom {})]
-      (binding [*local-debug-ranges* local-ranges]
+      (binding [*local-debug-ranges* local-ranges
+                ;; Top-level code: state in slot 0, its own locals above.
+                *scratch-slot* (atom (max 2 (max-ir-slot [body locals])))]
         (.visitLabel mv start-label)
         (doseq [fn-node functions
                 key-name (distinct [(:name fn-node) (:qualified-name fn-node)])
@@ -3455,7 +3651,10 @@
     (let [start-label (Label.)
           end-label (Label.)
           local-ranges (atom {})]
-      (binding [*local-debug-ranges* local-ranges]
+      (binding [*local-debug-ranges* local-ranges
+                ;; A top-level function: state in slot 0, its arguments in
+                ;; slot 1, its own locals above.
+                *scratch-slot* (atom (max 3 (max-ir-slot fn-node)))]
         (.visitLabel mv start-label)
         (emit-repl-fn-arity-check! mv fn-node 1)
         (emit-function-arg-prologue! mv fn-node 1)

@@ -5818,15 +5818,18 @@
   ([env method-def arg-irs nex-type jvm-type qualified? carrier-ir]
    (let [name-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))
          checked (lowered-instance-method-name method-def)]
-     (ir/call-runtime-node "dispatch-path-call"
-                           (into [carrier-ir
-                                  (name-const (if qualified?
-                                                checked
-                                                (unchecked-instance-method-name method-def)))
-                                  (name-const checked)]
-                                 arg-irs)
-                           nex-type
-                           jvm-type))))
+     (assoc (ir/call-runtime-node "dispatch-path-call"
+                                  (into [carrier-ir
+                                         (name-const (if qualified?
+                                                       checked
+                                                       (unchecked-instance-method-name method-def)))
+                                         (name-const checked)]
+                                        arg-irs)
+                                  nex-type
+                                  jvm-type)
+            ;; The routine's typed method (typed-method-descriptor), which
+            ;; the call tries first so its arguments and result stay unboxed.
+            :typed-descriptor (typed-method-descriptor method-def)))))
 
 (defn- overridable-self-call-ir
   "An unqualified call to an own or inherited routine an heir may override.

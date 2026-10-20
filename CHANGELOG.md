@@ -63,9 +63,22 @@
   48 ms to about 7 ms, about what the same code takes in Java, and a loop of
   two calls between objects is about 2x faster. An heir's forwarding stub for
   an inherited routine, and the checked routine of a class with an
-  invariant, are typed the same way, so calls to them are typed too. A
-  receiver that redeclares the routine with other types takes the general
-  call as before. Error traces are unchanged.
+  invariant, are typed the same way, so calls to them are typed too, and so
+  are `this.f(...)` and an unqualified call in inherited code (through
+  `nex/dispatch/S_...` for a routine's unchecked twin), and calls made from
+  top-level code and top-level functions. A receiver that redeclares the
+  routine with other types takes the general call as before. Error traces
+  are unchanged.
+- **Integer and Real math methods compile to JVM instructions.** On an
+  Integer or Real value, `to_real`, `to_integer`, Integer's `min` and `max`,
+  and Real's `sqrt`, `cbrt`, `exp`, `log`, `log10`, `power`, `sin`, `cos`,
+  `tan`, `asin`, `acos`, `atan`, `atan2`, `hypot`, `to_radians`,
+  `to_degrees`, `sign`, `abs`, `is_nan` and `is_infinite` are emitted as the
+  JVM operations they stand for (`Math.sqrt`, a long-to-double conversion,
+  ...), computing exactly what the runtime's methods compute, rather than
+  calls into the runtime with boxed values. A loop of Real arithmetic calling
+  `to_real` and `sqrt` went from about 1.1 s to about 75 ms for 20 million
+  iterations.
 - **Fix: Real's math methods (`sqrt`, `exp`, `log`, ...) no longer pay for a
   wrapper on every call.** Their signature was attached with `with-meta`,
   which wraps a function in one that rebuilds its arguments as a sequence on
