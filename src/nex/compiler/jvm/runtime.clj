@@ -2591,7 +2591,11 @@
 (def-builtin-method-wrapper builtin-method-boolean-compare "compare")
 (def-builtin-method-wrapper builtin-method-boolean-hash "hash")
 
-(def-builtin-method-wrapper builtin-method-string-length "length")
+(defn builtin-method-string-length
+  "`s.length`, called directly rather than through call-builtin-method's
+   lookup by type and name: an `across` over a String tests it per element."
+  [^String s & _]
+  (long (.length s)))
 (def-builtin-method-wrapper builtin-method-string-index-of "index_of")
 (def-builtin-method-wrapper builtin-method-string-substring "substring")
 (def-builtin-method-wrapper builtin-method-string-to-upper "to_upper")
@@ -2607,7 +2611,16 @@
 (def-builtin-method-wrapper builtin-method-string-pad-end "pad_end")
 (def-builtin-method-wrapper builtin-method-string-pad-start "pad_start")
 (def-builtin-method-wrapper builtin-method-string-replicate "replicate")
-(def-builtin-method-wrapper builtin-method-string-char-at "char_at")
+(defn builtin-method-string-char-at
+  "`s.char_at(i)`, called directly (see builtin-method-string-length). Out of
+   range is an Index_Out_Of_Bounds error, as the builtin's is."
+  [^String s idx & _]
+  (let [i (long idx)
+        n (.length s)]
+    (if (and (<= 0 i) (< i n))
+      (.charAt s (int i))
+      (throw (ex-info (str "Index " i " out of bounds for length " n)
+                      {:builtin-kind "Index_Out_Of_Bounds"})))))
 (def-builtin-method-wrapper builtin-method-string-chars "chars")
 (def-builtin-method-wrapper builtin-method-string-to-bytes "to_bytes")
 (def-builtin-method-wrapper builtin-method-string-compare "compare")

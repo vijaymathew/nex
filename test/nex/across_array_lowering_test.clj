@@ -1,7 +1,7 @@
 (ns nex.across-array-lowering-test
-  "The compiled backend lowers `across` over a statically typed Array to an
-   indexed walk (nex.lower/array-across->indexed) instead of three dynamic
-   cursor calls per element. Each case must print the same on both backends:
+  "The compiled backend lowers `across` over a statically typed Array, String
+   or Set to an indexed walk (nex.lower/indexed-across) instead of three
+   dynamic cursor calls per element. Each case must print the same on both backends:
    the interpreter still runs the cursor, so it is the reference."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
@@ -121,3 +121,71 @@ let s: Set[Integer] := #{1, 2, 3}
 let n: Integer := 0
 across s as x do n := n + 1 end
 print(n)"))))
+
+(deftest string-test
+  (is (= ["#a" "#b" "#c" "3"]
+         (both "let s: String := \"abc\"
+let n: Integer := 0
+across s as ch do
+  print(ch)
+  n := n + 1
+end
+print(n)"))))
+
+(deftest empty-string-test
+  (is (= ["\"done\""]
+         (both "across \"\" as ch do print(ch) end
+print(\"done\")"))))
+
+(deftest string-in-routine-test
+  (is (= ["3"]
+         (both "class Counter
+feature
+  vowels(s: String): Integer do
+    result := 0
+    across s as ch do
+      if ch = #a or ch = #e or ch = #i or ch = #o or ch = #u then result := result + 1 end
+    end
+  end
+end
+let c: Counter := create Counter
+print(c.vowels(\"nexus\" + \"a\"))"))))
+
+(deftest set-in-insertion-order-test
+  (is (= ["\"b\"" "\"a\"" "\"c\""]
+         (both "let s: Set[String] := #{\"b\", \"a\", \"c\"}
+across s as x do print(x) end"))))
+
+(deftest set-changed-during-loop-test
+  (testing "the loop walks a copy taken once, as the Set cursor does"
+    (is (= ["1" "2" "4"]
+           (both "let s: Set[Integer] := #{1, 2}
+across s as x do
+  print(x)
+  s.add(x + 10)
+end
+print(s.size)")))))
+
+(deftest set-field-in-generic-class-test
+  (is (= ["3"]
+         (both "class Bag[T]
+create
+  make do items := #{} end
+feature
+  items: Set[T]
+  put(x: T) do items.add(x) end
+  count_all: Integer do
+    result := 0
+    across items as x do result := result + 1 end
+  end
+end
+let b: Bag[Integer] := create Bag[Integer].make
+b.put(7)
+b.put(8)
+b.put(9)
+print(b.count_all)"))))
+
+(deftest map-still-uses-cursor-test
+  (is (= ["\"a=1\"" "\"b=2\""]
+         (both "let m: Map[String, Integer] := {\"a\": 1, \"b\": 2}
+across m as e do print(e.key + \"=\" + e.value.to_string) end"))))

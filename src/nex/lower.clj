@@ -7568,41 +7568,62 @@
       [env (ir/pop-node call-ir)])
     [env (ir/pop-node (lower-expression env stmt))]))
 
-(defn- array-across->indexed
-  "STMT, the loop an `across` over an Array desugars to, rewritten to walk the
-   array by index; or STMT unchanged when it is not one. `across xs as x`
-   desugars to cursor calls (nex.walker/handle-across-statement):
+(defn- indexed-across-plan
+  "How an `across` over a target of static type TARGET-TYPE walks it by index,
+   or nil when it keeps the cursor: {:source (fn [target] expr)
+   :source-type type :item-method name}. An Array is walked as it is, with
+   `get`; a String with `char_at`; a Set through `to_array`, a copy taken once,
+   as the Set cursor takes one at `start`. A detachable target keeps the
+   cursor, which reports a void target as it always has."
+  [target-type]
+  (when-not (tc/detachable-type? target-type)
+    (case (base-type-name target-type)
+      "Array"  {:source identity :source-type target-type :item-method "get"}
+      "String" {:source identity :source-type "String" :item-method "char_at"}
+      "Set"    {:source (fn [target] {:type :call :target target :method "to_array"
+                                      :args [] :has-parens true})
+                :source-type (cond-> {:base-type "Array"}
+                               (map? target-type)
+                               (assoc :type-args (or (:type-args target-type)
+                                                     (:type-params target-type))))
+                :item-method "get"}
+      nil)))
+
+(defn- indexed-across
+  "STMT, the loop an `across` over an Array, String or Set desugars to,
+   rewritten to walk the target by index; or STMT unchanged when it is not
+   one. `across xs as x` desugars to cursor calls
+   (nex.walker/handle-across-statement):
 
      init   let c := xs.cursor   c.start   [stop flag, with a rescue]
      until  c.at_end             [or the stop flag]
      body   let x := c.item   ...   c.next
 
-   which the runtime runs as three dynamic cursor calls per element. When xs
-   is statically an (attached) Array, the cursor's calls are replaced with the
-   ones a hand-written loop makes, on a local holding the array and an index:
-   `a.length`, `a.get(i)` and `i := i + 1`. The array is still evaluated once,
-   and its length is read on every test, as the cursor does."
+   which the runtime runs as three dynamic cursor calls per element. When the
+   target's static type has an indexed-across-plan, the cursor's calls are
+   replaced with the ones a hand-written loop makes, on a local holding the
+   source and an index: `a.length`, `a.get(i)` (or `char_at`) and
+   `i := i + 1`. The target is still evaluated once, and the length is read
+   on every test, as the cursor does."
   [env stmt]
   (let [[cursor-let & init-rest] (:init stmt)
         cursor-name (:name cursor-let)
         value (:value cursor-let)
         target (:target value)
-        target-type (when (and (= :let (:type cursor-let))
-                               (:synthetic cursor-let)
-                               (string? cursor-name)
-                               (str/starts-with? cursor-name "__across_c_")
-                               (= :call (:type value))
-                               (= "cursor" (:method value))
-                               (empty? (:args value))
-                               (some? target))
-                      (infer-type env (normalize-call-target target)))]
-    (if-not (and (= "Array" (base-type-name target-type))
-                 (not (tc/detachable-type? target-type)))
+        plan (when (and (= :let (:type cursor-let))
+                        (:synthetic cursor-let)
+                        (string? cursor-name)
+                        (str/starts-with? cursor-name "__across_c_")
+                        (= :call (:type value))
+                        (= "cursor" (:method value))
+                        (empty? (:args value))
+                        (some? target))
+               (indexed-across-plan (infer-type env (normalize-call-target target))))]
+    (if-not plan
       stmt
       (let [suffix (subs cursor-name (count "__across_c_"))
-            arr-name (str "__across_a_" suffix)
+            src-name (str "__across_a_" suffix)
             idx-name (str "__across_i_" suffix)
-            arr {:type :identifier :name arr-name}
             idx {:type :identifier :name idx-name}
             cursor-call? (fn [node]
                            (and (map? node)
@@ -7617,17 +7638,17 @@
                              (case (:method node)
                                "start"  (set-idx {:type :integer :value 0})
                                "at_end" {:type :binary :operator ">=" :left idx
-                                         :right {:type :call :target arr-name :method "length"
+                                         :right {:type :call :target src-name :method "length"
                                                  :args [] :has-parens false}}
-                               "item"   {:type :call :target arr-name :method "get"
+                               "item"   {:type :call :target src-name :method (:item-method plan)
                                          :args [idx] :has-parens true}
                                "next"   (set-idx {:type :binary :operator "+" :left idx
                                                   :right {:type :integer :value 1}})
                                node)))
             rewrite (fn [x] (walk/postwalk replace-call x))]
         (assoc stmt
-               :init (into [{:type :let :name arr-name :synthetic true
-                             :var-type target-type :value target}
+               :init (into [{:type :let :name src-name :synthetic true
+                             :var-type (:source-type plan) :value ((:source plan) target)}
                             {:type :let :name idx-name :synthetic true
                              :var-type "Integer" :value {:type :integer :value 0}}]
                            (rewrite (vec init-rest)))
@@ -7636,7 +7657,7 @@
 
 (defn- lower-loop-stmt [env stmt]
   (let [loop-env (scoped-child-env env)
-        stmt (array-across->indexed loop-env stmt)
+        stmt (indexed-across loop-env stmt)
         [env-after-init lowered-init] (lower-statements loop-env (:init stmt))
         [env-after-init invariant-start-stmts] (contract-assertions-ir env-after-init :invariant (:invariant stmt))
         [env-with-variant variant-init-stmts variant-prefix]
