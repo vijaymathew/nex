@@ -1118,13 +1118,13 @@
   ([ctx class-def obj] (check-object-invariant ctx class-def obj nil))
   ([ctx class-def obj on-entry-of]
    (when-not *validating-invariant*
-     (let [^ThreadLocal entry bi/invariant-entry-routine
-           outer (.get entry)]
-       (.set entry on-entry-of)
+     (let [^objects st (.get ^ThreadLocal bi/invariant-check-state)
+           outer (aget st 1)]
+       (aset st 1 on-entry-of)
        (try
          (binding [*validating-invariant* true]
            (check-object-invariant* ctx class-def obj))
-         (finally (.set entry outer)))))))
+         (finally (aset st 1 outer)))))))
 
 (defn- check-object-invariant*
   [ctx class-def obj]

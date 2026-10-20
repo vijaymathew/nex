@@ -380,9 +380,9 @@
            ;; The interfaces the classes implement and the call sites call
            ;; through (see nex.compiler.jvm.emit/*dispatch-keys*).
            class-bytes (into class-bytes
-                             (map (fn [[name arity]]
-                                    [(desc/binary-class-name (emit/dispatch-interface-name name arity))
-                                     (emit/compile-dispatch-interface->bytes name arity)]))
+                             (map (fn [k]
+                                    [(desc/binary-class-name (apply emit/dispatch-interface-name k))
+                                     (apply emit/compile-dispatch-interface->bytes k)]))
                              @dispatch-keys)]
        {:program-class (desc/binary-class-name program-internal-name)
         :main-class (desc/binary-class-name launcher-internal-name)

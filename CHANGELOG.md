@@ -36,6 +36,20 @@
   20 ns. A class invariant check costs about a third of what it did.
   Together these make a call in a tight loop about 3x faster, or about 7x
   faster with a small invariant.
+- **Calls between user objects are JVM interface calls in compiled code.**
+  For each routine name and arity a program uses, the compiler generates a
+  small interface (`nex/dispatch/F_<name>$<arity>`, and `U_...` for a
+  routine's unchecked twin) that every class with that routine implements, its
+  own or inherited. A call `x.f(...)` is then an interface call that the JVM
+  can inline, rather than a call by reflection: about 5 ns instead of 20 ns.
+  `this.f(...)` and an unqualified call in inherited code, which may reach an
+  heir's override, now find the object that runs the routine through the
+  object's own links (and a per-call-site cache) and call it the same way:
+  about 2.5x faster. A class invariant is checked through a fixed runtime
+  interface, also without reflection, about 2.5x faster. A nil, interpreter or
+  Java receiver takes the general path as before. A jar carries the
+  interfaces it uses as class files; two Nex jars on one classpath carry
+  identical copies, and either serves both.
 - **Built-in methods are called directly in compiled code.** A method of a
   String, Integer, Real, Char, Boolean, Byte, sized integer, Console, Process
   or Map_Entry value (`abs`, `to_upper`, `char_at`, ...) is looked up once,

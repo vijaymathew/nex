@@ -157,26 +157,43 @@
     (swap! keys conj k))
   k)
 
+(def ^:private dispatch-kinds
+  "Dispatch interface kind -> the prefix of the routine method it declares:
+   F for a routine (`__method_`), whose qualified calls check the invariant,
+   U for its unchecked twin (`__imethod_`), which a class whose hierarchy has
+   an invariant also emits, and an unqualified call prefers
+   (nex.lower/self-call-method-name)."
+  {"F" "__method_" "U" "__imethod_"})
+
 (defn routine-dispatch-key
-  "[name arity] of an emitted user routine `__method_<name>$arity<N>`, or nil
-   for any other method (a constructor, the synthetic `$invariant`, whose `$`
-   no Nex identifier has, or an unchecked `__imethod_` twin)."
+  "[kind name arity] of an emitted user routine, `__method_<name>$arity<N>`
+   (kind F) or its unchecked twin `__imethod_<name>$arity<N>` (kind U); nil
+   for any other method (a constructor, or the synthetic `$invariant`, whose
+   `$` no Nex identifier has)."
   [emitted-name]
-  (when-let [[_ name arity] (re-matches #"__method_([A-Za-z_][A-Za-z0-9_]*)\$arity(\d+)"
-                                        (str emitted-name))]
-    [name (Long/parseLong arity)]))
+  (some (fn [[kind prefix]]
+          (when-let [[_ name arity] (re-matches (re-pattern (str prefix "([A-Za-z_][A-Za-z0-9_]*)\\$arity(\\d+)"))
+                                                (str emitted-name))]
+            [kind name (Long/parseLong arity)]))
+        dispatch-kinds))
 
 (defn dispatch-interface-name
-  "Internal name of the interface every class with a routine NAME of ARITY
-   implements, so that a call `x.name(...)` can be a JVM interface call
-   whatever x's class: an heir is not a JVM subclass of its parent (it holds
-   the parent as a composition carrier), but it has the routine itself, its
-   own or a forwarding stub, with the same signature."
-  [name arity]
-  (str "nex/dispatch/F_" name "$" arity))
+  "Internal name of the interface every class with routine NAME of ARITY
+   implements (kind F, the default), or its unchecked twin (kind U), so that
+   a call of it can be a JVM interface call whatever the receiver's class:
+   an heir is not a JVM subclass of its parent (it holds the parent as a
+   composition carrier), but it has the routine itself, its own or a
+   forwarding stub, with the same signature."
+  ([name arity] (dispatch-interface-name "F" name arity))
+  ([kind name arity] (str "nex/dispatch/" kind "_" name "$" arity)))
+
+(defn dispatch-routine-name
+  "The method a dispatch interface of KIND declares for routine NAME of ARITY."
+  [kind name arity]
+  (str (get dispatch-kinds kind) name "$arity" arity))
 
 (defn class-dispatch-keys
-  "[name arity] of each routine LOWERED-CLASS emits a callable method for."
+  "[kind name arity] of each routine LOWERED-CLASS emits a callable method for."
   [lowered-class]
   (into (sorted-set)
         (keep (fn [fn-node]
@@ -184,21 +201,37 @@
                   (routine-dispatch-key (:emitted-name fn-node)))))
         (:methods lowered-class)))
 
+(def ^:private invariant-interface
+  "nex.compiler.jvm.runtime/NexInvariant, which a class with an invariant
+   implements so the runtime can call its invariant method directly."
+  "nex/compiler/jvm/runtime/NexInvariant")
+
+(def ^:private carrier-interface
+  "nex.compiler.jvm.runtime/NexCarrier, which every user class implements
+   (its `__container__`/`__outer__` getters, below)."
+  "nex/compiler/jvm/runtime/NexCarrier")
+
+(defn- has-invariant-method?
+  [lowered-class]
+  (some #(and (not (:deferred? %)) (= "__method_$invariant$arity0" (:emitted-name %)))
+        (:methods lowered-class)))
+
 (defn compile-dispatch-interface->bytes
-  "The interface for routine NAME of ARITY (see dispatch-interface-name): one
-   abstract method, `__method_<name>$arity<N>`, with the signature every
-   compiled routine has."
-  [name arity]
-  (let [cw (ClassWriter. 0)]
-    (.visit cw class-version
-            (+ Opcodes/ACC_PUBLIC Opcodes/ACC_INTERFACE Opcodes/ACC_ABSTRACT)
-            (dispatch-interface-name name arity) nil "java/lang/Object" nil)
-    (-> (.visitMethod cw (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
-                      (str "__method_" name "$arity" arity)
-                      (repl-fn-method-descriptor) nil nil)
-        (.visitEnd))
-    (.visitEnd cw)
-    (.toByteArray cw)))
+  "The dispatch interface of KIND (F by default) for routine NAME of ARITY
+   (see dispatch-interface-name): one abstract method, with the signature
+   every compiled routine has."
+  ([name arity] (compile-dispatch-interface->bytes "F" name arity))
+  ([kind name arity]
+   (let [cw (ClassWriter. 0)]
+     (.visit cw class-version
+             (+ Opcodes/ACC_PUBLIC Opcodes/ACC_INTERFACE Opcodes/ACC_ABSTRACT)
+             (dispatch-interface-name kind name arity) nil "java/lang/Object" nil)
+     (-> (.visitMethod cw (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
+                       (dispatch-routine-name kind name arity)
+                       (repl-fn-method-descriptor) nil nil)
+         (.visitEnd))
+     (.visitEnd cw)
+     (.toByteArray cw))))
 
 (defn user-class-spec
   ([class-spec] (user-class-spec class-spec {}))
@@ -208,10 +241,13 @@
     :source-file (:source-file class-spec)
     :super-name (or (:java-super-class class-spec) "java/lang/Object")
     :interfaces (vec (concat (:interfaces class-spec)
-                             (map (fn [[name arity :as k]]
+                             (map (fn [k]
                                     (note-dispatch-key! k)
-                                    (dispatch-interface-name name arity))
-                                  (class-dispatch-keys class-spec))))
+                                    (apply dispatch-interface-name k))
+                                  (class-dispatch-keys class-spec))
+                             (when (has-invariant-method? class-spec)
+                               [invariant-interface])
+                             [carrier-interface]))
     :flags Opcodes/ACC_PUBLIC
     :fields (vec
              (concat
@@ -308,7 +344,19 @@
                        :runtime-type-fields (:runtime-type-fields class-spec)
                        :fields (:fields class-spec)})
                     (:java-super-ctor-forwards class-spec))
-               [{:name "set_outer"
+               [{:name "__container"
+                 :descriptor "()Ljava/lang/Object;"
+                 :flags Opcodes/ACC_PUBLIC
+                 :kind :field-getter
+                 :field "__container__"
+                 :owner (:internal-name class-spec)}
+                {:name "__outer"
+                 :descriptor "()Ljava/lang/Object;"
+                 :flags Opcodes/ACC_PUBLIC
+                 :kind :field-getter
+                 :field "__outer__"
+                 :owner (:internal-name class-spec)}
+                {:name "set_outer"
                  :descriptor "(Ljava/lang/Object;)V"
                  :flags Opcodes/ACC_PUBLIC
                  :kind :set-outer
@@ -1207,7 +1255,7 @@
         iface (dispatch-interface-name method-name arity)
         slow (Label.)
         done (Label.)]
-    (note-dispatch-key! [method-name arity])
+    (note-dispatch-key! ["F" method-name arity])
     (emit-boxed-expr! mv target-ir state-slot)          ; target
     (emit-boxed-arg-array! mv (vec arg-irs) state-slot)  ; target args
     (.visitInsn mv Opcodes/DUP2)                         ; target args target args
@@ -1241,6 +1289,89 @@
       (do (emit-unbox-or-cast! mv (:jvm-type expr))
           (:jvm-type expr)))))
 
+(defn- emit-path-call!
+  "A call on the current object made by code running on its carrier (IR
+   helper \"dispatch-path-call\": args are the carrier, the routine's
+   unchecked and checked JVM names, then the call's own arguments): `this.f`,
+   or an unqualified call an heir may override. The runtime picks the object
+   that runs it (runtime/path-call-target); the call is then a JVM interface
+   call on that object, through the unchecked twin's interface when the
+   unchecked name is one and the object has it, else the routine's. Anything
+   else is runtime/dispatch-path-call, as before. The carrier and the
+   arguments are evaluated once. Returns the result's JVM type."
+  [^MethodVisitor mv expr state-slot]
+  (let [[carrier-ir unchecked-ir checked-ir & arg-irs] (:args expr)
+        unchecked (:value unchecked-ir)
+        checked (:value checked-ir)
+        try-keys (distinct (keep routine-dispatch-key [unchecked checked]))
+        resolve (Label.)
+        dispatch (Label.)
+        slow (Label.)
+        done (Label.)]
+    (emit-boxed-expr! mv carrier-ir state-slot)            ; carrier
+    ;; Typed Object from here on: the carrier and the runtime's answer meet at
+    ;; `dispatch`, and a frame merging the carrier's own class with Object
+    ;; makes ASM look that class up, which may not be loaded yet.
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Object")
+    (emit-boxed-arg-array! mv (vec arg-irs) state-slot)    ; carrier args
+    (.visitInsn mv Opcodes/DUP2)
+    (.visitInsn mv Opcodes/POP)                            ; carrier args carrier
+    ;; A carrier inside no other object (any object not part of an heir's)
+    ;; runs the routine itself: no need to ask the runtime.
+    (.visitInsn mv Opcodes/DUP)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF carrier-interface)
+    (.visitJumpInsn mv Opcodes/IFEQ resolve)
+    (.visitInsn mv Opcodes/DUP)
+    (.visitTypeInsn mv Opcodes/CHECKCAST carrier-interface)
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE carrier-interface "__container"
+                      "()Ljava/lang/Object;" true)
+    (.visitJumpInsn mv Opcodes/IFNULL dispatch)            ; carrier args carrier(=target)
+    (.visitLabel mv resolve)                               ; carrier args carrier
+    (emit-runtime-var! mv "path-call-target")
+    (.visitInsn mv Opcodes/SWAP)                           ; carrier args var carrier
+    (emit-call-site-cache! mv)
+    (.visitInsn mv Opcodes/SWAP)                           ; carrier args var site carrier
+    (.visitLdcInsn mv ^String unchecked)
+    (.visitLdcInsn mv ^String checked)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 4) false) ; carrier args target
+    (.visitLabel mv dispatch)
+    (doseq [[kind name arity :as k] try-keys
+            :let [iface (dispatch-interface-name kind name arity)
+                  next-try (Label.)]]
+      (note-dispatch-key! k)
+      (.visitInsn mv Opcodes/DUP)
+      (.visitTypeInsn mv Opcodes/INSTANCEOF iface)
+      (.visitJumpInsn mv Opcodes/IFEQ next-try)
+      ;; carrier args target -> iface state args
+      (.visitTypeInsn mv Opcodes/CHECKCAST iface)
+      (.visitInsn mv Opcodes/DUP_X2)                       ; iface carrier args iface
+      (.visitInsn mv Opcodes/POP)                          ; iface carrier args
+      (.visitInsn mv Opcodes/SWAP)                         ; iface args carrier
+      (.visitInsn mv Opcodes/POP)                          ; iface args
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (.visitInsn mv Opcodes/SWAP)                         ; iface state args
+      (.visitMethodInsn mv Opcodes/INVOKEINTERFACE iface
+                        (dispatch-routine-name kind name arity)
+                        (repl-fn-method-descriptor) true)
+      (.visitJumpInsn mv Opcodes/GOTO done)
+      (.visitLabel mv next-try))
+    (.visitLabel mv slow)
+    (.visitInsn mv Opcodes/POP)                            ; carrier args
+    (emit-runtime-var! mv "dispatch-path-call-fallback")
+    (.visitInsn mv Opcodes/DUP_X2)
+    (.visitInsn mv Opcodes/POP)                            ; var carrier args
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitLdcInsn mv ^String unchecked)
+    (.visitLdcInsn mv ^String checked)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 5) false)
+    (.visitLabel mv done)
+    (if (= :void (:jvm-type expr))
+      (do (.visitInsn mv Opcodes/POP) :void)
+      (do (emit-unbox-or-cast! mv (:jvm-type expr))
+          (:jvm-type expr)))))
+
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
   (let [helper (:helper expr)
@@ -1250,8 +1381,9 @@
                         (do (.visitInsn mv Opcodes/POP) :void)
                         (do (emit-unbox-or-cast! mv jvm-type)
                             jvm-type)))]
-    (if (= helper "call-user-method")
-      (emit-user-method-call! mv expr state-slot)
+    (case helper
+      "call-user-method" (emit-user-method-call! mv expr state-slot)
+      "dispatch-path-call" (emit-path-call! mv expr state-slot)
     (if-let [[runtime-fn spec] (get direct-runtime-helper-specs helper)]
       (do
         (emit-runtime-call! mv runtime-fn (runtime-helper-emitters mv args state-slot spec))
@@ -3417,9 +3549,21 @@
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
 
+(defn- emit-field-getter!
+  "A no-argument method returning the Object-typed field (:field) of `this`."
+  [^ClassWriter cw {:keys [name descriptor owner field]}]
+  (let [^MethodVisitor mv (.visitMethod cw Opcodes/ACC_PUBLIC name descriptor nil nil)]
+    (.visitCode mv)
+    (.visitVarInsn mv Opcodes/ALOAD 0)
+    (.visitFieldInsn mv Opcodes/GETFIELD owner field "Ljava/lang/Object;")
+    (.visitInsn mv Opcodes/ARETURN)
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
 (defn emit-method!
   [^ClassWriter cw method-spec]
   (case (:kind method-spec)
+    :field-getter (emit-field-getter! cw method-spec)
     :object-equals (emit-object-equals! cw method-spec)
     :object-hash-code (emit-object-hash-code! cw method-spec)
     :default-constructor (emit-default-constructor! cw method-spec)
