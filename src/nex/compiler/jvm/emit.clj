@@ -1014,6 +1014,30 @@
     :else
     nil))
 
+(def ^:private call-site-counter
+  "Numbers the call-site caches, so that each is a distinct constant: ASM
+   merges identical dynamic constants into one constant-pool entry, which
+   would make every call site in a class share one cache."
+  (atom 0))
+
+(def ^:private atomic-reference-ctor
+  (org.objectweb.asm.Handle. Opcodes/H_NEWINVOKESPECIAL
+                             "java/util/concurrent/atomic/AtomicReference"
+                             "<init>"
+                             "()V"
+                             false))
+
+(defn- emit-call-site-cache!
+  "Push this call site's own cache, an empty AtomicReference made the first
+   time the site runs and kept by the JVM as a dynamic constant (see
+   nex.compiler.jvm.runtime/call-user-method)."
+  [^MethodVisitor mv]
+  (.visitLdcInsn mv (org.objectweb.asm.ConstantDynamic.
+                     (str "site" (swap! call-site-counter inc))
+                     "Ljava/util/concurrent/atomic/AtomicReference;"
+                     constant-bootstraps-invoke
+                     (object-array [atomic-reference-ctor]))))
+
 (defn- runtime-helper-emitters
   "Build the ordered emitter list for a direct runtime-helper call from a
    compact spec (see direct-runtime-helper-specs)."
@@ -1022,6 +1046,7 @@
         (fn [tok]
           (case tok
             :state      [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))]
+            :site-cache [(fn [] (emit-call-site-cache! mv))]
             :e0         [(fn [] (emit-expr! mv (first args) state-slot))]
             :b0         [(fn [] (emit-boxed-expr! mv (first args) state-slot))]
             :b1         [(fn [] (emit-boxed-expr! mv (second args) state-slot))]
@@ -1072,7 +1097,7 @@
    "java-get-static-field"                   ["java-get-static-field" [:state :b0 :b1]]
    "validate-object-state"                   ["validate-object-state" [:state :b0 :b1]]
    "validate-object-state-on-entry"          ["validate-object-state-on-entry" [:state :b0 :b1]]
-   "call-user-method"                        ["call-user-method" [:state :b0 :b1 :b2 :args-drop3]]
+   "call-user-method"                        ["call-user-method" [:state :site-cache :b0 :b1 :b2 :args-drop3]]
    "dispatch-self-call"                      ["dispatch-self-call" [:state :b0 :b1 :b2 :args-drop3]]
    "dispatch-path-call"                      ["dispatch-path-call" [:state :b0 :b1 :b2 :args-drop3]]
    "op:string-concat"                        ["string-concat" [:state :args]]

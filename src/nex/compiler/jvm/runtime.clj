@@ -1212,7 +1212,11 @@
                                     (reify java.util.function.Function
                                       (apply [_ _]
                                         (try
-                                          (.getDeclaredMethod cls lowered-name user-method-param-types)
+                                          ;; Accessible once, here: otherwise every reflective
+                                          ;; call re-runs Java's access check, which compares
+                                          ;; the caller's and the class's packages by name.
+                                          (doto (.getDeclaredMethod cls lowered-name user-method-param-types)
+                                            (.setAccessible true))
                                           (catch NoSuchMethodException _ false))))))]
     (when found found)))
 
@@ -1276,12 +1280,22 @@
    it) this is one cached lookup and the call. Anything else — a nil or
    interpreter receiver, a routine found only on a composition parent, a
    builtin fallback — takes the general invoke-user-method path."
-  [state ^String lowered-name method-name target ^objects args]
-  (if-let [method (and (some? target)
-                       (not (interp-object? target))
-                       (declared-user-method (.getClass ^Object target) lowered-name))]
-    (invoke-reflective! method target (method-args state args))
-    (invoke-user-method state target method-name (vec args))))
+  [state ^java.util.concurrent.atomic.AtomicReference site ^String lowered-name
+   method-name target ^objects args]
+  (if (nil? target)
+    (invoke-user-method state target method-name (vec args))
+    (let [cls (.getClass ^Object target)
+          ;; SITE remembers [class method] from this call site's last call.
+          ;; A site nearly always sees one class, so this skips the lookup.
+          ^objects hit (when site (.get site))]
+      (if (and hit (identical? cls (aget hit 0)))
+        (invoke-reflective! (aget hit 1) target (method-args state args))
+        (if-let [method (and (not (interp-object? target))
+                             (declared-user-method cls lowered-name))]
+          (do
+            (when site (.set site (object-array [cls method])))
+            (invoke-reflective! method target (method-args state args)))
+          (invoke-user-method state target method-name (vec args)))))))
 
 (defn dispatch-self-call
   "An unqualified call made by code running on a composition carrier, so on
@@ -3251,7 +3265,7 @@
    "call-user-method"
    (fn [state args]
      (let [[lowered-name method-name target & call-args] args]
-       (call-user-method state lowered-name method-name target (object-array call-args))))
+       (call-user-method state nil lowered-name method-name target (object-array call-args))))
 
    "shallow-copy-collection"
    (fn [_state args] (shallow-copy-collection (first args)))

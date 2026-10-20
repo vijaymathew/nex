@@ -29,7 +29,11 @@
   `x.f(...)` on a user object no longer builds the routine's name or walks
   its arguments on every call, and compiled code no longer looks up each
   runtime helper by name on every call (the lookup is now done once per call
-  site). A class invariant check costs about a third of what it did.
+  site). Each call site also remembers the routine it last called and for
+  which class, so a call on an object of the same class as last time skips
+  the lookup altogether, and Java's per-call access check is no longer run;
+  a call between two objects inside a routine went from about 33 ns to about
+  20 ns. A class invariant check costs about a third of what it did.
   Together these make a call in a tight loop about 3x faster, or about 7x
   faster with a small invariant.
 - **Built-in methods are called directly in compiled code.** A method of a
