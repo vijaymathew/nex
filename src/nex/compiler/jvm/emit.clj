@@ -11,6 +11,7 @@
   and debug metadata such as source files, line tables, and local variables."
   (:require [clojure.set :as set]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir]
             [nex.types.builtins :as bi])
@@ -183,9 +184,28 @@
    a call of it can be a JVM interface call whatever the receiver's class:
    an heir is not a JVM subclass of its parent (it holds the parent as a
    composition carrier), but it has the routine itself, its own or a
-   forwarding stub, with the same signature."
+   forwarding stub, with the same signature. Kind T, with CODE (see
+   typed-dispatch-code), is for the routine's typed method."
   ([name arity] (dispatch-interface-name "F" name arity))
-  ([kind name arity] (str "nex/dispatch/" kind "_" name "$" arity)))
+  ([kind name arity] (str "nex/dispatch/" kind "_" name "$" arity))
+  ([kind name arity code] (str "nex/dispatch/" kind "_" name "$" arity "$" code)))
+
+(defn typed-dispatch-code
+  "A typed method descriptor (nex.lower/typed-method-descriptor) as a short
+   code for its T interface's name: a letter per parameter after the state,
+   `_`, then the result's (J long, D double, Z boolean, C char, L Object)."
+  [^String typed-desc]
+  (let [letter (fn [^Type t] (if (= Type/OBJECT (.getSort t)) "L" (.getDescriptor t)))]
+    (str (apply str (map letter (rest (Type/getArgumentTypes typed-desc))))
+         "_"
+         (letter (Type/getReturnType typed-desc)))))
+
+(defn- typed-dispatch-descriptor
+  "The typed method descriptor a T interface's CODE stands for."
+  [^String code]
+  (let [[params ret] (str/split code #"_" -1)
+        desc (fn [c] (if (= "L" (str c)) "Ljava/lang/Object;" (str c)))]
+    (str "(Lnex/compiler/jvm/runtime/NexReplState;" (apply str (map desc params)) ")" (desc ret))))
 
 (defn dispatch-routine-name
   "The method a dispatch interface of KIND declares for routine NAME of ARITY."
@@ -193,12 +213,16 @@
   (str (get dispatch-kinds kind) name "$arity" arity))
 
 (defn class-dispatch-keys
-  "[kind name arity] of each routine LOWERED-CLASS emits a callable method for."
+  "[kind name arity] of each routine LOWERED-CLASS emits a callable method
+   for, and [\"T\" name arity code] of each routine's typed method."
   [lowered-class]
   (into (sorted-set)
-        (keep (fn [fn-node]
-                (when-not (:deferred? fn-node)
-                  (routine-dispatch-key (:emitted-name fn-node)))))
+        (mapcat (fn [fn-node]
+                  (when-not (:deferred? fn-node)
+                    (when-let [[kind name arity :as k] (routine-dispatch-key (:emitted-name fn-node))]
+                      (cond-> [k]
+                        (and (= "F" kind) (:typed-descriptor fn-node))
+                        (conj ["T" name arity (typed-dispatch-code (:typed-descriptor fn-node))]))))))
         (:methods lowered-class)))
 
 (def ^:private invariant-interface
@@ -216,22 +240,31 @@
   (some #(and (not (:deferred? %)) (= "__method_$invariant$arity0" (:emitted-name %)))
         (:methods lowered-class)))
 
+(defn- interface-bytes
+  [internal-name method-name descriptor]
+  (let [cw (ClassWriter. 0)]
+    (.visit cw class-version
+            (+ Opcodes/ACC_PUBLIC Opcodes/ACC_INTERFACE Opcodes/ACC_ABSTRACT)
+            internal-name nil "java/lang/Object" nil)
+    (-> (.visitMethod cw (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT) method-name descriptor nil nil)
+        (.visitEnd))
+    (.visitEnd cw)
+    (.toByteArray cw)))
+
 (defn compile-dispatch-interface->bytes
   "The dispatch interface of KIND (F by default) for routine NAME of ARITY
    (see dispatch-interface-name): one abstract method, with the signature
-   every compiled routine has."
+   every compiled routine has; or, for kind T and CODE, the routine's typed
+   method."
   ([name arity] (compile-dispatch-interface->bytes "F" name arity))
   ([kind name arity]
-   (let [cw (ClassWriter. 0)]
-     (.visit cw class-version
-             (+ Opcodes/ACC_PUBLIC Opcodes/ACC_INTERFACE Opcodes/ACC_ABSTRACT)
-             (dispatch-interface-name kind name arity) nil "java/lang/Object" nil)
-     (-> (.visitMethod cw (+ Opcodes/ACC_PUBLIC Opcodes/ACC_ABSTRACT)
-                       (dispatch-routine-name kind name arity)
-                       (repl-fn-method-descriptor) nil nil)
-         (.visitEnd))
-     (.visitEnd cw)
-     (.toByteArray cw))))
+   (interface-bytes (dispatch-interface-name kind name arity)
+                    (dispatch-routine-name kind name arity)
+                    (repl-fn-method-descriptor)))
+  ([kind name arity code]
+   (interface-bytes (dispatch-interface-name kind name arity code)
+                    (str (dispatch-routine-name "F" name arity) "$t")
+                    (typed-dispatch-descriptor code))))
 
 (defn user-class-spec
   ([class-spec] (user-class-spec class-spec {}))
@@ -1240,6 +1273,127 @@
    "select-sleep-step"                       ["select-sleep-step!" []]
    "__datetime_make"                           ["builtin-datetime-make-from-array" [:args]]})
 
+(declare descriptor-jvm-type)
+
+(def ^:dynamic *scratch-slot*
+  "While a routine's method is emitted, an atom of the next local slot free
+   for scratch values (above every slot its IR uses, see
+   with-scratch-slots); nil elsewhere, where code that wants one does without."
+  nil)
+
+(defn- max-ir-slot
+  "One past the highest local slot that IR (any nested node) names, by a
+   :slot or :*-slot key, counting a long or double as two."
+  [ir]
+  (let [hi (atom 0)]
+    (walk/postwalk (fn [x]
+                     (when (map? x)
+                       (doseq [[k v] x
+                               :when (and (integer? v) (keyword? k)
+                                          (or (= k :slot) (str/ends-with? (name k) "-slot")))]
+                         (swap! hi max (+ v (if (#{:long :double} (:jvm-type x)) 2 1)))))
+                     x)
+                   ir)
+    @hi))
+
+(defn- alloc-scratch!
+  "A scratch local for a value of JVM-TYPE (see *scratch-slot*)."
+  [jvm-type]
+  (let [slot @*scratch-slot*]
+    (swap! *scratch-slot* + (if (#{:long :double} jvm-type) 2 1))
+    slot))
+
+(defn- emit-typed-user-method-call!
+  "emit-user-method-call! when the target's static type gives the routine a
+   typed method (:typed-descriptor) and scratch locals are at hand. The
+   target and each argument, converted to the typed parameter's type, are
+   evaluated once into scratch locals; then, when the target implements the
+   routine's T interface, the call is to its typed method, the arguments
+   passed and the result returned unboxed. Otherwise the arguments are boxed
+   into an array and the call goes on as emit-user-method-call!'s does."
+  [^MethodVisitor mv expr state-slot]
+  (let [[lowered-ir name-ir target-ir & arg-irs] (:args expr)
+        method-name (:value name-ir)
+        arity (count arg-irs)
+        typed-desc (:typed-descriptor expr)
+        code (typed-dispatch-code typed-desc)
+        t-iface (dispatch-interface-name "T" method-name arity code)
+        f-iface (dispatch-interface-name method-name arity)
+        param-types (map descriptor-jvm-type (rest (Type/getArgumentTypes ^String typed-desc)))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String typed-desc))
+        void? (= :void (:jvm-type expr))
+        boxed (Label.)
+        slow (Label.)
+        done (Label.)
+        end (Label.)
+        target-slot (alloc-scratch! (ir/object-jvm-type "java/lang/Object"))
+        arg-slots (mapv alloc-scratch! param-types)]
+    (note-dispatch-key! ["T" method-name arity code])
+    (note-dispatch-key! ["F" method-name arity])
+    (emit-boxed-expr! mv target-ir state-slot)
+    (.visitVarInsn mv Opcodes/ASTORE target-slot)
+    (doseq [[arg t slot] (map vector arg-irs param-types arg-slots)]
+      (emit-stack-coerce! mv (emit-expr! mv arg state-slot) t)
+      (.visitVarInsn mv (local-store-op t) slot))
+    ;; The typed call.
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF t-iface)
+    (.visitJumpInsn mv Opcodes/IFEQ boxed)
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitTypeInsn mv Opcodes/CHECKCAST t-iface)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (doseq [[t slot] (map vector param-types arg-slots)]
+      (.visitVarInsn mv (local-load-op t) slot))
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE t-iface
+                      (str "__method_" method-name "$arity" arity "$t") typed-desc true)
+    (if void?
+      (.visitInsn mv (if (#{:long :double} return-type) Opcodes/POP2 Opcodes/POP))
+      (emit-stack-coerce! mv return-type (:jvm-type expr)))
+    (.visitJumpInsn mv Opcodes/GOTO end)
+    ;; Boxed: the arguments into an array, then the routine's interface or
+    ;; the runtime.
+    (.visitLabel mv boxed)
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitLdcInsn mv (int arity))
+    (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+    (doseq [[i t slot] (map vector (range) param-types arg-slots)]
+      (.visitInsn mv Opcodes/DUP)
+      (.visitLdcInsn mv (int i))
+      (.visitVarInsn mv (local-load-op t) slot)
+      (emit-stack-coerce! mv t (ir/object-jvm-type "java/lang/Object"))
+      (.visitInsn mv Opcodes/AASTORE))                     ; target args
+    (.visitInsn mv Opcodes/DUP2)
+    (.visitInsn mv Opcodes/POP)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF f-iface)
+    (.visitJumpInsn mv Opcodes/IFEQ slow)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitTypeInsn mv Opcodes/CHECKCAST f-iface)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitInsn mv Opcodes/SWAP)
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE f-iface
+                      (str "__method_" method-name "$arity" arity)
+                      (repl-fn-method-descriptor) true)
+    (.visitJumpInsn mv Opcodes/GOTO done)
+    (.visitLabel mv slow)
+    (emit-runtime-var! mv "call-user-method-fallback")
+    (.visitInsn mv Opcodes/DUP_X2)
+    (.visitInsn mv Opcodes/POP)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (emit-call-site-cache! mv)
+    (emit-boxed-expr! mv lowered-ir state-slot)
+    (emit-boxed-expr! mv name-ir state-slot)
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      (runtime-invoke-descriptor 6) false)
+    (.visitLabel mv done)
+    (if void?
+      (.visitInsn mv Opcodes/POP)
+      (emit-unbox-or-cast! mv (:jvm-type expr)))
+    (.visitLabel mv end)
+    (if void? :void (:jvm-type expr))))
+
+(declare emit-boxed-user-method-call!)
+
 (defn- emit-user-method-call!
   "A qualified call `x.f(args)` on a user object (IR helper
    \"call-user-method\": args are the routine's JVM name, its Nex name, the
@@ -1248,6 +1402,12 @@
    inline; otherwise (nil, an interpreter object, a Java object) it is
    runtime/call-user-method, as before. The target and the arguments are
    evaluated once, before the test. Returns the result's JVM type."
+  [^MethodVisitor mv expr state-slot]
+  (if (and (:typed-descriptor expr) *scratch-slot*)
+    (emit-typed-user-method-call! mv expr state-slot)
+    (emit-boxed-user-method-call! mv expr state-slot)))
+
+(defn- emit-boxed-user-method-call!
   [^MethodVisitor mv expr state-slot]
   (let [[lowered-ir name-ir target-ir & arg-irs] (:args expr)
         method-name (:value name-ir)
@@ -3347,7 +3507,8 @@
           local-ranges (atom {})]
       (.visitCode mv)
       (binding [*local-debug-ranges* local-ranges
-                *typed-return* return-type]
+                *typed-return* return-type
+                *scratch-slot* (atom (max (last temp-slots) (max-ir-slot fn-node)))]
         (.visitLabel mv start-label)
         ;; The incoming slots overlap the body's: move each argument out to a
         ;; temporary first, then into its local, converting it to the
@@ -3413,7 +3574,8 @@
     (let [start-label (Label.)
           end-label (Label.)
           local-ranges (atom {})]
-      (binding [*local-debug-ranges* local-ranges]
+      (binding [*local-debug-ranges* local-ranges
+                *scratch-slot* (atom (max 3 (max-ir-slot fn-node)))]
         (.visitLabel mv start-label)
         (emit-function-arg-prologue! mv fn-node 2)
         (doseq [stmt (:body fn-node)]

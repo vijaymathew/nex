@@ -50,6 +50,24 @@
   Java receiver takes the general path as before. A jar carries the
   interfaces it uses as class files; two Nex jars on one classpath carry
   identical copies, and either serves both.
+- **Routines take and return Integer, Real, Boolean and Char unboxed in
+  compiled code.** Each class routine is compiled to a typed method, whose
+  parameters and result are JVM `long`, `double`, `boolean` or `char` where
+  declared as one of these types, and a wrapper of the general
+  `(state, Object[]) -> Object` signature that interfaces and the runtime
+  call. An unqualified call to a routine of the object's own class, and a
+  call `x.f(...)` whose receiver has the routine as `x`'s static type
+  declares it (through a typed dispatch interface,
+  `nex/dispatch/T_<name>$<arity>$<types>`), call the typed method directly:
+  no argument array and no boxing. A recursive `fib(32)` went from about
+  48 ms to about 7 ms, about what the same code takes in Java, and a loop of
+  two calls between objects is about 2x faster. A receiver that inherits the
+  routine, or redeclares it with other types, takes the general call as
+  before. Error traces are unchanged.
+- **Fix: Real's math methods (`sqrt`, `exp`, `log`, ...) no longer pay for a
+  wrapper on every call.** Their signature was attached with `with-meta`,
+  which wraps a function in one that rebuilds its arguments as a sequence on
+  each call.
 - **Built-in methods are called directly in compiled code.** A method of a
   String, Integer, Real, Char, Boolean, Byte, sized integer, Console, Process
   or Map_Entry value (`abs`, `to_upper`, `char_at`, ...) is looked up once,

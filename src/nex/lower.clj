@@ -28,7 +28,7 @@
 (declare lower-statements)
 (declare lower-create-expr)
 (declare lower-call-expr)
-(declare dispatch-path-call-ir lower-expr-identifier* typed-call-virtual-node)
+(declare dispatch-path-call-ir lower-expr-identifier* typed-call-virtual-node typed-method-descriptor)
 (declare lower-member-assign-stmt)
 (declare lower-call-stmt)
 (declare lower-loop-stmt)
@@ -4781,16 +4781,22 @@
   "IR for a qualified call `target.method(args)` on a user object, dispatched
    at run time on the receiver's class (an heir's object need not be a JVM
    subtype of the static type, so there is no direct call to emit). The
-   routine's JVM name is worked out here, once, rather than on every call."
-  [method target-ir arg-irs nex-type jvm-type]
-  (let [string-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
-    (ir/call-runtime-node "call-user-method"
-                          (into [(string-const (str "__method_" method "$arity" (count arg-irs)))
-                                 (string-const method)
-                                 target-ir]
-                                arg-irs)
-                          nex-type
-                          jvm-type)))
+   routine's JVM name is worked out here, once, rather than on every call.
+   METHOD-DEF, the routine as the target's static type declares it, gives
+   the typed method's descriptor (typed-method-descriptor), which the call
+   tries first so its arguments and result need no boxing."
+  ([method target-ir arg-irs nex-type jvm-type]
+   (user-method-call-ir method target-ir arg-irs nex-type jvm-type nil))
+  ([method target-ir arg-irs nex-type jvm-type method-def]
+   (let [string-const (fn [s] (ir/const-node s "String" (ir/object-jvm-type "java/lang/String")))]
+     (cond-> (ir/call-runtime-node "call-user-method"
+                                   (into [(string-const (str "__method_" method "$arity" (count arg-irs)))
+                                          (string-const method)
+                                          target-ir]
+                                         arg-irs)
+                                   nex-type
+                                   jvm-type)
+       method-def (assoc :typed-descriptor (typed-method-descriptor method-def))))))
 
 (defn- lower-instance-user-field-get
   [env target-expr method base-type target-ir field-def type-map]
@@ -4828,7 +4834,7 @@
 
       :else
       (user-method-call-ir method target-ir (mapv #(lower-expression env %) args)
-                           nex-type jvm-type))))
+                           nex-type jvm-type method-def))))
 
 (defn- lower-instance-inherited-parent-call
   "`this.m(...)` where M is not declared/inherited on the class itself but is a
@@ -6827,7 +6833,7 @@
     ;; without parentheses (Nex allows `x.describe` for a no-arg call), so
     ;; resolution — not punctuation — decides method vs field.
     (if method-def
-      (user-method-call-ir (:method expr) target-ir arg-irs nex-type jvm-type)
+      (user-method-call-ir (:method expr) target-ir arg-irs nex-type jvm-type method-def)
       (ir/call-runtime-node (str "user-field-get:" (:method expr))
                             [target-ir]
                             nex-type

@@ -19,8 +19,7 @@
    followed by the next entry's tag byte, never a name character."
   [^bytes bytecode]
   (into #{}
-        (map first)
-        (re-seq #"nex/dispatch/[FU]_([A-Za-z_][A-Za-z0-9_]*)\$(\d+)"
+        (re-seq #"nex/dispatch/(?:T_[A-Za-z_][A-Za-z0-9_]*\$\d+\$[JDZCL]*_[JDZCL]|[FU]_[A-Za-z_][A-Za-z0-9_]*\$\d+)"
                 (String. bytecode java.nio.charset.StandardCharsets/ISO_8859_1))))
 
 (defn- ensure-dispatch-interface!
@@ -33,10 +32,12 @@
   (locking dispatch-interfaces-defined
     (let [defined (or (.get ^java.util.WeakHashMap dispatch-interfaces-defined loader) #{})]
       (when-not (contains? defined internal-name)
-        (let [[_ kind method arity] (re-matches #"nex/dispatch/([FU])_(.+)\$(\d+)" internal-name)]
-          (.defineClass loader (.replace internal-name \/ \.)
-                        (emit/compile-dispatch-interface->bytes kind method (Long/parseLong arity))
-                        nil))
+        (.defineClass loader (.replace internal-name \/ \.)
+                      (if-let [[_ method arity code] (re-matches #"nex/dispatch/T_(.+)\$(\d+)\$([JDZCL]*_[JDZCL])" internal-name)]
+                        (emit/compile-dispatch-interface->bytes "T" method (Long/parseLong arity) code)
+                        (let [[_ kind method arity] (re-matches #"nex/dispatch/([FU])_(.+)\$(\d+)" internal-name)]
+                          (emit/compile-dispatch-interface->bytes kind method (Long/parseLong arity))))
+                      nil)
         (.put ^java.util.WeakHashMap dispatch-interfaces-defined loader (conj defined internal-name))))))
 
 (defn define-class!
