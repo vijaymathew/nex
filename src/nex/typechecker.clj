@@ -5760,7 +5760,9 @@
                (= :call (:type value))
                (= "cursor" (:method value))
                (empty? (:args value)))
-      (env-add-across-cursor env name (cursor-item-type env (check-expression env (:target value)))))
+      ;; Through any alias, so `across v` over a `Vector = Array[Real]`
+      ;; yields Reals, not Any.
+      (env-add-across-cursor env name (cursor-item-type env (expand-type-aliases env (check-expression env (:target value))))))
     (when (= name "result")
       (maybe-update-spawn-result! env inferred-type))))
 
@@ -6991,7 +6993,9 @@
             normal-path-inits? (result-definitely-assigned-in-body? body false)
             rescue-path-inits? (when rescue (result-definitely-assigned-in-body? rescue false))]
         (when (and return-type
-                   (attached-non-scalar-type? return-type)
+                   ;; Through any alias: `Vector = Array[Real]` has the Array's
+                   ;; zero value, an empty array, as `Array[Real]` itself does.
+                   (attached-non-scalar-type? (expand-type-aliases method-env return-type))
                    (or (and normal-path-returns? (not normal-path-inits?))
                        (and rescue-path-returns? (not rescue-path-inits?))))
           (let [msg (str Routine " returns " (display-type return-type)

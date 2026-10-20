@@ -2621,8 +2621,13 @@
         ;; whatever scope happens to be *reading* the constant, which for
         ;; `print(Base.B)` is the top level. `lookup-class-constant` records the
         ;; declaring class; infer there.
+        ;; In the declaring class's own context, as lower-class-constants
+        ;; infers it where the constant is defined: a sibling constant resolves
+        ;; through :this-type as well as :current-class, so with only the
+        ;; latter `SIZE = SYMBOLS.length` inferred as Any here but Integer
+        ;; there, and the compiled read named a field the class did not have.
         (infer-type (if-let [owner (:declaring-class constant)]
-                      (assoc env :current-class owner)
+                      (assoc env :current-class owner :this-type owner :top-level? false)
                       env)
                     value-expr))))
 
@@ -7128,7 +7133,7 @@
                       (empty? (get-in stmt [:value :args])))
                (let [target-type (infer-type env0 (get-in stmt [:value :target]))]
                  (assoc-in env0 [:across-cursors (:name stmt)]
-                           (across-item-type env0 target-type)))
+                           (across-item-type env0 (resolve-type-alias target-type))))
                env0)]
     (if (and (:top-level? env) (not (:scoped-locals? env))
              (not (contains? (:promoted-globals env) (:name stmt))))
@@ -7630,7 +7635,7 @@
                         (= "cursor" (:method value))
                         (empty? (:args value))
                         (some? target))
-               (indexed-across-plan (infer-type env (normalize-call-target target))))]
+               (indexed-across-plan (resolve-type-alias (infer-type env (normalize-call-target target)))))]
     (if-not plan
       stmt
       (let [suffix (subs cursor-name (count "__across_c_"))
@@ -7853,7 +7858,9 @@
   [result-local]
   (when result-local
     (let [jvm-type (:jvm-type result-local)
-          nex-type (:nex-type result-local)
+          ;; Through any alias: a `Vector = Array[Real]` result starts empty,
+          ;; as an `Array[Real]` one does.
+          nex-type (resolve-type-alias (:nex-type result-local))
           base-type (when (map? nex-type) (:base-type nex-type))
           detachable? (and (map? nex-type) (:detachable nex-type))
           scalar-default (cond
