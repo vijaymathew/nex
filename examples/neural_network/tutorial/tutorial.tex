@@ -273,7 +273,7 @@ project:
 We will build the whole project together, from an empty folder, in small
 steps. Each step adds a few lines of code to one of the project's files,
 and explains what the code does and why. When there is math behind the
-code, we work through the math first, in plain steps, and then turn it
+code, we work through the math first, in simple steps, and then turn it
 into code.
 
 The code comes in boxes like this one. The title of the box says which
@@ -408,18 +408,8 @@ weights. Nex prints a \code{Real} with all its digits, like
 first file holds a few helpers for printing numbers neatly.
 
 A Nex program uses another file with \code{intern}. \code{intern Helpers}
-looks for a file called \code{helpers.nex} in the same folder, and it
-expects that file to define a class called \code{Helpers}. Our helpers are
-plain functions, so the class has nothing in it. It is only there so that
-\code{intern} can find the file.
-
-\begin{newfile}{helpers.nex}
--- helpers.nex: printing numbers neatly, and finding the user's files.
-
--- `intern Helpers` finds this file by the name of this class.
-class Helpers
-end
-\end{newfile}
+finds \code{helpers.nex} in the same folder and loads everything in it. The file does not need a class called \code{Helpers}:
+ours holds only plain functions.
 
 The first helper writes a number with a fixed number of decimal places.
 We multiply by $10^{\text{places}}$, round to a whole number, and then
@@ -430,7 +420,9 @@ the answer is \code{"2.500"}. The \code{from}\,\dots\,\code{until} loop
 puts back leading zeros the fraction needs: with 3 places, a fraction of
 \code{5} must be written \code{005}.
 
-\begin{append}{helpers.nex}
+\begin{newfile}{helpers.nex}
+-- helpers.nex: printing numbers neatly, and finding the user's files.
+
 -- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
 -- is "2.500".
 function fixed(r: Real, places: Integer): String
@@ -452,7 +444,7 @@ function fixed(r: Real, places: Integer): String
       result := result + "." + frac
     end
   end
-\end{append}
+\end{newfile}
 
 Notice \code{when ... then ... else ... end}: it is an \code{if} that gives
 a value. We work on the absolute value \code{r.abs} and put the minus sign
@@ -693,8 +685,8 @@ product: quantities times prices, added up.
 \section{The code}
 
 In Nex, a vector is an \code{Array[Real]}. Start the math file with a class
-for \code{intern} to find, as before. It holds one constant, which we will
-need in Chapter~7.
+\code{Vector_Math} that holds one constant, which we will need in
+Chapter~7.
 
 \begin{newfile}{vector_math.nex}
 -- vector_math.nex: the few pieces of linear algebra the network needs.
@@ -703,7 +695,6 @@ need in Chapter~7.
 -- is a vector. No library does the math for us: every multiply and add is
 -- written out below.
 
--- `intern Vector_Math` finds this file by the name of this class.
 class Vector_Math
   feature
     -- How far a sum of probabilities may drift from 1.0 through rounding.
@@ -1836,7 +1827,6 @@ intern Vector_Math
 intern Next_Letter_Model
 intern io/Path
 
--- `intern Training_Data` finds this file by the name of this class.
 class Training_Data
   feature
     -- Keeps -log(p) finite even if a probability rounds to exactly 0.
@@ -3808,7 +3798,7 @@ A reminder of the Nex features this project uses.
 \toprule
 Feature & Example \\
 \midrule
-\code{intern} another file & \code{intern Vector_Math} loads \code{vector_math.nex}, which defines class \code{Vector_Math} \\
+\code{intern} another file & \code{intern Helpers} loads everything in \code{helpers.nex}; no class of that name is needed \\
 Class constants & \code{SIZE = 27}, read as \code{Vocabulary.SIZE} \\
 \code{result} and its zero value & \code{result} starts at \code{0.0}, \code{""}, \code{[]}, \dots \\
 Preconditions, postconditions & \code{require same_length: ...}, \code{ensure sums_to_one: ...} \\

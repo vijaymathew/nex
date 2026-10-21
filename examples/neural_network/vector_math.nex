@@ -4,7 +4,6 @@
 -- is a vector. No library does the math for us: every multiply and add is
 -- written out below.
 
--- `intern Vector_Math` finds this file by the name of this class.
 class Vector_Math
   feature
     -- How far a sum of probabilities may drift from 1.0 through rounding.

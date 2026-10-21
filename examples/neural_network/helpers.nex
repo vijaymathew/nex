@@ -1,9 +1,5 @@
 -- helpers.nex: printing numbers neatly, and finding the user's files.
 
--- `intern Helpers` finds this file by the name of this class.
-class Helpers
-end
-
 -- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
 -- is "2.500".
 function fixed(r: Real, places: Integer): String
