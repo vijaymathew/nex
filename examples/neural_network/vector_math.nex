@@ -5,20 +5,20 @@
 -- written out below.
 
 class Vector_Math
-  feature
-    -- How far a sum of probabilities may drift from 1.0 through rounding.
-    TOLERANCE = 1.0e-9
+feature
+  -- How far a sum of probabilities may drift from 1.0 through rounding.
+  TOLERANCE = 1.0e-9
 end
 
 -- A vector of n zeros.
 function zeros(n: Integer): Array[Real]
-  require
-    non_negative: n >= 0
-  do
-    result := create Array.filled(n, 0.0)
-  ensure
-    right_length: result.length = n
-  end
+require
+  non_negative: n >= 0
+do
+  result := create Array.filled(n, 0.0)
+ensure
+  right_length: result.length = n
+end
 
 -- The sum of the elements.
 function sum(v: Array[Real]): Real do
@@ -29,65 +29,65 @@ end
 
 -- The dot product: u[0]*v[0] + u[1]*v[1] + ...
 function dot(u, v: Array[Real]): Real
-  require
-    same_length: u.length = v.length
+require
+  same_length: u.length = v.length
+do
+  from
+    let i: Integer := 0
+  until
+    i = u.length
   do
-    from
-      let i: Integer := 0
-    until
-      i = u.length
-    do
-      result := result + u.get(i) * v.get(i)
-      i := i + 1
-    end
+    result := result + u.get(i) * v.get(i)
+    i := i + 1
   end
+end
 
 -- A rows x cols matrix of zeros. Each row is its own array, so changing
 -- one row never changes another.
 function zero_matrix(rows, cols: Integer): Array[Array[Real]]
-  require
-    non_negative: rows >= 0 and cols >= 0
-  do
-    repeat rows do
-      result.add(zeros(cols))
-    end
-  ensure
-    right_rows: result.length = rows
+require
+  non_negative: rows >= 0 and cols >= 0
+do
+  repeat rows do
+    result.add(zeros(cols))
   end
+ensure
+  right_rows: result.length = rows
+end
 
 -- W·x + b: one dot product per row of W, plus that row's bias.
 -- Each row is one neuron; all the rows together are a layer.
 function affine(w: Array[Array[Real]], x, b: Array[Real]): Array[Real]
-  require
-    one_bias_per_row: w.length = b.length
+require
+  one_bias_per_row: w.length = b.length
+do
+  from
+    let i: Integer := 0
+  until
+    i = w.length
   do
-    from
-      let i: Integer := 0
-    until
-      i = w.length
-    do
-      result.add(dot(w.get(i), x) + b.get(i))
-      i := i + 1
-    end
-  ensure
-    one_output_per_row: result.length = w.length
+    result.add(dot(w.get(i), x) + b.get(i))
+    i := i + 1
   end
+ensure
+  one_output_per_row: result.length = w.length
+end
 
 -- target := target + s * v, changing target in place.
 -- Backpropagation and gradient descent are built almost entirely from this.
 function add_scaled(target: Array[Real], s: Real, v: Array[Real])
-  require
-    same_length: target.length = v.length
+require
+  same_length: target.length = v.length
+do
+  from
+    let i: Integer := 0
+  until
+    i = target.length
   do
-    from
-      let i: Integer := 0
-    until
-      i = target.length
-    do
-      target.set(i, target.get(i) + s * v.get(i))
-      i := i + 1
-    end
+    target.set(i, target.get(i) + s * v.get(i))
+    i := i + 1
   end
+end
 
 -- The hyperbolic tangent, squashing any real number into (-1, 1).
 -- Real has no tanh method, so we build it from exp:
@@ -95,52 +95,52 @@ function add_scaled(target: Array[Real], s: Real, v: Array[Real])
 -- The second form is safe for large v: e^2v overflows to Infinity,
 -- 2 / Infinity is 0, and the answer is exactly 1.
 function tanh(v: Real): Real
-  do
-    result := 1.0 - 2.0 / ((2.0 * v).exp + 1.0)
-  ensure
-    bounded: result >= -1.0 and result <= 1.0
-  end
+do
+  result := 1.0 - 2.0 / ((2.0 * v).exp + 1.0)
+ensure
+  bounded: result >= -1.0 and result <= 1.0
+end
 
 -- Turn raw scores ("logits") into probabilities that sum to 1.
 -- Subtracting the largest score first changes nothing in the answer
 -- (it cancels between top and bottom), but it keeps exp from
 -- overflowing when a score is large.
 function softmax(z: Array[Real]): Array[Real]
-  require
-    not_empty: z.length > 0
-  do
-    let m: Real := z.get(0)
-    across z as v do
-      m := m.max(v)
-    end
-    let exps: Array[Real] := []
-    across z as v do
-      exps.add((v - m).exp)
-    end
-    let total: Real := sum(exps)
-    across exps as e do
-      result.add(e / total)
-    end
-  ensure
-    same_length: result.length = z.length
-    sums_to_one: (sum(result) - 1.0).abs < Vector_Math.TOLERANCE
+require
+  not_empty: z.length > 0
+do
+  let m: Real := z.get(0)
+  across z as v do
+    m := m.max(v)
   end
+  let exps: Array[Real] := []
+  across z as v do
+    exps.add((v - m).exp)
+  end
+  let total: Real := sum(exps)
+  across exps as e do
+    result.add(e / total)
+  end
+ensure
+  same_length: result.length = z.length
+  sums_to_one: (sum(result) - 1.0).abs < Vector_Math.TOLERANCE
+end
 
 -- The index of the largest element (the first one, if there is a tie).
 function argmax(v: Array[Real]): Integer
-  require
-    not_empty: v.length > 0
+require
+  not_empty: v.length > 0
+do
+  from
+    let i: Integer := 1
+  until
+    i = v.length
   do
-    from
-      let i: Integer := 1
-    until
-      i = v.length
-    do
-      if v.get(i) > v.get(result) then
-        result := i
-      end
-      i := i + 1
+    if v.get(i) > v.get(result) then
+      result := i
     end
-  ensure
-    in_range: result >= 0 and result < v.length
+    i := i + 1
   end
+ensure
+  in_range: result >= 0 and result < v.length
+end

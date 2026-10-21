@@ -18,316 +18,316 @@ intern io/Path
 -- What one forward pass computed. Backpropagation reuses these values
 -- instead of computing them again.
 class Forward_Pass
-  create
-    make(ids: Array[Integer], x, h, probs: Array[Real]) do
-      this.ids := ids
-      this.x := x
-      this.h := h
-      this.probs := probs
-    end
-  feature
-    ids: Array[Integer]   -- the context letters, as symbol ids
-    x: Array[Real]        -- their embeddings, joined into one vector
-    h: Array[Real]        -- the hidden layer's outputs
-    probs: Array[Real]    -- one probability per symbol
+create
+  make(ids: Array[Integer], x, h, probs: Array[Real]) do
+    this.ids := ids
+    this.x := x
+    this.h := h
+    this.probs := probs
+  end
+feature
+  ids: Array[Integer]   -- the context letters, as symbol ids
+  x: Array[Real]        -- their embeddings, joined into one vector
+  h: Array[Real]        -- the hidden layer's outputs
+  probs: Array[Real]    -- one probability per symbol
 end
 
 -- Zero-filled containers with the same shapes as the model's parameters.
 -- During a minibatch, each example adds its gradients here.
 class Gradients
-  create
-    make(model: Next_Letter_Model) do
-      c := zero_matrix(Vocabulary.SIZE, model.emb_dim)
-      w1 := zero_matrix(model.hidden, model.context * model.emb_dim)
-      b1 := zeros(model.hidden)
-      w2 := zero_matrix(Vocabulary.SIZE, model.hidden)
-      b2 := zeros(Vocabulary.SIZE)
-    end
-  feature
-    c: Array[Array[Real]]
-    w1: Array[Array[Real]]
-    b1: Array[Real]
-    w2: Array[Array[Real]]
-    b2: Array[Real]
+create
+  make(model: Next_Letter_Model) do
+    c := zero_matrix(Vocabulary.SIZE, model.emb_dim)
+    w1 := zero_matrix(model.hidden, model.context * model.emb_dim)
+    b1 := zeros(model.hidden)
+    w2 := zero_matrix(Vocabulary.SIZE, model.hidden)
+    b2 := zeros(Vocabulary.SIZE)
+  end
+feature
+  c: Array[Array[Real]]
+  w1: Array[Array[Real]]
+  b1: Array[Real]
+  w2: Array[Array[Real]]
+  b2: Array[Real]
 end
 
 -- One row of a prediction: a symbol and its probability.
 class Prediction
-  create
-    make(symbol: String, probability: Real) do
-      this.symbol := symbol
-      this.probability := probability
-    end
-  feature
-    symbol: String
-    probability: Real
+create
+  make(symbol: String, probability: Real) do
+    this.symbol := symbol
+    this.probability := probability
+  end
+feature
+  symbol: String
+  probability: Real
 end
 
 class Next_Letter_Model
-  create
-    -- A fresh, untrained model with random weights.
-    make(context, emb_dim, hidden, seed: Integer)
-      require
-        positive_sizes: context > 0 and emb_dim > 0 and hidden > 0
-      do
-        -- Hyperparameters: chosen by us, not learned.
-        this.context := context
-        this.emb_dim := emb_dim
-        this.hidden := hidden
+create
+  -- A fresh, untrained model with random weights.
+  make(context, emb_dim, hidden, seed: Integer)
+  require
+    positive_sizes: context > 0 and emb_dim > 0 and hidden > 0
+  do
+    -- Hyperparameters: chosen by us, not learned.
+    this.context := context
+    this.emb_dim := emb_dim
+    this.hidden := hidden
 
-        -- Parameters: learned during training. They start out random.
-        let rng: Rng := create Rng.make(seed)
-        let n_in: Integer := context * emb_dim
+    -- Parameters: learned during training. They start out random.
+    let rng: Rng := create Rng.make(seed)
+    let n_in: Integer := context * emb_dim
 
-        -- C: one embedding row per symbol.
-        c := random_matrix(rng, Vocabulary.SIZE, emb_dim, 1.0)
+    -- C: one embedding row per symbol.
+    c := random_matrix(rng, Vocabulary.SIZE, emb_dim, 1.0)
 
-        -- W1, b1: the hidden layer. Scaling by 1/sqrt(n_in) keeps W1·x
-        -- small at the start, where tanh is not yet flat.
-        w1 := random_matrix(rng, hidden, n_in, 1.0 / n_in.to_real.sqrt)
-        b1 := zeros(hidden)
+    -- W1, b1: the hidden layer. Scaling by 1/sqrt(n_in) keeps W1·x
+    -- small at the start, where tanh is not yet flat.
+    w1 := random_matrix(rng, hidden, n_in, 1.0 / n_in.to_real.sqrt)
+    b1 := zeros(hidden)
 
-        -- W2, b2: the output layer. Tiny weights make every symbol start
-        -- out about equally likely: an honest "I know nothing yet".
-        w2 := random_matrix(rng, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
-        b2 := zeros(Vocabulary.SIZE)
-      end
+    -- W2, b2: the output layer. Tiny weights make every symbol start
+    -- out about equally likely: an honest "I know nothing yet".
+    w2 := random_matrix(rng, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
+    b2 := zeros(Vocabulary.SIZE)
+  end
 
-    -- A trained model, read back from a file written by save.
-    from_file(path: String) do
-      let json: Json := create Json.make()
-      let text: String := create Path.make(path).read_text()
-      if convert json.parse(text) to data: Map[String, Any] then
-        context := json_integer(data.get("context"))
-        emb_dim := json_integer(data.get("emb_dim"))
-        hidden := json_integer(data.get("hidden"))
-        c := json_matrix(data.get("C"))
-        w1 := json_matrix(data.get("W1"))
-        b1 := json_vector(data.get("b1"))
-        w2 := json_matrix(data.get("W2"))
-        b2 := json_vector(data.get("b2"))
-      else
-        raise "not a model file: " + path
+  -- A trained model, read back from a file written by save.
+  from_file(path: String) do
+    let json: Json := create Json.make()
+    let text: String := create Path.make(path).read_text()
+    if convert json.parse(text) to data: Map[String, Any] then
+      context := json_integer(data.get("context"))
+      emb_dim := json_integer(data.get("emb_dim"))
+      hidden := json_integer(data.get("hidden"))
+      c := json_matrix(data.get("C"))
+      w1 := json_matrix(data.get("W1"))
+      b1 := json_vector(data.get("b1"))
+      w2 := json_matrix(data.get("W2"))
+      b2 := json_vector(data.get("b2"))
+    else
+      raise "not a model file: " + path
+    end
+  end
+
+feature
+  context: Integer   -- how many previous letters the model sees
+  emb_dim: Integer   -- length of each letter's embedding vector
+  hidden: Integer    -- number of neurons in the hidden layer
+
+  c: Array[Array[Real]]    -- embeddings,   Vocabulary.SIZE x emb_dim
+  w1: Array[Array[Real]]   -- hidden layer, hidden x (context * emb_dim)
+  b1: Array[Real]          --               hidden
+  w2: Array[Array[Real]]   -- output layer, Vocabulary.SIZE x hidden
+  b2: Array[Real]          --               Vocabulary.SIZE
+
+  -- The last `context` letters of a prefix as ids, padded with ".".
+  --   "app" with context 4  ->  ".app"  ->  [0, 1, 16, 16]
+  context_ids(prefix: String): Array[Integer]
+  require
+    known_symbols: is_lowercase_word(prefix) or prefix = ""
+  do
+    let padded: String := Vocabulary.END.replicate(context) + prefix
+    let tail: String := padded.substring(padded.length - context, padded.length)
+    across tail as ch do
+      result.add(symbol_id(ch.to_string))
+    end
+  ensure
+    full_context: result.length = context
+  end
+
+  -- Run the network on one context.
+  forward(ids: Array[Integer]): Forward_Pass
+  require
+    full_context: ids.length = context
+  do
+    -- 1. Embedding lookup: replace each id by its row of C, and join
+    --    the rows into one input vector x.
+    let x: Array[Real] := []
+    across ids as id do
+      across c.get(id) as v do
+        x.add(v)
       end
     end
 
-  feature
-    context: Integer   -- how many previous letters the model sees
-    emb_dim: Integer   -- length of each letter's embedding vector
-    hidden: Integer    -- number of neurons in the hidden layer
-
-    c: Array[Array[Real]]    -- embeddings,   Vocabulary.SIZE x emb_dim
-    w1: Array[Array[Real]]   -- hidden layer, hidden x (context * emb_dim)
-    b1: Array[Real]          --               hidden
-    w2: Array[Array[Real]]   -- output layer, Vocabulary.SIZE x hidden
-    b2: Array[Real]          --               Vocabulary.SIZE
-
-    -- The last `context` letters of a prefix as ids, padded with ".".
-    --   "app" with context 4  ->  ".app"  ->  [0, 1, 16, 16]
-    context_ids(prefix: String): Array[Integer]
-      require
-        known_symbols: is_lowercase_word(prefix) or prefix = ""
-      do
-        let padded: String := Vocabulary.END.replicate(context) + prefix
-        let tail: String := padded.substring(padded.length - context, padded.length)
-        across tail as ch do
-          result.add(symbol_id(ch.to_string))
-        end
-      ensure
-        full_context: result.length = context
-      end
-
-    -- Run the network on one context.
-    forward(ids: Array[Integer]): Forward_Pass
-      require
-        full_context: ids.length = context
-      do
-        -- 1. Embedding lookup: replace each id by its row of C, and join
-        --    the rows into one input vector x.
-        let x: Array[Real] := []
-        across ids as id do
-          across c.get(id) as v do
-            x.add(v)
-          end
-        end
-
-        -- 2. Hidden layer: h = tanh(W1·x + b1).
-        let h: Array[Real] := []
-        across affine(w1, x, b1) as v do
-          h.add(tanh(v))
-        end
-
-        -- 3. Output layer: one score per symbol, then softmax.
-        let probs: Array[Real] := softmax(affine(w2, h, b2))
-
-        result := create Forward_Pass.make(ids, x, h, probs)
-      ensure
-        one_probability_per_symbol: result.probs.length = Vocabulary.SIZE
-      end
-
-    -- Add one example's gradients into g, by the chain rule, from the
-    -- loss back to the input:
-    --   loss -> logits -> W2, b2, h -> tanh -> W1, b1, x -> C
-    backward(fp: Forward_Pass, target: Integer, g: Gradients)
-      require
-        valid_target: target >= 0 and target < Vocabulary.SIZE
-      do
-        -- Step A: softmax followed by cross-entropy has a very simple
-        -- gradient with respect to the logits:
-        --     dL/dz[i] = p[i] - (1 if i is the target, else 0)
-        let dz: Array[Real] := fp.probs.clone()
-        dz.set(target, dz.get(target) - 1.0)
-
-        -- Step B: output layer, z = W2·h + b2.
-        --     dW2[i][j] += dz[i] * h[j]     db2[i] += dz[i]
-        --     dh[j]     += dz[i] * W2[i][j]
-        let dh: Array[Real] := zeros(hidden)
-        from
-          let i: Integer := 0
-        until
-          i = Vocabulary.SIZE
-        do
-          add_scaled(g.w2.get(i), dz.get(i), fp.h)
-          g.b2.set(i, g.b2.get(i) + dz.get(i))
-          add_scaled(dh, dz.get(i), w2.get(i))
-          i := i + 1
-        end
-
-        -- Step C: through tanh. tanh'(a) = 1 - tanh(a)^2 = 1 - h^2, and
-        -- we already have h, so this costs almost nothing.
-        let da: Array[Real] := []
-        from
-          let j: Integer := 0
-        until
-          j = hidden
-        do
-          let hj: Real := fp.h.get(j)
-          da.add(dh.get(j) * (1.0 - hj * hj))
-          j := j + 1
-        end
-
-        -- Step D: hidden layer, a = W1·x + b1. Same pattern as step B.
-        let dx: Array[Real] := zeros(fp.x.length)
-        from
-          let i: Integer := 0
-        until
-          i = hidden
-        do
-          add_scaled(g.w1.get(i), da.get(i), fp.x)
-          g.b1.set(i, g.b1.get(i) + da.get(i))
-          add_scaled(dx, da.get(i), w1.get(i))
-          i := i + 1
-        end
-
-        -- Step E: embeddings. x was the context letters' rows of C joined
-        -- together, so cut dx back into pieces and add each piece to the
-        -- row it came from. A letter that appears twice ("pp") gets both.
-        from
-          let k: Integer := 0
-        until
-          k = context
-        do
-          let row: Array[Real] := g.c.get(fp.ids.get(k))
-          from
-            let d: Integer := 0
-          until
-            d = emb_dim
-          do
-            row.set(d, row.get(d) + dx.get(k * emb_dim + d))
-            d := d + 1
-          end
-          k := k + 1
-        end
-      end
-
-    -- Gradient descent: p := p - lr * (average gradient), for every
-    -- parameter. g holds sums over the batch, so divide by its size.
-    step(g: Gradients, lr: Real, batch_size: Integer)
-      require
-        positive_rate: lr > 0.0
-        positive_batch: batch_size > 0
-      do
-        let s: Real := -lr / batch_size.to_real
-        update_matrix(c, s, g.c)
-        update_matrix(w1, s, g.w1)
-        add_scaled(b1, s, g.b1)
-        update_matrix(w2, s, g.w2)
-        add_scaled(b2, s, g.b2)
-      end
-
-    -- Every symbol with its probability, most likely first.
-    predict(prefix: String): Array[Prediction]
-      require
-        known_symbols: is_lowercase_word(prefix) or prefix = ""
-      do
-        let probs: Array[Real] := forward(context_ids(prefix)).probs
-        let unsorted: Array[Prediction] := []
-        from
-          let i: Integer := 0
-        until
-          i = Vocabulary.SIZE
-        do
-          unsorted.add(create Prediction.make(symbol_at(i), probs.get(i)))
-          i := i + 1
-        end
-        result := unsorted.sort(fn(a, b: Prediction): Integer do
-          result := b.probability.compare(a.probability)
-        end)
-      ensure
-        every_symbol: result.length = Vocabulary.SIZE
-      end
-
-    num_parameters(): Integer do
-      result := Vocabulary.SIZE * emb_dim
-        + hidden * context * emb_dim + hidden
-        + Vocabulary.SIZE * hidden + Vocabulary.SIZE
+    -- 2. Hidden layer: h = tanh(W1·x + b1).
+    let h: Array[Real] := []
+    across affine(w1, x, b1) as v do
+      h.add(tanh(v))
     end
 
-    -- Write the model as JSON. The field names match the Python version
-    -- of this project, so a model trained by one can be used by the other.
-    save(path: String) do
-      let data: Map[String, Any] := {
-        "context": context, "emb_dim": emb_dim, "hidden": hidden,
-        "C": c, "W1": w1, "b1": b1, "W2": w2, "b2": b2
-      }
-      let json: Json := create Json.make()
-      create Path.make(path).write_text(json.stringify(data))
+    -- 3. Output layer: one score per symbol, then softmax.
+    let probs: Array[Real] := softmax(affine(w2, h, b2))
+
+    result := create Forward_Pass.make(ids, x, h, probs)
+  ensure
+    one_probability_per_symbol: result.probs.length = Vocabulary.SIZE
+  end
+
+  -- Add one example's gradients into g, by the chain rule, from the
+  -- loss back to the input:
+  --   loss -> logits -> W2, b2, h -> tanh -> W1, b1, x -> C
+  backward(fp: Forward_Pass, target: Integer, g: Gradients)
+  require
+    valid_target: target >= 0 and target < Vocabulary.SIZE
+  do
+    -- Step A: softmax followed by cross-entropy has a very simple
+    -- gradient with respect to the logits:
+    --     dL/dz[i] = p[i] - (1 if i is the target, else 0)
+    let dz: Array[Real] := fp.probs.clone()
+    dz.set(target, dz.get(target) - 1.0)
+
+    -- Step B: output layer, z = W2·h + b2.
+    --     dW2[i][j] += dz[i] * h[j]     db2[i] += dz[i]
+    --     dh[j]     += dz[i] * W2[i][j]
+    let dh: Array[Real] := zeros(hidden)
+    from
+      let i: Integer := 0
+    until
+      i = Vocabulary.SIZE
+    do
+      add_scaled(g.w2.get(i), dz.get(i), fp.h)
+      g.b2.set(i, g.b2.get(i) + dz.get(i))
+      add_scaled(dh, dz.get(i), w2.get(i))
+      i := i + 1
     end
 
-  invariant
-    embedding_rows: c.length = Vocabulary.SIZE
-    hidden_rows: w1.length = hidden and b1.length = hidden
-    output_rows: w2.length = Vocabulary.SIZE and b2.length = Vocabulary.SIZE
+    -- Step C: through tanh. tanh'(a) = 1 - tanh(a)^2 = 1 - h^2, and
+    -- we already have h, so this costs almost nothing.
+    let da: Array[Real] := []
+    from
+      let j: Integer := 0
+    until
+      j = hidden
+    do
+      let hj: Real := fp.h.get(j)
+      da.add(dh.get(j) * (1.0 - hj * hj))
+      j := j + 1
+    end
+
+    -- Step D: hidden layer, a = W1·x + b1. Same pattern as step B.
+    let dx: Array[Real] := zeros(fp.x.length)
+    from
+      let i: Integer := 0
+    until
+      i = hidden
+    do
+      add_scaled(g.w1.get(i), da.get(i), fp.x)
+      g.b1.set(i, g.b1.get(i) + da.get(i))
+      add_scaled(dx, da.get(i), w1.get(i))
+      i := i + 1
+    end
+
+    -- Step E: embeddings. x was the context letters' rows of C joined
+    -- together, so cut dx back into pieces and add each piece to the
+    -- row it came from. A letter that appears twice ("pp") gets both.
+    from
+      let k: Integer := 0
+    until
+      k = context
+    do
+      let row: Array[Real] := g.c.get(fp.ids.get(k))
+      from
+        let d: Integer := 0
+      until
+        d = emb_dim
+      do
+        row.set(d, row.get(d) + dx.get(k * emb_dim + d))
+        d := d + 1
+      end
+      k := k + 1
+    end
+  end
+
+  -- Gradient descent: p := p - lr * (average gradient), for every
+  -- parameter. g holds sums over the batch, so divide by its size.
+  step(g: Gradients, lr: Real, batch_size: Integer)
+  require
+    positive_rate: lr > 0.0
+    positive_batch: batch_size > 0
+  do
+    let s: Real := -lr / batch_size.to_real
+    update_matrix(c, s, g.c)
+    update_matrix(w1, s, g.w1)
+    add_scaled(b1, s, g.b1)
+    update_matrix(w2, s, g.w2)
+    add_scaled(b2, s, g.b2)
+  end
+
+  -- Every symbol with its probability, most likely first.
+  predict(prefix: String): Array[Prediction]
+  require
+    known_symbols: is_lowercase_word(prefix) or prefix = ""
+  do
+    let probs: Array[Real] := forward(context_ids(prefix)).probs
+    let unsorted: Array[Prediction] := []
+    from
+      let i: Integer := 0
+    until
+      i = Vocabulary.SIZE
+    do
+      unsorted.add(create Prediction.make(symbol_at(i), probs.get(i)))
+      i := i + 1
+    end
+    result := unsorted.sort(fn(a, b: Prediction): Integer do
+      result := b.probability.compare(a.probability)
+    end)
+  ensure
+    every_symbol: result.length = Vocabulary.SIZE
+  end
+
+  num_parameters(): Integer do
+    result := Vocabulary.SIZE * emb_dim
+      + hidden * context * emb_dim + hidden
+      + Vocabulary.SIZE * hidden + Vocabulary.SIZE
+  end
+
+  -- Write the model as JSON. The field names match the Python version
+  -- of this project, so a model trained by one can be used by the other.
+  save(path: String) do
+    let data: Map[String, Any] := {
+      "context": context, "emb_dim": emb_dim, "hidden": hidden,
+      "C": c, "W1": w1, "b1": b1, "W2": w2, "b2": b2
+    }
+    let json: Json := create Json.make()
+    create Path.make(path).write_text(json.stringify(data))
+  end
+
+invariant
+  embedding_rows: c.length = Vocabulary.SIZE
+  hidden_rows: w1.length = hidden and b1.length = hidden
+  output_rows: w2.length = Vocabulary.SIZE and b2.length = Vocabulary.SIZE
 end
 
 -- A rows x cols matrix of normal random numbers, each times `scale`.
 function random_matrix(rng: Rng, rows, cols: Integer, scale: Real): Array[Array[Real]]
-  do
-    repeat rows do
-      let row: Array[Real] := []
-      repeat cols do
-        row.add(rng.gauss() * scale)
-      end
-      result.add(row)
+do
+  repeat rows do
+    let row: Array[Real] := []
+    repeat cols do
+      row.add(rng.gauss() * scale)
     end
-  ensure
-    right_rows: result.length = rows
+    result.add(row)
   end
+ensure
+  right_rows: result.length = rows
+end
 
 -- m := m + s * g, row by row.
 function update_matrix(m: Array[Array[Real]], s: Real, g: Array[Array[Real]])
-  require
-    same_rows: m.length = g.length
+require
+  same_rows: m.length = g.length
+do
+  from
+    let r: Integer := 0
+  until
+    r = m.length
   do
-    from
-      let r: Integer := 0
-    until
-      r = m.length
-    do
-      add_scaled(m.get(r), s, g.get(r))
-      r := r + 1
-    end
+    add_scaled(m.get(r), s, g.get(r))
+    r := r + 1
   end
+end
 
 -- Reading numbers back out of parsed JSON, where every value is an Any.
 

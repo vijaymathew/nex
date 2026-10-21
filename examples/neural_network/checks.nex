@@ -15,38 +15,38 @@ intern Helpers
 intern io/Path
 
 class Checker
-  create
-    make() do
-      con := create Console
-    end
-  feature
-    con: Console
-    passed: Integer
-    failed: Integer
+create
+  make() do
+    con := create Console
+  end
+feature
+  con: Console
+  passed: Integer
+  failed: Integer
 
-    check(label: String, ok: Boolean) do
-      if ok then
-        passed := passed + 1
-        con.print_line("PASS " + label)
-      else
-        failed := failed + 1
-        con.print_line("FAIL " + label)
-      end
+  check(label: String, ok: Boolean) do
+    if ok then
+      passed := passed + 1
+      con.print_line("PASS " + label)
+    else
+      failed := failed + 1
+      con.print_line("FAIL " + label)
     end
+  end
 
-    close_to(label: String, expected, actual, tolerance: Real) do
-      check(label + " (expected " + expected.to_string
-          + ", got " + actual.to_string + ")",
-        (expected - actual).abs <= tolerance)
-    end
+  close_to(label: String, expected, actual, tolerance: Real) do
+    check(label + " (expected " + expected.to_string
+      + ", got " + actual.to_string + ")",
+      (expected - actual).abs <= tolerance)
+  end
 
-    summary() do
-      con.print_line("---")
-      con.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
-      if failed > 0 then
-        exit(1)
-      end
+  summary() do
+    con.print_line("---")
+    con.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
+    if failed > 0 then
+      exit(1)
     end
+  end
 end
 
 -- The loss of a model on one example.
@@ -57,7 +57,7 @@ end
 -- Compare backward's gradient for parameter row[col] with a measured one:
 --     dL/dp  is about  (L(p + eps) - L(p - eps)) / (2 eps)
 function gradient_matches(model: Next_Letter_Model, ex: Example, row: Array[Real],
-                          col: Integer, analytic: Real): Boolean do
+  col: Integer, analytic: Real): Boolean do
   let eps: Real := 1.0e-5
   let saved: Real := row.get(col)
   row.set(col, saved + eps)
@@ -130,19 +130,19 @@ let grads: Gradients := create Gradients.make(model)
 model.backward(model.forward(ex.ids), ex.target, grads)
 c.check("gradient of b2",
   gradient_matches(model, ex, model.b2, 12, grads.b2.get(12))
-  and gradient_matches(model, ex, model.b2, 5, grads.b2.get(5)))
+    and gradient_matches(model, ex, model.b2, 5, grads.b2.get(5)))
 c.check("gradient of W2",
   gradient_matches(model, ex, model.w2.get(12), 3, grads.w2.get(12).get(3))
-  and gradient_matches(model, ex, model.w2.get(0), 40, grads.w2.get(0).get(40)))
+    and gradient_matches(model, ex, model.w2.get(0), 40, grads.w2.get(0).get(40)))
 c.check("gradient of b1",
   gradient_matches(model, ex, model.b1, 7, grads.b1.get(7)))
 c.check("gradient of W1",
   gradient_matches(model, ex, model.w1.get(7), 30, grads.w1.get(7).get(30))
-  and gradient_matches(model, ex, model.w1.get(63), 0, grads.w1.get(63).get(0)))
+    and gradient_matches(model, ex, model.w1.get(63), 0, grads.w1.get(63).get(0)))
 -- "p" (id 16) appears twice in ".app", so its embedding gets two gradients.
 c.check("gradient of C",
   gradient_matches(model, ex, model.c.get(16), 2, grads.c.get(16).get(2))
-  and gradient_matches(model, ex, model.c.get(1), 5, grads.c.get(1).get(5)))
+    and gradient_matches(model, ex, model.c.get(1), 5, grads.c.get(1).get(5)))
 
 -- Training lowers the loss: learn three words by heart.
 let tiny: Array[Example] := make_examples(["apple", "apply", "maple"], 4)

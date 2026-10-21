@@ -34,8 +34,8 @@
   (testing "trailing spaces go; a well-formatted file is unchanged"
     (formats-to "let x := 1   \nprint(x)\n" "let x := 1\nprint(x)\n")
     (let [src (lines "class A"
-                     "  feature"
-                     "    x: Integer"
+                     "feature"
+                     "  x: Integer"
                      "end")]
       (is (= src (fmt/format-code src))))))
 
@@ -62,13 +62,13 @@
                      "feature"
                      "  count: Integer"
                      "  bump(by: Integer)"
-                     "    require"
-                     "      positive: by > 0"
-                     "    do"
-                     "      count := count + by"
-                     "    ensure"
-                     "      grew: count = old count + by"
-                     "    end"
+                     "  require"
+                     "    positive: by > 0"
+                     "  do"
+                     "    count := count + by"
+                     "  ensure"
+                     "    grew: count = old count + by"
+                     "  end"
                      "create"
                      "  make() do"
                      "    count := 0"
@@ -77,36 +77,44 @@
                      "  non_negative: count >= 0"
                      "end")))
 
-(deftest keeps-the-style-in-use
-  (testing "class sections one level in, as the first one is written"
+(deftest official-style
+  (testing "class sections go in column 0, even when written one level in"
     (formats-to (lines "class A"
-                       "  feature"
-                       "x: Integer"
-                       "create"
-                       "make() do"
-                       "x := 1"
-                       "end"
-                       "end")
-                (lines "class A"
+                       "  inherit"
+                       "    B"
                        "  feature"
                        "    x: Integer"
                        "  create"
                        "    make() do"
                        "      x := 1"
                        "    end"
-                       "end")))
-  (testing "routine clauses flush with the header, as the first one is written"
-    (formats-to (lines "function f(n: Integer): Integer"
-                       "require"
-                       "    ok: n > 0"
-                       "do"
-                       "result := n"
                        "end")
+                (lines "class A"
+                       "inherit"
+                       "  B"
+                       "feature"
+                       "  x: Integer"
+                       "create"
+                       "  make() do"
+                       "    x := 1"
+                       "  end"
+                       "end")))
+  (testing "routine clauses go flush with the header, even when written one level in"
+    (formats-to (lines "function f(n: Integer): Integer"
+                       "  require"
+                       "    ok: n > 0"
+                       "  do"
+                       "    result := n"
+                       "  ensure"
+                       "    small: result < 100"
+                       "  end")
                 (lines "function f(n: Integer): Integer"
                        "require"
                        "  ok: n > 0"
                        "do"
                        "  result := n"
+                       "ensure"
+                       "  small: result < 100"
                        "end"))))
 
 (deftest statements
@@ -240,15 +248,54 @@
                      "end")))
 
 (deftest continuation-lines
-  (testing "a continued statement keeps its own alignment"
+  (testing "a continuation goes one level past its line, whatever the alignment"
     (formats-to (lines "  print(\"a\" +"
                        "        \"b\")"
                        "let xs := [1,"
                        "           2]")
                 (lines "print(\"a\" +"
-                       "      \"b\")"
+                       "  \"b\")"
                        "let xs := [1,"
-                       "           2]")))
+                       "  2]")))
+  (testing "an operator line continuing an argument goes past that argument"
+    (formats-to (lines "check(\"label\","
+                       "x > 0"
+                       "and y > 0)")
+                (lines "check(\"label\","
+                       "  x > 0"
+                       "    and y > 0)")))
+  (testing "outside brackets: past the statement, two levels for a condition"
+    (formats-to (lines "function f(): Integer do"
+                       "result := 1"
+                       "+ 2"
+                       "if result > 0"
+                       "and result < 9 then"
+                       "print(result)"
+                       "end"
+                       "let m: Integer :="
+                       "3"
+                       "end")
+                (lines "function f(): Integer do"
+                       "  result := 1"
+                       "    + 2"
+                       "  if result > 0"
+                       "      and result < 9 then"
+                       "    print(result)"
+                       "  end"
+                       "  let m: Integer :="
+                       "    3"
+                       "end")))
+  (testing "a when expression reads like an if"
+    (formats-to (lines "let s := when a then"
+                       "     \"yes\""
+                       "   else"
+                       "     \"no\""
+                       "   end")
+                (lines "let s := when a then"
+                       "  \"yes\""
+                       "else"
+                       "  \"no\""
+                       "end")))
   (testing "a continuation goes deeper than its statement, unless it closes it"
     (formats-to (lines "let m := ["
                        "1,"

@@ -42,6 +42,7 @@
 ;;; Code:
 
 (require 'comint)
+(require 'seq)
 
 ;;;; Customization
 
@@ -197,510 +198,504 @@
   "Font lock keywords for Nex mode.")
 
 ;;;; Indentation
+;;
+;; A port of the indentation pass of `nex format' (src/nex/fmt.clj), so that
+;; Emacs and the formatter always agree.  A change to one should be made to
+;; the other; test/scripts/test-nex-mode.el and test/nex/fmt_test.clj cover
+;; the same rules.
+;;
+;; The whole buffer is tokenized and walked once, top to bottom, keeping a
+;; stack of the blocks that are open: a line's indentation comes from the
+;; innermost one.  Code lines are indented from the code alone; a comment line
+;; moves by as much as the next line of code does.
 
-(defconst nex-method-signature-re
-  "\\b[a-z_][a-z0-9_]*\\s-*\\(([^)]*)\\)?\\s-*\\(?::\\s-*[A-Z][a-zA-Z0-9_]*\\)?\\s-*$"
-  "Regexp matching a Nex method/feature declaration line (name, optional args, optional return type).")
+(defconst nex-fmt--continuing-ends
+  '("+" "-" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=" "," "." "?." "->"
+    ":" "and" "or" "not")
+  "A line ending with one of these continues on the next line.")
 
-(defconst nex-free-function-re
-  "\\bfunction\\b"
-  "Regexp matching the header line of a free (top-level) function definition.
-Such a line owns the routine's `do'/`require'/`ensure' clauses exactly as a
-class-level feature signature does, but it does not match
-`nex-method-signature-re' (the name is preceded by the `function' keyword),
-so the backward scans that look for a routine's anchor must test for it too.")
+(defconst nex-fmt--continuing-starts
+  '("and" "or" "." "?." "+" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=")
+  "A line starting with one of these continues the line before.")
 
-(defconst nex-section-keyword-re
-  (regexp-opt '("class" "union" "feature" "create" "inherit" "invariant"
-                "do" "end" "require" "ensure" "rescue" "from" "until"
-                "if" "then" "else" "elseif" "when" "select" "timeout"
-                "repeat" "across" "case" "of" "deferred" "sealed" "once"
-                "private" "note" "import" "intern" "spawn" "function" "fn")
-              'words)
-  "Regexp matching Nex keywords that cannot be method names.")
+(defconst nex-fmt--clause-words
+  '((class "feature" "private" "create" "invariant")
+    (routine "require" "do" "ensure" "rescue" "deferred")
+    (do "ensure" "rescue")
+    (if "then" "elseif" "else")
+    (loop "invariant" "variant" "until" "do" "rescue")
+    (block-loop "do" "rescue")
+    (case "else")
+    (select "when" "timeout" "else"))
+  "For each kind of block, the words that start one of its clauses.")
 
-(defconst nex-block-delimiter-re
-  (regexp-opt '("do" "if" "match" "select" "case" "class" "union" "end") 'words)
-  "Regexp matching the keywords that open or close an `end'-terminated block.
-Every Nex construct closed by `end' is opened by exactly one of these (see
-grammar/nexlang.g4).  Compound headers contribute only their `do': a loop is
-\"from ... until ... do ... end\", so `from' is deliberately absent here — the
-`do' is what pairs with the `end'.  Likewise for repeat/across/with/spawn/fn and
-routine bodies.  A `deferred' method has no `end' and so opens nothing.")
+(defsubst nex-fmt--text (tok) (and tok (aref tok 0)))
+(defsubst nex-fmt--line (tok) (aref tok 1))
+(defsubst nex-fmt--kind (tok) (and tok (aref tok 2)))
 
-(defconst nex-block-delimiter-or-else-re
-  (regexp-opt '("do" "if" "match" "select" "case" "class" "union" "end" "else")
-              'words)
-  "Like `nex-block-delimiter-re', but also matches `else'.
-Used only by `nex-match-opener-indent', which needs to notice an `else'
-belonging to the enclosing match/select/case without it opening or closing
-anything of its own (it shares the construct's `end').")
+(defun nex-fmt--letter-p (c)
+  (memq (get-char-code-property c 'general-category) '(Lu Ll Lt Lm Lo)))
 
-(defun nex-match-opener-indent ()
-  "Return (INDENT . PAST-ELSE) for the match/select/case whose clause list
-encloses point, or nil when point is not directly inside one.
-Scans backward over `nex-block-delimiter-or-else-re' balancing `end' against
-openers, so the first opener still unclosed at point is the block point sits
-in.  If that block is a match/select/case, INDENT is its indentation and
-PAST-ELSE is non-nil when an `else' belonging to it was crossed along the way
-— meaning point is inside the `else' block's body (one level deeper than the
-clause list) rather than directly among the clauses.  Any other opener (a
-routine body `do', an `if', ...) means point is nested inside a clause rather
-than between clauses, and yields nil.  Matches inside strings and comments are
-ignored.  A clause body needs no balancing of its own beyond what its single
-statement already carries (see `nexlang.g4' `matchClause'/`caseClause'), so
-the enclosing match/select/case is always reached directly."
-  (save-excursion
-    (beginning-of-line)
-    (let ((depth 0) (past-else nil))
-      (catch 'found
-        (while (re-search-backward nex-block-delimiter-or-else-re nil t)
-          (unless (nth 8 (syntax-ppss))  ; skip keywords in strings or comments
-            (let ((kw (match-string 1)))
+(defun nex-fmt--digit-p (c)
+  (eq (get-char-code-property c 'general-category) 'Nd))
+
+(defun nex-fmt--word-start-p (c)
+  (or (eq c ?_) (nex-fmt--letter-p c)))
+
+(defun nex-fmt--word-char-p (c)
+  (or (eq c ?_) (nex-fmt--letter-p c) (nex-fmt--digit-p c)))
+
+(defun nex-fmt--tokenize (src)
+  "The tokens of SRC and the lines that end inside a string.
+Return (TOKENS . STRING-LINES): TOKENS a list of [TEXT LINE KIND], KIND
+being `word', `string', `char', `comment', `punct' or `other', and lines
+counted from 0; STRING-LINES a hash table of line numbers."
+  (let ((n (length src)) (i 0) (line 0) (tokens nil)
+        (string-lines (make-hash-table)))
+    (while (< i n)
+      (let ((c (aref src i)))
+        (cond
+         ((eq c ?\n) (setq i (1+ i) line (1+ line)))
+         ((memq c '(?\s ?\t ?\r ?\f ?\v)) (setq i (1+ i)))
+         ((and (eq c ?-) (< (1+ i) n) (eq (aref src (1+ i)) ?-))
+          (let ((end (or (string-search "\n" src i) n)))
+            (push (vector (substring src i end) line 'comment) tokens)
+            (setq i end)))
+         ((memq c '(?\" ?'))
+          (let ((j (1+ i)) (count 0) (done nil))
+            (while (not done)
+              (let ((d (and (< j n) (aref src j))))
+                (cond
+                 ((null d) (setq j n done t))
+                 ((eq d ?\\)
+                  (when (and (< (1+ j) n) (eq (aref src (1+ j)) ?\n))
+                    (puthash (+ line count) t string-lines)
+                    (setq count (1+ count)))
+                  (setq j (+ j 2)))
+                 ((eq d c) (setq j (1+ j) done t))
+                 ((eq d ?\n)
+                  (puthash (+ line count) t string-lines)
+                  (setq count (1+ count) j (1+ j)))
+                 (t (setq j (1+ j))))))
+            (setq j (min j n))
+            (push (vector (substring src i j) line 'string) tokens)
+            (setq i j line (+ line count))))
+         ((eq c ?#)
+          (let* ((d (and (< (1+ i) n) (aref src (1+ i))))
+                 (end (cond
+                       ((eq d ?{) (+ i 2))
+                       ((and d (nex-fmt--word-char-p d))
+                        (let ((j (+ i 2)))
+                          (while (and (< j n) (nex-fmt--word-char-p (aref src j)))
+                            (setq j (1+ j)))
+                          j))
+                       ((and d (not (eq d ?\n))) (+ i 2))
+                       (t (1+ i)))))
+            (push (vector (substring src i end) line (if (eq d ?{) 'punct 'char))
+                  tokens)
+            (setq i end)))
+         ((nex-fmt--word-start-p c)
+          (let ((j (1+ i)))
+            (while (and (< j n) (nex-fmt--word-char-p (aref src j)))
+              (setq j (1+ j)))
+            (push (vector (substring src i j) line 'word) tokens)
+            (setq i j)))
+         ((nex-fmt--digit-p c)
+          (let ((j (1+ i)) (go t))
+            (while go
+              (let ((d (and (< j n) (aref src j))))
+                (cond
+                 ((null d) (setq go nil))
+                 ((nex-fmt--word-char-p d) (setq j (1+ j)))
+                 ((and (eq d ?.) (< (1+ j) n) (nex-fmt--digit-p (aref src (1+ j))))
+                  (setq j (1+ j)))
+                 (t (setq go nil)))))
+            (push (vector (substring src i j) line 'other) tokens)
+            (setq i j)))
+         (t
+          (let* ((two (and (< (1+ i) n) (substring src i (+ i 2))))
+                 (end (if (member two '(":=" "/=" "<=" ">=" "->" "?.")) (+ i 2) (1+ i))))
+            (push (vector (substring src i end) line 'punct) tokens)
+            (setq i end))))))
+    (cons (nreverse tokens) string-lines)))
+
+(defun nex-fmt--frame (kind at &rest more)
+  "A block of KIND opened on a line indented AT columns: its clauses go at
+:c, its lines at :body, its `end' at :end.  MORE overrides those."
+  (let ((f (list :kind kind :c at :body (+ at nex-indent-offset) :end at)))
+    (while more
+      (setq f (plist-put f (car more) (cadr more))
+            more (cddr more)))
+    f))
+
+(defun nex-fmt--with (frame &rest kvs)
+  "A copy of FRAME with the keys and values KVS set."
+  (let ((f (copy-sequence frame)))
+    (while kvs
+      (setq f (plist-put f (car kvs) (cadr kvs))
+            kvs (cddr kvs)))
+    f))
+
+(defsubst nex-fmt--clause-word-p (kind word)
+  (and word (member word (cdr (assq kind nex-fmt--clause-words)))))
+
+(defun nex-fmt--continuation-indent (top t0 prev op head head-word prev-new)
+  "The indentation of a line that continues a statement.
+TOP is the innermost open frame, T0 the line's first token, PREV the last
+code token of the line above, OP whether the line continues by an operator,
+HEAD and HEAD-WORD the indentation and first word of the statement's first
+line, PREV-NEW the new indentation of the line above."
+  (let ((t0-text (nex-fmt--text t0)))
+    (pcase (plist-get top :kind)
+      ;; Inside brackets: one level past the line that opened them, and a
+      ;; closing bracket level with that line.  An operator line continuing
+      ;; an argument written on a line of its own goes one level past it.
+      ('bracket
+       (cond
+        ((member t0-text '(")" "]" "}")) (plist-get top :line))
+        ((and op (plist-get top :arg)) (+ (plist-get top :arg) nex-indent-offset))
+        (t (+ (plist-get top :line) nex-indent-offset))))
+      ;; A `when ... then ... else ... end' expression reads like an `if'.
+      ('when-expr
+       (if (member t0-text '("then" "else" "elseif" "end"))
+           (plist-get top :line)
+         (+ (plist-get top :line) nex-indent-offset)))
+      (_
+       (cond
+        ;; the next item of a list, as after `inherit'
+        ((equal "," (nex-fmt--text prev)) prev-new)
+        ((member t0-text '("then" "else" "elseif" "end")) head)
+        ;; A condition goes two levels in, apart from the body below it.
+        ((member head-word '("if" "elseif" "until"))
+         (+ head (* 2 nex-indent-offset)))
+        (t (+ head nex-indent-offset)))))))
+
+(defun nex-fmt--code-indents (order code)
+  "Indent the code lines ORDER (sorted line numbers); CODE maps each to a
+vector of its code tokens.  Return (INDENT . AFTER), two hash tables from
+line number to the line's indentation and to where a statement would go on
+the line after (absent inside an expression)."
+  (let ((indents (make-hash-table)) (afters (make-hash-table))
+        (stack (list (nex-fmt--frame 'top 0 :body 0)))
+        (prev nil) (head 0) (head-word nil) (pending nil) (prev-new nil)
+        (rest order))
+    (while rest
+      (let* ((i (car rest))
+             (toks (gethash i code))
+             (n (length toks))
+             (t0 (aref toks 0))
+             (w0 (and (eq 'word (nex-fmt--kind t0)) (nex-fmt--text t0)))
+             (prev-text (nex-fmt--text prev))
+             ;; Whether the line continues an expression by an operator, at
+             ;; its start or at the end of the line above.
+             (op (or (member (nex-fmt--text t0) nex-fmt--continuing-starts)
+                     (and (member prev-text nex-fmt--continuing-ends)
+                          (not (equal "," prev-text)))))
+             (continues
+              (or (memq (plist-get (car stack) :kind) '(bracket when-expr))
+                  ;; a routine's `note "..."' and `alias "-"' belong to its header
+                  (and pending (member w0 '("note" "alias"))
+                       (> n 1) (eq 'string (nex-fmt--kind (aref toks 1))))
+                  (member prev-text nex-fmt--continuing-ends)
+                  (member (nex-fmt--text t0) nex-fmt--continuing-starts)))
+             top clause case-level indent clause-line)
+        ;; A lone `assert' takes the `label: expression' lines after it.
+        (when (and (eq 'assert (plist-get (car stack) :kind)) (not continues)
+                   (not (and (eq 'word (nex-fmt--kind t0))
+                             (> n 1) (equal ":" (nex-fmt--text (aref toks 1))))))
+          (setq stack (cdr stack)))
+        ;; A header followed by `require' or `do' on a line of its own is a
+        ;; routine.  Its clauses go flush with the header.
+        (when (and (not continues) pending
+                   (member w0 '("require" "do" "deferred"))
+                   (not (plist-get (car stack) :await-do)))
+          (push (nex-fmt--frame 'routine head :await-do t) stack))
+        ;; A class's sections go flush with `class'.
+        (let ((f (car stack)))
+          (when (and (not continues) (eq 'class (plist-get f :kind))
+                     (null (plist-get f :c))
+                     (nex-fmt--clause-word-p 'class w0))
+            (setq stack (cons (nex-fmt--with f :c (plist-get f :end)) (cdr stack)))))
+        (setq top (car stack))
+        ;; `do' in a routine or loop body starts a block, unless the routine
+        ;; or loop is still waiting for its own `do'.
+        (setq clause (and (not continues)
+                          (nex-fmt--clause-word-p (plist-get top :kind) w0)
+                          (or (not (equal "do" w0)) (plist-get top :await-do)
+                              (not (memq (plist-get top :kind)
+                                         '(routine loop block-loop))))))
+        (setq case-level (and (eq 'case (plist-get top :kind))
+                              (if (or (plist-get top :stmt) (plist-get top :else-block))
+                                  (+ (plist-get top :c) nex-indent-offset)
+                                (plist-get top :c))))
+        (setq indent
               (cond
-               ((string= kw "end")
-                (setq depth (1+ depth)))
-               ((string= kw "else")
-                ;; Only the target construct's own `else' (depth 0) counts;
-                ;; one belonging to an already-balanced nested block (depth >
-                ;; 0) is not a boundary here and changes nothing.
-                (when (= depth 0) (setq past-else t)))
-               ((> depth 0)
-                (setq depth (1- depth)))
-               ((member kw '("match" "select" "case"))
-                (throw 'found (cons (current-indentation) past-else)))
-               ;; An unclosed opener that is not a match/select/case encloses
-               ;; point: whatever is on this line belongs to that block.
-               (t (throw 'found nil))))))
-        nil))))
+               (continues (nex-fmt--continuation-indent
+                           top t0 prev op head head-word prev-new))
+               ((equal "end" w0) (plist-get top :end))
+               (clause (plist-get top :c))
+               ((and (eq 'class (plist-get top :kind)) (equal "note" w0))
+                (+ (plist-get top :end) nex-indent-offset))
+               ;; `inherit' goes flush with `class'.
+               ((and (eq 'class (plist-get top :kind)) (equal "inherit" w0))
+                (plist-get top :end))
+               (case-level case-level)
+               (t (plist-get top :body))))
+        (setq clause-line (and (not continues) (eq 'case (plist-get top :kind))
+                               (eql indent (plist-get top :c))
+                               (not (equal "else" w0))))
+        (cond
+         ;; The parents listed under `inherit' go one level deeper.
+         ((and (not continues) (eq 'class (plist-get top :kind)) (equal "inherit" w0))
+          (setq stack (cons (nex-fmt--with top :body (+ indent nex-indent-offset))
+                            (cdr stack))))
+         ;; A clause sets the level of the lines after it.
+         ((and clause (not (eq 'case (plist-get top :kind))))
+          (setq stack (cons (nex-fmt--with top :body (+ (plist-get top :c) nex-indent-offset))
+                            (cdr stack))))
+         ;; A case or match clause's statement ends at the line's end.
+         ((eq 'case (plist-get top :kind))
+          (setq stack (cons (nex-fmt--with top :stmt nil) (cdr stack)))))
+        ;; An argument line inside brackets is what an operator line after
+        ;; it continues.
+        (when (and continues (not op) (eq 'bracket (plist-get top :kind)))
+          (setq stack (cons (nex-fmt--with (car stack) :arg indent) (cdr stack))))
+        (unless continues
+          (setq head indent head-word w0))
+        ;; The blocks opened on this line.  Those opened on a statement's
+        ;; first line, or outside any bracket, line up with that line; one
+        ;; opened inside brackets on a later line lines up with its own line.
+        (let ((j 0) (seen-then nil))
+          (while (< j n)
+            (let* ((tok (aref toks j))
+                   (text (nex-fmt--text tok))
+                   (after-dot (and (> j 0)
+                                   (member (nex-fmt--text (aref toks (1- j))) '("." "?."))))
+                   (last (= j (1- n)))
+                   (f (car stack))
+                   (kind (plist-get f :kind))
+                   (at (if (eq 'bracket kind) indent head))
+                   (word (and (eq 'word (nex-fmt--kind tok)) (not after-dot) text)))
+              (cond
+               ((member text '("(" "[" "{" "#{"))
+                (push (list :kind 'bracket :line indent) stack))
+               ((member text '(")" "]" "}"))
+                (while (and (cdr stack) (not (eq 'bracket (plist-get (car stack) :kind))))
+                  (setq stack (cdr stack)))
+                (when (cdr stack) (setq stack (cdr stack))))
+               ((null word))
+               ((equal "class" word)
+                (push (nex-fmt--frame 'class at :c nil) stack))
+               ((and (equal "union" word) (member w0 '("union" "enum")))
+                (push (nex-fmt--frame 'union at :c (+ at nex-indent-offset)) stack))
+               ((equal "if" word)
+                (unless (and clause-line (not seen-then)) ; a match clause's guard
+                  (push (nex-fmt--frame 'if at) stack)))
+               ((and (equal "from" word) (not (equal "import" w0)))
+                (push (nex-fmt--frame 'loop at :await-do t) stack))
+               ((member word '("repeat" "across" "with"))
+                (push (nex-fmt--frame 'block-loop at :await-do t) stack))
+               ((member word '("case" "match"))
+                (push (nex-fmt--frame 'case at :c (+ at nex-indent-offset)) stack))
+               ((equal "select" word)
+                (push (nex-fmt--frame 'select at :c (+ at nex-indent-offset)
+                                      :body (+ at (* 2 nex-indent-offset)))
+                      stack))
+               ;; `when' starting a line of a select is a clause; anywhere
+               ;; else it starts a `when ... end' expression.
+               ((equal "when" word)
+                (unless (and (eq 'select kind) (= j 0))
+                  (push (list :kind 'when-expr :line indent) stack)))
+               ((equal "do" word)
+                (if (plist-get f :await-do)
+                    (setq stack (cons (nex-fmt--with f :await-do nil
+                                                     :body (+ (plist-get f :c) nex-indent-offset))
+                                      (cdr stack)))
+                  (push (nex-fmt--frame 'do at) stack)))
+               ((and (equal "then" word) (eq 'case kind))
+                (when last
+                  (setq stack (cons (nex-fmt--with f :stmt t) (cdr stack)))))
+               ((and (equal "else" word) (eq 'case kind) last)
+                (setq stack (cons (nex-fmt--with f :else-block t) (cdr stack))))
+               ((equal "end" word)
+                (when (cdr stack) (setq stack (cdr stack))))
+               ;; A deferred routine without `ensure' has no `end'.
+               ((and (equal "deferred" word) (= j 0) (eq 'routine kind)
+                     (not (let* ((next (cadr rest))
+                                 (nt (and next (aref (gethash next code) 0))))
+                            (and (eq 'word (nex-fmt--kind nt))
+                                 (equal "ensure" (nex-fmt--text nt))))))
+                (setq stack (cdr stack)))
+               ((and (equal "assert" word) (= j 0) (= n 1))
+                (push (list :kind 'assert :c indent :body (+ indent nex-indent-offset)
+                            :end indent)
+                      stack)))
+              (setq seen-then (or seen-then (equal "then" word))
+                    j (1+ j)))))
+        (let* ((words (delq nil (mapcar (lambda (tok)
+                                          (and (eq 'word (nex-fmt--kind tok))
+                                               (nex-fmt--text tok)))
+                                        toks)))
+               (fn-rest (member "fn" words))
+               (no-do-after-fn (and fn-rest (not (member "do" fn-rest)))))
+          (setq pending
+                (if continues
+                    (and pending (not (member "do" words)))
+                  (or (and (equal "function" w0) (not (member "do" words)))
+                      ;; a member, maybe after its section's word
+                      ;; (`create make(x: Integer)')
+                      (and (eq 'class (plist-get (seq-find
+                                                  (lambda (f) (not (eq 'bracket (plist-get f :kind))))
+                                                  stack)
+                                                 :kind))
+                           (eq 'word (nex-fmt--kind t0))
+                           (not (member "class" words))
+                           (seq-some (lambda (w) (not (nex-fmt--clause-word-p 'class w))) words)
+                           (not (member w0 '("note" "inherit"))))
+                      no-do-after-fn))))
+        (puthash i indent indents)
+        (let* ((f (car stack))
+               (after (pcase (plist-get f :kind)
+                        ((or 'bracket 'when-expr 'assert) nil)
+                        ('case (if (or (plist-get f :stmt) (plist-get f :else-block))
+                                   (+ (plist-get f :c) nex-indent-offset)
+                                 (plist-get f :c)))
+                        (_ (plist-get f :body)))))
+          (when after (puthash i after afters)))
+        (setq prev (aref toks (1- n))
+              prev-new indent
+              rest (cdr rest))))
+    (cons indents afters)))
 
-(defun nex-match-clause-indent ()
-  "Indentation column for a line that belongs to a match/select/case skeleton.
-The clause keywords \\='when\\=' and \\='timeout\\=' (select only — a match/case
-clause carries no leading keyword, see `nexlang.g4' `matchClause'/`caseClause')
-and \\='else\\=' indent one level inside their opener; the \\='end\\=' that
-closes the construct aligns with it.  A bare clause header — a match pattern
-or a case literal list, with no keyword to spot it by — gets the same
-one-level indent, detected structurally: it is whatever is left when point is
-directly in an enclosing match/select/case's clause list (not nested inside a
-clause's own body, and not inside that construct's `else' body, which is a
-further level of nesting the default rule already handles correctly on its
-own, the same way it always has for a second statement following any other
-block opener) — and is not itself the first line of the *preceding* clause's
-body, which `nex-should-increase-indent' already grows from that clause's
-`then' and must be left alone (a clause's body is exactly one statement, so
-its first line is the only place this ambiguity with a fresh clause header
-can arise; there is never a second body line to confuse with one).  Return
-nil when none of this applies — the current line is plain body content, or
-belongs to some other construct entirely (the `else' of an `if', say).
-Anchoring to the opener rather than to the previous line is what keeps
-sibling clauses aligned: the previous line is usually the last (or only)
-statement of the preceding clause's body, one level too deep."
-  (save-excursion
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    (let ((clause (looking-at (regexp-opt '("when" "timeout" "else") 'words)))
-          (closer (looking-at "\\bend\\b")))
-      (cond
-       (closer
-        (let ((info (nex-match-opener-indent)))
-          (when info (car info))))
-       (clause
-        (let ((info (nex-match-opener-indent)))
-          (when info (+ (car info) nex-indent-offset))))
-       ((nex-should-increase-indent)
-        nil)
-       (t
-        (let ((info (nex-match-opener-indent)))
-          (when (and info (not (cdr info)))
-            (+ (car info) nex-indent-offset))))))))
+(defun nex-fmt--indent-width (line)
+  (let ((i 0) (w 0) (n (length line)) (go t))
+    (while (and go (< i n))
+      (pcase (aref line i)
+        (?\s (setq w (1+ w)))
+        (?\t (setq w (+ w nex-indent-offset)))
+        (_ (setq go nil)))
+      (when go (setq i (1+ i))))
+    w))
 
-(defun nex-bracket-continuation-indent ()
-  "Indentation column when point's line continues a multi-line bracket literal.
-Return the column to indent to when the start of the current line is inside an
-unclosed \"[\", \"{\", or \"(\" (array/map literals, multi-line argument lists),
-otherwise nil.  Contents indent one level past the line that opened the bracket;
-a line that itself begins with the matching close bracket aligns with that
-opening line.  Uses the syntax parser, so brackets inside strings and comments
-are correctly ignored."
-  (save-excursion
-    (beginning-of-line)
-    (let ((open (nth 1 (syntax-ppss (point)))))
-      (when open
-        (let ((open-line-indent
-               (save-excursion (goto-char open) (current-indentation))))
-          (if (looking-at "[ \t]*[]})]")
-              open-line-indent
-            (+ open-line-indent nex-indent-offset)))))))
+(defun nex-fmt--line-indents (src)
+  "The new indentation of each line of SRC, as `nex format' would give it.
+Return a vector with one element per line: the indentation, `blank' for
+a line of only spaces, or nil for a line to leave as it is (the `#!' line,
+or one starting inside a string)."
+  (let* ((shebang (and (string-prefix-p "#!" src)
+                       (substring src 0 (or (string-search "\n" src) (length src)))))
+         ;; Blank out the `#!' line so its text isn't read as code.
+         (scan (if shebang
+                   (concat (make-string (length shebang) ?\s) (substring src (length shebang)))
+                 src))
+         (tokenized (nex-fmt--tokenize scan))
+         (string-lines (cdr tokenized))
+         (text-lines (vconcat (split-string src "\n")))
+         (nlines (length text-lines))
+         (starts-in-string (lambda (i) (gethash (1- i) string-lines)))
+         (code (make-hash-table))
+         (has-tokens (make-hash-table)))
+    ;; A line that starts inside a string belongs to the line where the
+    ;; string started.
+    (dolist (tok (car tokenized))
+      (let ((i (nex-fmt--line tok)))
+        (while (funcall starts-in-string i) (setq i (1- i)))
+        (puthash i t has-tokens)
+        (unless (eq 'comment (nex-fmt--kind tok))
+          (puthash i (cons tok (gethash i code)) code))))
+    (let (order)
+      (maphash (lambda (i toks)
+                 (puthash i (vconcat (nreverse toks)) code)
+                 (push i order))
+               code)
+      (setq order (sort order #'<))
+      (let* ((result (nex-fmt--code-indents order code))
+             (indents (car result))
+             (afters (cdr result))
+             (code-vec (vconcat order))
+             (out (make-vector nlines nil))
+             (old-of (lambda (i) (nex-fmt--indent-width (aref text-lines i))))
+             (delta-of (lambda (j) (- (gethash j indents) (funcall old-of j))))
+             (k 0))
+        (dotimes (i nlines)
+          ;; k: the index in code-vec of the first code line after i
+          (while (and (< k (length code-vec)) (<= (aref code-vec k) i))
+            (setq k (1+ k)))
+          (let ((line (aref text-lines i)))
+            (cond
+             ((funcall starts-in-string i))
+             ((and shebang (= i 0)))
+             ((string-match-p "\\`[ \t\r]*\\'" line) (aset out i 'blank))
+             ((gethash i indents) (aset out i (gethash i indents)))
+             (t
+              ;; A comment line moves by as much as the next line of code
+              ;; does, unless it is deeper than that line: then it ends the
+              ;; block above and goes where a statement there would.
+              (let* ((old (funcall old-of i))
+                     (next-code (and (< k (length code-vec)) (aref code-vec k)))
+                     (prev-code (let ((p (1- k)))
+                                  (while (and (>= p 0) (>= (aref code-vec p) i))
+                                    (setq p (1- p)))
+                                  (and (>= p 0) (aref code-vec p))))
+                     (next-old (and next-code (funcall old-of next-code))))
+                (aset out i
+                      (cond
+                       ((and next-code (<= old next-old))
+                        (max 0 (+ old (- (gethash next-code indents) next-old))))
+                       ;; far to the right: a note lined up with end-of-line
+                       ;; comments above, so it moves with the line above
+                       ((and prev-code (> old (+ (funcall old-of prev-code)
+                                                 (* 2 nex-indent-offset))))
+                        (max 0 (+ old (funcall delta-of prev-code))))
+                       ((and prev-code (gethash prev-code afters))
+                        (gethash prev-code afters))
+                       (next-code (max 0 (+ old (- (gethash next-code indents) next-old))))
+                       (prev-code (max 0 (+ old (funcall delta-of prev-code))))
+                       (t old))))))))
+        out))))
 
 (defun nex-indent-line ()
-  "Indent current line as Nex code."
+  "Indent the current line as `nex format' would.
+A blank line gets the indentation a statement typed there would have."
   (interactive)
-  (let ((indent-col 0)
-        (current-indent (current-indentation)))
+  (let* ((line (count-lines (point-min) (line-beginning-position)))
+         (blank (save-excursion (beginning-of-line) (looking-at "[ \t]*$")))
+         (src (buffer-substring-no-properties (point-min) (point-max)))
+         (col (aref (nex-fmt--line-indents
+                     (if blank
+                         ;; Stand in a statement for the blank line.
+                         (let ((start (- (line-beginning-position) (point-min)))
+                               (end (- (line-end-position) (point-min))))
+                           (concat (substring src 0 start) "x" (substring src end)))
+                       src))
+                    line))
+         (offset (- (current-column) (current-indentation))))
+    (when (numberp col)
+      (indent-line-to col)
+      (when (> offset 0)
+        (move-to-column (+ col offset))))))
+
+(defun nex-indent-region (start end)
+  "Indent the lines between START and END as `nex format' would."
+  (let ((indents (nex-fmt--line-indents
+                  (buffer-substring-no-properties (point-min) (point-max))))
+        (first (count-lines (point-min) (save-excursion (goto-char start)
+                                                        (line-beginning-position))))
+        (end-marker (copy-marker end)))
     (save-excursion
+      (goto-char start)
       (beginning-of-line)
-      (let ((bracket-indent (and (not (bobp)) (nex-bracket-continuation-indent))))
-        (cond
-         ((bobp)
-          (setq indent-col 0))
-         ;; Inside a multi-line [ ], { }, or ( ): indent relative to the line
-         ;; that opened the bracket. Takes precedence over keyword rules so
-         ;; array/map literal elements line up correctly.
-         (bracket-indent
-          (setq indent-col bracket-indent))
-         (t
-          (let ((prev-indent (nex-previous-line-indent))
-                (should-increase (nex-should-increase-indent))
-                (should-decrease (nex-should-decrease-indent))
-                (is-class-level (nex-is-class-level-keyword))
-                (is-note-after-method (nex-is-note-after-method))
-                (is-contract-after-method (nex-is-contract-after-method))
-                (is-loop-do (nex-is-loop-do))
-                (is-loop-clause (nex-loop-clause-keyword-p))
-                (match-clause-indent (nex-match-clause-indent)))
-            (setq indent-col
-                  (cond
-                   ;; Class-level keywords: align with class (usually 0)
-                   (is-class-level
-                    (nex-find-class-indent))
-                   ;; 'note' after method name: indent extra level
-                   (is-note-after-method
-                    (+ prev-indent nex-indent-offset))
-                   ;; require/ensure/do after method: align with method
-                   (is-contract-after-method
-                    (nex-find-method-indent))
-                   ;; Loop header clauses ('until'/'variant'/loop 'invariant')
-                   ;; and the loop 'do' all align with their 'from'.  Anchoring
-                   ;; to the matching 'from' (rather than the previous line)
-                   ;; makes this form-independent: the clause keyword sits at
-                   ;; the loop level whether its content is on its own line
-                   ;; (block form) or inline ("until cond", "variant expr").
-                   ((or is-loop-clause is-loop-do)
-                    (or (nex-loop-from-indent) prev-indent))
-                   ;; A match/select/case clause — 'when'/'timeout' for
-                   ;; select, a bare pattern or literal list for match/case —
-                   ;; and its 'else' and closing 'end' all anchor to their
-                   ;; opener.  Must precede the `should-decrease' rule, which
-                   ;; also matches 'when'/'else'/'end' but measures from the
-                   ;; previous line — the preceding clause's body — and so lands
-                   ;; a level short.
-                   (match-clause-indent
-                    match-clause-indent)
-                   ;; Closing keywords: decrease indent
-                   (should-decrease
-                    (max 0 (- prev-indent nex-indent-offset)))
-                   ;; Opening keywords on previous line: increase indent
-                   (should-increase
-                    (+ prev-indent nex-indent-offset))
-                   ;; Default: same as previous line
-                   (t prev-indent))))))))
-
-    ;; Indent the line
-    (indent-line-to indent-col)
-
-    ;; Move point to indentation if before it
-    (when (< (current-column) indent-col)
-      (move-to-column indent-col))))
-
-(defun nex-previous-line-indent ()
-  "Return the indentation of the previous non-blank line.
-When that line is a continuation of a multi-line bracketed expression -- an
-argument list or array/map literal split across lines -- return the
-indentation of the line that *opened* the expression instead.  Continuation
-lines are themselves indented relative to the opener (see
-`nex-bracket-continuation-indent'), so measuring the next statement from one
-would carry that extra level over to every line that follows."
-  (save-excursion
-    (forward-line -1)
-    (while (and (not (bobp))
-                (looking-at "^\\s-*$"))
-      (forward-line -1))
-    (beginning-of-line)
-    ;; The 10th ppss element lists the positions of the currently open
-    ;; brackets, outermost first; the statement starts on the outermost one's
-    ;; line.  Brackets inside strings and comments are correctly ignored.
-    (let ((openers (nth 9 (syntax-ppss (point)))))
-      (when openers
-        (goto-char (car openers))))
-    (current-indentation)))
-
-(defun nex-should-increase-indent ()
-  "Return t if the previous line should increase indentation."
-  (save-excursion
-    (forward-line -1)
-    ;; A 'union' declaration opener indents its variant list one level, the way
-    ;; 'feature' indents a class body.  The line ends with the union's name
-    ;; rather than a keyword, so it is matched at the start of the line.  An
-    ;; 'enum union' opener indents its members the same way.
-    (if (save-excursion (beginning-of-line)
-                        (looking-at "[ \t]*\\(enum[ \t]+\\)?union\\b"))
-        t
-      (end-of-line)
-      (skip-chars-backward " \t")
-      (or
-       ;; Keywords that start indented blocks
-       (looking-back
-        (regexp-opt '("class" "do" "then" "else" "elseif" "require" "ensure"
-                      "from" "until" "inherit" "invariant" "variant"
-                      "rescue" "of" "select" "when" "timeout")
-                    'words)
-        (line-beginning-position))
-     ;; Section keywords that contain items (feature, create)
-     (looking-back
-      (regexp-opt '("feature" "create") 'words)
-      (line-beginning-position))
-     ;; Handle "private feature" specially
-     (looking-back "\\bprivate\\s-+feature\\b" (line-beginning-position))))))
-
-(defun nex-in-contract-block-p ()
-  "Return t if point is in a contract block (after require/ensure)."
-  (save-excursion
-    (beginning-of-line)
-    ;; Search backward for require/ensure or do/end
-    (let ((start-pos (point)))
-      (catch 'result
-        (while (re-search-backward "\\b\\(require\\|ensure\\|do\\|end\\)\\b" nil t)
-          (let ((keyword (match-string 1)))
+      (let ((i first))
+        (while (and (< (point) end-marker) (not (eobp)))
+          (let ((col (and (< i (length indents)) (aref indents i))))
             (cond
-             ;; Found require or ensure before do - we're in contract block
-             ((or (string= keyword "require") (string= keyword "ensure"))
-              (throw 'result t))
-             ;; Found do or end first - not in contract block
-             ((or (string= keyword "do") (string= keyword "end"))
-              (throw 'result nil)))))
-        ;; Didn't find anything
-        nil))))
-
-(defun nex-in-from-block-p ()
-  "Return t if point is between 'until' and 'do' in a from-until-do block."
-  (save-excursion
-    (beginning-of-line)
-    (catch 'result
-      (while (re-search-backward "\\b\\(until\\|do\\|end\\)\\b" nil t)
-        (let ((keyword (match-string 1)))
-          (cond
-           ((string= keyword "until")
-            (throw 'result t))
-           (t
-            (throw 'result nil)))))
-      nil)))
-
-(defun nex-is-loop-do ()
-  "Return t if the current line is the loop 'do' of a from-until-do block.
-That is, a 'do' reached from the loop's 'until' rather than a method body or a
-contract block."
-  (save-excursion
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    (and (looking-at "\\bdo\\b")
-         (nex-in-from-block-p))))
-
-(defun nex-loop-from-indent ()
-  "Return the indentation of the 'from' of the loop enclosing point, or nil.
-Scans backward balancing 'from'/'end' so the matching opener is found even
-across nested or preceding sibling loops; a class 'invariant' or any code not
-inside a loop yields nil.  Matches inside strings/comments are ignored.  Works
-for any loop-header line ('invariant'/'variant'/'until'/loop 'do') because none
-of those are preceded by the loop's own 'end'."
-  (save-excursion
-    (beginning-of-line)
-    (let ((depth 0))
-      (catch 'found
-        (while (re-search-backward "\\b\\(from\\|end\\)\\b" nil t)
-          (unless (nth 8 (syntax-ppss))  ; skip 'from'/'end' in strings or comments
-            (let ((kw (match-string 1)))
-              (cond
-               ((string= kw "end")
-                (setq depth (1+ depth)))
-               ((string= kw "from")
-                (if (= depth 0)
-                    (throw 'found (current-indentation))
-                  (setq depth (1- depth))))))))
-        nil))))
-
-(defun nex-loop-clause-keyword-p ()
-  "Return t if the current line starts a from-loop header clause that should
-align with the loop's 'from': 'until', 'variant', or a loop (non-class)
-'invariant'.  A class-level 'invariant' returns nil."
-  (save-excursion
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    (cond
-     ((looking-at (regexp-opt '("until" "variant") 'words)) t)
-     ;; 'invariant' is a loop clause only when enclosed by a 'from'; otherwise
-     ;; it is a class invariant (handled by `nex-is-class-level-keyword').
-     ((looking-at "\\binvariant\\b")
-      (and (nex-loop-from-indent) t))
-     (t nil))))
-
-(defun nex-should-decrease-indent ()
-  "Return t if the current line should decrease indentation."
-  (save-excursion
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    (or
-     ;; 'end', 'else', 'elseif', 'rescue', 'when', 'timeout' close/open siblings.
-     ;; NB: inside a match/select/case these are anchored to their opener by
-     ;; `nex-match-clause-indent', which runs first; this is the fallback for
-     ;; every other block.
-     (looking-at (regexp-opt '("end" "else" "elseif" "rescue" "when" "timeout") 'words))
-     ;; 'do' aligns with require/ensure if inside contract block
-     (and (looking-at "\\bdo\\b")
-          (nex-in-contract-block-p)))
-     ;; NB: loop header clauses ('until'/'variant'/loop 'invariant') and the
-     ;; loop 'do' are NOT decreases.  They are handled separately in
-     ;; `nex-indent-line' via `nex-loop-clause-keyword-p'/`nex-is-loop-do',
-     ;; which align them with their 'from' rather than decreasing from the
-     ;; previous line (which may be an inline clause already at the loop
-     ;; level, in which case decreasing would overshoot).
-     ))
-
-(defun nex-is-class-level-keyword ()
-  "Return t if the current line starts with a class-level keyword.
-Class-level keywords should align with 'class' at column 0."
-  (save-excursion
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    ;; Skip 'private' if present
-    (when (looking-at "\\bprivate\\s-+")
-      (goto-char (match-end 0)))
-    (and (looking-at (regexp-opt '("feature" "create" "inherit" "invariant") 'words))
-         ;; A loop 'invariant' (enclosed by a 'from') is not class-level.  Use
-         ;; the 'from'-balancing scan rather than `nex-in-from-block-p', which
-         ;; only sees a loop 'invariant' written after 'until'.
-         (not (and (looking-at "\\binvariant\\b")
-                   (nex-loop-from-indent)))
-         ;; A 'create' creation instruction (e.g. "create Account.open(x)") is
-         ;; NOT the class-level 'create' clause.  The clause stands alone on its
-         ;; line or lists lowercase feature names; the instruction is followed
-         ;; by an uppercase type name (or a "{TYPE}" cast).  Only the latter is
-         ;; a statement inside a body and must indent with the body, not align
-         ;; to the class.
-         (not (looking-at "\\bcreate\\s-+[A-Z{]")))))
-
-(defun nex-find-class-indent ()
-  "Find the indentation level of the enclosing class.
-Returns 0 if at top level or inside a class."
-  (save-excursion
-    (beginning-of-line)
-    (if (re-search-backward "^\\s-*class\\s-+" nil t)
-        ;; Found a class, return its indentation
-        (current-indentation)
-      ;; No class found, return 0 (top level)
-      0)))
-
-(defun nex-is-note-after-method ()
-  "Return t if current line is 'note' after a method name."
-  (save-excursion
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    (when (looking-at "\\bnote\\b")
-      ;; Check if previous non-empty line is a method name
-      (forward-line -1)
-      (while (and (not (bobp)) (looking-at "^\\s-*$"))
-        (forward-line -1))
-      (end-of-line)
-      (skip-chars-backward " \t")
-      ;; Method name: lowercase identifier with optional parens and optional return type
-      (looking-back nex-method-signature-re
-                    (line-beginning-position)))))
-
-(defun nex-signature-line-p ()
-  "Return t if the line at point (after leading whitespace) is a genuine
-method/feature/constructor signature, not a same-shaped body statement.
-`nex-method-signature-re' alone cannot tell them apart: a bare, receiverless
-call statement ending a line -- `print()' -- has exactly the shape of a
-parameterless feature declaration.  The two are told apart by what follows:
-a real signature is always directly followed (skipping blank and `note'
-lines) by its `require' or `do' clause (or `deferred'), whereas a body
-statement's next line is more of the body, `ensure', or `end'."
-  (and (looking-at nex-method-signature-re)
-       (save-excursion
-         (forward-line 1)
-         (while (and (not (eobp))
-                     (progn (beginning-of-line)
-                            (skip-chars-forward " \t")
-                            (or (looking-at "^\\s-*$")
-                                (looking-at "\\bnote\\b"))))
-           (forward-line 1))
-         (beginning-of-line)
-         (skip-chars-forward " \t")
-         (looking-at "\\b\\(do\\|require\\|deferred\\)\\b"))))
-
-(defun nex-is-contract-after-method ()
-  "Return t if current line is require/ensure/do after a method name.
-A `deferred' standing in for a routine's body counts as its `do'."
-  (save-excursion
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    (when (and (looking-at "\\b\\(require\\|ensure\\|do\\|deferred\\)\\b")
-               (not (looking-at "\\bdeferred\\s-+class\\b")))
-      (let ((cur-kw (match-string 1)))
-        (if (string= cur-kw "ensure")
-            ;; 'ensure' is only ever a routine postcondition. It follows the
-            ;; routine body and aligns with the method (its matching 'do'),
-            ;; even when the preceding line is a nested block's 'end' (which
-            ;; the backward scan below would otherwise stop on, mis-anchoring
-            ;; the clause to the body indentation).
-            t
-          (nex-is-contract-after-method-1 cur-kw))))))
-
-(defun nex-is-contract-after-method-1 (cur-kw)
-  "Helper for `nex-is-contract-after-method' for the require/body-do case.
-CUR-KW is the contract keyword on the current line."
-  (save-excursion
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    ;; Search backward for method name, skipping note, empty lines, and body statements
-    (forward-line -1)
-    (while (and (not (bobp))
-                (progn
-                  (beginning-of-line)
-                  (skip-chars-forward " \t")
-                  (or (looking-at "^\\s-*$")
-                      (looking-at "\\bnote\\b")
-                      ;; Skip body statements (assignments, calls, etc) when looking for method
-                      ;; Stop at loop-starting keywords that own their own do..end
-                      (and (not (looking-at "\\b\\(do\\|require\\|ensure\\|feature\\|create\\|class\\|end\\|across\\|from\\|repeat\\|with\\)\\b"))
-                           (not (nex-signature-line-p))))))
-      (forward-line -1))
-    ;; Check if we found a method/constructor name or another contract keyword
-    (beginning-of-line)
-    (skip-chars-forward " \t")
-    (or (and (nex-signature-line-p)
-             (not (looking-at nex-section-keyword-re)))
-        (looking-at "\\brequire\\b")
-        ;; Landing on a 'do' anchors a method body: it lines up an 'ensure'
-        ;; (or a body 'do' that follows 'require') with the method. But a 'do'
-        ;; that opens a nested scoped block follows the enclosing body 'do',
-        ;; and must indent one level deeper instead of aligning to the method.
-        (and (looking-at "\\bdo\\b")
-             (not (member cur-kw '("do" "deferred")))))))
-
-(defun nex-find-method-indent ()
-  "Find the indentation of the method that owns the current contract."
-  (save-excursion
-    (beginning-of-line)
-    ;; Search backward for method name, skipping note, empty lines, and body statements
-    (forward-line -1)
-    (while (and (not (bobp))
-                (progn
-                  (beginning-of-line)
-                  (skip-chars-forward " \t")
-                  (or (looking-at "^\\s-*$")
-                      (looking-at "\\bnote\\b")
-                      ;; Skip body statements and section keywords when looking for method indent.
-                      ;; A free function's `function' header is the anchor for its
-                      ;; own clauses, so stop there instead of scanning past it into
-                      ;; whatever precedes the definition.
-                      (and (not (looking-at nex-free-function-re))
-                           (or (looking-at nex-section-keyword-re)
-                               (and (not (nex-signature-line-p))
-                                    (not (looking-at "\\b\\(do\\|require\\|ensure\\)\\b"))))))))
-      (forward-line -1))
-    ;; Should be at method name or contract keyword line now
-    (current-indentation)))
+             ((numberp col) (indent-line-to col))
+             ;; a line of only spaces becomes empty, as `nex format' makes it
+             ((and (eq col 'blank) (looking-at "[ \t]+$"))
+              (delete-region (point) (match-end 0)))))
+          (forward-line 1)
+          (setq i (1+ i)))))
+    (set-marker end-marker nil)))
 
 ;;;; Navigation
 
@@ -844,6 +839,7 @@ Nex is an Eiffel-inspired language with Design by Contract features.
 
   ;; Indentation
   (setq-local indent-line-function 'nex-indent-line)
+  (setq-local indent-region-function #'nex-indent-region)
   (setq-local tab-width nex-indent-offset)
   (setq-local indent-tabs-mode nil)  ; Use spaces, not tabs
 

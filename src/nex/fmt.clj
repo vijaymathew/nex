@@ -178,9 +178,12 @@
 ;; A line's indentation comes from the blocks around it: class sections,
 ;; routine clauses (require / do / ensure / rescue), loop and if bodies, and
 ;; the clauses of case, match and select. A line that continues a statement
-;; (inside brackets, after a trailing operator, or starting with one) keeps
-;; its offset from the statement's first line. A comment line moves with the
-;; next line of code.
+;; (inside brackets, after a trailing operator, or starting with one) goes one
+;; level past the line it continues: see `continuation-indent`. A comment line
+;; moves with the next line of code.
+;;
+;; editor/emacs/nex-mode.el indents with a port of this algorithm; a change
+;; here should be made there too.
 ;; ---------------------------------------------------------------------------
 
 (defn- word-start? [c] (or (Character/isLetter (char c)) (= \_ c)))
@@ -291,6 +294,33 @@
   [toks]
   (and (= :word (:kind (first toks))) (= ":" (:text (second toks)))))
 
+(defn- continuation-indent
+  "The indentation of a line that continues a statement. TOP is the
+   innermost open block or bracket, T0 the line's first token, PREV the last
+   code token of the line above, OP? whether the line continues by an
+   operator, HEAD and HEAD-WORD the indentation and first word of the
+   statement's first line, PREV-LINE {:new} the line above's indentation."
+  [top t0 prev op? head head-word prev-line]
+  (case (:kind top)
+    ;; Inside brackets: one level past the line that opened them, and a
+    ;; closing bracket level with that line. An operator line continuing an
+    ;; argument written on a line of its own goes one level past it.
+    :bracket (cond
+               (#{")" "]" "}"} (:text t0)) (:line top)
+               (and op? (:arg top)) (+ (:arg top) indent-size)
+               :else (+ (:line top) indent-size))
+    ;; A `when ... then ... else ... end` expression reads like an `if`.
+    :when-expr (if (#{"then" "else" "elseif" "end"} (:text t0))
+                 (:line top)
+                 (+ (:line top) indent-size))
+    (cond
+      ;; the next item of a list, as after `inherit`
+      (= "," (:text prev)) (:new prev-line)
+      (#{"then" "else" "elseif" "end"} (:text t0)) head
+      ;; A condition goes two levels in, apart from the body below it.
+      (#{"if" "elseif" "until"} head-word) (+ head (* 2 indent-size))
+      :else (+ head indent-size))))
+
 (defn- code-indents
   "For LINES, a map from line number to the line's code tokens:
    {:indent {line new-indentation} :after {line indentation}}, :after being
@@ -303,8 +333,7 @@
            stack [(open-frame :top 0 :body 0)]
            prev nil          ; last code token of the previous code line
            head 0            ; new indentation of the current statement's first line
-           head-old 0        ; and its indentation before
-           delta 0           ; how far that line moved
+           head-word nil     ; and that line's first word
            pending? false    ; whether the previous statement may be a routine header
            prev-line nil     ; {:old :new :continues?} of the previous code line
            out {:indent {} :after {}}]
@@ -315,6 +344,10 @@
               old (:old (meta toks))
               t0 (first toks)
               w0 (when (= :word (:kind t0)) (:text t0))
+              ;; Whether the line continues an expression by an operator,
+              ;; at its start or at the end of the line above.
+              op? (or (contains? continuing-starts (:text t0))
+                      (and (contains? continuing-ends (:text prev)) (not= "," (:text prev))))
               continues? (or (#{:bracket :when-expr} (:kind (peek stack)))
                              ;; a routine's `note "..."` and `alias "-"` belong
                              ;; to its header
@@ -328,23 +361,17 @@
                       (pop stack)
                       stack)
               ;; A header followed by `require` or `do` on a line of its own
-              ;; is a routine. Its clauses stay flush with the header, or one
-              ;; level in, as the first one is written.
+              ;; is a routine. Its clauses go flush with the header.
               stack (if (and (not continues?) pending?
                              (#{"require" "do" "deferred"} w0)
                              (not (:await-do (peek stack))))
-                      (let [c (if (> old head-old) (+ head indent-size) head)]
-                        (conj stack (open-frame :routine c :await-do true)))
+                      (conj stack (open-frame :routine head :await-do true))
                       stack)
-              ;; A class's sections stay flush with `class`, or one level in,
-              ;; as the first one is written.
+              ;; A class's sections go flush with `class`.
               stack (let [top (peek stack)]
                       (if (and (not continues?) (= :class (:kind top)) (nil? (:c top))
                                (contains? (clause-words :class) w0))
-                        (conj (pop stack)
-                              (assoc top :c (if (> old (:old-at top))
-                                              (+ (:end top) indent-size)
-                                              (:end top))))
+                        (conj (pop stack) (assoc top :c (:end top)))
                         stack))
               top (peek stack)
               ;; `do` in a routine or loop body starts a block, unless the
@@ -356,25 +383,12 @@
               case-level (when (= :case (:kind top))
                            (if (or (:stmt? top) (:else-block? top)) (+ (:c top) indent-size) (:c top)))
               indent (cond
-                       ;; A continuation keeps its offset from the statement's first
-                       ;; line. A line level with the one above, when that one
-                       ;; continues the statement or ends a list item, lines up
-                       ;; with it; otherwise a continuation goes deeper than the
-                       ;; statement's first line unless it closes something.
-                       continues? (let [w (max 0 (+ old delta))]
-                                    (cond
-                                      (#{")" "]" "}" "else" "elseif" "end" "then"} (:text t0)) w
-                                      (and (= old (:old prev-line))
-                                           (or (:continues? prev-line) (= "," (:text prev))))
-                                      (:new prev-line)
-                                      (<= w head) (+ head indent-size)
-                                      :else w))
+                       continues? (continuation-indent top t0 prev op? head head-word prev-line)
                        (= "end" w0) (:end top)
                        clause? (:c top)
                        (and (= :class (:kind top)) (= "note" w0)) (+ (:end top) indent-size)
-                       ;; `inherit` stays flush with `class` or one level in, as written.
-                       (and (= :class (:kind top)) (= "inherit" w0))
-                       (if (> old (:old-at top)) (+ (:end top) indent-size) (:end top))
+                       ;; `inherit` goes flush with `class`.
+                       (and (= :class (:kind top)) (= "inherit" w0)) (:end top)
                        case-level case-level
                        :else (:body top))
               clause-line? (and (not continues?) (= :case (:kind top))
@@ -389,9 +403,13 @@
                       ;; A case or match clause's statement ends at the line's end.
                       (= :case (:kind top))
                       (-> pop (conj (dissoc top :stmt?))))
+              ;; An argument line inside brackets is what an operator line
+              ;; after it continues.
+              stack (if (and continues? (not op?) (= :bracket (:kind top)))
+                      (conj (pop stack) (assoc top :arg indent))
+                      stack)
               head (if continues? head indent)
-              head-old (if continues? head-old old)
-              delta (if continues? delta (- indent old))
+              head-word (if continues? head-word w0)
               n (count toks)
               ;; Blocks opened on a statement's first line, or outside any
               ;; bracket, line up with that line; one opened inside brackets
@@ -409,7 +427,7 @@
                           (recur
                            (inc j)
                            (cond
-                             (#{"(" "[" "{" "#{"} text) (conj stack {:kind :bracket})
+                             (#{"(" "[" "{" "#{"} text) (conj stack {:kind :bracket :line indent})
                              (#{")" "]" "}"} text)
                              (let [s (loop [s stack]
                                        (if (and (> (count s) 1) (not= :bracket (:kind (peek s))))
@@ -417,7 +435,7 @@
                                          s))]
                                (if (> (count s) 1) (pop s) s))
                              (nil? word) stack
-                             (= "class" word) (conj stack (open-frame :class at :c nil :old-at head-old))
+                             (= "class" word) (conj stack (open-frame :class at :c nil))
                              (and (= "union" word) (#{"union" "enum"} w0))
                              (conj stack (open-frame :union at :c (+ at indent-size)))
                              (= "if" word) (if (and clause-line? (not seen-then?))
@@ -435,7 +453,7 @@
                              ;; anywhere else it starts a `when ... end` expression
                              (= "when" word) (if (and (= :select (:kind top)) (zero? j))
                                                stack
-                                               (conj stack {:kind :when-expr}))
+                                               (conj stack {:kind :when-expr :line indent}))
                              (= "do" word) (if (:await-do top)
                                              (-> stack pop (conj (assoc top :await-do false
                                                                         :body (+ (:c top) indent-size))))
@@ -467,7 +485,7 @@
                                    (some #(not (contains? (clause-words :class) %)) words)
                                    (not (#{"note" "inherit"} w0)))
                               no-do-after-fn?)))]
-          (recur (inc k) stack (peek toks) head head-old delta pending?
+          (recur (inc k) stack (peek toks) head head-word pending?
                  {:old old :new indent :continues? continues?}
                  (let [top (peek stack)
                        after (case (:kind top)

@@ -10,7 +10,7 @@ A comprehensive Emacs major mode is available in [`emacs/nex-mode.el`](emacs/nex
 
 **Features:**
 - ✓ Syntax highlighting for all Nex keywords and constructs
-- ✓ Automatic indentation
+- ✓ Automatic indentation, the same as `nex format` gives (`feature`, `require`, `do` and `ensure` in column 0)
 - ✓ REPL integration (evaluate buffer, region, or file)
 - ✓ Navigation support (jump to classes/methods)
 - ✓ Imenu support for quick navigation

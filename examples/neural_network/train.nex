@@ -23,55 +23,55 @@ intern time/Date_Time
 
 -- The settings of one training run, read from the command line.
 class Options
-  create
-    from_command_line(args: Array[String]) do
-      words := "/usr/share/dict/words"
-      out := "model.json"
-      steps := 20000
-      batch := 32
-      lr := 0.3
-      context := 4
-      emb := 8
-      hidden := 64
-      seed := 42
+create
+  from_command_line(args: Array[String]) do
+    words := "/usr/share/dict/words"
+    out := "model.json"
+    steps := 20000
+    batch := 32
+    lr := 0.3
+    context := 4
+    emb := 8
+    hidden := 64
+    seed := 42
 
-      from
-        let i: Integer := 0
-      until
-        i >= args.length
-      do
-        if i + 1 >= args.length then
-          raise "missing value after " + args.get(i)
-        end
-        let value: String := args.get(i + 1)
-        case args.get(i) of
-          "--words"   then words := value
-          "--out"     then out := value
-          "--steps"   then steps := value.to_integer
-          "--batch"   then batch := value.to_integer
-          "--lr"      then lr := value.to_real
-          "--context" then context := value.to_integer
-          "--emb"     then emb := value.to_integer
-          "--hidden"  then hidden := value.to_integer
-          "--seed"    then seed := value.to_integer
-          else raise "unknown option " + args.get(i)
-        end
-        i := i + 2
+    from
+      let i: Integer := 0
+    until
+      i >= args.length
+    do
+      if i + 1 >= args.length then
+        raise "missing value after " + args.get(i)
       end
+      let value: String := args.get(i + 1)
+      case args.get(i) of
+        "--words"   then words := value
+        "--out"     then out := value
+        "--steps"   then steps := value.to_integer
+        "--batch"   then batch := value.to_integer
+        "--lr"      then lr := value.to_real
+        "--context" then context := value.to_integer
+        "--emb"     then emb := value.to_integer
+        "--hidden"  then hidden := value.to_integer
+        "--seed"    then seed := value.to_integer
+        else raise "unknown option " + args.get(i)
+      end
+      i := i + 2
     end
-  feature
-    words: String    -- word list, one word per line
-    out: String      -- where to save the trained model
-    steps: Integer   -- number of minibatch updates
-    batch: Integer   -- minibatch size
-    lr: Real         -- learning rate (a tenth of it for the last 25%)
-    context: Integer -- how many previous letters the model sees
-    emb: Integer     -- embedding size
-    hidden: Integer  -- hidden neurons
-    seed: Integer    -- random seed, so runs can be repeated
-  invariant
-    positive_sizes: steps > 0 and batch > 0 and context > 0 and emb > 0 and hidden > 0
-    positive_rate: lr > 0.0
+  end
+feature
+  words: String    -- word list, one word per line
+  out: String      -- where to save the trained model
+  steps: Integer   -- number of minibatch updates
+  batch: Integer   -- minibatch size
+  lr: Real         -- learning rate (a tenth of it for the last 25%)
+  context: Integer -- how many previous letters the model sees
+  emb: Integer     -- embedding size
+  hidden: Integer  -- hidden neurons
+  seed: Integer    -- random seed, so runs can be repeated
+invariant
+  positive_sizes: steps > 0 and batch > 0 and context > 0 and emb > 0 and hidden > 0
+  positive_rate: lr > 0.0
 end
 
 -- Seconds since `start`, a time in milliseconds.

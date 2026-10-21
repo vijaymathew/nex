@@ -427,18 +427,18 @@ The built-in \code{pad_start} does that: \code{s.pad_start("0", 3)} adds
 -- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
 -- is "2.500".
 function fixed(r: Real, places: Integer): String
-  require
-    non_negative: places >= 0
-  do
-    let scale: Integer := 10 ^ places
-    let scaled: Integer := (r.abs * scale.to_real).round
-    let whole: String := (scaled / scale).to_string
-    let frac: String := (scaled % scale).to_string.pad_start("0", places)
-    result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
-    if places > 0 then
-      result := result + "." + frac
-    end
+require
+  non_negative: places >= 0
+do
+  let scale: Integer := 10 ^ places
+  let scaled: Integer := (r.abs * scale.to_real).round
+  let whole: String := (scaled / scale).to_string
+  let frac: String := (scaled % scale).to_string.pad_start("0", places)
+  result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
+  if places > 0 then
+    result := result + "." + frac
   end
+end
 \end{newfile}
 
 Notice \code{when ... then ... else ... end}: it is an \code{if} that gives
@@ -540,10 +540,10 @@ written \code{NAME = value}, which we read through the class name:
 --     ("appl" -> "e", then "pple" -> "." means "apple is complete").
 
 class Vocabulary
-  feature
-    END = "."
-    SYMBOLS = ".abcdefghijklmnopqrstuvwxyz"
-    SIZE = 27
+feature
+  END = "."
+  SYMBOLS = ".abcdefghijklmnopqrstuvwxyz"
+  SIZE = 27
 end
 \end{newfile}
 
@@ -554,23 +554,23 @@ that position:
 \begin{append}{vocabulary.nex}
 -- The id of a symbol: "." is 0, "a" is 1, ..., "z" is 26.
 function symbol_id(ch: String): Integer
-  require
-    one_symbol: ch.length = 1 and Vocabulary.SYMBOLS.contains(ch)
-  do
-    result := Vocabulary.SYMBOLS.index_of(ch)
-  ensure
-    in_range: result >= 0 and result < Vocabulary.SIZE
-  end
+require
+  one_symbol: ch.length = 1 and Vocabulary.SYMBOLS.contains(ch)
+do
+  result := Vocabulary.SYMBOLS.index_of(ch)
+ensure
+  in_range: result >= 0 and result < Vocabulary.SIZE
+end
 
 -- The symbol with a given id.
 function symbol_at(id: Integer): String
-  require
-    in_range: id >= 0 and id < Vocabulary.SIZE
-  do
-    result := Vocabulary.SYMBOLS.substring(id, id + 1)
-  ensure
-    one_symbol: result.length = 1
-  end
+require
+  in_range: id >= 0 and id < Vocabulary.SIZE
+do
+  result := Vocabulary.SYMBOLS.substring(id, id + 1)
+ensure
+  one_symbol: result.length = 1
+end
 \end{append}
 
 The contracts say exactly what these functions accept and promise.
@@ -681,9 +681,9 @@ Chapter~7.
 -- written out below.
 
 class Vector_Math
-  feature
-    -- How far a sum of probabilities may drift from 1.0 through rounding.
-    TOLERANCE = 1.0e-9
+feature
+  -- How far a sum of probabilities may drift from 1.0 through rounding.
+  TOLERANCE = 1.0e-9
 end
 \end{newfile}
 
@@ -693,13 +693,13 @@ components.
 \begin{append}{vector_math.nex}
 -- A vector of n zeros.
 function zeros(n: Integer): Array[Real]
-  require
-    non_negative: n >= 0
-  do
-    result := create Array.filled(n, 0.0)
-  ensure
-    right_length: result.length = n
-  end
+require
+  non_negative: n >= 0
+do
+  result := create Array.filled(n, 0.0)
+ensure
+  right_length: result.length = n
+end
 
 -- The sum of the elements.
 function sum(v: Array[Real]): Real do
@@ -720,18 +720,18 @@ defined.
 \begin{append}{vector_math.nex}
 -- The dot product: u[0]*v[0] + u[1]*v[1] + ...
 function dot(u, v: Array[Real]): Real
-  require
-    same_length: u.length = v.length
+require
+  same_length: u.length = v.length
+do
+  from
+    let i: Integer := 0
+  until
+    i = u.length
   do
-    from
-      let i: Integer := 0
-    until
-      i = u.length
-    do
-      result := result + u.get(i) * v.get(i)
-      i := i + 1
-    end
+    result := result + u.get(i) * v.get(i)
+    i := i + 1
   end
+end
 \end{append}
 
 \begin{tryit}{try_vectors.nex}
@@ -832,15 +832,15 @@ changing one would change them all.)
 -- A rows x cols matrix of zeros. Each row is its own array, so changing
 -- one row never changes another.
 function zero_matrix(rows, cols: Integer): Array[Array[Real]]
-  require
-    non_negative: rows >= 0 and cols >= 0
-  do
-    repeat rows do
-      result.add(zeros(cols))
-    end
-  ensure
-    right_rows: result.length = rows
+require
+  non_negative: rows >= 0 and cols >= 0
+do
+  repeat rows do
+    result.add(zeros(cols))
   end
+ensure
+  right_rows: result.length = rows
+end
 \end{append}
 
 Then the layer itself. It is a dot product per row, exactly as in the box
@@ -850,20 +850,20 @@ above:
 -- W·x + b: one dot product per row of W, plus that row's bias.
 -- Each row is one neuron; all the rows together are a layer.
 function affine(w: Array[Array[Real]], x, b: Array[Real]): Array[Real]
-  require
-    one_bias_per_row: w.length = b.length
+require
+  one_bias_per_row: w.length = b.length
+do
+  from
+    let i: Integer := 0
+  until
+    i = w.length
   do
-    from
-      let i: Integer := 0
-    until
-      i = w.length
-    do
-      result.add(dot(w.get(i), x) + b.get(i))
-      i := i + 1
-    end
-  ensure
-    one_output_per_row: result.length = w.length
+    result.add(dot(w.get(i), x) + b.get(i))
+    i := i + 1
   end
+ensure
+  one_output_per_row: result.length = w.length
+end
 \end{append}
 
 One more operation, which looks modest but will do most of the work in
@@ -874,18 +874,18 @@ $\vect{t} \leftarrow \vect{t} + s\,\vect{v}$. (The arrow means ``becomes''.)
 -- target := target + s * v, changing target in place.
 -- Backpropagation and gradient descent are built almost entirely from this.
 function add_scaled(target: Array[Real], s: Real, v: Array[Real])
-  require
-    same_length: target.length = v.length
+require
+  same_length: target.length = v.length
+do
+  from
+    let i: Integer := 0
+  until
+    i = target.length
   do
-    from
-      let i: Integer := 0
-    until
-      i = target.length
-    do
-      target.set(i, target.get(i) + s * v.get(i))
-      i := i + 1
-    end
+    target.set(i, target.get(i) + s * v.get(i))
+    i := i + 1
   end
+end
 \end{append}
 
 \begin{tryit}{try_layer.nex}
@@ -1022,11 +1022,11 @@ ourselves, using the safe form:
 -- The second form is safe for large v: e^2v overflows to Infinity,
 -- 2 / Infinity is 0, and the answer is exactly 1.
 function tanh(v: Real): Real
-  do
-    result := 1.0 - 2.0 / ((2.0 * v).exp + 1.0)
-  ensure
-    bounded: result >= -1.0 and result <= 1.0
-  end
+do
+  result := 1.0 - 2.0 / ((2.0 * v).exp + 1.0)
+ensure
+  bounded: result >= -1.0 and result <= 1.0
+end
 \end{append}
 
 \begin{tryit}{try_tanh.nex}
@@ -1125,25 +1125,25 @@ the answer is unchanged.
 -- (it cancels between top and bottom), but it keeps exp from
 -- overflowing when a score is large.
 function softmax(z: Array[Real]): Array[Real]
-  require
-    not_empty: z.length > 0
-  do
-    let m: Real := z.get(0)
-    across z as v do
-      m := m.max(v)
-    end
-    let exps: Array[Real] := []
-    across z as v do
-      exps.add((v - m).exp)
-    end
-    let total: Real := sum(exps)
-    across exps as e do
-      result.add(e / total)
-    end
-  ensure
-    same_length: result.length = z.length
-    sums_to_one: (sum(result) - 1.0).abs < Vector_Math.TOLERANCE
+require
+  not_empty: z.length > 0
+do
+  let m: Real := z.get(0)
+  across z as v do
+    m := m.max(v)
   end
+  let exps: Array[Real] := []
+  across z as v do
+    exps.add((v - m).exp)
+  end
+  let total: Real := sum(exps)
+  across exps as e do
+    result.add(e / total)
+  end
+ensure
+  same_length: result.length = z.length
+  sums_to_one: (sum(result) - 1.0).abs < Vector_Math.TOLERANCE
+end
 \end{append}
 
 The postcondition \code{sums_to_one} is where the \code{TOLERANCE}
@@ -1159,22 +1159,22 @@ network's top choice.
 \begin{append}{vector_math.nex}
 -- The index of the largest element (the first one, if there is a tie).
 function argmax(v: Array[Real]): Integer
-  require
-    not_empty: v.length > 0
+require
+  not_empty: v.length > 0
+do
+  from
+    let i: Integer := 1
+  until
+    i = v.length
   do
-    from
-      let i: Integer := 1
-    until
-      i = v.length
-    do
-      if v.get(i) > v.get(result) then
-        result := i
-      end
-      i := i + 1
+    if v.get(i) > v.get(result) then
+      result := i
     end
-  ensure
-    in_range: result >= 0 and result < v.length
+    i := i + 1
   end
+ensure
+  in_range: result >= 0 and result < v.length
+end
 \end{append}
 
 \begin{tryit}{try_softmax.nex}
@@ -1252,28 +1252,28 @@ $\ln 0$ is $-\infty$, so this matters.)
 -- less than 2^47 and never overflows a 64-bit Integer.
 
 class Rng
-  create
-    make(seed: Integer) do
-      -- Map any seed into the valid range 1 .. MODULUS - 1 (0 would stick).
-      state := 1 + seed.abs % (MODULUS - 1)
-    end
-  feature
-    MODULUS = 2147483647
-    MULTIPLIER = 48271
+create
+  make(seed: Integer) do
+    -- Map any seed into the valid range 1 .. MODULUS - 1 (0 would stick).
+    state := 1 + seed.abs % (MODULUS - 1)
+  end
+feature
+  MODULUS = 2147483647
+  MULTIPLIER = 48271
 
-    state: Integer
+  state: Integer
 
-    -- A real number spread evenly over the open interval (0, 1).
-    uniform(): Real
-      do
-        state := (state * MULTIPLIER) % MODULUS
-        result := state.to_real / MODULUS.to_real
-      ensure
-        open_interval: result > 0.0 and result < 1.0
-      end
+  -- A real number spread evenly over the open interval (0, 1).
+  uniform(): Real
+  do
+    state := (state * MULTIPLIER) % MODULUS
+    result := state.to_real / MODULUS.to_real
+  ensure
+    open_interval: result > 0.0 and result < 1.0
+  end
 
-  invariant
-    state_in_range: state >= 1 and state < MODULUS
+invariant
+  state_in_range: state >= 1 and state < MODULUS
 end
 \end{newfile}
 
@@ -1287,16 +1287,16 @@ $n-1$. Multiply a uniform number $u \in (0,1)$ by $n$ and round down:
 $\lfloor u\,n \rfloor$. Since $0 < u\,n < n$, the result is one of
 $0, 1, \dots, n-1$, each about equally likely.
 
-\begin{addbefore}{rng.nex}{before the invariant}{  invariant}
-    -- A whole number in 0 .. n - 1, each equally likely.
-    below(n: Integer): Integer
-      require
-        positive: n > 0
-      do
-        result := (uniform() * n.to_real).floor
-      ensure
-        in_range: result >= 0 and result < n
-      end
+\begin{addbefore}{rng.nex}{before the invariant}{invariant}
+  -- A whole number in 0 .. n - 1, each equally likely.
+  below(n: Integer): Integer
+  require
+    positive: n > 0
+  do
+    result := (uniform() * n.to_real).floor
+  ensure
+    in_range: result >= 0 and result < n
+  end
 \end{addbefore}
 
 \section{Bell-curve numbers: Box--Muller}
@@ -1330,28 +1330,28 @@ $z_1$ and $z_2$.
 The transform gives two numbers at a time. We return the first and keep
 the second, the \emph{spare}, for the next call:
 
-\begin{addbefore}{rng.nex}{before the invariant}{  invariant}
-    -- Box-Muller (below) makes normal numbers in pairs; this holds the
-    -- second one until it is asked for.
-    has_spare: Boolean
-    spare: Real
+\begin{addbefore}{rng.nex}{before the invariant}{invariant}
+  -- Box-Muller (below) makes normal numbers in pairs; this holds the
+  -- second one until it is asked for.
+  has_spare: Boolean
+  spare: Real
 
-    -- A number from the standard normal ("bell curve") distribution, with
-    -- mean 0 and standard deviation 1, by the Box-Muller transform: two
-    -- uniform numbers u1, u2 give two independent normal numbers
-    --     sqrt(-2 ln u1) * cos(2 pi u2)   and   sqrt(-2 ln u1) * sin(2 pi u2)
-    gauss(): Real do
-      if has_spare then
-        has_spare := false
-        result := spare
-      else
-        let radius: Real := (-2.0 * uniform().log).sqrt
-        let angle: Real := 2.0 * Real.PI * uniform()
-        spare := radius * angle.sin
-        has_spare := true
-        result := radius * angle.cos
-      end
+  -- A number from the standard normal ("bell curve") distribution, with
+  -- mean 0 and standard deviation 1, by the Box-Muller transform: two
+  -- uniform numbers u1, u2 give two independent normal numbers
+  --     sqrt(-2 ln u1) * cos(2 pi u2)   and   sqrt(-2 ln u1) * sin(2 pi u2)
+  gauss(): Real do
+    if has_spare then
+      has_spare := false
+      result := spare
+    else
+      let radius: Real := (-2.0 * uniform().log).sqrt
+      let angle: Real := 2.0 * Real.PI * uniform()
+      spare := radius * angle.sin
+      has_spare := true
+      result := radius * angle.cos
     end
+  end
 \end{addbefore}
 
 \section{Shuffling}
@@ -1549,50 +1549,50 @@ intern data/Json
 intern io/Path
 
 class Next_Letter_Model
-  create
-    -- A fresh, untrained model with random weights.
-    make(context, emb_dim, hidden, seed: Integer)
-      require
-        positive_sizes: context > 0 and emb_dim > 0 and hidden > 0
-      do
-        -- Hyperparameters: chosen by us, not learned.
-        this.context := context
-        this.emb_dim := emb_dim
-        this.hidden := hidden
+create
+  -- A fresh, untrained model with random weights.
+  make(context, emb_dim, hidden, seed: Integer)
+  require
+    positive_sizes: context > 0 and emb_dim > 0 and hidden > 0
+  do
+    -- Hyperparameters: chosen by us, not learned.
+    this.context := context
+    this.emb_dim := emb_dim
+    this.hidden := hidden
 
-        -- Parameters: learned during training. They start out random.
-        let rng: Rng := create Rng.make(seed)
-        let n_in: Integer := context * emb_dim
+    -- Parameters: learned during training. They start out random.
+    let rng: Rng := create Rng.make(seed)
+    let n_in: Integer := context * emb_dim
 
-        -- C: one embedding row per symbol.
-        c := random_matrix(rng, Vocabulary.SIZE, emb_dim, 1.0)
+    -- C: one embedding row per symbol.
+    c := random_matrix(rng, Vocabulary.SIZE, emb_dim, 1.0)
 
-        -- W1, b1: the hidden layer. Scaling by 1/sqrt(n_in) keeps W1·x
-        -- small at the start, where tanh is not yet flat.
-        w1 := random_matrix(rng, hidden, n_in, 1.0 / n_in.to_real.sqrt)
-        b1 := zeros(hidden)
+    -- W1, b1: the hidden layer. Scaling by 1/sqrt(n_in) keeps W1·x
+    -- small at the start, where tanh is not yet flat.
+    w1 := random_matrix(rng, hidden, n_in, 1.0 / n_in.to_real.sqrt)
+    b1 := zeros(hidden)
 
-        -- W2, b2: the output layer. Tiny weights make every symbol start
-        -- out about equally likely: an honest "I know nothing yet".
-        w2 := random_matrix(rng, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
-        b2 := zeros(Vocabulary.SIZE)
-      end
+    -- W2, b2: the output layer. Tiny weights make every symbol start
+    -- out about equally likely: an honest "I know nothing yet".
+    w2 := random_matrix(rng, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
+    b2 := zeros(Vocabulary.SIZE)
+  end
 
-  feature
-    context: Integer   -- how many previous letters the model sees
-    emb_dim: Integer   -- length of each letter's embedding vector
-    hidden: Integer    -- number of neurons in the hidden layer
+feature
+  context: Integer   -- how many previous letters the model sees
+  emb_dim: Integer   -- length of each letter's embedding vector
+  hidden: Integer    -- number of neurons in the hidden layer
 
-    c: Array[Array[Real]]    -- embeddings,   Vocabulary.SIZE x emb_dim
-    w1: Array[Array[Real]]   -- hidden layer, hidden x (context * emb_dim)
-    b1: Array[Real]          --               hidden
-    w2: Array[Array[Real]]   -- output layer, Vocabulary.SIZE x hidden
-    b2: Array[Real]          --               Vocabulary.SIZE
+  c: Array[Array[Real]]    -- embeddings,   Vocabulary.SIZE x emb_dim
+  w1: Array[Array[Real]]   -- hidden layer, hidden x (context * emb_dim)
+  b1: Array[Real]          --               hidden
+  w2: Array[Array[Real]]   -- output layer, Vocabulary.SIZE x hidden
+  b2: Array[Real]          --               Vocabulary.SIZE
 
-  invariant
-    embedding_rows: c.length = Vocabulary.SIZE
-    hidden_rows: w1.length = hidden and b1.length = hidden
-    output_rows: w2.length = Vocabulary.SIZE and b2.length = Vocabulary.SIZE
+invariant
+  embedding_rows: c.length = Vocabulary.SIZE
+  hidden_rows: w1.length = hidden and b1.length = hidden
+  output_rows: w2.length = Vocabulary.SIZE and b2.length = Vocabulary.SIZE
 end
 \end{newfile}
 
@@ -1606,17 +1606,17 @@ a scale:
 \begin{append}{next_letter_model.nex}
 -- A rows x cols matrix of normal random numbers, each times `scale`.
 function random_matrix(rng: Rng, rows, cols: Integer, scale: Real): Array[Array[Real]]
-  do
-    repeat rows do
-      let row: Array[Real] := []
-      repeat cols do
-        row.add(rng.gauss() * scale)
-      end
-      result.add(row)
+do
+  repeat rows do
+    let row: Array[Real] := []
+    repeat cols do
+      row.add(rng.gauss() * scale)
     end
-  ensure
-    right_rows: result.length = rows
+    result.add(row)
   end
+ensure
+  right_rows: result.length = rows
+end
 \end{append}
 
 Two small methods complete the setup. The first turns the end of a typed
@@ -1629,27 +1629,27 @@ full stops on the left, and then take its last \code{context} characters:
 a string. Each \code{ch} is a \code{Char}, which \code{ch.to_string} turns
 back into a one-letter \code{String} for \code{symbol_id}.
 
-\begin{addbefore}{next_letter_model.nex}{before the invariant}{  invariant}
-    -- The last `context` letters of a prefix as ids, padded with ".".
-    --   "app" with context 4  ->  ".app"  ->  [0, 1, 16, 16]
-    context_ids(prefix: String): Array[Integer]
-      require
-        known_symbols: is_lowercase_word(prefix) or prefix = ""
-      do
-        let padded: String := Vocabulary.END.replicate(context) + prefix
-        let tail: String := padded.substring(padded.length - context, padded.length)
-        across tail as ch do
-          result.add(symbol_id(ch.to_string))
-        end
-      ensure
-        full_context: result.length = context
-      end
-
-    num_parameters(): Integer do
-      result := Vocabulary.SIZE * emb_dim
-        + hidden * context * emb_dim + hidden
-        + Vocabulary.SIZE * hidden + Vocabulary.SIZE
+\begin{addbefore}{next_letter_model.nex}{before the invariant}{invariant}
+  -- The last `context` letters of a prefix as ids, padded with ".".
+  --   "app" with context 4  ->  ".app"  ->  [0, 1, 16, 16]
+  context_ids(prefix: String): Array[Integer]
+  require
+    known_symbols: is_lowercase_word(prefix) or prefix = ""
+  do
+    let padded: String := Vocabulary.END.replicate(context) + prefix
+    let tail: String := padded.substring(padded.length - context, padded.length)
+    across tail as ch do
+      result.add(symbol_id(ch.to_string))
     end
+  ensure
+    full_context: result.length = context
+  end
+
+  num_parameters(): Integer do
+    result := Vocabulary.SIZE * emb_dim
+      + hidden * context * emb_dim + hidden
+      + Vocabulary.SIZE * hidden + Vocabulary.SIZE
+  end
 \end{addbefore}
 
 \begin{tryit}{try_model.nex}
@@ -1681,18 +1681,18 @@ returns all of them, in a small object:
 -- What one forward pass computed. Backpropagation reuses these values
 -- instead of computing them again.
 class Forward_Pass
-  create
-    make(ids: Array[Integer], x, h, probs: Array[Real]) do
-      this.ids := ids
-      this.x := x
-      this.h := h
-      this.probs := probs
-    end
-  feature
-    ids: Array[Integer]   -- the context letters, as symbol ids
-    x: Array[Real]        -- their embeddings, joined into one vector
-    h: Array[Real]        -- the hidden layer's outputs
-    probs: Array[Real]    -- one probability per symbol
+create
+  make(ids: Array[Integer], x, h, probs: Array[Real]) do
+    this.ids := ids
+    this.x := x
+    this.h := h
+    this.probs := probs
+  end
+feature
+  ids: Array[Integer]   -- the context letters, as symbol ids
+  x: Array[Real]        -- their embeddings, joined into one vector
+  h: Array[Real]        -- the hidden layer's outputs
+  probs: Array[Real]    -- one probability per symbol
 end
 \end{addbefore}
 
@@ -1700,34 +1700,34 @@ The method itself follows the box in the previous chapter line by line:
 look up and join the embeddings, run the hidden layer and $\tanh$, run the
 output layer and softmax.
 
-\begin{addbefore}{next_letter_model.nex}{before num_parameters}{    num_parameters(): Integer do}
-    -- Run the network on one context.
-    forward(ids: Array[Integer]): Forward_Pass
-      require
-        full_context: ids.length = context
-      do
-        -- 1. Embedding lookup: replace each id by its row of C, and join
-        --    the rows into one input vector x.
-        let x: Array[Real] := []
-        across ids as id do
-          across c.get(id) as v do
-            x.add(v)
-          end
-        end
-
-        -- 2. Hidden layer: h = tanh(W1·x + b1).
-        let h: Array[Real] := []
-        across affine(w1, x, b1) as v do
-          h.add(tanh(v))
-        end
-
-        -- 3. Output layer: one score per symbol, then softmax.
-        let probs: Array[Real] := softmax(affine(w2, h, b2))
-
-        result := create Forward_Pass.make(ids, x, h, probs)
-      ensure
-        one_probability_per_symbol: result.probs.length = Vocabulary.SIZE
+\begin{addbefore}{next_letter_model.nex}{before num_parameters}{  num_parameters(): Integer do}
+  -- Run the network on one context.
+  forward(ids: Array[Integer]): Forward_Pass
+  require
+    full_context: ids.length = context
+  do
+    -- 1. Embedding lookup: replace each id by its row of C, and join
+    --    the rows into one input vector x.
+    let x: Array[Real] := []
+    across ids as id do
+      across c.get(id) as v do
+        x.add(v)
       end
+    end
+
+    -- 2. Hidden layer: h = tanh(W1·x + b1).
+    let h: Array[Real] := []
+    across affine(w1, x, b1) as v do
+      h.add(tanh(v))
+    end
+
+    -- 3. Output layer: one score per symbol, then softmax.
+    let probs: Array[Real] := softmax(affine(w2, h, b2))
+
+    result := create Forward_Pass.make(ids, x, h, probs)
+  ensure
+    one_probability_per_symbol: result.probs.length = Vocabulary.SIZE
+  end
 \end{addbefore}
 
 \begin{tryit}{try_forward.nex}
@@ -1814,21 +1814,21 @@ intern Next_Letter_Model
 intern io/Path
 
 class Training_Data
-  feature
-    -- Keeps -log(p) finite even if a probability rounds to exactly 0.
-    TINY = 1.0e-12
+feature
+  -- Keeps -log(p) finite even if a probability rounds to exactly 0.
+  TINY = 1.0e-12
 end
 
 -- One training example: a context and the symbol that follows it.
 class Example
-  create
-    make(ids: Array[Integer], target: Integer) do
-      this.ids := ids
-      this.target := target
-    end
-  feature
-    ids: Array[Integer]
-    target: Integer
+create
+  make(ids: Array[Integer], target: Integer) do
+    this.ids := ids
+    this.target := target
+  end
+feature
+  ids: Array[Integer]
+  target: Integer
 end
 \end{newfile}
 
@@ -1864,27 +1864,27 @@ window is the answer.
 \begin{append}{training_data.nex}
 -- Every (context, next symbol) pair in every word, as shown at the top.
 function make_examples(words: Array[String], context: Integer): Array[Example]
-  require
-    positive_context: context > 0
-  do
-    let pad: String := Vocabulary.END.replicate(context)
-    across words as word do
-      let padded: String := pad + word + Vocabulary.END
-      from
-        let i: Integer := 0
-      until
-        i = word.length + 1
-      do
-        let ids: Array[Integer] := []
-        across padded.substring(i, i + context) as ch do
-          ids.add(symbol_id(ch.to_string))
-        end
-        let target: Integer := symbol_id(padded.substring(i + context, i + context + 1))
-        result.add(create Example.make(ids, target))
-        i := i + 1
+require
+  positive_context: context > 0
+do
+  let pad: String := Vocabulary.END.replicate(context)
+  across words as word do
+    let padded: String := pad + word + Vocabulary.END
+    from
+      let i: Integer := 0
+    until
+      i = word.length + 1
+    do
+      let ids: Array[Integer] := []
+      across padded.substring(i, i + context) as ch do
+        ids.add(symbol_id(ch.to_string))
       end
+      let target: Integer := symbol_id(padded.substring(i + context, i + context + 1))
+      result.add(create Example.make(ids, target))
+      i := i + 1
     end
   end
+end
 \end{append}
 
 \section{Measuring wrongness: cross-entropy}
@@ -1953,33 +1953,33 @@ right answer.
 \begin{append}{training_data.nex}
 -- Average loss and accuracy over a set of examples.
 class Evaluation
-  create
-    make(loss, accuracy: Real) do
-      this.loss := loss
-      this.accuracy := accuracy
-    end
-  feature
-    loss: Real       -- average cross-entropy: lower is better
-    accuracy: Real   -- fraction of examples where the top guess was right
+create
+  make(loss, accuracy: Real) do
+    this.loss := loss
+    this.accuracy := accuracy
+  end
+feature
+  loss: Real       -- average cross-entropy: lower is better
+  accuracy: Real   -- fraction of examples where the top guess was right
 end
 
 -- Average cross-entropy and top-1 accuracy of a model on some examples.
 function evaluate(model: Next_Letter_Model, examples: Array[Example]): Evaluation
-  require
-    not_empty: examples.length > 0
-  do
-    let total_loss: Real := 0.0
-    let correct: Integer := 0
-    across examples as ex do
-      let probs: Array[Real] := model.forward(ex.ids).probs
-      total_loss := total_loss + cross_entropy(probs, ex.target)
-      if argmax(probs) = ex.target then
-        correct := correct + 1
-      end
+require
+  not_empty: examples.length > 0
+do
+  let total_loss: Real := 0.0
+  let correct: Integer := 0
+  across examples as ex do
+    let probs: Array[Real] := model.forward(ex.ids).probs
+    total_loss := total_loss + cross_entropy(probs, ex.target)
+    if argmax(probs) = ex.target then
+      correct := correct + 1
     end
-    let n: Real := examples.length.to_real
-    result := create Evaluation.make(total_loss / n, correct.to_real / n)
   end
+  let n: Real := examples.length.to_real
+  result := create Evaluation.make(total_loss / n, correct.to_real / n)
+end
 \end{append}
 
 \begin{tryit}{try_examples.nex}
@@ -2222,20 +2222,20 @@ parameter, with the same shape:
 -- Zero-filled containers with the same shapes as the model's parameters.
 -- During a minibatch, each example adds its gradients here.
 class Gradients
-  create
-    make(model: Next_Letter_Model) do
-      c := zero_matrix(Vocabulary.SIZE, model.emb_dim)
-      w1 := zero_matrix(model.hidden, model.context * model.emb_dim)
-      b1 := zeros(model.hidden)
-      w2 := zero_matrix(Vocabulary.SIZE, model.hidden)
-      b2 := zeros(Vocabulary.SIZE)
-    end
-  feature
-    c: Array[Array[Real]]
-    w1: Array[Array[Real]]
-    b1: Array[Real]
-    w2: Array[Array[Real]]
-    b2: Array[Real]
+create
+  make(model: Next_Letter_Model) do
+    c := zero_matrix(Vocabulary.SIZE, model.emb_dim)
+    w1 := zero_matrix(model.hidden, model.context * model.emb_dim)
+    b1 := zeros(model.hidden)
+    w2 := zero_matrix(Vocabulary.SIZE, model.hidden)
+    b2 := zeros(Vocabulary.SIZE)
+  end
+feature
+  c: Array[Array[Real]]
+  w1: Array[Array[Real]]
+  b1: Array[Real]
+  w2: Array[Array[Real]]
+  b2: Array[Real]
 end
 \end{addbefore}
 
@@ -2273,19 +2273,19 @@ the gradient is small when the model is already nearly right.
 In code: copy the probabilities, and subtract 1 at the target. This is the
 start of the \code{backward} method; the next boxes continue it.
 
-\begin{addbefore}{next_letter_model.nex}{before num_parameters}{    num_parameters(): Integer do}
-    -- Add one example's gradients into g, by the chain rule, from the
-    -- loss back to the input:
-    --   loss -> logits -> W2, b2, h -> tanh -> W1, b1, x -> C
-    backward(fp: Forward_Pass, target: Integer, g: Gradients)
-      require
-        valid_target: target >= 0 and target < Vocabulary.SIZE
-      do
-        -- Step A: softmax followed by cross-entropy has a very simple
-        -- gradient with respect to the logits:
-        --     dL/dz[i] = p[i] - (1 if i is the target, else 0)
-        let dz: Array[Real] := fp.probs.clone()
-        dz.set(target, dz.get(target) - 1.0)
+\begin{addbefore}{next_letter_model.nex}{before num_parameters}{  num_parameters(): Integer do}
+  -- Add one example's gradients into g, by the chain rule, from the
+  -- loss back to the input:
+  --   loss -> logits -> W2, b2, h -> tanh -> W1, b1, x -> C
+  backward(fp: Forward_Pass, target: Integer, g: Gradients)
+  require
+    valid_target: target >= 0 and target < Vocabulary.SIZE
+  do
+    -- Step A: softmax followed by cross-entropy has a very simple
+    -- gradient with respect to the logits:
+    --     dL/dz[i] = p[i] - (1 if i is the target, else 0)
+    let dz: Array[Real] := fp.probs.clone()
+    dz.set(target, dz.get(target) - 1.0)
 \end{addbefore}
 
 \section{Step B: the output layer}
@@ -2314,20 +2314,20 @@ $\pd{L}{\vect{h}}$ is the sum, over all rows $i$, of row $i$ of $W_2$
 times $\pd{L}{z_i}$. Both are exactly what \code{add_scaled} does:
 
 \begin{continued}{next_letter_model.nex}
-        -- Step B: output layer, z = W2·h + b2.
-        --     dW2[i][j] += dz[i] * h[j]     db2[i] += dz[i]
-        --     dh[j]     += dz[i] * W2[i][j]
-        let dh: Array[Real] := zeros(hidden)
-        from
-          let i: Integer := 0
-        until
-          i = Vocabulary.SIZE
-        do
-          add_scaled(g.w2.get(i), dz.get(i), fp.h)
-          g.b2.set(i, g.b2.get(i) + dz.get(i))
-          add_scaled(dh, dz.get(i), w2.get(i))
-          i := i + 1
-        end
+    -- Step B: output layer, z = W2·h + b2.
+    --     dW2[i][j] += dz[i] * h[j]     db2[i] += dz[i]
+    --     dh[j]     += dz[i] * W2[i][j]
+    let dh: Array[Real] := zeros(hidden)
+    from
+      let i: Integer := 0
+    until
+      i = Vocabulary.SIZE
+    do
+      add_scaled(g.w2.get(i), dz.get(i), fp.h)
+      g.b2.set(i, g.b2.get(i) + dz.get(i))
+      add_scaled(dh, dz.get(i), w2.get(i))
+      i := i + 1
+    end
 \end{continued}
 
 Note that we \emph{add} into \code{g}, rather than overwrite it, so that
@@ -2351,18 +2351,18 @@ and almost no gradient gets through to the layer below. That neuron
 hardly learns.
 
 \begin{continued}{next_letter_model.nex}
-        -- Step C: through tanh. tanh'(a) = 1 - tanh(a)^2 = 1 - h^2, and
-        -- we already have h, so this costs almost nothing.
-        let da: Array[Real] := []
-        from
-          let j: Integer := 0
-        until
-          j = hidden
-        do
-          let hj: Real := fp.h.get(j)
-          da.add(dh.get(j) * (1.0 - hj * hj))
-          j := j + 1
-        end
+    -- Step C: through tanh. tanh'(a) = 1 - tanh(a)^2 = 1 - h^2, and
+    -- we already have h, so this costs almost nothing.
+    let da: Array[Real] := []
+    from
+      let j: Integer := 0
+    until
+      j = hidden
+    do
+      let hj: Real := fp.h.get(j)
+      da.add(dh.get(j) * (1.0 - hj * hj))
+      j := j + 1
+    end
 \end{continued}
 
 \section{Step D: the hidden layer}
@@ -2378,18 +2378,18 @@ $\vect{b}_2$, $\vect{h}$ and $\pd{L}{\vect{z}}$:
 \]
 
 \begin{continued}{next_letter_model.nex}
-        -- Step D: hidden layer, a = W1·x + b1. Same pattern as step B.
-        let dx: Array[Real] := zeros(fp.x.length)
-        from
-          let i: Integer := 0
-        until
-          i = hidden
-        do
-          add_scaled(g.w1.get(i), da.get(i), fp.x)
-          g.b1.set(i, g.b1.get(i) + da.get(i))
-          add_scaled(dx, da.get(i), w1.get(i))
-          i := i + 1
-        end
+    -- Step D: hidden layer, a = W1·x + b1. Same pattern as step B.
+    let dx: Array[Real] := zeros(fp.x.length)
+    from
+      let i: Integer := 0
+    until
+      i = hidden
+    do
+      add_scaled(g.w1.get(i), da.get(i), fp.x)
+      g.b1.set(i, g.b1.get(i) + da.get(i))
+      add_scaled(dx, da.get(i), w1.get(i))
+      i := i + 1
+    end
 \end{continued}
 
 \section{Step E: the embeddings}
@@ -2413,26 +2413,26 @@ $C$ gets the gradients of both positions. Rows of symbols that are not in
 the context get nothing from this example.
 
 \begin{continued}{next_letter_model.nex}
-        -- Step E: embeddings. x was the context letters' rows of C joined
-        -- together, so cut dx back into pieces and add each piece to the
-        -- row it came from. A letter that appears twice ("pp") gets both.
-        from
-          let k: Integer := 0
-        until
-          k = context
-        do
-          let row: Array[Real] := g.c.get(fp.ids.get(k))
-          from
-            let d: Integer := 0
-          until
-            d = emb_dim
-          do
-            row.set(d, row.get(d) + dx.get(k * emb_dim + d))
-            d := d + 1
-          end
-          k := k + 1
-        end
+    -- Step E: embeddings. x was the context letters' rows of C joined
+    -- together, so cut dx back into pieces and add each piece to the
+    -- row it came from. A letter that appears twice ("pp") gets both.
+    from
+      let k: Integer := 0
+    until
+      k = context
+    do
+      let row: Array[Real] := g.c.get(fp.ids.get(k))
+      from
+        let d: Integer := 0
+      until
+        d = emb_dim
+      do
+        row.set(d, row.get(d) + dx.get(k * emb_dim + d))
+        d := d + 1
       end
+      k := k + 1
+    end
+  end
 \end{continued}
 
 The final \code{end} closes the method. That is the whole of
@@ -2523,38 +2523,38 @@ intern Helpers
 intern io/Path
 
 class Checker
-  create
-    make() do
-      con := create Console
-    end
-  feature
-    con: Console
-    passed: Integer
-    failed: Integer
+create
+  make() do
+    con := create Console
+  end
+feature
+  con: Console
+  passed: Integer
+  failed: Integer
 
-    check(label: String, ok: Boolean) do
-      if ok then
-        passed := passed + 1
-        con.print_line("PASS " + label)
-      else
-        failed := failed + 1
-        con.print_line("FAIL " + label)
-      end
+  check(label: String, ok: Boolean) do
+    if ok then
+      passed := passed + 1
+      con.print_line("PASS " + label)
+    else
+      failed := failed + 1
+      con.print_line("FAIL " + label)
     end
+  end
 
-    close_to(label: String, expected, actual, tolerance: Real) do
-      check(label + " (expected " + expected.to_string
-          + ", got " + actual.to_string + ")",
-        (expected - actual).abs <= tolerance)
-    end
+  close_to(label: String, expected, actual, tolerance: Real) do
+    check(label + " (expected " + expected.to_string
+      + ", got " + actual.to_string + ")",
+      (expected - actual).abs <= tolerance)
+  end
 
-    summary() do
-      con.print_line("---")
-      con.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
-      if failed > 0 then
-        exit(1)
-      end
+  summary() do
+    con.print_line("---")
+    con.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
+    if failed > 0 then
+      exit(1)
     end
+  end
 end
 
 let c: Checker := create Checker.make()
@@ -2653,7 +2653,7 @@ end
 -- Compare backward's gradient for parameter row[col] with a measured one:
 --     dL/dp  is about  (L(p + eps) - L(p - eps)) / (2 eps)
 function gradient_matches(model: Next_Letter_Model, ex: Example, row: Array[Real],
-                          col: Integer, analytic: Real): Boolean do
+  col: Integer, analytic: Real): Boolean do
   let eps: Real := 1.0e-5
   let saved: Real := row.get(col)
   row.set(col, saved + eps)
@@ -2678,19 +2678,19 @@ let grads: Gradients := create Gradients.make(model)
 model.backward(model.forward(ex.ids), ex.target, grads)
 c.check("gradient of b2",
   gradient_matches(model, ex, model.b2, 12, grads.b2.get(12))
-  and gradient_matches(model, ex, model.b2, 5, grads.b2.get(5)))
+    and gradient_matches(model, ex, model.b2, 5, grads.b2.get(5)))
 c.check("gradient of W2",
   gradient_matches(model, ex, model.w2.get(12), 3, grads.w2.get(12).get(3))
-  and gradient_matches(model, ex, model.w2.get(0), 40, grads.w2.get(0).get(40)))
+    and gradient_matches(model, ex, model.w2.get(0), 40, grads.w2.get(0).get(40)))
 c.check("gradient of b1",
   gradient_matches(model, ex, model.b1, 7, grads.b1.get(7)))
 c.check("gradient of W1",
   gradient_matches(model, ex, model.w1.get(7), 30, grads.w1.get(7).get(30))
-  and gradient_matches(model, ex, model.w1.get(63), 0, grads.w1.get(63).get(0)))
+    and gradient_matches(model, ex, model.w1.get(63), 0, grads.w1.get(63).get(0)))
 -- "p" (id 16) appears twice in ".app", so its embedding gets two gradients.
 c.check("gradient of C",
   gradient_matches(model, ex, model.c.get(16), 2, grads.c.get(16).get(2))
-  and gradient_matches(model, ex, model.c.get(1), 5, grads.c.get(1).get(5)))
+    and gradient_matches(model, ex, model.c.get(1), 5, grads.c.get(1).get(5)))
 \end{addbefore}
 
 \runoutput{checks.nex}{checks_gradients}
@@ -2719,35 +2719,35 @@ matrix is updated one row at a time:
 \begin{append}{next_letter_model.nex}
 -- m := m + s * g, row by row.
 function update_matrix(m: Array[Array[Real]], s: Real, g: Array[Array[Real]])
-  require
-    same_rows: m.length = g.length
+require
+  same_rows: m.length = g.length
+do
+  from
+    let r: Integer := 0
+  until
+    r = m.length
   do
-    from
-      let r: Integer := 0
-    until
-      r = m.length
-    do
-      add_scaled(m.get(r), s, g.get(r))
-      r := r + 1
-    end
+    add_scaled(m.get(r), s, g.get(r))
+    r := r + 1
   end
+end
 \end{append}
 
-\begin{addbefore}{next_letter_model.nex}{before num_parameters}{    num_parameters(): Integer do}
-    -- Gradient descent: p := p - lr * (average gradient), for every
-    -- parameter. g holds sums over the batch, so divide by its size.
-    step(g: Gradients, lr: Real, batch_size: Integer)
-      require
-        positive_rate: lr > 0.0
-        positive_batch: batch_size > 0
-      do
-        let s: Real := -lr / batch_size.to_real
-        update_matrix(c, s, g.c)
-        update_matrix(w1, s, g.w1)
-        add_scaled(b1, s, g.b1)
-        update_matrix(w2, s, g.w2)
-        add_scaled(b2, s, g.b2)
-      end
+\begin{addbefore}{next_letter_model.nex}{before num_parameters}{  num_parameters(): Integer do}
+  -- Gradient descent: p := p - lr * (average gradient), for every
+  -- parameter. g holds sums over the batch, so divide by its size.
+  step(g: Gradients, lr: Real, batch_size: Integer)
+  require
+    positive_rate: lr > 0.0
+    positive_batch: batch_size > 0
+  do
+    let s: Real := -lr / batch_size.to_real
+    update_matrix(c, s, g.c)
+    update_matrix(w1, s, g.w1)
+    add_scaled(b1, s, g.b1)
+    update_matrix(w2, s, g.w2)
+    add_scaled(b2, s, g.b2)
+  end
 \end{addbefore}
 
 \section{The first learning}
@@ -2831,17 +2831,17 @@ sizes and five parameter arrays:
 anything, so the map's type is \code{Map[String, Any]}. Writing the file
 is \code{write_text} on a \code{Path}.
 
-\begin{addbefore}{next_letter_model.nex}{before the invariant}{  invariant}
-    -- Write the model as JSON. The field names match the Python version
-    -- of this project, so a model trained by one can be used by the other.
-    save(path: String) do
-      let data: Map[String, Any] := {
-        "context": context, "emb_dim": emb_dim, "hidden": hidden,
-        "C": c, "W1": w1, "b1": b1, "W2": w2, "b2": b2
-      }
-      let json: Json := create Json.make()
-      create Path.make(path).write_text(json.stringify(data))
-    end
+\begin{addbefore}{next_letter_model.nex}{before the invariant}{invariant}
+  -- Write the model as JSON. The field names match the Python version
+  -- of this project, so a model trained by one can be used by the other.
+  save(path: String) do
+    let data: Map[String, Any] := {
+      "context": context, "emb_dim": emb_dim, "hidden": hidden,
+      "C": c, "W1": w1, "b1": b1, "W2": w2, "b2": b2
+    }
+    let json: Json := create Json.make()
+    create Path.make(path).write_text(json.stringify(data))
+  end
 \end{addbefore}
 
 Loading is the reverse, with one complication. \code{parse} can return
@@ -2901,24 +2901,24 @@ constructor, next to \code{make}: \code{create Next_Letter_Model.from_file("mode
 The class invariant is checked when it finishes, so a file with the
 wrong shapes is rejected right away.
 
-\begin{addbefore}{next_letter_model.nex}{as a second constructor, after make}{  feature|    context: Integer   -- how many previous letters the model sees}
-    -- A trained model, read back from a file written by save.
-    from_file(path: String) do
-      let json: Json := create Json.make()
-      let text: String := create Path.make(path).read_text()
-      if convert json.parse(text) to data: Map[String, Any] then
-        context := json_integer(data.get("context"))
-        emb_dim := json_integer(data.get("emb_dim"))
-        hidden := json_integer(data.get("hidden"))
-        c := json_matrix(data.get("C"))
-        w1 := json_matrix(data.get("W1"))
-        b1 := json_vector(data.get("b1"))
-        w2 := json_matrix(data.get("W2"))
-        b2 := json_vector(data.get("b2"))
-      else
-        raise "not a model file: " + path
-      end
+\begin{addbefore}{next_letter_model.nex}{as a second constructor, after make}{feature|  context: Integer   -- how many previous letters the model sees}
+  -- A trained model, read back from a file written by save.
+  from_file(path: String) do
+    let json: Json := create Json.make()
+    let text: String := create Path.make(path).read_text()
+    if convert json.parse(text) to data: Map[String, Any] then
+      context := json_integer(data.get("context"))
+      emb_dim := json_integer(data.get("emb_dim"))
+      hidden := json_integer(data.get("hidden"))
+      c := json_matrix(data.get("C"))
+      w1 := json_matrix(data.get("W1"))
+      b1 := json_vector(data.get("b1"))
+      w2 := json_matrix(data.get("W2"))
+      b2 := json_vector(data.get("b2"))
+    else
+      raise "not a model file: " + path
     end
+  end
 \end{addbefore}
 
 One last detail before we can test this. The \code{nex} command starts
@@ -3014,17 +3014,17 @@ intern time/Date_Time
 
 -- The settings of one training run, read from the command line.
 class Options
-  create
-    from_command_line(args: Array[String]) do
-      words := "/usr/share/dict/words"
-      out := "model.json"
-      steps := 20000
-      batch := 32
-      lr := 0.3
-      context := 4
-      emb := 8
-      hidden := 64
-      seed := 42
+create
+  from_command_line(args: Array[String]) do
+    words := "/usr/share/dict/words"
+    out := "model.json"
+    steps := 20000
+    batch := 32
+    lr := 0.3
+    context := 4
+    emb := 8
+    hidden := 64
+    seed := 42
 \end{newfile}
 
 The constructor continues by going through the arguments in pairs, an
@@ -3032,43 +3032,43 @@ option name and its value. \code{case}\,\dots\,\code{of} picks the branch
 whose string matches.
 
 \begin{continued}{train.nex}
-      from
-        let i: Integer := 0
-      until
-        i >= args.length
-      do
-        if i + 1 >= args.length then
-          raise "missing value after " + args.get(i)
-        end
-        let value: String := args.get(i + 1)
-        case args.get(i) of
-          "--words"   then words := value
-          "--out"     then out := value
-          "--steps"   then steps := value.to_integer
-          "--batch"   then batch := value.to_integer
-          "--lr"      then lr := value.to_real
-          "--context" then context := value.to_integer
-          "--emb"     then emb := value.to_integer
-          "--hidden"  then hidden := value.to_integer
-          "--seed"    then seed := value.to_integer
-          else raise "unknown option " + args.get(i)
-        end
-        i := i + 2
+    from
+      let i: Integer := 0
+    until
+      i >= args.length
+    do
+      if i + 1 >= args.length then
+        raise "missing value after " + args.get(i)
       end
+      let value: String := args.get(i + 1)
+      case args.get(i) of
+        "--words"   then words := value
+        "--out"     then out := value
+        "--steps"   then steps := value.to_integer
+        "--batch"   then batch := value.to_integer
+        "--lr"      then lr := value.to_real
+        "--context" then context := value.to_integer
+        "--emb"     then emb := value.to_integer
+        "--hidden"  then hidden := value.to_integer
+        "--seed"    then seed := value.to_integer
+        else raise "unknown option " + args.get(i)
+      end
+      i := i + 2
     end
-  feature
-    words: String    -- word list, one word per line
-    out: String      -- where to save the trained model
-    steps: Integer   -- number of minibatch updates
-    batch: Integer   -- minibatch size
-    lr: Real         -- learning rate (a tenth of it for the last 25%)
-    context: Integer -- how many previous letters the model sees
-    emb: Integer     -- embedding size
-    hidden: Integer  -- hidden neurons
-    seed: Integer    -- random seed, so runs can be repeated
-  invariant
-    positive_sizes: steps > 0 and batch > 0 and context > 0 and emb > 0 and hidden > 0
-    positive_rate: lr > 0.0
+  end
+feature
+  words: String    -- word list, one word per line
+  out: String      -- where to save the trained model
+  steps: Integer   -- number of minibatch updates
+  batch: Integer   -- minibatch size
+  lr: Real         -- learning rate (a tenth of it for the last 25%)
+  context: Integer -- how many previous letters the model sees
+  emb: Integer     -- embedding size
+  hidden: Integer  -- hidden neurons
+  seed: Integer    -- random seed, so runs can be repeated
+invariant
+  positive_sizes: steps > 0 and batch > 0 and context > 0 and emb > 0 and hidden > 0
+  positive_rate: lr > 0.0
 end
 \end{continued}
 
@@ -3311,14 +3311,14 @@ first. A small class holds one such pair:
 \begin{addbefore}{next_letter_model.nex}{before the model class}{class Next_Letter_Model}
 -- One row of a prediction: a symbol and its probability.
 class Prediction
-  create
-    make(symbol: String, probability: Real) do
-      this.symbol := symbol
-      this.probability := probability
-    end
-  feature
-    symbol: String
-    probability: Real
+create
+  make(symbol: String, probability: Real) do
+    this.symbol := symbol
+    this.probability := probability
+  end
+feature
+  symbol: String
+  probability: Real
 end
 \end{addbefore}
 
@@ -3327,28 +3327,28 @@ returns a negative number if \code{a} should come first, and a positive
 one if \code{b} should. Comparing \code{b} with \code{a}, rather than
 \code{a} with \code{b}, sorts from most to least likely.
 
-\begin{addbefore}{next_letter_model.nex}{before num_parameters}{    num_parameters(): Integer do}
-    -- Every symbol with its probability, most likely first.
-    predict(prefix: String): Array[Prediction]
-      require
-        known_symbols: is_lowercase_word(prefix) or prefix = ""
-      do
-        let probs: Array[Real] := forward(context_ids(prefix)).probs
-        let unsorted: Array[Prediction] := []
-        from
-          let i: Integer := 0
-        until
-          i = Vocabulary.SIZE
-        do
-          unsorted.add(create Prediction.make(symbol_at(i), probs.get(i)))
-          i := i + 1
-        end
-        result := unsorted.sort(fn(a, b: Prediction): Integer do
-          result := b.probability.compare(a.probability)
-        end)
-      ensure
-        every_symbol: result.length = Vocabulary.SIZE
-      end
+\begin{addbefore}{next_letter_model.nex}{before num_parameters}{  num_parameters(): Integer do}
+  -- Every symbol with its probability, most likely first.
+  predict(prefix: String): Array[Prediction]
+  require
+    known_symbols: is_lowercase_word(prefix) or prefix = ""
+  do
+    let probs: Array[Real] := forward(context_ids(prefix)).probs
+    let unsorted: Array[Prediction] := []
+    from
+      let i: Integer := 0
+    until
+      i = Vocabulary.SIZE
+    do
+      unsorted.add(create Prediction.make(symbol_at(i), probs.get(i)))
+      i := i + 1
+    end
+    result := unsorted.sort(fn(a, b: Prediction): Integer do
+      result := b.probability.compare(a.probability)
+    end)
+  ensure
+    every_symbol: result.length = Vocabulary.SIZE
+  end
 \end{addbefore}
 
 One more check, that the model trained on three words in Chapter~15 has
@@ -3394,9 +3394,9 @@ intern Helpers
 intern io/Path
 
 class Play
-  feature
-    MAX_LEN = 30        -- safety stop, in case the model never predicts "."
-    ALTERNATIVES = 5    -- how many suggestions "n" cycles through
+feature
+  MAX_LEN = 30        -- safety stop, in case the model never predicts "."
+  ALTERNATIVES = 5    -- how many suggestions "n" cycles through
 end
 \end{newfile}
 
@@ -3465,7 +3465,7 @@ shown; \code{n} moves it to the next one.
 -- Suggest letters for one word until it is finished or abandoned.
 -- Returns false when the input has ended.
 function complete_interactively(con: Console, model: Next_Letter_Model,
-                                start: String): Boolean do
+  start: String): Boolean do
   result := true
   let word: String := start
   let choice: Integer := 0     -- which of the ranked options to show

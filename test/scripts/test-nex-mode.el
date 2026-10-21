@@ -212,6 +212,188 @@ class level.  Bare-'from' init statements still indent one level under 'from'."
               "end")
             "\n"))))
 
+(ert-deftest nex-indent-uppercase-names-are-not-keywords ()
+  "A constant END or a class Do is not the keyword `end' or `do'."
+  (let ((case-fold-search t))
+    (should (string=
+             (nex-test--reindent
+              "class Vocabulary\nfeature\nEND = \".\"\nDO = 1\nSIZE = 27\nend")
+             (string-join
+              '("class Vocabulary"
+                "feature"
+                "  END = \".\""
+                "  DO = 1"
+                "  SIZE = 27"
+                "end")
+              "\n")))))
+
+(ert-deftest nex-indent-lambda-in-argument-list ()
+  "A lambda body inside brackets indents as code; its `end)' aligns with
+the line that opened it."
+  (should (string=
+           (nex-test--reindent
+            (concat "function f() do\n"
+                    "let s := xs.sort(fn(a, b: Integer): Integer do\n"
+                    "if a < b then\nresult := -1\nelse\nresult := 1\nend\n"
+                    "end)\n"
+                    "print(s)\n"
+                    "end"))
+           (string-join
+            '("function f() do"
+              "  let s := xs.sort(fn(a, b: Integer): Integer do"
+              "    if a < b then"
+              "      result := -1"
+              "    else"
+              "      result := 1"
+              "    end"
+              "  end)"
+              "  print(s)"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-operator-continuation ()
+  "A line starting with an operator continues the statement above it, and
+the next statement goes back to the statement's level."
+  (should (string=
+           (nex-test--reindent
+            "function f() do\nresult := a * b\n+ c\n+ d\nprint(result)\nend")
+           (string-join
+            '("function f() do"
+              "  result := a * b"
+              "    + c"
+              "    + d"
+              "  print(result)"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-operator-continuation-in-brackets ()
+  "Inside brackets, an operator line continues the argument above it; if
+that argument is on the bracket's own line, it gets the bracket indent."
+  (should (string=
+           (nex-test--reindent
+            (concat "print(\"a\"\n+ \"b\")\n"
+                    "check(\"label\",\nx > 0\nand y > 0)"))
+           (string-join
+            '("print(\"a\""
+              "  + \"b\")"
+              "check(\"label\","
+              "  x > 0"
+              "    and y > 0)")
+            "\n"))))
+
+(ert-deftest nex-indent-keyword-before-trailing-comment ()
+  "A `then' followed by a comment still opens its block."
+  (should (string=
+           (nex-test--reindent
+            "if a then   -- the first case\nprint(1)\nelse\nprint(2)\nend")
+           (string-join
+            '("if a then   -- the first case"
+              "  print(1)"
+              "else"
+              "  print(2)"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-trailing-operator-continuation ()
+  "A line ending with an operator continues on the next line."
+  (should (string=
+           (nex-test--reindent
+            "let m: Model :=   -- a new one\ncreate Model.make(4)\nprint(m)")
+           (string-join
+            '("let m: Model :=   -- a new one"
+              "  create Model.make(4)"
+              "print(m)")
+            "\n"))))
+
+(ert-deftest nex-indent-multi-line-if-condition ()
+  "A continued `if' condition goes two levels deep, apart from the body."
+  (should (string=
+           (nex-test--reindent
+            "if a > 0\nand b > 0 then\nprint(a)\nend")
+           (string-join
+            '("if a > 0"
+              "    and b > 0 then"
+              "  print(a)"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-keyword-ending-a-comment ()
+  "A comment ending in a keyword (\"do\", \"of\") opens no block."
+  (should (string=
+           (nex-test--reindent
+            "-- what other languages ask of\n-- what to do\nclass A\nend")
+           (string-join
+            '("-- what other languages ask of"
+              "-- what to do"
+              "class A"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-notes-after-class-and-attribute ()
+  "A class's note and a detachable attribute's note indent one level."
+  (should (string=
+           (nex-test--reindent
+            "class A\nnote \"An A.\"\nfeature\nlabel: ?String\nnote \"Or nil.\"\nend")
+           (string-join
+            '("class A"
+              "  note \"An A.\""
+              "feature"
+              "  label: ?String"
+              "    note \"Or nil.\""
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-cases-that-used-to-differ-from-nex-format ()
+  "An empty `from', a `require' on its assertion's line, a match in a
+function whose `do' is on its own line, and continuation lines."
+  (should (string=
+           (nex-test--reindent
+            (concat "function f(): Integer\n"
+                    "require ok: 1 > 0\n"
+                    "do\n"
+                    "match x of\n"
+                    "A then result := 1\n"
+                    "B then result := 2\n"
+                    "end\n"
+                    "from\n"
+                    "until\n"
+                    "done\n"
+                    "do\n"
+                    "step()\n"
+                    "end\n"
+                    "c.print_line(\"a\" +\n"
+                    "\"b\")\n"
+                    "end"))
+           (string-join
+            '("function f(): Integer"
+              "require ok: 1 > 0"
+              "do"
+              "  match x of"
+              "    A then result := 1"
+              "    B then result := 2"
+              "  end"
+              "  from"
+              "  until"
+              "    done"
+              "  do"
+              "    step()"
+              "  end"
+              "  c.print_line(\"a\" +"
+              "    \"b\")"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-blank-line-gets-statement-indent ()
+  "TAB on a blank line indents it for the statement about to be typed."
+  (with-temp-buffer
+    (nex-mode)
+    (insert "if a then\n\nend\n")
+    (goto-char (point-min))
+    (forward-line 1)
+    (nex-indent-line)
+    (should (= 2 (current-indentation)))
+    (should (= 2 (current-column)))))
+
 (ert-deftest nex-indent-nested-do-rescue-block ()
   "A nested do..rescue..end block indents one level deeper than the enclosing body."
   (should (string=

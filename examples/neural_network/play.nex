@@ -17,9 +17,9 @@ intern Helpers
 intern io/Path
 
 class Play
-  feature
-    MAX_LEN = 30        -- safety stop, in case the model never predicts "."
-    ALTERNATIVES = 5    -- how many suggestions "n" cycles through
+feature
+  MAX_LEN = 30        -- safety stop, in case the model never predicts "."
+  ALTERNATIVES = 5    -- how many suggestions "n" cycles through
 end
 
 function describe(symbol: String): String do
@@ -66,7 +66,7 @@ end
 -- Suggest letters for one word until it is finished or abandoned.
 -- Returns false when the input has ended.
 function complete_interactively(con: Console, model: Next_Letter_Model,
-                                start: String): Boolean do
+  start: String): Boolean do
   result := true
   let word: String := start
   let choice: Integer := 0     -- which of the ranked options to show
