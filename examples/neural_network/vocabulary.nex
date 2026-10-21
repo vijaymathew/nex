@@ -6,6 +6,8 @@
 --   * the end-of-word marker, so the model can learn when to stop
 --     ("appl" -> "e", then "pple" -> "." means "apple is complete").
 
+intern text/Regex
+
 class Vocabulary
   feature
     END = "."
@@ -33,12 +35,7 @@ function symbol_at(id: Integer): String
     one_symbol: result.length = 1
   end
 
--- True when every character of s is one of a..z.
+-- True when s is one or more of a..z, and nothing else.
 function is_lowercase_word(s: String): Boolean do
-  result := s.length > 0
-  across s as ch do
-    if ch < #a or ch > #z then
-      result := false
-    end
-  end
+  result := create Regex.compile("[a-z]+").matches(s)
 end

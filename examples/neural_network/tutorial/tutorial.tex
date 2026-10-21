@@ -416,9 +416,10 @@ We multiply by $10^{\text{places}}$, round to a whole number, and then
 split that whole number back into the part before the point and the part
 after it. For \code{fixed(2.5, 3)}: $2.5 \times 1000 = 2500$, so the whole
 part is $2500 / 1000 = 2$, the fraction is $2500 \bmod 1000 = 500$, and
-the answer is \code{"2.500"}. The \code{from}\,\dots\,\code{until} loop
-puts back leading zeros the fraction needs: with 3 places, a fraction of
-\code{5} must be written \code{005}.
+the answer is \code{"2.500"}. The fraction may need leading zeros put
+back: with 3 places, a fraction of \code{5} must be written \code{005}.
+The built-in \code{pad_start} does that: \code{s.pad_start("0", 3)} adds
+\code{"0"}s on the left of \code{s} until it is 3 characters long.
 
 \begin{newfile}{helpers.nex}
 -- helpers.nex: printing numbers neatly, and finding the user's files.
@@ -432,13 +433,7 @@ function fixed(r: Real, places: Integer): String
     let scale: Integer := 10 ^ places
     let scaled: Integer := (r.abs * scale.to_real).round
     let whole: String := (scaled / scale).to_string
-    let frac: String := (scaled % scale).to_string
-    from
-    until
-      frac.length >= places
-    do
-      frac := "0" + frac
-    end
+    let frac: String := (scaled % scale).to_string.pad_start("0", places)
     result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
     if places > 0 then
       result := result + "." + frac
@@ -451,52 +446,38 @@ a value. We work on the absolute value \code{r.abs} and put the minus sign
 back at the end, but only if the rounded number isn't zero, so that
 \code{-0.0001} prints as \code{0.000} rather than \code{-0.000}.
 
-Three more small helpers: a probability as a percentage, and padding
-text to a fixed width, so that columns line up.
+Nex's \code{Real} does have a \code{to_fixed} method, but it rounds the
+number and gives back a \code{Real}, so \code{2.5.to_fixed(3)} still prints
+as \code{2.5}. We want text with the trailing zeros, so we write our own.
+
+One more small helper writes a probability as a percentage.
 
 \begin{append}{helpers.nex}
 -- A probability as a whole percentage: percent(0.257) is "26%".
 function percent(p: Real): String do
   result := (p * 100.0).round.to_string + "%"
 end
-
--- s padded with spaces on the left to at least `width` characters.
-function pad_left(s: String, width: Integer): String do
-  result := s
-  from
-  until
-    result.length >= width
-  do
-    result := " " + result
-  end
-end
-
--- s padded with spaces on the right to at least `width` characters.
-function pad_right(s: String, width: Integer): String do
-  result := s
-  from
-  until
-    result.length >= width
-  do
-    result := result + " "
-  end
-end
 \end{append}
 
-And one that prints a whole list of numbers:
+To line up columns we will pad text to a fixed width with the built-in
+\code{pad_start} (spaces on the left) and \code{pad_end} (spaces on the
+right): \code{"42".pad_start(" ", 6)} puts four spaces in front of
+\code{42}, making it 6 characters wide. Text that is already long enough
+is left as it is.
+
+And one that prints a whole list of numbers. It collects the numbers as
+text in an array, and the built-in \code{join} glues them together with
+\code{", "} between each pair:
 
 \begin{append}{helpers.nex}
 -- A list of numbers as text, each with `places` decimals:
 -- vector_text([0.5, 0.25], 2) is "[0.50, 0.25]".
 function vector_text(v: Array[Real], places: Integer): String do
-  result := "["
+  let parts: Array[String] := []
   across v as x do
-    if result /= "[" then
-      result := result + ", "
-    end
-    result := result + fixed(x, places)
+    parts.add(fixed(x, places))
   end
-  result := result + "]"
+  result := "[" + ", ".join(parts) + "]"
 end
 \end{append}
 
@@ -511,7 +492,7 @@ let con: Console := create Console
 con.print_line(fixed(2.5, 3))
 con.print_line(fixed(-3.14159, 2))
 con.print_line(percent(0.257))
-con.print_line("[" + pad_left("42", 6) + "]")
+con.print_line("[" + "42".pad_start(" ", 6) + "]")
 con.print_line(vector_text([0.5, 0.25, 1.0 / 3.0], 3))
 \end{tryit}
 \tryoutput{try_helpers}
@@ -601,24 +582,28 @@ nonsense id and failing somewhere far away.
 
 The word list we will train on contains words such as \code{Paris} and
 \code{it's}, which use characters outside our 27 symbols. We'll skip those,
-so we need a test for ``plain lowercase word'':
+so we need a test for ``plain lowercase word''. A \emph{regular
+expression} describes this exactly: \code{[a-z]+} means ``one or more
+characters, each in the range \code{a} to \code{z}''. Nex's library has
+regular expressions in \code{text/Regex}, so we intern that at the top of
+the file:
+
+\begin{addbefore}{vocabulary.nex}{at the top}{class Vocabulary}
+intern text/Regex
+\end{addbefore}
+
+and use it:
 
 \begin{append}{vocabulary.nex}
--- True when every character of s is one of a..z.
+-- True when s is one or more of a..z, and nothing else.
 function is_lowercase_word(s: String): Boolean do
-  result := s.length > 0
-  across s as ch do
-    if ch < #a or ch > #z then
-      result := false
-    end
-  end
+  result := create Regex.compile("[a-z]+").matches(s)
 end
 \end{append}
 
-\code{across s as ch} walks through the characters of a string. Each
-\code{ch} is a \code{Char}, and \texttt{\#a} is how Nex writes the character
-\code{a}. Characters compare by their code, and \code{a}\,\dots\,\code{z}
-are consecutive codes, so the test is a simple range check.
+\code{matches} is true only when the \emph{whole} string fits the pattern,
+so \code{"it's"} fails because of the apostrophe, and the empty string
+fails because \code{+} asks for at least one character.
 
 \begin{tryit}{try_vocabulary.nex}
 intern Vocabulary
@@ -1052,8 +1037,8 @@ let con: Console := create Console
 con.print_line("     v    tanh(v)   1 - tanh(v)^2")
 across [-3.0, -1.0, -0.1, 0.0, 0.1, 1.0, 3.0] as v do
   let h: Real := tanh(v)
-  con.print_line(pad_left(fixed(v, 1), 6) + pad_left(fixed(h, 4), 11)
-    + pad_left(fixed(1.0 - h * h, 4), 16))
+  con.print_line(fixed(v, 1).pad_start(" ", 6) + fixed(h, 4).pad_start(" ", 11)
+    + fixed(1.0 - h * h, 4).pad_start(" ", 16))
 end
 con.print_line("tanh(1000)  = " + tanh(1000.0).to_string)
 con.print_line("tanh(-1000) = " + tanh(-1000.0).to_string)
@@ -1638,7 +1623,11 @@ Two small methods complete the setup. The first turns the end of a typed
 word into the 4 ids the network reads. We pad the word with \code{context}
 full stops on the left, and then take its last \code{context} characters:
 \code{"app"} becomes \code{"....app"}, whose last four characters are
-\code{".app"}, which is \code{[0, 1, 16, 16]}.
+\code{".app"}, which is \code{[0, 1, 16, 16]}. The built-in
+\code{replicate} makes the padding: \code{".".replicate(4)} is
+\code{"...."}. And \code{across tail as ch} walks through the characters of
+a string. Each \code{ch} is a \code{Char}, which \code{ch.to_string} turns
+back into a one-letter \code{String} for \code{symbol_id}.
 
 \begin{addbefore}{next_letter_model.nex}{before the invariant}{  invariant}
     -- The last `context` letters of a prefix as ids, padded with ".".
@@ -1647,10 +1636,7 @@ full stops on the left, and then take its last \code{context} characters:
       require
         known_symbols: is_lowercase_word(prefix) or prefix = ""
       do
-        let padded: String := prefix
-        repeat context do
-          padded := Vocabulary.END + padded
-        end
+        let padded: String := Vocabulary.END.replicate(context) + prefix
         let tail: String := padded.substring(padded.length - context, padded.length)
         across tail as ch do
           result.add(symbol_id(ch.to_string))
@@ -1760,7 +1746,7 @@ from
 until
   i = Vocabulary.SIZE
 do
-  con.print(symbol_at(i) + " " + pad_left(percent(fp.probs.get(i)), 3) + "   ")
+  con.print(symbol_at(i) + " " + percent(fp.probs.get(i)).pad_start(" ", 3) + "   ")
   if i % 9 = 8 then
     con.print_line("")
   end
@@ -1881,10 +1867,7 @@ function make_examples(words: Array[String], context: Integer): Array[Example]
   require
     positive_context: context > 0
   do
-    let pad: String := ""
-    repeat context do
-      pad := pad + Vocabulary.END
-    end
+    let pad: String := Vocabulary.END.replicate(context)
     across words as word do
       let padded: String := pad + word + Vocabulary.END
       from
@@ -2092,8 +2075,8 @@ function descend(lr: Real) do
     let loss: Real := (w - 3.0) * (w - 3.0)
     let slope: Real := 2.0 * (w - 3.0)
     if step % 3 = 0 then
-      con.print_line("  step " + pad_left(step.to_string, 2) + ": w = "
-        + pad_left(fixed(w, 4), 9) + "   loss = " + fixed(loss, 4))
+      con.print_line("  step " + step.to_string.pad_start(" ", 2) + ": w = "
+        + fixed(w, 4).pad_start(" ", 9) + "   loss = " + fixed(loss, 4))
     end
     w := w - lr * slope
     step := step + 1
@@ -2788,7 +2771,7 @@ until
   step > 300
 do
   if step % 50 = 0 then
-    con.print_line("step " + pad_left(step.to_string, 3) + ": loss "
+    con.print_line("step " + step.to_string.pad_start(" ", 3) + ": loss "
       + fixed(evaluate(model, examples).loss, 4))
   end
   let g: Gradients := create Gradients.make(model)
@@ -3208,12 +3191,12 @@ worth of training.
       let train_loss: Real := running_loss / (report_every * opts.batch).to_real
       running_loss := 0.0
       let val_now: Evaluation := evaluate(model, val_sample)
-      con.print_line("step " + pad_left(step.to_string, 6) + "/" + opts.steps.to_string
+      con.print_line("step " + step.to_string.pad_start(" ", 6) + "/" + opts.steps.to_string
         + "  lr " + fixed(lr, 3)
         + "  train loss " + fixed(train_loss, 3)
         + "  val loss " + fixed(val_now.loss, 3)
-        + "  val accuracy " + pad_left(fixed(val_now.accuracy * 100.0, 1), 4) + "%"
-        + "  [" + pad_left(fixed(seconds_since(start), 0), 5) + "s]")
+        + "  val accuracy " + fixed(val_now.accuracy * 100.0, 1).pad_start(" ", 4) + "%"
+        + "  [" + fixed(seconds_since(start), 0).pad_start(" ", 5) + "s]")
       model.save(user_path(opts.out))
     end
     step := step + 1
@@ -3454,15 +3437,14 @@ when \code{line} is not \code{nil}, and then gives us the string as
 \begin{append}{play.nex}
 -- The other top choices, e.g. "r 21%, e 5%, end 3%".
 function others(ranked: Array[Prediction], skip: String): String do
+  let parts: Array[String] := []
   across ranked.take(Play.ALTERNATIVES) as p do
     if p.symbol /= skip then
-      if result /= "" then
-        result := result + ", "
-      end
-      result := result + when p.symbol = Vocabulary.END then "end" else p.symbol end
-        + " " + percent(p.probability)
+      parts.add(when p.symbol = Vocabulary.END then "end" else p.symbol end
+        + " " + percent(p.probability))
     end
   end
+  result := ", ".join(parts)
 end
 
 -- Read a line, lowercased and trimmed; nil at end of input (Ctrl-D).
@@ -3617,10 +3599,10 @@ function main() do
           end
           top := top + describe(p.symbol) + " " + percent(p.probability)
         end
-        con.print_line(pad_left(prefix, 12) + " -> "
-          + pad_right(greedy_complete(model, prefix), 16) + "(next letter: " + top + ")")
+        con.print_line(prefix.pad_start(" ", 12) + " -> "
+          + greedy_complete(model, prefix).pad_end(" ", 16) + "(next letter: " + top + ")")
       else
-        con.print_line(pad_left(prefix, 12) + " -> please use letters a-z only")
+        con.print_line(prefix.pad_start(" ", 12) + " -> please use letters a-z only")
       end
     end
   end
@@ -3812,7 +3794,8 @@ Anonymous functions & \code{fn(a, b: Prediction): Integer do ... end} for \code{
 \code{convert} & narrowing an \code{Any} from JSON to \code{Integer}, \code{Real}, \code{Array[Any]} \\
 Detachable types, object test & \code{?String}, \code{if ?line as text then} \\
 \code{case ... of} & matching option names in \code{train.nex} \\
-Libraries & \code{data/Json}, \code{io/Path}, \code{time/Date_Time}, \code{Console}, \code{Process} \\
+Built-in \code{String} methods & \code{pad_start}, \code{pad_end}, \code{replicate}, \code{join}, \code{substring}, \code{trim} \\
+Libraries & \code{data/Json}, \code{text/Regex}, \code{io/Path}, \code{time/Date_Time}, \code{Console}, \code{Process} \\
 \bottomrule
 \end{tabular}
 \end{center}

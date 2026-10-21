@@ -54,10 +54,7 @@ function make_examples(words: Array[String], context: Integer): Array[Example]
   require
     positive_context: context > 0
   do
-    let pad: String := ""
-    repeat context do
-      pad := pad + Vocabulary.END
-    end
+    let pad: String := Vocabulary.END.replicate(context)
     across words as word do
       let padded: String := pad + word + Vocabulary.END
       from

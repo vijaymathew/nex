@@ -9,13 +9,7 @@ function fixed(r: Real, places: Integer): String
     let scale: Integer := 10 ^ places
     let scaled: Integer := (r.abs * scale.to_real).round
     let whole: String := (scaled / scale).to_string
-    let frac: String := (scaled % scale).to_string
-    from
-    until
-      frac.length >= places
-    do
-      frac := "0" + frac
-    end
+    let frac: String := (scaled % scale).to_string.pad_start("0", places)
     result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
     if places > 0 then
       result := result + "." + frac
@@ -27,39 +21,14 @@ function percent(p: Real): String do
   result := (p * 100.0).round.to_string + "%"
 end
 
--- s padded with spaces on the left to at least `width` characters.
-function pad_left(s: String, width: Integer): String do
-  result := s
-  from
-  until
-    result.length >= width
-  do
-    result := " " + result
-  end
-end
-
--- s padded with spaces on the right to at least `width` characters.
-function pad_right(s: String, width: Integer): String do
-  result := s
-  from
-  until
-    result.length >= width
-  do
-    result := result + " "
-  end
-end
-
 -- A list of numbers as text, each with `places` decimals:
 -- vector_text([0.5, 0.25], 2) is "[0.50, 0.25]".
 function vector_text(v: Array[Real], places: Integer): String do
-  result := "["
+  let parts: Array[String] := []
   across v as x do
-    if result /= "[" then
-      result := result + ", "
-    end
-    result := result + fixed(x, places)
+    parts.add(fixed(x, places))
   end
-  result := result + "]"
+  result := "[" + ", ".join(parts) + "]"
 end
 
 -- The full path of a file the user named. The `nex` launcher runs

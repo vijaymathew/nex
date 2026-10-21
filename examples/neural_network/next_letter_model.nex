@@ -128,10 +128,7 @@ class Next_Letter_Model
       require
         known_symbols: is_lowercase_word(prefix) or prefix = ""
       do
-        let padded: String := prefix
-        repeat context do
-          padded := Vocabulary.END + padded
-        end
+        let padded: String := Vocabulary.END.replicate(context) + prefix
         let tail: String := padded.substring(padded.length - context, padded.length)
         across tail as ch do
           result.add(symbol_id(ch.to_string))

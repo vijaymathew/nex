@@ -45,15 +45,14 @@ end
 
 -- The other top choices, e.g. "r 21%, e 5%, end 3%".
 function others(ranked: Array[Prediction], skip: String): String do
+  let parts: Array[String] := []
   across ranked.take(Play.ALTERNATIVES) as p do
     if p.symbol /= skip then
-      if result /= "" then
-        result := result + ", "
-      end
-      result := result + when p.symbol = Vocabulary.END then "end" else p.symbol end
-        + " " + percent(p.probability)
+      parts.add(when p.symbol = Vocabulary.END then "end" else p.symbol end
+        + " " + percent(p.probability))
     end
   end
+  result := ", ".join(parts)
 end
 
 -- Read a line, lowercased and trimmed; nil at end of input (Ctrl-D).
@@ -185,10 +184,10 @@ function main() do
           end
           top := top + describe(p.symbol) + " " + percent(p.probability)
         end
-        con.print_line(pad_left(prefix, 12) + " -> "
-          + pad_right(greedy_complete(model, prefix), 16) + "(next letter: " + top + ")")
+        con.print_line(prefix.pad_start(" ", 12) + " -> "
+          + greedy_complete(model, prefix).pad_end(" ", 16) + "(next letter: " + top + ")")
       else
-        con.print_line(pad_left(prefix, 12) + " -> please use letters a-z only")
+        con.print_line(prefix.pad_start(" ", 12) + " -> please use letters a-z only")
       end
     end
   end

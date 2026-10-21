@@ -151,12 +151,12 @@ function main() do
       let train_loss: Real := running_loss / (report_every * opts.batch).to_real
       running_loss := 0.0
       let val_now: Evaluation := evaluate(model, val_sample)
-      con.print_line("step " + pad_left(step.to_string, 6) + "/" + opts.steps.to_string
+      con.print_line("step " + step.to_string.pad_start(" ", 6) + "/" + opts.steps.to_string
         + "  lr " + fixed(lr, 3)
         + "  train loss " + fixed(train_loss, 3)
         + "  val loss " + fixed(val_now.loss, 3)
-        + "  val accuracy " + pad_left(fixed(val_now.accuracy * 100.0, 1), 4) + "%"
-        + "  [" + pad_left(fixed(seconds_since(start), 0), 5) + "s]")
+        + "  val accuracy " + fixed(val_now.accuracy * 100.0, 1).pad_start(" ", 4) + "%"
+        + "  [" + fixed(seconds_since(start), 0).pad_start(" ", 5) + "s]")
       model.save(user_path(opts.out))
     end
     step := step + 1
