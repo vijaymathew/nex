@@ -2,13 +2,11 @@
 
 ## Unreleased
 
-<<<<<<< Updated upstream
 - **A Nex file can run as a script with a `#!` first line.** With
   `#!/usr/bin/env nex` at the top and the execute bit set, `./script args`
   runs it. The parser skips that line (later lines keep their numbers), the
   `nex` launcher accepts such a file without the `.nex` extension, runtime
   errors still give line numbers for it, and `nex format` keeps the line.
-=======
 - **Fix: `nex format` no longer damages code.** It rebuilt each file from
   the parse tree, which dropped comments, top-level `let`s and other
   statements, and printed some constructs wrongly (`constructors` for
@@ -21,7 +19,6 @@
   one level in follows how the file already writes them. A continued line
   keeps its alignment. Before writing, it checks the result still parses to
   the same program, and leaves the file alone if not.
->>>>>>> Stashed changes
 - **Fix: a class constant defined from another constant compiles.** With
   `SIZE = SYMBOLS.length`, the compiled backend inferred `SIZE`'s type where
   it was read without the declaring class's context, so the read named a

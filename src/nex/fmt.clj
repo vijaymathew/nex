@@ -484,7 +484,7 @@
   [^String src]
   (let [crlf? (str/includes? src "\r\n")
         src (if crlf? (str/replace src "\r\n" "\n") src)
-        shebang (re-find #"^#![^\n]*" src)
+        shebang (p/shebang-line src)
         ;; Blank out the `#!` line so its text isn't read as code.
         {:keys [tokens string-lines]} (tokenize (if shebang
                                                   (str (str/join (repeat (count shebang) " "))
@@ -556,19 +556,6 @@
   "CODE with its indentation fixed. Throws when CODE does not parse, or (a
    bug in the formatter) when the result would mean something else."
   [code]
-<<<<<<< Updated upstream
-  (try
-    (let [ast (p/ast code)
-          formatted (format-program ast)]
-      ;; The parser skips a `#!` line; put it back.
-      (if-let [shebang (p/shebang-line code)]
-        (str shebang "\n" formatted)
-        formatted))
-    (catch Exception e
-      (throw (ex-info "Failed to format code"
-                      {:error (.getMessage e)
-                       :cause e})))))
-=======
   (let [before (try
                  (p/ast code)
                  (catch Exception e
@@ -579,7 +566,6 @@
       (throw (ex-info "Failed to format code: the result would change the program, so the file was left as it is"
                       {:error "formatting would change the program"})))
     formatted))
->>>>>>> Stashed changes
 
 (defn format-file
   "The formatted text of the Nex file at FILE-PATH."
