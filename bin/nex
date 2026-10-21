@@ -57,6 +57,7 @@ EXAMPLES:
     nex                                      # Start REPL
     nex app.nex                              # Run app.nex (compiled JVM backend)
     nex app.nex --interpret                  # Run on the tree-walking interpreter
+    ./app                                    # Run a file whose first line is #!/usr/bin/env nex
     nex app.nex --classpath a.jar:b.jar      # Run with extra jars on the classpath
     nex app.nex --skip-contracts             # Run with require/ensure/invariant checks off
     nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
@@ -457,7 +458,9 @@ main() {
             show_version
             ;;
         *)
-	    if [[ -f "$command" && "$command" == *.nex ]]; then
+	    # A script run through a `#!` line (`#!/usr/bin/env nex`) may be
+	    # named without .nex.
+	    if [[ -f "$command" && ( "$command" == *.nex || "$(head -c 2 "$command")" == "#!" ) ]]; then
 		cmd_run_script "$@"
 		exit $?
 	    else

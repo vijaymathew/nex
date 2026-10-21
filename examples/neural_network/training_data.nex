@@ -16,7 +16,6 @@ intern Vector_Math
 intern Next_Letter_Model
 intern io/Path
 
--- `intern Training_Data` finds this file by the name of this class.
 class Training_Data
   feature
     -- Keeps -log(p) finite even if a probability rounds to exactly 0.

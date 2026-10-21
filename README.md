@@ -389,6 +389,27 @@ nex examples/inheritance_example.nex
 
 See [examples/README.md](examples/README.md) for the full list.
 
+### Running a File as a Script
+
+A file whose first line starts with `#!` runs like any other script:
+
+```bash
+$ cat hello
+#!/usr/bin/env nex
+let args := (create Process).command_line()
+print("Hello, " + args.get(0) + "!")
+$ chmod +x hello
+$ ./hello World
+"Hello, World!"
+```
+
+Nex skips the `#!` line, and `nex format` keeps it. With a `#!` line, the
+file doesn't need the `.nex` extension. `command_line()` returns the
+arguments after the script's name, except `--classpath` and its value,
+which the `nex` launcher takes for itself. Prefer `#!/usr/bin/env nex` to a
+fixed path such as `#!/usr/local/bin/nex`: `nex` is itself a shell script,
+and not every system allows a `#!` line to name one directly.
+
 ---
 
 ## Language Reference

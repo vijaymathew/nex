@@ -285,13 +285,15 @@
 
 (defn- nex-frames
   "The frames of compiled Nex code in T's stack trace, innermost first:
-   [{:file :line :routine}], :line nil for contract-checking code."
-  [^Throwable t]
+   [{:file :line :routine}], :line nil for contract-checking code. MAIN-NAME
+   is the main file's name, which a `#!` script may give without `.nex`."
+  [^Throwable t main-name]
   (let [trace (vec (.getStackTrace t))]
     (for [[i ^StackTraceElement fr] (map-indexed vector trace)
           :let [file (.getFileName fr)
                 method (.getMethodName fr)]
-          :when (and file (str/ends-with? file ".nex") (not= method "main")
+          :when (and file (or (str/ends-with? file ".nex") (= file main-name))
+                     (not= method "main")
                      (not (typed-wrapper-frame? (when (pos? i) (nth trace (dec i))) fr)))]
       {:file file
        :line (when (pos? (.getLineNumber fr)) (.getLineNumber fr))
@@ -358,8 +360,8 @@
         ;; The JVM keeps at most this many frames, so a deep recursion's
         ;; repeat count is only a lower bound.
         truncated? (>= (count (.getStackTrace t)) 1024)
-        frames (collapse-repeats (nex-frames t))
         main-name (.getName (io/file main-file))
+        frames (collapse-repeats (nex-frames t main-name))
         place (fn [{:keys [file line]}]
                 (str "line " line (when (not= file main-name) (str " of " file))))
         in (fn [{:keys [routine]}] (when (string? routine) (str ", in " routine)))

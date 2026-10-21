@@ -31,8 +31,22 @@
                     (throw (ex-info "Could not locate grammar/nexlang.g4"
                                     {:resource "grammar/nexlang.g4"})))))
 
+(defn shebang-line
+  "The `#!` line that starts INPUT, as in `#!/usr/bin/env nex`, or nil."
+  [input]
+  (when (string? input)
+    (re-find #"^#![^\r\n]*" input)))
+
+(defn- strip-shebang
+  "INPUT with its `#!` line blanked out. The line break stays, so error line
+   numbers still match the file."
+  [input]
+  (if-let [line (shebang-line input)]
+    (subs input (count line))
+    input))
+
 (defn parse [input]
-  (antlr/parse parser input))
+  (antlr/parse parser (strip-shebang input)))
 
 (defn ast [input]
   (-> input
