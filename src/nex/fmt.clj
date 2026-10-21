@@ -379,8 +379,12 @@
   "Format Nex code from string"
   [code]
   (try
-    (let [ast (p/ast code)]
-      (format-program ast))
+    (let [ast (p/ast code)
+          formatted (format-program ast)]
+      ;; The parser skips a `#!` line; put it back.
+      (if-let [shebang (p/shebang-line code)]
+        (str shebang "\n" formatted)
+        formatted))
     (catch Exception e
       (throw (ex-info "Failed to format code"
                       {:error (.getMessage e)

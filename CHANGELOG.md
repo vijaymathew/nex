@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A Nex file can run as a script with a `#!` first line.** With
+  `#!/usr/bin/env nex` at the top and the execute bit set, `./script args`
+  runs it. The parser skips that line (later lines keep their numbers), the
+  `nex` launcher accepts such a file without the `.nex` extension, runtime
+  errors still give line numbers for it, and `nex format` keeps the line.
 - **Fix: a class constant defined from another constant compiles.** With
   `SIZE = SYMBOLS.length`, the compiled backend inferred `SIZE`'s type where
   it was read without the declaring class's context, so the read named a
