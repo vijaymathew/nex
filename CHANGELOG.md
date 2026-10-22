@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.2 - 2026-10-22
+
+- **New example: a next-letter predictor.** `examples/neural_network/` is a
+  small neural network written entirely in Nex (matrix math, softmax,
+  backpropagation, gradient descent, its own random number generator, with
+  contracts checking shapes as it runs), trained on a word list, with an
+  interactive word-completion program and a step-by-step tutorial (PDF).
 - **A Nex file can run as a script with a `#!` first line.** With
   `#!/usr/bin/env nex` at the top and the execute bit set, `./script args`
   runs it. The parser skips that line (later lines keep their numbers), the
@@ -19,6 +26,19 @@
   one level in follows how the file already writes them. A continued line
   keeps its alignment. Before writing, it checks the result still parses to
   the same program, and leaves the file alone if not.
+- **Emacs indents as `nex format` does.** `nex-mode`'s indentation is now a
+  port of the formatter's indentation pass, so the two always agree: class
+  sections and routine clauses (`feature`, `require`, `do`, `ensure`), blocks,
+  case/match/select clauses and continued lines are indented by the same
+  rules.
+- **Fix: a feature called on a `callN` result dispatches on its type in
+  compiled code.** `xs.tail.call0().first` typed the call as `Any` and failed
+  for want of an `Any` dispatch entry for `first`; the call now takes the
+  function's declared return type.
+- **Calling a field with parentheses names the field.** `x.f()` where `f` is a
+  field now says `f` is a field, not a routine, and suggests `x.f` without
+  `()`, or binding a function-typed field first (`let f := x.f` then `f(...)`),
+  instead of the generic "not a feature" message.
 - **Fix: a class constant defined from another constant compiles.** With
   `SIZE = SYMBOLS.length`, the compiled backend inferred `SIZE`'s type where
   it was read without the declaring class's context, so the read named a
@@ -153,7 +173,6 @@
 - **Fix: the name bound by `if ?x as name` or `convert ... to name` is local.**
   The def-before-use check for globals read it as a read of any global of the
   same name declared later in the program, and rejected the program.
-
 - **Pixel access and image operations on `graphics/Picture`.** Read and set
   pixels by `(col, row)` from the top left, as a `Color` (`get`/`set`), as
   `0xRRGGBB` (`get_rgb`/`set_rgb`) or as `0xAARRGGBB` (`get_argb`/`set_argb`).
