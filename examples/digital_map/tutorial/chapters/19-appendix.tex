@@ -1,0 +1,82 @@
+% ===========================================================================
+\chapter{The formulas on one page}
+
+\begin{description}[style=nextline, leftmargin=1.2em, itemsep=0.5em]
+  \item[Distance on the Earth (haversine)]
+    With latitudes $\varphi$ and longitudes $\lambda$ in radians, and
+    $R = 6\,371\,000$ m:
+    \[ h = \sin^2\frac{\Delta\varphi}{2} + \cos\varphi_1\cos\varphi_2\sin^2\frac{\Delta\lambda}{2},
+       \qquad d = 2R\arcsin\sqrt{h}. \]
+  \item[Local projection (equirectangular)]
+    $x = (\lambda - \lambda_0)\,k_\varphi\cos\varphi_0$, \quad
+    $y = (\varphi - \varphi_0)\,k_\varphi$, \quad with
+    $k_\varphi = 2\pi R / 360 \approx 111\,195$ m per degree.
+  \item[Web Mercator]
+    $x = R\lambda$, \quad $y = R\ln\tan(\pi/4 + \varphi/2)$; scale
+    $1/\cos\varphi$.
+  \item[Dot product and length]
+    $u \cdot v = u_x v_x + u_y v_y = |u||v|\cos\theta$, \quad
+    $|u| = \sqrt{u_x^2 + u_y^2}$.
+  \item[Closest point of a segment]
+    $t = \operatorname{clamp}\big((p - a)\cdot(b - a) / |b - a|^2,\ 0,\ 1\big)$,
+    \quad point $a + t(b - a)$.
+  \item[Area of a polygon (shoelace)]
+    $A = \frac{1}{2}\big|\sum_i (x_i y_{i+1} - x_{i+1} y_i)\big|$.
+  \item[Inside a polygon (ray casting)]
+    Count the edges crossed by a ray from the point: odd means inside.
+  \item[Compass bearing]
+    $\theta = \operatorname{atan2}(\Delta x, \Delta y)$, in degrees
+    clockwise from north, plus $360^\circ$ if negative.
+  \item[Turn angle]
+    $\text{after} - \text{before}$, brought into $(-180^\circ, 180^\circ]$;
+    positive is to the right.
+  \item[Travel time]
+    $\text{seconds} = \text{metres} / (\text{km/h} / 3.6)$.
+  \item[A*]
+    Priority $f(n) = g(n) + h(n)$; the route is the cheapest when $h$
+    never overestimates. $h = $ straight-line distance (for distance), or
+    straight-line distance / top speed (for time).
+  \item[Box--Muller]
+    $z = \sqrt{-2\ln u_1}\,\cos(2\pi u_2)$ is normal when $u_1, u_2$ are
+    uniform on $(0, 1)$.
+\end{description}
+
+% ===========================================================================
+\chapter{The Nex you met}
+
+Along the way, the project used these parts of Nex. Each is described more
+fully in the Nex documentation.
+
+\begin{description}[style=nextline, leftmargin=1.2em, itemsep=0.4em]
+  \item[\code{intern}] loads another file of the project, as
+    \code{intern Geo} loads \code{geo.nex}, or a file of the library, as
+    \code{intern graphics/Canvas} does.
+  \item[\code{once} fields] can be set by a constructor and never changed,
+    which makes \code{Point}, \code{Lat_Lon} and \code{Edge} values.
+  \item[Constants] such as \code{Earth.RADIUS} and \code{Palette.SEA} are
+    written \code{NAME = value} in a class, and worked out once.
+  \item[\code{alias}] gives a method an operator, so that \code{a + b}
+    means \code{a.plus(b)} on points.
+  \item[\code{enum union}] declares a fixed set of named values, such as
+    \code{Road_Kind.Main} and \code{Mode.Walking}, with \code{values}
+    listing them all in order.
+  \item[Contracts] \code{require}, \code{ensure} (with \code{old} for a
+    value before the call) and \code{invariant} state what each routine
+    expects and promises, and are checked as the program runs.
+  \item[Detachable types] such as \code{?Place} may be \code{nil}; the
+    object test \code{?x as y} checks and names the attached value.
+  \item[\code{when ... then ... else ... end}] is an \code{if} that gives a
+    value.
+  \item[Functions as values] \code{fn (e: Edge): Real do ... end} is an
+    anonymous function, of type \code{Function(Edge): Real}. It can capture
+    the local variables around it, which makes it a closure.
+  \item[Collections] \code{Array}, \code{Map}, \code{Set}, and the priority
+    queue \code{Min_Heap}, here with a comparison function.
+  \item[\code{raise} and \code{rescue}] signal and handle errors, as in
+    reading the map file.
+  \item[Operator precedence] \code{^} binds as tightly as \code{*} and
+    groups left to right: write \code{a * (b ^ 2)}.
+  \item[\code{graphics/Canvas}] draws in our own coordinates, saves PNG
+    files, and runs a window with double buffering, the mouse and the
+    keyboard.
+\end{description}

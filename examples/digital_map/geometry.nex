@@ -1,0 +1,175 @@
+-- geometry.nex: the flat geometry a map needs. Lines, segments and
+-- polygons, and the directions of travel along them.
+
+intern Geo
+
+-- The total length of a line through `points`, in order.
+function line_length(points: Array[Point]): Real do
+  from
+    let i: Integer := 1
+  until
+    i >= points.length
+  do
+    result := result + points.get(i - 1).distance_to(points.get(i))
+    i := i + 1
+  end
+ensure
+  non_negative: result >= 0.0
+end
+
+-- The point `d` metres along the line through `pts` (its last point if d
+-- is past the end).
+function point_along(pts: Array[Point], d: Real): Point
+require
+  not_empty: not pts.is_empty
+do
+  result := pts.get(pts.length - 1)
+  let left: Real := d
+  let found: Boolean := false
+  from
+    let i: Integer := 1
+  until
+    found or i >= pts.length
+  do
+    let a: Point := pts.get(i - 1)
+    let b: Point := pts.get(i)
+    let seg: Real := a.distance_to(b)
+    if left <= seg and seg > 0.0 then
+      result := a + (b - a) * (left / seg)
+      found := true
+    else
+      left := left - seg
+    end
+    i := i + 1
+  end
+end
+
+-- The average of some points: their centre of mass.
+function average(pts: Array[Point]): Point
+require
+  not_empty: not pts.is_empty
+do
+  let sum: Point := create Point.make(0.0, 0.0)
+  across pts as p do
+    sum := sum + p
+  end
+  result := sum * (1.0 / pts.length.to_real)
+end
+
+-- The point of the segment a-b closest to p.
+--
+-- Every point of the segment is a + t (b - a) for some t between 0 and 1.
+-- The closest one to p is where the line from p meets the segment at a
+-- right angle, which is at t = (p - a)·(b - a) / |b - a|^2. If that t is
+-- below 0 or above 1, the right angle is off the end of the segment, and
+-- the closest point is the nearer end.
+function closest_point_on_segment(p, a, b: Point): Point do
+  let ab: Point := b - a
+  let len2: Real := ab.dot(ab)
+  if len2 = 0.0 then
+    result := a
+  else
+    let t: Real := ((p - a).dot(ab) / len2).clamp(0.0, 1.0)
+    result := a + ab * t
+  end
+ensure
+  no_further_than_ends: p.distance_to(result) <= p.distance_to(a) + 0.000001
+    and p.distance_to(result) <= p.distance_to(b) + 0.000001
+end
+
+function distance_to_segment(p, a, b: Point): Real do
+  result := p.distance_to(closest_point_on_segment(p, a, b))
+end
+
+-- The area inside a polygon, in square metres, by the shoelace formula.
+-- `ring` lists the corners in order around the outline; the last corner
+-- joins back to the first.
+function polygon_area(ring: Array[Point]): Real
+require
+  is_polygon: ring.length >= 3
+do
+  let twice: Real := 0.0
+  from
+    let i: Integer := 0
+  until
+    i = ring.length
+  do
+    let p: Point := ring.get(i)
+    let q: Point := ring.get((i + 1) % ring.length)
+    twice := twice + (p.x * q.y - q.x * p.y)
+    i := i + 1
+  end
+  result := twice.abs / 2.0
+ensure
+  non_negative: result >= 0.0
+end
+
+-- Whether p is inside the polygon, by casting a ray from p due east and
+-- counting how many edges of the outline it crosses: an odd number means
+-- inside, an even number outside.
+function polygon_contains(ring: Array[Point], p: Point): Boolean
+require
+  is_polygon: ring.length >= 3
+do
+  let inside: Boolean := false
+  from
+    let i: Integer := 0
+  until
+    i = ring.length
+  do
+    let a: Point := ring.get(i)
+    let b: Point := ring.get((i + 1) % ring.length)
+    -- Does edge a-b cross the horizontal line through p, to p's right?
+    if (a.y > p.y) /= (b.y > p.y) then
+      let crossing_x: Real := a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x)
+      if crossing_x > p.x then
+        inside := not inside
+      end
+    end
+    i := i + 1
+  end
+  result := inside
+end
+
+-- The compass bearing from a to b, in degrees: 0 is north, 90 east, 180
+-- south and 270 west, measured clockwise as on a compass.
+function bearing(a, b: Point): Real do
+  let d: Point := b - a
+  result := d.x.atan2(d.y).to_degrees
+  if result < 0.0 then
+    result := result + 360.0
+  end
+ensure
+  in_range: result >= 0.0 and result < 360.0
+end
+
+-- An arrow of length 1 pointing along a compass bearing.
+function direction(heading: Real): Point do
+  let r: Real := heading.to_radians
+  result := create Point.make(r.sin, r.cos)
+end
+
+-- How far a traveller turns when changing from heading `before` to
+-- heading `after`: positive to the right, negative to the left, and never
+-- more than half a turn either way.
+function turn_angle(before, after: Real): Real do
+  result := after - before
+  if result > 180.0 then
+    result := result - 360.0
+  elseif result <= -180.0 then
+    result := result + 360.0
+  end
+ensure
+  in_range: result > -180.0 and result <= 180.0
+end
+
+-- The nearest of the eight compass points to a bearing: "north",
+-- "north-east", ..., "north-west".
+function compass_name(degrees: Real): String
+require
+  in_range: degrees >= 0.0 and degrees < 360.0
+do
+  let names: Array[String] := ["north", "north-east", "east", "south-east",
+    "south", "south-west", "west", "north-west"]
+  result := names.get(((degrees / 45.0).round) % 8)
+end

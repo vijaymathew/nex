@@ -1,0 +1,155 @@
+-- road_graph.nex: the roads as a graph, for one way of travelling.
+
+intern Island_Map
+
+-- How the traveller gets about.
+enum union Mode
+  Driving
+  Walking
+end
+
+-- How fast a traveller goes on a kind of road, in km/h; 0 means the
+-- traveller may not use it at all.
+function speed_kmh(mode: Mode, kind: Road_Kind): Real do
+  if mode = Mode.Walking then
+    result := 5.0
+  elseif kind = Road_Kind.Main then
+    result := 60.0
+  elseif kind = Road_Kind.Lane then
+    result := 40.0
+  elseif kind = Road_Kind.Street then
+    result := 30.0
+  elseif kind = Road_Kind.Track then
+    result := 20.0
+  else
+    result := 0.0
+  end
+ensure
+  non_negative: result >= 0.0
+end
+
+-- One step of travel: from node `source` straight to the next node
+-- along a road, `target`.
+class Edge
+create
+  make(s, t: Integer, metres, kmh: Real, r: Road)
+  require
+    different_nodes: s /= t
+    positive_length: metres > 0.0
+    positive_speed: kmh > 0.0
+  do
+    source := s
+    target := t
+    length := metres
+    seconds := metres / (kmh / 3.6)
+    road := r
+  end
+feature
+  once source: Integer
+  once target: Integer
+  -- How long the step is, in metres...
+  once length: Real
+  -- ...and how long it takes, in seconds.
+  once seconds: Real
+  -- The road the step is part of.
+  once road: Road
+end
+
+class Road_Graph
+create
+  -- The graph of the roads of `m` that a traveller can use in mode `how`.
+  build(m: Island_Map, how: Mode) do
+    island := m
+    mode := how
+    adjacency := {}
+    edge_count := 0
+    top_speed := 0.0
+    across m.roads as r do
+      let kmh: Real := speed_kmh(how, r.kind)
+      if kmh > 0.0 then
+        top_speed := top_speed.max(kmh / 3.6)
+        let both_ways: Boolean := not r.is_one_way or how = Mode.Walking
+        from
+          let i: Integer := 1
+        until
+          i >= r.node_ids.length
+        do
+          let a: Integer := r.node_ids.get(i - 1)
+          let b: Integer := r.node_ids.get(i)
+          let metres: Real := m.point(a).distance_to(m.point(b))
+          add_edge(create Edge.make(a, b, metres, kmh, r))
+          if both_ways then
+            add_edge(create Edge.make(b, a, metres, kmh, r))
+          end
+          i := i + 1
+        end
+      end
+    end
+  end
+feature
+  island: Island_Map
+  mode: Mode
+  -- For every node, the edges that leave it.
+  adjacency: Map[Integer, Array[Edge]]
+  edge_count: Integer
+  -- The fastest speed on any edge, in metres per second.
+  top_speed: Real
+
+  -- Whether `id` is on a road this graph's traveller can use.
+  has_node(id: Integer): Boolean do
+    result := adjacency.contains_key(id)
+  end
+
+  -- Every node of the graph.
+  nodes(): Array[Integer] do
+    result := adjacency.keys
+  end
+
+  -- The edges leaving `id` (none if it is not in the graph).
+  edges_from(id: Integer): Array[Edge] do
+    result := adjacency.try_get(id, [])
+  end
+
+  -- The edge from a to b, if there is one.
+  edge_between(a, b: Integer): ?Edge do
+    across edges_from(a) as e do
+      if e.target = b then
+        result := e
+      end
+    end
+  end
+
+  -- The node of the graph closest to p: where a traveller standing at p
+  -- joins the roads.
+  nearest_node(p: Point): Integer
+  require
+    not_empty: edge_count > 0
+  do
+    let best: Real := -1.0
+    across adjacency.keys as id do
+      let d: Real := island.point(id).distance_to(p)
+      if best < 0.0 or d < best then
+        best := d
+        result := id
+      end
+    end
+  ensure
+    in_graph: has_node(result)
+  end
+
+private feature
+  add_edge(e: Edge) do
+    if not adjacency.contains_key(e.source) then
+      adjacency.put(e.source, [])
+    end
+    -- A one-way road's last node has no edge leaving it, but it is still a
+    -- node of the graph.
+    if not adjacency.contains_key(e.target) then
+      adjacency.put(e.target, [])
+    end
+    adjacency.get(e.source).add(e)
+    edge_count := edge_count + 1
+  end
+invariant
+  non_negative_count: edge_count >= 0
+end

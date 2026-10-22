@@ -1,0 +1,288 @@
+-- island_map.nex: the map itself. Nodes, roads, areas, a river and named
+-- places, read from a .map file.
+
+intern Geo
+intern Geometry
+intern io/Path
+
+-- The kinds of road, from fastest to slowest. A footpath is for walkers
+-- only.
+enum union Road_Kind
+  Main
+  Lane
+  Street
+  Track
+  Footpath
+end
+
+-- The kind written in a .map file: "main", "lane", "street", "track" or
+-- "path".
+function road_kind(word: String): Road_Kind do
+  if word = "main" then
+    result := Road_Kind.Main
+  elseif word = "lane" then
+    result := Road_Kind.Lane
+  elseif word = "street" then
+    result := Road_Kind.Street
+  elseif word = "track" then
+    result := Road_Kind.Track
+  elseif word = "path" then
+    result := Road_Kind.Footpath
+  else
+    raise "unknown road kind: " + word
+  end
+end
+
+-- A road: a line through two or more nodes, in order.
+class Road
+create
+  make(road_name: String, road_kind: Road_Kind, one_way: Boolean, ids: Array[Integer])
+  require
+    at_least_two_nodes: ids.length >= 2
+  do
+    name := road_name
+    kind := road_kind
+    is_one_way := one_way
+    node_ids := ids
+  end
+feature
+  once name: String
+  once kind: Road_Kind
+  -- A one-way road may be driven only from its first node towards its last.
+  once is_one_way: Boolean
+  once node_ids: Array[Integer]
+invariant
+  at_least_two_nodes: node_ids.length >= 2
+end
+
+-- An area: the polygon through its nodes, the last joined back to the
+-- first. The kind is "land", "water", "wood", "sand" or "town".
+class Area
+create
+  make(area_kind, area_name: String, ids: Array[Integer])
+  require
+    at_least_three_nodes: ids.length >= 3
+  do
+    kind := area_kind
+    name := area_name
+    node_ids := ids
+  end
+feature
+  once kind: String
+  once name: String
+  once node_ids: Array[Integer]
+invariant
+  at_least_three_nodes: node_ids.length >= 3
+end
+
+-- A river, as a line through its nodes from source to sea.
+class River
+create
+  make(river_name: String, ids: Array[Integer])
+  require
+    at_least_two_nodes: ids.length >= 2
+  do
+    name := river_name
+    node_ids := ids
+  end
+feature
+  once name: String
+  once node_ids: Array[Integer]
+end
+
+-- A named place: a single node with a name.
+class Place
+create
+  make(place_name: String, id: Integer) do
+    name := place_name
+    node_id := id
+  end
+feature
+  once name: String
+  once node_id: Integer
+end
+
+class Island_Map
+create
+  -- Read a map from a .map file (see kestrel_island.map for the format).
+  load(file: String) do
+    name := "Untitled"
+    positions := {}
+    points := {}
+    roads := []
+    areas := []
+    rivers := []
+    places := []
+    let line_number: Integer := 0
+    across create Path.make(file).read_text().split("\n") as raw do
+      line_number := line_number + 1
+      let line: String := raw.trim()
+      if line /= "" and not line.starts_with("#") then
+        do
+          read_line(line)
+        rescue
+          raise file + ", line " + line_number.to_string + ": " + exception.to_string
+        end
+      end
+    end
+    if positions.is_empty then
+      raise file + ": no nodes"
+    end
+    projection := create Projection.make(middle_of(positions.values))
+    across positions as entry do
+      points.put(entry.key, projection.to_point(entry.value))
+    end
+  end
+
+feature
+  name: String
+  -- Every node's position on the globe, by node id...
+  positions: Map[Integer, Lat_Lon]
+  -- ...and on the flat map, in metres from the map's centre.
+  points: Map[Integer, Point]
+  projection: Projection
+  roads: Array[Road]
+  areas: Array[Area]
+  rivers: Array[River]
+  places: Array[Place]
+
+  -- The flat position of a node.
+  point(id: Integer): Point
+  require
+    known_node: points.contains_key(id)
+  do
+    result := points.get(id)
+  end
+
+  -- The flat positions of several nodes, in order.
+  points_of(ids: Array[Integer]): Array[Point] do
+    across ids as id do
+      result.add(point(id))
+    end
+  ensure
+    same_length: result.length = ids.length
+  end
+
+  -- The smallest and largest x and y of all the nodes.
+  min_x(): Real do
+    result := extreme(true, true)
+  end
+
+  max_x(): Real do
+    result := extreme(true, false)
+  end
+
+  min_y(): Real do
+    result := extreme(false, true)
+  end
+
+  max_y(): Real do
+    result := extreme(false, false)
+  end
+
+  -- The place called `query`, ignoring case; failing that, the first
+  -- place whose name contains it ("mill" finds "Old Mill").
+  find_place(query: String): ?Place do
+    let wanted: String := query.to_lower()
+    across places as p do
+      if result = nil and p.name.to_lower() = wanted then
+        result := p
+      end
+    end
+    across places as p do
+      if result = nil and p.name.to_lower().contains(wanted) then
+        result := p
+      end
+    end
+  end
+
+  -- The area at a point, or nil out at sea. Areas listed later are drawn
+  -- on top of earlier ones (the lake on top of the island), so the last
+  -- one that contains the point is the one you would see there.
+  area_at(p: Point): ?Area do
+    across areas as a do
+      if polygon_contains(points_of(a.node_ids), p) then
+        result := a
+      end
+    end
+  end
+
+private feature
+  read_line(line: String) do
+    let colon: Integer := line.index_of(":")
+    let head: Array[String] := []
+    let ids: Array[Integer] := []
+    if colon >= 0 then
+      head := words(line.substring(0, colon))
+      across words(line.substring(colon + 1, line.length)) as w do
+        let id: Integer := w.to_integer
+        if not positions.contains_key(id) then
+          raise "node " + w + " is used before it is defined"
+        end
+        ids.add(id)
+      end
+    else
+      head := words(line)
+    end
+    let record: String := head.get(0)
+    if record = "map" then
+      name := joined(head, 1)
+    elseif record = "node" then
+      positions.put(head.get(1).to_integer,
+        create Lat_Lon.make(head.get(2).to_real, head.get(3).to_real))
+    elseif record = "road" then
+      roads.add(create Road.make(joined(head, 3), road_kind(head.get(1)),
+        head.get(2) = "one-way", ids))
+    elseif record = "area" then
+      areas.add(create Area.make(head.get(1), joined(head, 2), ids))
+    elseif record = "river" then
+      rivers.add(create River.make(joined(head, 1), ids))
+    elseif record = "place" then
+      places.add(create Place.make(joined(head, 1), ids.get(0)))
+    else
+      raise "unknown record: " + record
+    end
+  end
+
+  -- The words of s, however many spaces separate them.
+  words(s: String): Array[String] do
+    across s.split(" ") as w do
+      if w /= "" then
+        result.add(w)
+      end
+    end
+  end
+
+  -- The words from index `first` on, joined back with single spaces.
+  joined(ws: Array[String], first: Integer): String do
+    result := " ".join(ws.drop(first))
+  end
+
+  -- The point halfway between the most northern and southern latitudes,
+  -- and the most eastern and western longitudes.
+  middle_of(all: Array[Lat_Lon]): Lat_Lon do
+    let south: Real := 90.0
+    let north: Real := -90.0
+    let west: Real := 180.0
+    let east: Real := -180.0
+    across all as p do
+      south := south.min(p.latitude)
+      north := north.max(p.latitude)
+      west := west.min(p.longitude)
+      east := east.max(p.longitude)
+    end
+    result := create Lat_Lon.make((south + north) / 2.0, (west + east) / 2.0)
+  end
+
+  -- The smallest (or largest) x (or y) of all the nodes.
+  extreme(along_x, smallest: Boolean): Real do
+    let first: Boolean := true
+    across points.values as p do
+      let v: Real := when along_x then p.x else p.y end
+      if first or (smallest and v < result) or (not smallest and v > result) then
+        result := v
+        first := false
+      end
+    end
+  end
+end

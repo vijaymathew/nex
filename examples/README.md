@@ -38,6 +38,11 @@ read one is to run it alongside the source.
 - **neural_network/** — a next-letter predictor: a small neural network with
   hand-written backpropagation, trained on a word list, with an interactive
   word-completion program and a step-by-step tutorial (PDF)
+- **digital_map/** — digital maps and navigation on an imaginary island:
+  latitude and longitude, map projection, drawing with label placement,
+  breadth-first search, Dijkstra and A*, turn-by-turn directions, and a live
+  map in a window where a simulated traveller follows the route (and gets
+  rerouted after a wrong turn), with a step-by-step tutorial (PDF)
 
 ## Data structures
 

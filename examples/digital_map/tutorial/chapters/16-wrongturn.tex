@@ -1,0 +1,584 @@
+% ===========================================================================
+\chapter{Wrong turns}\label{ch:wrongturn}
+
+Every driver misses a turn now and then. A navigator can't stop them; it
+can only notice, quickly, and work out a new way from wherever they have
+ended up. ``Recalculating\ldots'' This chapter teaches the navigator to do
+that, and then builds a pretend traveller, with a pretend GPS, to try it
+out on.
+
+\section{Where is the traveller now?}
+
+When the traveller has left the route, the navigator's progress along it
+means nothing any more. All it has is the last GPS fix. So, as before, it
+assumes the traveller is on a road, but this time any road of the map, not
+just the route: it finds the edge nearest to the fix.
+
+Each two-way stretch of road is two edges, one each way, at exactly the
+same distance from the fix. Which way is the traveller going? Away from
+the route, most likely, since that is how they come to be off it. So of the
+two, we take the edge whose end is further from the point where the
+traveller left the route.
+
+\begin{append}{navigation.nex}
+-- The edge of g nearest p, going away from `behind`: of the two
+-- directions along the nearest stretch of road, the one whose end is
+-- further from `behind`.
+function rejoin(g: Road_Graph, p: Point, behind: Point): Edge
+require
+  has_edges: g.edge_count > 0
+do
+  let all: Array[Edge] := []
+  across g.nodes as id do
+    all := all.concat(g.edges_from(id))
+  end
+  result := all.get(0)
+  let best: Real := distance_to_segment(p, g.island.point(result.source),
+    g.island.point(result.target))
+  across all as e do
+    let a: Point := g.island.point(e.source)
+    let b: Point := g.island.point(e.target)
+    let d: Real := distance_to_segment(p, a, b)
+    let better: Boolean := d < best - 0.5
+    if not better and (d - best).abs <= 0.5 then
+      -- The same stretch of road the other way: keep the direction that
+      -- leads away from `behind`.
+      better := b.distance_to(behind) > g.island.point(result.target).distance_to(behind)
+    end
+    if better then
+      best := d
+      result := e
+    end
+  end
+end
+\end{append}
+
+Two distances within half a metre of each other count as a tie, since two
+edges along the same stretch of road should be exactly equal, but rounding
+might make them differ in the last decimal place.
+
+\section{Planning again}
+
+The new route starts with the edge the traveller is on, and continues with
+the best way from the end of that edge to the destination, planned with
+the same algorithm as before. The traveller is already part of the way
+along the first edge, so the progress starts there: the distance from the
+edge's start to the point of the edge nearest the fix.
+
+\begin{addbefore}{navigation.nex}{to Navigator, before is_off_route}{  is_off_route(): Boolean do}
+  -- Plan a new route from where the traveller is now.
+  --
+  -- The navigator knows only the GPS fixes. The traveller is on the road
+  -- nearest the last fix, heading away from where they left the route. So
+  -- the new route starts with that stretch of road, and continues with
+  -- the best way from the end of it to the destination.
+  reroute() do
+    let left_at: Point := route.point_at(progress)
+    let e: Edge := rejoin(graph, last_fix, left_at)
+    let goal: Integer := route.nodes.get(route.nodes.length - 1)
+    let rest: Search_Result := find_route(graph, e.target, goal, algorithm, false)
+    if rest.found() then
+      let path: Array[Integer] := [e.source].concat(rest.path)
+      route := create Route_Line.make(graph, path)
+      instructions := directions(graph, path, destination)
+      let a: Point := graph.island.point(e.source)
+      progress := a.distance_to(closest_point_on_segment(last_fix, a,
+        graph.island.point(e.target)))
+      misses := 0
+      reroutes := reroutes + 1
+    end
+  end
+\end{addbefore}
+
+The new route may well begin by turning round: if the traveller has just
+gone the wrong way down a long road with no turnings, the quickest way back
+may be a U-turn. The directions will say so: ``Turn sharp left''.
+
+\section{A pretend traveller}
+
+To watch all this happen, we need someone to navigate. Our traveller
+moves along a path of nodes, at the speed of each road: an edge of 100
+metres that takes 12 seconds to drive is covered at $100/12$ metres per
+second. The traveller knows where it really is: on the edge from
+\code{path[leg]} to \code{path[leg + 1]}, \code{offset} metres along it.
+
+\begin{newfile}{simulation.nex}
+-- simulation.nex: a pretend traveller with a pretend GPS, so that the
+-- navigator has someone to guide.
+
+intern Navigation
+intern Rng
+
+-- The traveller, moving along a path of nodes at the speed of each road.
+-- Usually the path is the navigator's route, but a traveller can take a
+-- wrong turn.
+class Traveller
+create
+  make(g: Road_Graph, nodes: Array[Integer])
+  require
+    is_a_route: is_route(g, nodes)
+    can_move: nodes.length >= 2
+  do
+    graph := g
+    path := nodes
+    leg := 0
+    offset := 0.0
+    wrong_turn_pending := false
+  end
+feature
+  graph: Road_Graph
+  -- The nodes the traveller means to pass through.
+  path: Array[Integer]
+  -- The traveller is `offset` metres along the edge from path[leg] to
+  -- path[leg + 1].
+  leg: Integer
+  offset: Real
+  -- Set to make the traveller go the wrong way at the next junction.
+  wrong_turn_pending: Boolean
+
+  has_arrived(): Boolean do
+    result := leg >= path.length - 1
+  end
+
+  -- The edge the traveller is on.
+  edge(): Edge
+  require
+    on_the_way: not has_arrived()
+  do
+    if ?graph.edge_between(path.get(leg), path.get(leg + 1)) as e then
+      result := e
+    else
+      raise "the traveller's path has a step that is not an edge"
+    end
+  end
+
+  -- Where the traveller really is.
+  position(): Point do
+    if has_arrived() then
+      result := graph.island.point(path.get(path.length - 1))
+    else
+      let a: Point := graph.island.point(path.get(leg))
+      let b: Point := graph.island.point(path.get(leg + 1))
+      result := a + (b - a) * (offset / a.distance_to(b))
+    end
+  end
+
+  -- Which way the traveller is facing, as a compass bearing.
+  heading(): Real do
+    if path.length < 2 then
+      result := 0.0
+    else
+      let i: Integer := leg.min(path.length - 2)
+      result := bearing(graph.island.point(path.get(i)), graph.island.point(path.get(i + 1)))
+    end
+  end
+
+  -- Go the wrong way at the next junction.
+  take_wrong_turn() do
+    wrong_turn_pending := true
+  end
+\end{newfile}
+
+Moving on by some number of seconds means covering the rest of the current
+edge, if there is time, then the next edge, and so on, until the time is
+used up or the traveller arrives. Each time the traveller reaches a node,
+if a wrong turn is due, it takes it there.
+
+\begin{continued}{simulation.nex}
+  -- Move on by `seconds` of travel.
+  advance(seconds: Real)
+  require
+    non_negative: seconds >= 0.0
+  do
+    let left: Real := seconds
+    from
+    until
+      left <= 0.0 or has_arrived()
+    do
+      let e: Edge := edge()
+      let speed: Real := e.length / e.seconds
+      let to_go: Real := (e.length - offset) / speed
+      if left < to_go then
+        offset := offset + left * speed
+        left := 0.0
+      else
+        left := left - to_go
+        offset := 0.0
+        leg := leg + 1
+        if wrong_turn_pending and not has_arrived() then
+          go_wrong()
+        end
+      end
+    end
+  end
+\end{continued}
+
+When the navigator plans a new route, the traveller takes it. The new route
+starts with the edge the navigator believes the traveller is on; if that is
+the edge the traveller really is on, the traveller simply swaps its path
+for the new one. If the traveller has already reached the end of that edge,
+the new route starts where it is about to arrive, which works too. If
+neither, the navigator has guessed wrong, and the traveller carries on
+regardless. The navigator will soon find it off the new route as well, and
+try again.
+
+\begin{continued}{simulation.nex}
+  -- Take the navigator's new route, which starts on the traveller's edge
+  -- or at the node the traveller is about to reach.
+  follow(nodes: Array[Integer]) do
+    if has_arrived() then
+      if nodes.get(0) = path.get(path.length - 1) and nodes.length >= 2 then
+        path := nodes
+        leg := 0
+        offset := 0.0
+      end
+    elseif nodes.length >= 2 and nodes.get(0) = path.get(leg)
+        and nodes.get(1) = path.get(leg + 1) then
+      path := nodes
+      leg := 0
+    elseif nodes.get(0) = path.get(leg + 1) then
+      path := [path.get(leg)].concat(nodes)
+      leg := 0
+    end
+  end
+\end{continued}
+
+A wrong turn happens at a junction: a node with some way out other than
+the planned one and the one the traveller came from. Most nodes of a route
+are not junctions, just points along a road, so a wrong turn that is due
+waits for the next real junction. There, the traveller takes whichever
+other road turns least, the classic mistake of going straight on when the
+route turns, and then simply keeps going as straight as it can, for a
+dozen edges, wherever that leads.
+
+\begin{continued}{simulation.nex}
+private feature
+  -- At path[leg], turn off the planned way onto another road, and keep
+  -- going straight on, wherever that leads.
+  go_wrong() do
+    let here: Integer := path.get(leg)
+    let came_from: Integer := path.get(leg - 1)
+    let planned: Integer := path.get(leg + 1)
+    let options: Array[Edge] := []
+    across graph.edges_from(here) as e do
+      if e.target /= came_from and e.target /= planned then
+        options.add(e)
+      end
+    end
+    if not options.is_empty then
+      let wrong: Edge := straightest(came_from, here, options)
+      let detour: Array[Integer] := [wrong.target]
+      let previous: Integer := here
+      repeat 12 do
+        let at: Integer := detour.get(detour.length - 1)
+        let onward: Array[Edge] := []
+        across graph.edges_from(at) as e do
+          if e.target /= previous then
+            onward.add(e)
+          end
+        end
+        if not onward.is_empty then
+          detour.add(straightest(previous, at, onward).target)
+          previous := at
+        end
+      end
+      path := path.take(leg + 1).concat(detour)
+      wrong_turn_pending := false
+    end
+  end
+
+  -- Of `options`, the edges leaving `at`, the one that turns least for a
+  -- traveller arriving from `before`.
+  straightest(before, at: Integer, options: Array[Edge]): Edge
+  require
+    has_options: not options.is_empty
+  do
+    let island: Island_Map := graph.island
+    let heading_in: Real := bearing(island.point(before), island.point(at))
+    result := options.get(0)
+    across options as e do
+      let turn: Real := turn_angle(heading_in, bearing(island.point(at), island.point(e.target))).abs
+      let best: Real := turn_angle(heading_in, bearing(island.point(at),
+        island.point(result.target))).abs
+      if turn < best then
+        result := e
+      end
+    end
+  end
+end
+\end{continued}
+
+\section{A pretend GPS}
+
+A real GPS fix is off by a few metres, in a random direction, by a random
+amount: usually a little, occasionally more. Errors like that follow the
+\emph{normal distribution}, the bell curve. To make them, we need random
+numbers, and to be able to repeat a run exactly (so that the pictures in
+this tutorial come out the same every time), the random numbers must come
+from a generator we can \emph{seed}: start from a chosen number, and get
+the same sequence every time.
+
+\begin{newfile}{rng.nex}
+-- rng.nex: a small random number generator that can be seeded, for the
+-- simulated GPS. With a seed, the "random" numbers are the same on every
+-- run, so a simulated trip can be repeated exactly.
+--
+-- This is the Park-Miller "minimal standard" generator:
+--     state := state * 48271 mod (2^31 - 1)
+
+class Rng
+create
+  make(seed: Integer) do
+    state := 1 + seed.abs % (MODULUS - 1)
+  end
+feature
+  MODULUS = 2147483647
+  MULTIPLIER = 48271
+
+  state: Integer
+
+  -- A real number spread evenly over the open interval (0, 1).
+  uniform(): Real
+  do
+    state := (state * MULTIPLIER) % MODULUS
+    result := state.to_real / MODULUS.to_real
+  ensure
+    open_interval: result > 0.0 and result < 1.0
+  end
+
+  -- A number from the standard normal ("bell curve") distribution, with
+  -- mean 0 and standard deviation 1, by the Box-Muller transform.
+  gauss(): Real do
+    let radius: Real := (-2.0 * uniform().log).sqrt
+    let angle: Real := 2.0 * Real.PI * uniform()
+    result := radius * angle.cos
+  end
+invariant
+  state_in_range: state >= 1 and state < MODULUS
+end
+\end{newfile}
+
+The generator multiplies its state by 48,271 and keeps the remainder after
+dividing by $2^{31} - 1$, a prime number. The result jumps about so
+thoroughly that it looks random, and dividing by the modulus gives a number
+between 0 and 1.
+
+The \emph{Box--Muller transform} turns two such evenly spread numbers,
+$u_1$ and $u_2$, into one from the bell curve: $\sqrt{-2\ln u_1}
+\cos(2\pi u_2)$. It is a neat piece of mathematics: picking a random angle,
+$2\pi u_2$, and a random distance, $\sqrt{-2\ln u_1}$, gives a point whose
+$x$ and $y$ both follow the bell curve. We use just the $x$.
+
+A fix is then the true position plus a normal error in each direction,
+four metres on average:
+
+\begin{append}{simulation.nex}
+-- A pretend GPS receiver. Every fix is the true position plus a random
+-- error of a few metres, the way a real one is.
+class Gps
+create
+  make(seed: Integer, metres: Real) do
+    rng := create Rng.make(seed)
+    error := metres
+  end
+feature
+  rng: Rng
+  -- The typical size of the error, in metres (its standard deviation).
+  error: Real
+
+  fix(truth: Point): Point do
+    result := truth + create Point.make(rng.gauss() * error, rng.gauss() * error)
+  end
+end
+\end{append}
+
+\section{A trip}
+
+Finally, a trip puts the traveller, the GPS and the navigator together, with
+a clock. As the clock moves on, the traveller moves, and once a second the
+GPS takes a fix and gives it to the navigator. If the navigator finds the
+traveller off the route, it plans a new one, and the traveller takes it.
+
+Notice how little the navigator is told. It never asks the traveller where
+it is: it gets only fixes, with their errors, exactly as a real navigator
+gets only what the GPS chip says.
+
+\begin{append}{simulation.nex}
+-- A trip: a traveller, their GPS, and the navigator guiding them, with
+-- the clock that moves them all on together.
+class Trip
+create
+  make(g: Road_Graph, path: Array[Integer], destination, algorithm: String, seed: Integer)
+  require
+    is_a_route: is_route(g, path)
+    can_move: path.length >= 2
+  do
+    traveller := create Traveller.make(g, path)
+    gps := create Gps.make(seed, 4.0)
+    navigator := create Navigator.make(g, path, destination, algorithm)
+    clock := 0.0
+    next_fix := 0.0
+    fix := traveller.position()
+  end
+feature
+  traveller: Traveller
+  gps: Gps
+  navigator: Navigator
+  -- Seconds since the trip began...
+  clock: Real
+  -- ...and when the GPS gives its next fix (once a second).
+  next_fix: Real
+  -- The latest fix.
+  fix: Point
+
+  -- Move the trip on by `seconds`.
+  advance(seconds: Real) do
+    let stop: Real := clock + seconds
+    from
+    until
+      next_fix > stop
+    do
+      traveller.advance(next_fix - clock)
+      clock := next_fix
+      fix := gps.fix(traveller.position())
+      navigator.update(fix)
+      if navigator.is_off_route() then
+        navigator.reroute()
+        traveller.follow(navigator.route.nodes)
+      end
+      next_fix := next_fix + 1.0
+    end
+    traveller.advance(stop - clock)
+    clock := stop
+  end
+
+  is_over(): Boolean do
+    result := traveller.has_arrived() and navigator.has_arrived()
+  end
+end
+\end{append}
+
+\code{advance} can be asked to move on by any amount of time, a fraction of
+a second or a minute, and it still takes a fix at every whole second in
+between. The live map will move it on by whatever time has passed since
+the last frame it drew.
+
+\section{Taking a wrong turn}
+
+This script drives from the harbour to the lighthouse. Forty seconds in,
+it tells the traveller to take a wrong turn, and it prints what the
+navigator says along the way: the prompt whenever the next instruction
+changes, and every thirty seconds in between.
+
+\begin{tryit}{try_trip.nex}
+intern Simulation
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let g: Road_Graph := create Road_Graph.build(island, Mode.Driving)
+if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b then
+  let found: Search_Result := find_route(g, g.nearest_node(island.point(a.node_id)),
+    g.nearest_node(island.point(b.node_id)), "astar", false)
+  let trip: Trip := create Trip.make(g, found.path, b.name, "astar", 7)
+  say("   0 s  " + trip.navigator.prompt())
+  let step: String := trip.navigator.next_instruction().text
+  let told: Boolean := false
+  from
+  until
+    trip.is_over() or trip.clock > 1000.0
+  do
+    if trip.clock >= 40.0 and not told then
+      trip.traveller.take_wrong_turn()
+      told := true
+    end
+    let before: Integer := trip.navigator.reroutes
+    trip.advance(1.0)
+    let time: String := fixed(trip.clock, 0).pad_start(" ", 4) + " s  "
+    if trip.navigator.reroutes > before then
+      say(time + "Off the route: planning a new one")
+    end
+    let next: String := trip.navigator.next_instruction().text
+    if next /= step or trip.clock.round % 30 = 0 then
+      say(time + trip.navigator.prompt().pad_end(" ", 44)
+        + distance_text(trip.navigator.remaining_distance()) + " to go")
+      step := next
+    end
+  end
+  say(fixed(trip.clock, 0).pad_start(" ", 4) + " s  " + trip.navigator.prompt())
+  say("The trip took " + fixed(trip.clock, 0) + " seconds; the route planned at the start takes "
+    + fixed(create Route_Line.make(g, found.path).duration(), 0) + ".")
+end
+\end{tryit}
+\tryoutput{try_trip}
+
+Read it from the top. The traveller sets off up Harbour Street, and at 40
+seconds a wrong turn is due. At the next junction the traveller turns off
+the planned route. A few seconds later the navigator, seeing only the fixes,
+has noticed: three fixes in a row too far from the route. It finds the road
+the traveller is now on, plans a new route from there, and starts giving
+instructions for it straight away: back up Net Lane to the Coast Road, and
+on to Hill Road. The detour costs about half a minute, and the traveller
+still gets to the lighthouse.
+
+\section{Checking the navigation}
+
+The last checks follow a whole trip, twice: once as planned, which must
+arrive without ever leaving the route, in about the time the route should
+take; and once with a wrong turn, which must still arrive, with at least
+one new route planned on the way. They also check the route line: that it
+starts and ends at the right nodes, and that a point 10 metres to the side
+of it is matched back onto it, at the right place.
+
+\begin{addbefore}{checks.nex}{before main}{function main() do}
+function check_navigation(c: Checker, m: Island_Map, g: Road_Graph) do
+  if ?m.find_place("harbour") as a and ?m.find_place("lighthouse") as b then
+    let found: Search_Result := find_route(g, node_of(g, a), node_of(g, b), "astar", false)
+    let line: Route_Line := create Route_Line.make(g, found.path)
+    c.close_to("a route line starts at the start", 0.0,
+      line.point_at(0.0).distance_to(m.point(found.path.get(0))), 0.000001)
+    c.close_to("and ends at the end", 0.0, line.point_at(line.length())
+      .distance_to(m.point(found.path.get(found.path.length - 1))), 0.000001)
+    c.close_to("the time to the end is the duration", line.duration(),
+      line.time_at(line.length()), 0.000001)
+    let halfway: Real := line.length() / 2.0
+    let beside: Point := line.point_at(halfway)
+      + direction(line.heading_at(halfway) + 90.0) * 10.0
+    let found_again: Line_Match := line.locate(beside, 0.0, line.length())
+    c.close_to("a point 10 m off the route is matched to it", 10.0, found_again.offset, 0.001)
+    c.close_to("at the right place along it", halfway, found_again.along, 0.001)
+
+    let trip: Trip := create Trip.make(g, found.path, b.name, "astar", 1)
+    from
+    until
+      trip.is_over() or trip.clock > 3.0 * line.duration()
+    do
+      trip.advance(1.0)
+    end
+    c.check("a simulated trip arrives", trip.is_over())
+    c.check("without leaving the route", trip.navigator.reroutes = 0)
+    c.close_to("in the time the route should take", line.duration(), trip.clock, 3.0)
+
+    let lost: Trip := create Trip.make(g, found.path, b.name, "astar", 2)
+    lost.traveller.take_wrong_turn()
+    from
+    until
+      lost.is_over() or lost.clock > 3.0 * line.duration()
+    do
+      lost.advance(1.0)
+    end
+    c.check("after a wrong turn the traveller still arrives", lost.is_over())
+    c.check("because the navigator planned a new route", lost.navigator.reroutes >= 1)
+  end
+end
+\end{addbefore}
+
+\begin{tightaddbefore}{checks.nex}{to main, before c.summary()}{  c.summary()}
+  check_navigation(c, m, driving)
+\end{tightaddbefore}
+
+\begin{tightaddbefore}{checks.nex}{at the top}{intern Directions}
+intern Simulation
+\end{tightaddbefore}
+
+\runoutput{checks.nex}{checks}
+
+All 56 checks pass.

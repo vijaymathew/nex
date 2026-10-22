@@ -1,0 +1,293 @@
+% ===========================================================================
+\chapter{Words on the map}\label{ch:labels}
+
+A map without names is a puzzle. This chapter puts the names of places,
+areas and roads on the map, which turns out to be one of the hard problems
+of map making: there are more names than there is room for, and a label
+that overlaps another makes both unreadable.
+
+\section{Placing labels greedily}
+
+Professional map makers place labels with care, trying many positions for
+each and weighing them all against each other. We'll use the simplest
+method that works well, which is also what many map apps do when they have
+to be quick:
+
+\begin{enumerate}[nosep]
+  \item Put the labels in order of importance.
+  \item Take them one at a time. Work out the rectangle the label would
+    cover. If it overlaps a label already placed, skip it; otherwise place
+    it, and its rectangle is taken.
+\end{enumerate}
+
+The important names always make it onto the map, and the less important
+ones fill whatever room is left. Zoom in, and there is more room, so more
+names appear. That is exactly what happens on a phone as you pinch to
+zoom.
+
+Our order is: place names, then area names, then road names, with main
+roads before lanes before streets before tracks and paths. For a road, we
+try three spots: halfway along it, then a quarter and three quarters of
+the way.
+
+We need a rectangle that can tell whether it overlaps another. Two
+rectangles overlap when they overlap both left to right and bottom to
+top, and two ranges overlap when each one starts before the other ends.
+And a label: some text, where it goes, and how it looks.
+
+\begin{addbefore}{map_view.nex}{before the class Map_View}{class Map_View}
+-- A rectangle on the map, for keeping labels apart.
+class Box
+create
+  make(l, b, r, t: Real) do
+    left := l
+    bottom := b
+    right := r
+    top := t
+  end
+feature
+  once left: Real
+  once bottom: Real
+  once right: Real
+  once top: Real
+
+  overlaps(other: Box): Boolean do
+    result := left < other.right and other.left < right
+      and bottom < other.top and other.bottom < top
+  end
+end
+
+-- A piece of text to put on the map.
+class Label
+create
+  make(p: Point, s: String, f: Font, c: Color, in_middle: Boolean) do
+    at := p
+    text := s
+    font := f
+    colour := c
+    centred := in_middle
+  end
+feature
+  once at: Point
+  once text: String
+  once font: Font
+  once colour: Color
+  -- Whether the text is centred on `at`, or starts there.
+  once centred: Boolean
+end
+\end{addbefore}
+
+The view keeps the labels that have been placed and the room they take,
+and the three fonts it uses:
+
+\begin{addbefore}{map_view.nex}{after the field metres_per_pixel}{  -- Pixels at the top and bottom of the canvas that something else covers}
+  -- The labels that have found room on the map, and the room they take.
+  labels: Array[Label]
+  taken: Array[Box]
+  PLACE_FONT = Font.SANS.bold().with_size(12)
+  AREA_FONT = Font.SERIF.italic().with_size(13)
+  ROAD_FONT = Font.SANS.with_size(10)
+\end{addbefore}
+
+\begin{tightaddbefore}{map_view.nex}{to make, before show_all()}{    show_all()}
+    labels := []
+    taken := []
+\end{tightaddbefore}
+
+\section{Placing the labels}
+
+Places are labelled just to the right of their dot, areas in the middle of
+the area (the average of its corners), and roads at the three spots along
+them. Each one goes through \code{add_label}, which decides whether it
+fits.
+
+\begin{addbefore}{map_view.nex}{before draw_scale_bar}{  -- A bar of a round length (100 m, 200 m, 500 m, 1 km, ...) in the}
+  -- Labels must not overlap, or none of them can be read. The map places
+  -- them greedily, most important first: each label goes in only if there
+  -- is still room for it, and takes that room from the labels after it.
+  -- Place names come first, then area names, then road names, main roads
+  -- before lanes before streets.
+
+  -- Each place's name, just to the right of its dot.
+  place_place_labels() do
+    across island.places as p do
+      let at: Point := island.point(p.node_id) + create Point.make(metres(8.0), 0.0)
+      add_label(create Label.make(at, p.name, PLACE_FONT, Palette.LABEL, false))
+    end
+  end
+
+  -- Area names in the middle of each area (except the island itself,
+  -- whose name is the map's title).
+  place_area_labels() do
+    across island.areas as a do
+      if a.kind /= "land" then
+        add_label(create Label.make(average(island.points_of(a.node_ids)), a.name,
+          AREA_FONT, when a.kind = "water" then Palette.WATER_LABEL else Palette.LABEL end,
+          true))
+      end
+    end
+  end
+
+  -- Each road's name, halfway along it if there is room there, or else a
+  -- quarter or three quarters of the way along.
+  place_road_labels() do
+    across Road_Kind.values as kind do
+      across island.roads as r do
+        if r.kind = kind then
+          let pts: Array[Point] := island.points_of(r.node_ids)
+          let length: Real := line_length(pts)
+          let placed: Boolean := false
+          across [0.5, 0.25, 0.75] as fraction do
+            if not placed then
+              placed := add_label(create Label.make(point_along(pts, length * fraction),
+                r.name, ROAD_FONT, Palette.ROAD_LABEL, true))
+            end
+          end
+        end
+      end
+    end
+  end
+\end{addbefore}
+
+\code{add_label} needs to know how much room a label takes. The canvas can
+measure text exactly, but only privately, while drawing it; we estimate
+instead. In these fonts, a character is on average a little more than half
+as wide as the font's size, so a label of $n$ characters in a 10-point font
+is about $0.58 \times 10 \times n$ pixels wide, and a few pixels of padding
+around it keeps neighbours from touching.
+
+A label whose rectangle is entirely off the canvas is skipped too: it
+can't be seen, and it would only take room that doesn't exist.
+
+\begin{continued}{map_view.nex}
+  -- Add `label` if there is room for it, and answer whether there was.
+  add_label(label: Label): Boolean do
+    let w: Real := metres(label.text.length.to_real * label.font.size.to_real * 0.58 + 6.0)
+    let h: Real := metres(label.font.size.to_real + 4.0)
+    let left: Real := when label.centred then label.at.x - w / 2.0 else label.at.x end
+    let room: Box := create Box.make(left, label.at.y - h / 2.0, left + w, label.at.y + h / 2.0)
+    -- A label off the canvas takes no room, and isn't drawn.
+    result := room.right > canvas.x_min and room.left < canvas.x_max
+      and room.top > canvas.y_min and room.bottom < canvas.y_max
+    across taken as other do
+      if room.overlaps(other) then
+        result := false
+      end
+    end
+    if result then
+      taken.add(room)
+      labels.add(label)
+    end
+  end
+\end{continued}
+
+\section{Halos}
+
+A label drawn straight onto the map is hard to read where it crosses a
+road or the edge of a wood. Map makers draw a \emph{halo} around the
+letters: a thin outline in the background colour, which separates them
+from whatever is underneath. We make one by drawing the text in white
+eight times, nudged one pixel in each direction, and then once in its own
+colour on top.
+
+That is nine pieces of text for every label, and the pen colour changes
+twice for each. We saw in the last chapter that changing the pen is slow,
+so we draw all the halos first, in one colour, then all the text, and
+change the font or colour only when it differs from the label before.
+
+\begin{continued}{map_view.nex}
+  -- Draw the labels that found room: first a white outline around every
+  -- one, so that they stay readable over roads and areas, then the text
+  -- itself.
+  draw_labels() do
+    canvas.set_pen_color(Palette.HALO)
+    across labels as label do
+      use_font(label.font)
+      across halo_offsets() as o do
+        label_text(label, label.at + o)
+      end
+    end
+    across labels as label do
+      use_font(label.font)
+      if label.colour /= canvas.pen_color then
+        canvas.set_pen_color(label.colour)
+      end
+      label_text(label, label.at)
+    end
+  end
+
+  -- Labels come in only a few fonts and colours, and the canvas is slow
+  -- to change them (see draw_roads), so they are changed only when they
+  -- differ.
+  use_font(f: Font) do
+    if f /= canvas.font then
+      canvas.set_font(f)
+    end
+  end
+
+  label_text(label: Label, p: Point) do
+    if label.centred then
+      canvas.text(p.x, p.y, label.text)
+    else
+      canvas.text_left(p.x, p.y, label.text)
+    end
+  end
+
+  -- One pixel's worth of nudge in eight directions.
+  halo_offsets(): Array[Point] do
+    let d: Real := metres(1.2)
+    across [-1.0, 0.0, 1.0] as i do
+      across [-1.0, 0.0, 1.0] as j do
+        if i /= 0.0 or j /= 0.0 then
+          result.add(create Point.make(i * d, j * d))
+        end
+      end
+    end
+  end
+\end{continued}
+
+Last, \code{draw_map} places and draws the labels after the places' dots,
+starting each time with no labels and no room taken:
+
+\begin{tightaddbefore}{map_view.nex}{to draw_map, before draw_scale_bar()}{    draw_scale_bar()}
+    taken := []
+    labels := []
+    place_place_labels()
+    place_area_labels()
+    place_road_labels()
+    draw_labels()
+\end{tightaddbefore}
+
+\section{The finished map}
+
+\begin{tryit}{try_labels.nex}
+intern Map_View
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let view: Map_View := create Map_View.make(island, 1000, 700)
+view.draw_map()
+view.save("island.png")
+say(view.labels.length.to_string + " labels found room")
+
+-- Zoom in on the town: 1.4 metres per pixel, centred on Market Square.
+if ?island.find_place("market") as market then
+  view.look_at(island.point(market.node_id), 1.4)
+  view.draw_map()
+  view.save("town.png")
+  say(view.labels.length.to_string + " labels found room in the town")
+end
+\end{tryit}
+\tryoutput{try_labels}
+\mappicture{island}
+
+At this scale there is room for every place name, every area but the town
+(whose name would cover Market Square's), and most of the roads. In the
+town, the streets are too close together for all their names. Zoomed in,
+all of them fit, and the one-way arrows appear:
+
+\mappicture{town}
+
+The town has four one-way streets: Market Street runs east and Church
+Street west, so that between them traffic can go both ways, and the same
+for Net Lane (north) and Chapel Street (south). They will make the
+driving directions in town more interesting than the walking ones.

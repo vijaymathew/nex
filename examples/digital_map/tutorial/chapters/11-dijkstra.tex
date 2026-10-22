@@ -1,0 +1,196 @@
+% ===========================================================================
+\chapter{The cheapest way: Dijkstra's algorithm}\label{ch:dijkstra}
+
+In 1956, Edsger Dijkstra, a young Dutch programmer, wanted a problem to
+show off a new computer to people who knew nothing about computers. He
+chose finding the shortest route between two cities in the Netherlands,
+and, sitting at a café, worked out how to do it in twenty minutes. His
+algorithm is still at the heart of every route planner.
+
+\section{The idea}
+
+Breadth-first search explores the frontier in the order it found it. In
+Dijkstra's algorithm, every frontier node also carries the cost of the
+cheapest way to it found so far, and the search always explores the
+\emph{cheapest} frontier node next.
+
+When the search explores node $n$, it looks at every edge from $n$ to a
+neighbour $m$. The way to $m$ through $n$ costs the way to $n$, plus the
+edge. If that is cheaper than any way to $m$ found before (or $m$ hasn't
+been seen at all), it becomes $m$'s best known way: $m$ gets that cost,
+and $n$ as its parent.
+
+\begin{mathbox}[Why the cheapest frontier node is finished]
+Say node $n$ is the cheapest on the frontier, with cost $c$. Could there
+be a cheaper way to $n$ that the search hasn't found yet? Any such way
+starts at the source, inside the explored region, and must leave the
+region at some point, through some frontier node $f$. The way to $f$
+already costs at least $c$, because $n$ was the cheapest on the frontier,
+and the rest of the way from $f$ to $n$ can only add to that, since no edge
+costs less than nothing. So no way to $n$ costs less than $c$, and $n$'s
+best way is final. The search can explore it, and never look at it again.
+\end{mathbox}
+
+So the explored region grows in order of cost, like a ring of water
+spreading from a stone dropped in a pond, except that the ripple runs
+fast along cheap roads and slowly along expensive ones. When the target is
+explored, its cost is final, and following its parents gives the cheapest
+way there.
+
+The argument needs one thing: no edge may have a negative cost. Lengths
+and travel times never do.
+
+\section{A priority queue}
+
+``Take the cheapest frontier node'' could be done by looking through the
+whole frontier every time, but there is a data structure made for it: a
+\emph{priority queue}, which hands out its items smallest first. Nex has
+one built in, \code{Min_Heap}. Adding an item and taking out the smallest
+both take a time proportional to $\log n$ for $n$ items, instead of $n$.
+
+What goes in the queue is a node with its cost, and its \emph{priority}:
+the number the queue sorts by. For Dijkstra's algorithm the priority is
+just the cost; in the next chapter it won't be. A \code{Min_Heap} of our
+own class needs to be told how to compare two items: a function that gives
+a negative number when the first comes first, positive when it comes
+second, and 0 when they tie. \code{Real}'s \code{compare} does exactly that.
+
+\begin{append}{search.nex}
+-- A node waiting to be explored, with the cost of the best way to it
+-- found so far, and its priority: the lower, the sooner it is explored.
+class Waiting
+create
+  make(n: Integer, c, p: Real) do
+    node := n
+    cost := c
+    priority := p
+  end
+feature
+  once node: Integer
+  once cost: Real
+  once priority: Real
+end
+
+-- Lower priority first.
+function by_priority(): Function(Waiting, Waiting): Integer do
+  result := fn (a, b: Waiting): Integer do result := a.priority.compare(b.priority) end
+end
+\end{append}
+
+A priority queue doesn't let us change the cost of an item already in it,
+which we would need when a cheaper way to a waiting node turns up. Instead
+we simply add the node again, with its new cost. The cheaper copy comes out
+first; when the old, dearer copy comes out later, the node is already
+finished, and we skip it. This is called \emph{lazy deletion}, and it is
+the usual way to do it.
+
+\section{The algorithm}
+
+\begin{append}{search.nex}
+-- Dijkstra's algorithm: the way with the lowest total cost, where `cost`
+-- gives the cost of each edge (its length, or the time it takes).
+--
+-- Like breadth-first search, but the queue is a priority queue: the next
+-- node out is always the one with the cheapest way to it found so far.
+-- When a node comes out, no cheaper way to it can turn up later, because
+-- any other way would have to go through a node still waiting, and every
+-- one of those is already at least as expensive. So the node is finished.
+function dijkstra(g: Road_Graph, source, target: Integer,
+  cost: Function(Edge): Real): Search_Result
+require
+  source_on_roads: g.has_node(source)
+  target_on_roads: g.has_node(target)
+do
+  let waiting: Min_Heap[Waiting] := create Min_Heap[Waiting].from_comparator(by_priority())
+  waiting.insert(create Waiting.make(source, 0.0, 0.0))
+  let best: Map[Integer, Real] := {source: 0.0}
+  let parents: Map[Integer, Integer] := {}
+  let finished: Set[Integer] := #{}
+  let explored: Array[Integer] := []
+  let found: Boolean := false
+  from
+  until
+    found or waiting.is_empty
+  do
+    let w: Waiting := waiting.extract_min
+    -- A node can be in the queue more than once, if a cheaper way to it
+    -- turned up after it was first added. Only its first time out counts.
+    if not finished.contains(w.node) then
+      finished.add(w.node)
+      explored.add(w.node)
+      if w.node = target then
+        found := true
+      else
+        across g.edges_from(w.node) as e do
+          let c: Real := w.cost + cost(e)
+          if not best.contains_key(e.target) or c < best.get(e.target) then
+            best.put(e.target, c)
+            parents.put(e.target, w.node)
+            waiting.insert(create Waiting.make(e.target, c, c))
+          end
+        end
+      end
+    end
+  end
+  let path: Array[Integer] := []
+  if found then
+    path := trace_back(parents, source, target)
+  end
+  result := create Search_Result.make("Dijkstra", path,
+    best.try_get(target, 0.0), explored, parents)
+ensure
+  valid_path: not result.found() or is_route(g, result.path)
+  cost_adds_up: not result.found()
+    or (route_cost(g, result.path, cost) - result.cost).abs < 0.001
+end
+\end{append}
+
+Compare it with \code{breadth_first}: the shape is the same, a loop that
+takes a node from the frontier and looks at its edges. The queue has become
+a priority queue, \code{seen} has become \code{best}, which remembers a
+cost for every node seen, and a node is finished when it comes \emph{out}
+of the queue, not when it goes in.
+
+The second postcondition checks the algorithm's bookkeeping against an
+independent calculation: adding up the cost of each edge along the path
+found must give the cost the search reports.
+
+\section{Shortest or quickest?}
+
+The cost function decides what ``best'' means. With \code{by_distance()},
+Dijkstra's algorithm finds the shortest route; with \code{by_time()}, the
+quickest.
+
+\begin{tryit}{try_dijkstra.nex}
+intern Try_Pictures
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let g: Road_Graph := create Road_Graph.build(island, Mode.Driving)
+if ?island.find_place("beach") as a and ?island.find_place("lighthouse") as b then
+  let source: Integer := g.nearest_node(island.point(a.node_id))
+  let target: Integer := g.nearest_node(island.point(b.node_id))
+  let shortest: Search_Result := dijkstra(g, source, target, by_distance())
+  say("shortest  " + summary(g, shortest))
+  let quickest: Search_Result := dijkstra(g, source, target, by_time())
+  say("quickest  " + summary(g, quickest))
+  picture_of_search(create Map_View.make(island, 1000, 700), shortest, "dijkstra.png")
+end
+\end{tryit}
+\tryoutput{try_dijkstra}
+\mappicture{dijkstra}
+
+The shortest way goes up the middle of the island: Lake Road, then Hill
+Road, then Lighthouse Lane, 3.4 km. The quickest goes round the west coast
+on the Coast Road. It is 700 metres longer, but the Coast Road is a 60\,km/h
+road, against 40 for the lanes, and that more than makes up for it. Real
+navigators nearly always plan the quickest route, and that is what our
+navigator will do too.
+
+Breadth-first search found the quickest route as well, but only by luck:
+the Coast Road happens to have both few steps and fast ones.
+
+Look at the purple, though. Dijkstra's algorithm explored most of
+the island to find a route to its northern tip, including the whole of the
+town in the south, which is in exactly the wrong direction. It has no
+idea where the lighthouse is; it only knows what things cost. The next
+chapter gives it a sense of direction.

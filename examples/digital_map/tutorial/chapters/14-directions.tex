@@ -1,0 +1,343 @@
+% ===========================================================================
+\chapter{Turn by turn}\label{ch:directions}
+
+A route is a list of nodes: from the beach car park to the lighthouse, a
+couple of dozen of them. Nobody wants to hear about nodes. They want to
+hear ``Head west on Coast Road. After 3.8 km, turn left onto Lighthouse
+Lane.'' This chapter turns routes into instructions, and then into the
+first complete program of the project.
+
+\section{Where to say something}
+
+Most nodes of a route need no instruction at all: the traveller just keeps
+going along the same road. Something needs saying only where the road
+changes. So we walk along the route, edge by edge, and cut it into
+\emph{stretches}, each along a single road. Every stretch begins with an
+instruction:
+
+\begin{itemize}[nosep]
+  \item the first stretch with which way to set off: ``Head north on
+    Harbour Street'';
+  \item every later stretch with the turn onto its road: ``Turn left onto
+    Mill Lane'';
+\end{itemize}
+and a last instruction says that the traveller has arrived.
+
+How sharp is a turn? At the node where the road changes, compare the
+bearing of the segment arriving there with the bearing of the segment
+leaving it; \code{turn_angle} from Chapter~\ref{ch:geometry} gives the
+difference, positive to the right. Then a few thresholds put it into words:
+
+\begin{center}
+\begin{tikzpicture}[scale=1.0]
+  \draw[color=cm, thick, -{Stealth}] (0,-1.6) -- (0,0);
+  \foreach \a/\lab in {0/Continue, 40/Bear right, -40/Bear left, 95/Turn right,
+      -95/Turn left, 160/Turn sharp right, -160/Turn sharp left} {
+    \draw[accent, -{Stealth}] (0,0) -- ({1.6*sin(\a)},{1.6*cos(\a)});
+    \node[font=\scriptsize, text=accent] at ({2.35*sin(\a)},{2.1*cos(\a)}) {\lab};
+  }
+  \fill (0,0) circle (0.05);
+  \node[font=\scriptsize, text=cm] at (0.6,-1.2) {arriving};
+\end{tikzpicture}
+\end{center}
+
+Less than $25^\circ$ either way is carrying straight on; up to $60^\circ$
+is bearing left or right; up to $140^\circ$ is turning; more than that is
+turning sharply, nearly back the way you came.
+
+\begin{newfile}{directions.nex}
+-- directions.nex: turning a route into instructions a person can follow.
+
+intern Search
+intern Helpers
+
+-- One instruction: what to do, where, and how far into the route.
+class Instruction
+create
+  make(words: String, at: Integer, metres, degrees: Real) do
+    text := words
+    node := at
+    distance := metres
+    turn := degrees
+  end
+feature
+  -- What to do: "Turn left onto Mill Lane".
+  once text: String
+  -- The node where it happens.
+  once node: Integer
+  -- How far it is from the start of the route, in metres.
+  once distance: Real
+  -- How sharply the traveller turns there, in degrees: positive to the
+  -- right, negative to the left, 0 for straight on.
+  once turn: Real
+end
+
+-- The words for a turn of `angle` degrees (positive to the right).
+function manoeuvre(angle: Real): String do
+  let side: String := when angle > 0.0 then "right" else "left" end
+  if angle.abs < 25.0 then
+    result := "Continue"
+  elseif angle.abs < 60.0 then
+    result := "Bear " + side
+  elseif angle.abs < 140.0 then
+    result := "Turn " + side
+  else
+    result := "Turn sharp " + side
+  end
+end
+\end{newfile}
+
+Each instruction remembers how far into the route it is. The navigator
+will need that, to say ``in 300 m''. It also keeps the turn's angle, so
+that the live map can draw an arrow bending the right way.
+
+\section{The instructions}
+
+\begin{append}{directions.nex}
+-- Instructions for following `path` to `destination`.
+--
+-- A route can have dozens of nodes, but a person needs to be told
+-- something only where the road changes. So the route is cut into
+-- stretches along one road each. The first instruction says which way to
+-- set off; each later stretch starts with the turn onto its road; and the
+-- last instruction says that the traveller has arrived.
+function directions(g: Road_Graph, path: Array[Integer], destination: String): Array[Instruction]
+require
+  is_a_route: is_route(g, path)
+do
+  let pts: Array[Point] := g.island.points_of(path)
+  if path.length = 1 then
+    result.add(create Instruction.make("You are at " + destination, path.get(0), 0.0, 0.0))
+  else
+    let travelled: Real := 0.0
+    let previous: ?Edge := nil
+    from
+      let i: Integer := 0
+    until
+      i = path.length - 1
+    do
+      if ?g.edge_between(path.get(i), path.get(i + 1)) as e then
+        if ?previous as before then
+          if e.road.name /= before.road.name then
+            let angle: Real := turn_angle(bearing(pts.get(i - 1), pts.get(i)),
+              bearing(pts.get(i), pts.get(i + 1)))
+            result.add(create Instruction.make(manoeuvre(angle) + " onto " + e.road.name,
+              path.get(i), travelled, angle))
+          end
+        else
+          result.add(create Instruction.make("Head "
+            + compass_name(bearing(pts.get(0), pts.get(1))) + " on " + e.road.name,
+            path.get(0), 0.0, 0.0))
+        end
+        travelled := travelled + e.length
+        previous := e
+      end
+      i := i + 1
+    end
+    result.add(create Instruction.make("Arrive at " + destination,
+      path.get(path.length - 1), travelled, 0.0))
+  end
+ensure
+  starts_at_start: result.get(0).distance = 0.0
+  ends_at_end: (result.get(result.length - 1).distance
+    - route_cost(g, path, by_distance())).abs < 0.001
+end
+\end{append}
+
+\code{previous} is the edge before the current one, or \code{nil} for the
+very first edge. \code{?previous as before} is Nex's \emph{object test}:
+it is true when \code{previous} is not \code{nil}, and inside the
+\code{if} it names the edge \code{before}, with the type \code{Edge}
+instead of \code{?Edge}, so that we can use its road. On the first edge
+there is no edge before, so that is where we say which way to set off.
+
+The postcondition checks that the distances add up: the last instruction
+is exactly as far into the route as the route is long.
+
+Real navigators say a good deal more than ours: ``keep left'' where a road
+forks, ``take the second exit'' at a roundabout, ``turn right after the
+church'' when there is a landmark, and they warn about turns where the road
+keeps its name but the route leaves it. They all start from the same idea:
+find the places where something changes, and describe the change.
+
+\section{A route planner}
+
+Now everything comes together in a program. It takes two place names, and
+a few options, from the command line, plans a route, and prints its
+instructions, with the distance of each stretch.
+
+\begin{newfile}{route.nex}
+-- route.nex: directions from one place to another, printed.
+--
+--   nex route.nex                              -- list the places
+--   nex route.nex "The Harbour" Lighthouse     -- the quickest way by car
+--   nex route.nex harbour lighthouse --walk    -- on foot
+--   nex route.nex harbour lighthouse --shortest
+--   nex route.nex harbour lighthouse --algorithm dijkstra   (or bfs, astar)
+--
+-- A place can be given by part of its name: "mill" is "Old Mill".
+
+intern Directions
+intern Helpers
+
+function main() do
+  let args: Array[String] := (create Process).command_line()
+  let names: Array[String] := []
+  let mode: Mode := Mode.Driving
+  let shortest: Boolean := false
+  let algorithm: String := "astar"
+  let map_file: String := "kestrel_island.map"
+  from
+    let i: Integer := 0
+  until
+    i >= args.length
+  do
+    let arg: String := args.get(i)
+    if arg = "--walk" then
+      mode := Mode.Walking
+    elseif arg = "--shortest" then
+      shortest := true
+    elseif arg = "--algorithm" and i + 1 < args.length then
+      algorithm := args.get(i + 1)
+      i := i + 1
+    elseif arg = "--map" and i + 1 < args.length then
+      map_file := args.get(i + 1)
+      i := i + 1
+    else
+      names.add(arg)
+    end
+    i := i + 1
+  end
+\end{newfile}
+
+\code{(create Process).command_line()} gives the words typed after the
+program's name. Options start with \code{--}; anything else is a place
+name. Next, with the map loaded, either explain how to use the program,
+or plan the route:
+
+\begin{continued}{route.nex}
+  let island: Island_Map := create Island_Map.load(user_path(map_file))
+  if names.length /= 2 then
+    say("usage: nex route.nex FROM TO [--walk] [--shortest] [--algorithm bfs|dijkstra|astar]")
+    say("")
+    say("Places on " + island.name + ":")
+    across island.places as p do
+      say("  " + p.name)
+    end
+  elseif ?island.find_place(names.get(0)) as start
+      and ?island.find_place(names.get(1)) as finish then
+    let g: Road_Graph := create Road_Graph.build(island, mode)
+    let source: Integer := g.nearest_node(island.point(start.node_id))
+    let target: Integer := g.nearest_node(island.point(finish.node_id))
+    let found: Search_Result := find_route(g, source, target, algorithm, shortest)
+    if found.found() then
+      print_route(g, found, start.name, finish.name)
+    else
+      say("There is no way from " + start.name + " to " + finish.name + ".")
+    end
+  else
+    say("I don't know one of those places. Run nex route.nex to list them.")
+  end
+end
+\end{continued}
+
+The instructions are printed numbered, each with the length of its stretch:
+the distance from it to the next instruction.
+
+\begin{continued}{route.nex}
+function print_route(g: Road_Graph, found: Search_Result, from_name, to_name: String) do
+  let how: String := when g.mode = Mode.Walking then "Walking" else "Driving" end
+  say(how + " from " + from_name + " to " + to_name + ": "
+    + distance_text(route_cost(g, found.path, by_distance())) + ", about "
+    + duration_text(route_cost(g, found.path, by_time())) + ".")
+  say(found.algorithm + " explored " + found.explored.length.to_string
+    + " of the " + g.nodes.length.to_string + " nodes.")
+  say("")
+  let steps: Array[Instruction] := directions(g, found.path, to_name)
+  from
+    let i: Integer := 0
+  until
+    i = steps.length
+  do
+    let step: Instruction := steps.get(i)
+    let line: String := (i + 1).to_string.pad_start(" ", 3) + ". " + step.text
+    if i + 1 < steps.length then
+      line := line.pad_end(" ", 42)
+        + distance_text(steps.get(i + 1).distance - step.distance).pad_start(" ", 8)
+    end
+    say(line)
+    i := i + 1
+  end
+end
+
+main()
+\end{continued}
+
+\section{Planning some trips}
+
+With no places, the program lists them:
+
+\runoutput{route.nex}{route_places}
+
+From the beach to the lighthouse, by car, the quickest way and the
+shortest:
+
+\runoutput{route.nex "beach car park" lighthouse}{route_beach}
+\runoutput{route.nex beach lighthouse --shortest}{route_beach_shortest}
+
+From Market Square to the harbour, a few hundred metres, by car and on
+foot. The one-way streets send the car east, then south down Chapel
+Street, and back west along the quay; the walker goes straight down
+Harbour Street:
+
+\runoutput{route.nex market harbour}{route_market_drive}
+\runoutput{route.nex market harbour --walk}{route_market_walk}
+
+And from Kestrel Peak, in the middle of Hollow Wood, to the lighthouse. A
+car must take the track out of the wood and go round by the Coast Road;
+on foot, the paths over the hill and along the cliffs are much shorter:
+
+\runoutput{route.nex peak lighthouse}{route_peak_drive}
+\runoutput{route.nex peak lighthouse --walk}{route_peak_walk}
+
+\section{Checking the directions}
+
+Two more checks: that the directions start and end the way they should, and
+that the one-way streets really do send drivers round by Chapel Street
+while walkers go the short way.
+
+\begin{addbefore}{checks.nex}{before main}{function main() do}
+function check_directions(c: Checker, m: Island_Map, driving, walking: Road_Graph) do
+  if ?m.find_place("market") as a and ?m.find_place("harbour") as b then
+    let drive: Search_Result := dijkstra(driving, node_of(driving, a), node_of(driving, b), by_time())
+    let steps: Array[Instruction] := directions(driving, drive.path, b.name)
+    c.check("directions start by setting off", steps.get(0).text.starts_with("Head "))
+    c.check("directions end by arriving", steps.get(steps.length - 1).text = "Arrive at The Harbour")
+    let detour: Boolean := false
+    across steps as step do
+      if step.text = "Turn right onto Chapel Street" then
+        detour := true
+      end
+    end
+    c.check("one-way streets send drivers round by Chapel Street", detour)
+    let walk: Search_Result := dijkstra(walking, node_of(walking, a), node_of(walking, b), by_time())
+    c.check("walkers go the short way", route_cost(walking, walk.path, by_distance())
+      < route_cost(driving, drive.path, by_distance()))
+  end
+  c.check("manoeuvres", manoeuvre(5.0) = "Continue" and manoeuvre(-40.0) = "Bear left"
+    and manoeuvre(90.0) = "Turn right" and manoeuvre(-170.0) = "Turn sharp left")
+end
+\end{addbefore}
+
+\begin{tightaddbefore}{checks.nex}{to main, before c.summary()}{  c.summary()}
+  check_directions(c, m, driving, walking)
+\end{tightaddbefore}
+
+The checks now use \code{directions.nex}, so we intern it at the top of the
+file. (\code{directions.nex} interns \code{search.nex} itself, so the
+second \code{intern} is no longer needed, but interning a file twice is
+harmless.)
+
+\begin{tightaddbefore}{checks.nex}{at the top}{intern Search}
+intern Directions
+\end{tightaddbefore}

@@ -1,0 +1,515 @@
+% ===========================================================================
+\chapter{The map as data}\label{ch:mapfile}
+
+A digital map is not a picture. It is a database of things (roads,
+rivers, lakes, buildings, places) with their positions, and the pictures
+are drawn from that database whenever they are needed, at whatever zoom
+and in whatever style. That is how one map can be drawn for a car's
+dashboard and for a hiker's phone, and why the same data can answer
+``how do I get there?''.
+
+\section{Nodes and ways}
+
+OpenStreetMap, the free map of the world that anyone can edit, stores its
+whole database with just three kinds of element:
+\begin{itemize}[nosep]
+  \item a \textbf{node} is a single point, with a latitude and a longitude;
+  \item a \textbf{way} is an ordered list of nodes: a road, a river, or,
+    if its last node is its first, the outline of an area;
+  \item a \textbf{relation} groups other elements, such as all the roads
+    of a bus route.
+\end{itemize}
+Every element also carries \emph{tags} that say what it is, such as
+\code{highway=residential} or \code{name=Mill Lane}.
+
+Our map file is a small cousin of that design. Here is the start of it:
+
+\begin{shell}
+# Kestrel Island: an imaginary island in the North Atlantic.
+# ...
+map Kestrel Island
+
+node 1 47.053148 -34.574915
+node 2 47.053148 -34.573595
+node 3 47.053148 -34.572275
+...
+road street two-way Quay Street: 1 2 3 4 5 6 7 8 9
+road street one-way Market Street: 10 11 12 13 14 15 16 17 18
+...
+road main two-way Coast Road: 48 49 50 51 52 53 54 55 56 ...
+road path two-way Lake Walk: 100 144 145 146 147 148 149 ...
+...
+area land Kestrel Island: 174 175 176 177 178 179 180 ...
+area water Mirror Lake: 238 239 240 241 242 243 244 245 ...
+river Kestrel Brook: 256 257 258 259 260 261 262 263 264 265
+...
+place The Harbour: 266
+place Lighthouse: 271
+\end{shell}
+
+Each line is one record. A \code{node} line gives a node's id and its
+position. A \code{road} line gives the road's kind (\code{main},
+\code{lane}, \code{street}, \code{track} or \code{path}), whether it is
+one-way, its name, and then, after the colon, its nodes in order. An
+\code{area} line gives the kind of area (\code{land}, \code{water},
+\code{wood}, \code{sand} or \code{town}), its name, and the nodes around its
+outline. A \code{river} is a line of nodes, from its source to the sea. A
+\code{place} is a name for a single node.
+
+Keeping the positions in nodes, and having everything else refer to nodes
+by id, has a lovely consequence: \emph{roads that share a node are
+joined}. Node 1 is the first node of both Quay Street and Anchor Street,
+so that corner is a junction, and anyone on Quay Street can turn into
+Anchor Street there. Two roads that merely cross on the map without
+sharing a node, such as a road on a bridge over another, are not joined.
+The connections that route planning needs are all in the data, without any
+geometry.
+
+The order of a one-way road's nodes matters too: Market Street may be
+driven only from node 10 towards node 18, which on the map is from west to
+east.
+
+\section{Kinds of road}
+
+A road's kind decides how it is drawn and how fast you can travel on it. A
+fixed set of named values like this is what an \emph{enumeration} is for.
+In Nex, an \code{enum union} declares one: the values are
+\code{Road_Kind.Main}, \code{Road_Kind.Lane} and so on, each of them a
+single shared object, and \code{Road_Kind.values} is an array of them all,
+in the order they are written.
+
+\begin{newfile}{island_map.nex}
+-- island_map.nex: the map itself. Nodes, roads, areas, a river and named
+-- places, read from a .map file.
+
+intern Geo
+intern Geometry
+intern io/Path
+
+-- The kinds of road, from fastest to slowest. A footpath is for walkers
+-- only.
+enum union Road_Kind
+  Main
+  Lane
+  Street
+  Track
+  Footpath
+end
+
+-- The kind written in a .map file: "main", "lane", "street", "track" or
+-- "path".
+function road_kind(word: String): Road_Kind do
+  if word = "main" then
+    result := Road_Kind.Main
+  elseif word = "lane" then
+    result := Road_Kind.Lane
+  elseif word = "street" then
+    result := Road_Kind.Street
+  elseif word = "track" then
+    result := Road_Kind.Track
+  elseif word = "path" then
+    result := Road_Kind.Footpath
+  else
+    raise "unknown road kind: " + word
+  end
+end
+\end{newfile}
+
+The file says \code{path}, but the value is called \code{Footpath}, because
+\code{Path} is already the name of the library class for file paths, which
+we use below to read the file.
+
+The \code{raise} at the end matters. \code{Road_Kind} is not an optional
+type, so the function must return one on every path, and there is no
+sensible kind for a word we don't know. Raising an error is the honest
+answer, and Nex accepts it, since a path that raises never returns.
+
+\section{Roads, areas, rivers and places}
+
+Each kind of record becomes a small class. They hold node \emph{ids}, not
+positions, exactly as the file does.
+
+\begin{append}{island_map.nex}
+-- A road: a line through two or more nodes, in order.
+class Road
+create
+  make(road_name: String, road_kind: Road_Kind, one_way: Boolean, ids: Array[Integer])
+  require
+    at_least_two_nodes: ids.length >= 2
+  do
+    name := road_name
+    kind := road_kind
+    is_one_way := one_way
+    node_ids := ids
+  end
+feature
+  once name: String
+  once kind: Road_Kind
+  -- A one-way road may be driven only from its first node towards its last.
+  once is_one_way: Boolean
+  once node_ids: Array[Integer]
+invariant
+  at_least_two_nodes: node_ids.length >= 2
+end
+
+-- An area: the polygon through its nodes, the last joined back to the
+-- first. The kind is "land", "water", "wood", "sand" or "town".
+class Area
+create
+  make(area_kind, area_name: String, ids: Array[Integer])
+  require
+    at_least_three_nodes: ids.length >= 3
+  do
+    kind := area_kind
+    name := area_name
+    node_ids := ids
+  end
+feature
+  once kind: String
+  once name: String
+  once node_ids: Array[Integer]
+invariant
+  at_least_three_nodes: node_ids.length >= 3
+end
+
+-- A river, as a line through its nodes from source to sea.
+class River
+create
+  make(river_name: String, ids: Array[Integer])
+  require
+    at_least_two_nodes: ids.length >= 2
+  do
+    name := river_name
+    node_ids := ids
+  end
+feature
+  once name: String
+  once node_ids: Array[Integer]
+end
+
+-- A named place: a single node with a name.
+class Place
+create
+  make(place_name: String, id: Integer) do
+    name := place_name
+    node_id := id
+  end
+feature
+  once name: String
+  once node_id: Integer
+end
+\end{append}
+
+A road needs at least two nodes and an area at least three, so the
+constructors require it. A road with one node, or a lake with two corners,
+would be a mistake in the map file, and it is far better to stop when the
+file is read than to crash much later while drawing.
+
+\section{Reading the file}
+
+The map itself keeps every node's position twice: as latitude and longitude
+from the file, and as a flat point in metres, for everything else. Both are
+\code{Map}s from node ids. It reads the file line by line, skipping blank
+lines and comments.
+
+\begin{append}{island_map.nex}
+class Island_Map
+create
+  -- Read a map from a .map file (see kestrel_island.map for the format).
+  load(file: String) do
+    name := "Untitled"
+    positions := {}
+    points := {}
+    roads := []
+    areas := []
+    rivers := []
+    places := []
+    let line_number: Integer := 0
+    across create Path.make(file).read_text().split("\n") as raw do
+      line_number := line_number + 1
+      let line: String := raw.trim()
+      if line /= "" and not line.starts_with("#") then
+        do
+          read_line(line)
+        rescue
+          raise file + ", line " + line_number.to_string + ": " + exception.to_string
+        end
+      end
+    end
+    if positions.is_empty then
+      raise file + ": no nodes"
+    end
+    projection := create Projection.make(middle_of(positions.values))
+    across positions as entry do
+      points.put(entry.key, projection.to_point(entry.value))
+    end
+  end
+\end{append}
+
+Two things happen after the reading.
+
+First, the projection. Its centre is the middle of the map: halfway
+between the most northern and most southern nodes, and halfway between
+the most eastern and most western. That keeps every node within a couple
+of kilometres of the centre, where the projection is most accurate.
+
+Second, every position is projected once, and the flat points stored by
+node id. From here on, nothing else in the project needs to know that the
+Earth is round.
+
+If anything goes wrong reading a line, the \code{rescue} catches the
+error, and raises it again with the file name and line number in front, so
+that a mistake in a 300-line file can be found at once.
+
+Now the queries, starting with positions:
+
+\begin{continued}{island_map.nex}
+feature
+  name: String
+  -- Every node's position on the globe, by node id...
+  positions: Map[Integer, Lat_Lon]
+  -- ...and on the flat map, in metres from the map's centre.
+  points: Map[Integer, Point]
+  projection: Projection
+  roads: Array[Road]
+  areas: Array[Area]
+  rivers: Array[River]
+  places: Array[Place]
+
+  -- The flat position of a node.
+  point(id: Integer): Point
+  require
+    known_node: points.contains_key(id)
+  do
+    result := points.get(id)
+  end
+
+  -- The flat positions of several nodes, in order.
+  points_of(ids: Array[Integer]): Array[Point] do
+    across ids as id do
+      result.add(point(id))
+    end
+  ensure
+    same_length: result.length = ids.length
+  end
+
+  -- The smallest and largest x and y of all the nodes.
+  min_x(): Real do
+    result := extreme(true, true)
+  end
+
+  max_x(): Real do
+    result := extreme(true, false)
+  end
+
+  min_y(): Real do
+    result := extreme(false, true)
+  end
+
+  max_y(): Real do
+    result := extreme(false, false)
+  end
+\end{continued}
+
+\code{points_of} adds to \code{result} straight away: a routine returning
+an \code{Array} starts with a fresh empty one.
+
+People name places loosely, so \code{find_place} accepts any part of a
+name, ignoring capitals: \code{"mill"} finds Old Mill. An exact match is
+looked for first, so that a name that happens to be part of another
+(Long Sands inside ``Long Sands Car Park'', say) can still be chosen.
+
+Then a question every map app answers: what is at this point? Areas can
+overlap (the lake lies inside the island), and the file lists the ones
+drawn on top later, so the answer is the last area in the list that
+contains the point. The \code{?Place} and \code{?Area} return types say
+that the answer may be \code{nil}: no such place, or out at sea.
+
+\begin{continued}{island_map.nex}
+  -- The place called `query`, ignoring case; failing that, the first
+  -- place whose name contains it ("mill" finds "Old Mill").
+  find_place(query: String): ?Place do
+    let wanted: String := query.to_lower()
+    across places as p do
+      if result = nil and p.name.to_lower() = wanted then
+        result := p
+      end
+    end
+    across places as p do
+      if result = nil and p.name.to_lower().contains(wanted) then
+        result := p
+      end
+    end
+  end
+
+  -- The area at a point, or nil out at sea. Areas listed later are drawn
+  -- on top of earlier ones (the lake on top of the island), so the last
+  -- one that contains the point is the one you would see there.
+  area_at(p: Point): ?Area do
+    across areas as a do
+      if polygon_contains(points_of(a.node_ids), p) then
+        result := a
+      end
+    end
+  end
+\end{continued}
+
+Last, the private routines that do the reading. A line is split at its
+colon into a \emph{head}, the words before it, and the node ids after it.
+Every id must already have appeared in a \code{node} line; otherwise the
+file is broken, and we say so. Then the first word says what kind of
+record the line is.
+
+\begin{continued}{island_map.nex}
+private feature
+  read_line(line: String) do
+    let colon: Integer := line.index_of(":")
+    let head: Array[String] := []
+    let ids: Array[Integer] := []
+    if colon >= 0 then
+      head := words(line.substring(0, colon))
+      across words(line.substring(colon + 1, line.length)) as w do
+        let id: Integer := w.to_integer
+        if not positions.contains_key(id) then
+          raise "node " + w + " is used before it is defined"
+        end
+        ids.add(id)
+      end
+    else
+      head := words(line)
+    end
+    let record: String := head.get(0)
+    if record = "map" then
+      name := joined(head, 1)
+    elseif record = "node" then
+      positions.put(head.get(1).to_integer,
+        create Lat_Lon.make(head.get(2).to_real, head.get(3).to_real))
+    elseif record = "road" then
+      roads.add(create Road.make(joined(head, 3), road_kind(head.get(1)),
+        head.get(2) = "one-way", ids))
+    elseif record = "area" then
+      areas.add(create Area.make(head.get(1), joined(head, 2), ids))
+    elseif record = "river" then
+      rivers.add(create River.make(joined(head, 1), ids))
+    elseif record = "place" then
+      places.add(create Place.make(joined(head, 1), ids.get(0)))
+    else
+      raise "unknown record: " + record
+    end
+  end
+
+  -- The words of s, however many spaces separate them.
+  words(s: String): Array[String] do
+    across s.split(" ") as w do
+      if w /= "" then
+        result.add(w)
+      end
+    end
+  end
+
+  -- The words from index `first` on, joined back with single spaces.
+  joined(ws: Array[String], first: Integer): String do
+    result := " ".join(ws.drop(first))
+  end
+\end{continued}
+
+A name can have spaces in it, so it is everything in the head after the
+fixed words: \code{joined(head, 3)} on
+\code{road street one-way Market Street} is \code{Market Street}.
+
+Finally, the middle of a list of positions, for the projection's centre,
+and the extremes of the flat points, for fitting the map on a screen:
+
+\begin{continued}{island_map.nex}
+  -- The point halfway between the most northern and southern latitudes,
+  -- and the most eastern and western longitudes.
+  middle_of(all: Array[Lat_Lon]): Lat_Lon do
+    let south: Real := 90.0
+    let north: Real := -90.0
+    let west: Real := 180.0
+    let east: Real := -180.0
+    across all as p do
+      south := south.min(p.latitude)
+      north := north.max(p.latitude)
+      west := west.min(p.longitude)
+      east := east.max(p.longitude)
+    end
+    result := create Lat_Lon.make((south + north) / 2.0, (west + east) / 2.0)
+  end
+
+  -- The smallest (or largest) x (or y) of all the nodes.
+  extreme(along_x, smallest: Boolean): Real do
+    let first: Boolean := true
+    across points.values as p do
+      let v: Real := when along_x then p.x else p.y end
+      if first or (smallest and v < result) or (not smallest and v > result) then
+        result := v
+        first := false
+      end
+    end
+  end
+end
+\end{continued}
+
+\section{Exploring the island}
+
+Now we can load the island and ask it questions. One hectare is
+10,000 square metres, about the size of a football pitch and a half.
+
+\begin{tryit}{try_island.nex}
+intern Island_Map
+intern Helpers
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+say(island.name + ": " + island.positions.size.to_string + " nodes, "
+  + island.roads.length.to_string + " roads, " + island.places.length.to_string + " places")
+say("centred on " + island.projection.centre.to_string())
+say(fixed(island.max_x() - island.min_x(), 0) + " m from west to east, "
+  + fixed(island.max_y() - island.min_y(), 0) + " m from south to north")
+say("")
+across island.areas as a do
+  say(a.name.pad_end(" ", 16) + fixed(polygon_area(island.points_of(a.node_ids)) / 10000.0, 1)
+    .pad_start(" ", 7) + " hectares of " + a.kind)
+end
+say("")
+across Road_Kind.values as kind do
+  let total: Real := 0.0
+  across island.roads as r do
+    if r.kind = kind then
+      total := total + line_length(island.points_of(r.node_ids))
+    end
+  end
+  say(kind.to_string.pad_end(" ", 10) + distance_text(total).pad_start(" ", 7))
+end
+say("")
+across island.places as p do
+  if ?island.area_at(island.point(p.node_id)) as a then
+    say(p.name + when a.kind = "land" then " is on " else " is in " end + a.name)
+  end
+end
+\end{tryit}
+\tryoutput{try_island}
+
+The island is about ten square kilometres, and the program agrees with the
+map: Kestrel Peak is in Hollow Wood, and the school and the market are in
+Port Kestrel.
+
+What happens if the file has a mistake in it? This script writes a small
+broken map and tries to load it:
+
+\begin{tryit}{try_bad_map.nex}
+intern Island_Map
+intern Helpers
+
+let file: String := user_path("broken.map")
+create Path.make(file).write_text("map Broken\nnode 1 47.0 -34.0\nnode 2 47.0 -34.1\nroad lane two-way Short Lane: 1 2 3\n")
+do
+  let island: Island_Map := create Island_Map.load(file)
+rescue
+  say(exception.to_string.replace(user_path(""), ""))
+end
+\end{tryit}
+\tryoutput{try_bad_map}
+
+The error names the file, the line and the problem: Short Lane uses a node
+that the file never defines.

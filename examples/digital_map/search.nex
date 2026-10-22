@@ -1,0 +1,312 @@
+-- search.nex: finding a way from one node to another. Breadth-first
+-- search, Dijkstra's algorithm and A*.
+
+intern Road_Graph
+
+-- What a search found, and how much work it did to find it.
+class Search_Result
+create
+  make(name: String, nodes: Array[Integer], total: Real,
+    order: Array[Integer], tree: Map[Integer, Integer]) do
+    algorithm := name
+    path := nodes
+    cost := total
+    explored := order
+    parents := tree
+  end
+feature
+  algorithm: String
+  -- The nodes of the way found, from start to finish; empty if there is
+  -- no way.
+  path: Array[Integer]
+  -- What the search was minimising, added up along the path.
+  cost: Real
+  -- Every node the search finished with, in the order it did so.
+  explored: Array[Integer]
+  -- How the search reached each node it saw: parents.get(n) is the node
+  -- it came to n from. Together these links form a tree.
+  parents: Map[Integer, Integer]
+
+  found(): Boolean do
+    result := not path.is_empty
+  end
+end
+
+-- The way from `source` to `target`, following the parent links back
+-- from `target` and then turning the list around.
+function trace_back(parents: Map[Integer, Integer], source, target: Integer): Array[Integer] do
+  let backwards: Array[Integer] := [target]
+  let at: Integer := target
+  from
+  until
+    at = source
+  do
+    at := parents.get(at)
+    backwards.add(at)
+  end
+  result := backwards.reverse
+ensure
+  starts_at_source: result.get(0) = source
+  ends_at_target: result.get(result.length - 1) = target
+end
+
+-- Whether `path` is a way through the graph: every step is an edge.
+function is_route(g: Road_Graph, path: Array[Integer]): Boolean do
+  result := not path.is_empty
+  from
+    let i: Integer := 1
+  until
+    not result or i >= path.length
+  do
+    result := g.edge_between(path.get(i - 1), path.get(i)) /= nil
+    i := i + 1
+  end
+end
+
+-- The total of `cost` over the steps of a route.
+function route_cost(g: Road_Graph, path: Array[Integer], cost: Function(Edge): Real): Real
+require
+  is_a_route: is_route(g, path)
+do
+  from
+    let i: Integer := 1
+  until
+    i >= path.length
+  do
+    if ?g.edge_between(path.get(i - 1), path.get(i)) as e then
+      result := result + cost(e)
+    end
+    i := i + 1
+  end
+end
+
+-- Two ways to measure an edge: by its length, or by how long it takes.
+function by_distance(): Function(Edge): Real do
+  result := fn (e: Edge): Real do result := e.length end
+end
+
+function by_time(): Function(Edge): Real do
+  result := fn (e: Edge): Real do result := e.seconds end
+end
+
+-- Breadth-first search: the way with the fewest steps.
+--
+-- The search keeps a queue of nodes to visit, first in, first out. It
+-- starts with just the source. It takes the node at the front of the
+-- queue and puts every neighbour it has not seen before at the back, and
+-- repeats until it takes out the target. Nodes come out in order of how
+-- many steps they are from the source: all the nodes 1 step away, then
+-- all those 2 steps away, and so on. So the first time the search reaches
+-- the target, it has reached it in as few steps as possible.
+function breadth_first(g: Road_Graph, source, target: Integer): Search_Result
+require
+  source_on_roads: g.has_node(source)
+  target_on_roads: g.has_node(target)
+do
+  let queue: Array[Integer] := [source]
+  let front: Integer := 0
+  let seen: Set[Integer] := #{source}
+  let parents: Map[Integer, Integer] := {}
+  let explored: Array[Integer] := []
+  let found: Boolean := false
+  from
+  until
+    found or front = queue.length
+  do
+    let node: Integer := queue.get(front)
+    front := front + 1
+    explored.add(node)
+    if node = target then
+      found := true
+    else
+      across g.edges_from(node) as e do
+        if not seen.contains(e.target) then
+          seen.add(e.target)
+          parents.put(e.target, node)
+          queue.add(e.target)
+        end
+      end
+    end
+  end
+  let path: Array[Integer] := []
+  if found then
+    path := trace_back(parents, source, target)
+  end
+  result := create Search_Result.make("breadth-first", path,
+    (path.length - 1).max(0).to_real, explored, parents)
+ensure
+  valid_path: not result.found() or is_route(g, result.path)
+end
+
+-- A node waiting to be explored, with the cost of the best way to it
+-- found so far, and its priority: the lower, the sooner it is explored.
+class Waiting
+create
+  make(n: Integer, c, p: Real) do
+    node := n
+    cost := c
+    priority := p
+  end
+feature
+  once node: Integer
+  once cost: Real
+  once priority: Real
+end
+
+-- Lower priority first.
+function by_priority(): Function(Waiting, Waiting): Integer do
+  result := fn (a, b: Waiting): Integer do result := a.priority.compare(b.priority) end
+end
+
+-- Dijkstra's algorithm: the way with the lowest total cost, where `cost`
+-- gives the cost of each edge (its length, or the time it takes).
+--
+-- Like breadth-first search, but the queue is a priority queue: the next
+-- node out is always the one with the cheapest way to it found so far.
+-- When a node comes out, no cheaper way to it can turn up later, because
+-- any other way would have to go through a node still waiting, and every
+-- one of those is already at least as expensive. So the node is finished.
+function dijkstra(g: Road_Graph, source, target: Integer,
+  cost: Function(Edge): Real): Search_Result
+require
+  source_on_roads: g.has_node(source)
+  target_on_roads: g.has_node(target)
+do
+  let waiting: Min_Heap[Waiting] := create Min_Heap[Waiting].from_comparator(by_priority())
+  waiting.insert(create Waiting.make(source, 0.0, 0.0))
+  let best: Map[Integer, Real] := {source: 0.0}
+  let parents: Map[Integer, Integer] := {}
+  let finished: Set[Integer] := #{}
+  let explored: Array[Integer] := []
+  let found: Boolean := false
+  from
+  until
+    found or waiting.is_empty
+  do
+    let w: Waiting := waiting.extract_min
+    -- A node can be in the queue more than once, if a cheaper way to it
+    -- turned up after it was first added. Only its first time out counts.
+    if not finished.contains(w.node) then
+      finished.add(w.node)
+      explored.add(w.node)
+      if w.node = target then
+        found := true
+      else
+        across g.edges_from(w.node) as e do
+          let c: Real := w.cost + cost(e)
+          if not best.contains_key(e.target) or c < best.get(e.target) then
+            best.put(e.target, c)
+            parents.put(e.target, w.node)
+            waiting.insert(create Waiting.make(e.target, c, c))
+          end
+        end
+      end
+    end
+  end
+  let path: Array[Integer] := []
+  if found then
+    path := trace_back(parents, source, target)
+  end
+  result := create Search_Result.make("Dijkstra", path,
+    best.try_get(target, 0.0), explored, parents)
+ensure
+  valid_path: not result.found() or is_route(g, result.path)
+  cost_adds_up: not result.found()
+    or (route_cost(g, result.path, cost) - result.cost).abs < 0.001
+end
+
+-- A straight-line estimate of the cost from any node to `target`, when
+-- the cost is distance: no road between two points is shorter than the
+-- straight line between them.
+function distance_estimate(g: Road_Graph, target: Integer): Function(Integer): Real do
+  let goal: Point := g.island.point(target)
+  result := fn (n: Integer): Real do
+    result := g.island.point(n).distance_to(goal)
+  end
+end
+
+-- The same when the cost is time: no trip is quicker than the straight
+-- line at the top speed of any road.
+function time_estimate(g: Road_Graph, target: Integer): Function(Integer): Real do
+  let goal: Point := g.island.point(target)
+  let speed: Real := g.top_speed
+  result := fn (n: Integer): Real do
+    result := g.island.point(n).distance_to(goal) / speed
+  end
+end
+
+-- A* ("A star"): Dijkstra's algorithm with a sense of direction.
+--
+-- The priority of a waiting node is the cost of the best way to it so
+-- far, plus an estimate of the cost from it to the target. Nodes that
+-- lead towards the target come out sooner, and nodes that lead away wait,
+-- often until the target is found and they are never explored at all.
+-- As long as the estimate is never more than the true cost, the way A*
+-- finds is just as cheap as the one Dijkstra finds.
+function a_star(g: Road_Graph, source, target: Integer,
+  cost: Function(Edge): Real, estimate: Function(Integer): Real): Search_Result
+require
+  source_on_roads: g.has_node(source)
+  target_on_roads: g.has_node(target)
+do
+  let waiting: Min_Heap[Waiting] := create Min_Heap[Waiting].from_comparator(by_priority())
+  waiting.insert(create Waiting.make(source, 0.0, estimate(source)))
+  let best: Map[Integer, Real] := {source: 0.0}
+  let parents: Map[Integer, Integer] := {}
+  let finished: Set[Integer] := #{}
+  let explored: Array[Integer] := []
+  let found: Boolean := false
+  from
+  until
+    found or waiting.is_empty
+  do
+    let w: Waiting := waiting.extract_min
+    if not finished.contains(w.node) then
+      finished.add(w.node)
+      explored.add(w.node)
+      if w.node = target then
+        found := true
+      else
+        across g.edges_from(w.node) as e do
+          let c: Real := w.cost + cost(e)
+          if not best.contains_key(e.target) or c < best.get(e.target) then
+            best.put(e.target, c)
+            parents.put(e.target, w.node)
+            waiting.insert(create Waiting.make(e.target, c, c + estimate(e.target)))
+          end
+        end
+      end
+    end
+  end
+  let path: Array[Integer] := []
+  if found then
+    path := trace_back(parents, source, target)
+  end
+  result := create Search_Result.make("A*", path,
+    best.try_get(target, 0.0), explored, parents)
+ensure
+  valid_path: not result.found() or is_route(g, result.path)
+  cost_adds_up: not result.found()
+    or (route_cost(g, result.path, cost) - result.cost).abs < 0.001
+end
+
+-- Search with the algorithm called `algorithm` ("bfs", "dijkstra" or
+-- "astar"), for the quickest way, or the shortest one if `shortest`.
+function find_route(g: Road_Graph, source, target: Integer, algorithm: String,
+  shortest: Boolean): Search_Result
+require
+  source_on_roads: g.has_node(source)
+  target_on_roads: g.has_node(target)
+  known_algorithm: algorithm = "bfs" or algorithm = "dijkstra" or algorithm = "astar"
+do
+  let cost: Function(Edge): Real := when shortest then by_distance() else by_time() end
+  let estimate: Function(Integer): Real :=
+    when shortest then distance_estimate(g, target) else time_estimate(g, target) end
+  if algorithm = "bfs" then
+    result := breadth_first(g, source, target)
+  elseif algorithm = "dijkstra" then
+    result := dijkstra(g, source, target, cost)
+  else
+    result := a_star(g, source, target, cost, estimate)
+  end
+end

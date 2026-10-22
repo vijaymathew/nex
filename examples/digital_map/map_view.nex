@@ -1,0 +1,534 @@
+-- map_view.nex: drawing the map on a canvas, at any zoom.
+
+intern Island_Map
+intern Helpers
+intern graphics/Canvas
+
+-- The map's colours.
+class Palette
+feature
+  SEA = create Color.make(170, 211, 223)
+  LAND = create Color.make(242, 239, 233)
+  SAND = create Color.make(240, 228, 190)
+  TOWN = create Color.make(232, 224, 218)
+  WOOD = create Color.make(181, 214, 160)
+  WATER = create Color.make(170, 211, 223)
+  RIVER = create Color.make(120, 175, 205)
+  CASING = create Color.make(150, 140, 130)
+  MAIN_ROAD = create Color.make(250, 205, 140)
+  MAIN_CASING = create Color.make(205, 140, 70)
+  MINOR_ROAD = create Color.make(255, 255, 255)
+  TRACK = create Color.make(160, 115, 70)
+  FOOTPATH = create Color.make(225, 95, 80)
+  LABEL = create Color.make(60, 60, 60)
+  ROAD_LABEL = create Color.make(90, 85, 80)
+  WATER_LABEL = create Color.make(50, 110, 150)
+  HALO = create Color.make_rgba(255, 255, 255, 220)
+end
+
+-- A rectangle on the map, for keeping labels apart.
+class Box
+create
+  make(l, b, r, t: Real) do
+    left := l
+    bottom := b
+    right := r
+    top := t
+  end
+feature
+  once left: Real
+  once bottom: Real
+  once right: Real
+  once top: Real
+
+  overlaps(other: Box): Boolean do
+    result := left < other.right and other.left < right
+      and bottom < other.top and other.bottom < top
+  end
+end
+
+-- A piece of text to put on the map.
+class Label
+create
+  make(p: Point, s: String, f: Font, c: Color, in_middle: Boolean) do
+    at := p
+    text := s
+    font := f
+    colour := c
+    centred := in_middle
+  end
+feature
+  once at: Point
+  once text: String
+  once font: Font
+  once colour: Color
+  -- Whether the text is centred on `at`, or starts there.
+  once centred: Boolean
+end
+
+class Map_View
+create
+  -- A view of `m` on a new canvas `width` by `height` pixels, showing the
+  -- whole map.
+  make(m: Island_Map, width, height: Integer) do
+    island := m
+    canvas := create Canvas.make(width, height)
+    centre := create Point.make(0.0, 0.0)
+    metres_per_pixel := 1.0
+    labels := []
+    taken := []
+    show_all()
+  end
+feature
+  island: Island_Map
+  canvas: Canvas
+  -- The point of the map at the middle of the canvas...
+  centre: Point
+  -- ...and how many metres of the map one pixel covers. Bigger means
+  -- zoomed out.
+  metres_per_pixel: Real
+
+  -- The labels that have found room on the map, and the room they take.
+  labels: Array[Label]
+  taken: Array[Box]
+  PLACE_FONT = Font.SANS.bold().with_size(12)
+  AREA_FONT = Font.SERIF.italic().with_size(13)
+  ROAD_FONT = Font.SANS.with_size(10)
+
+  -- Pixels at the top and bottom of the canvas that something else covers
+  -- (a program's own panels), to keep the scale bar and north arrow clear
+  -- of.
+  inset_top: Real
+  inset_bottom: Real
+
+  set_insets(top, bottom: Real)
+  require
+    non_negative: top >= 0.0 and bottom >= 0.0
+    room_left: top + bottom < canvas.height.to_real
+  do
+    inset_top := top
+    inset_bottom := bottom
+    look_at(centre, metres_per_pixel)
+  end
+
+  -- Zoom and pan so that the whole map fits, with a little sea around it.
+  show_all() do
+    let w: Real := island.max_x() - island.min_x()
+    let h: Real := island.max_y() - island.min_y()
+    let mpp: Real := (w / canvas.width.to_real).max(h / free_height()) * 1.08
+    look_at(create Point.make((island.min_x() + island.max_x()) / 2.0,
+      (island.min_y() + island.max_y()) / 2.0), mpp)
+  end
+
+  -- Centre the view on c, at mpp metres per pixel. "Centre" means the
+  -- middle of the part of the canvas that the insets leave free.
+  look_at(c: Point, mpp: Real)
+  require
+    positive_scale: mpp > 0.0
+  do
+    centre := c
+    metres_per_pixel := mpp
+    let half_w: Real := canvas.width.to_real * mpp / 2.0
+    let top: Real := c.y + (inset_top + free_height() / 2.0) * mpp
+    canvas.set_x_scale(c.x - half_w, c.x + half_w)
+    canvas.set_y_scale(top - canvas.height.to_real * mpp, top)
+  end
+
+  -- The height of the canvas that the insets leave free, in pixels.
+  free_height(): Real do
+    result := canvas.height.to_real - inset_top - inset_bottom
+  end
+
+  -- A distance on the canvas in pixels, as metres on the map.
+  metres(pixels: Real): Real do
+    result := pixels * metres_per_pixel
+  end
+
+  -- Draw the whole map, layer by layer, from the sea up.
+  draw_map() do
+    canvas.clear(Palette.SEA)
+    draw_areas()
+    draw_rivers()
+    draw_roads()
+    draw_places()
+    taken := []
+    labels := []
+    place_place_labels()
+    place_area_labels()
+    place_road_labels()
+    draw_labels()
+    draw_scale_bar()
+    draw_north_arrow()
+  end
+
+  draw_areas() do
+    across island.areas as a do
+      canvas.set_pen_color(area_color(a.kind))
+      fill_polygon(island.points_of(a.node_ids))
+    end
+  end
+
+  draw_rivers() do
+    across island.rivers as r do
+      line(island.points_of(r.node_ids), Palette.RIVER, 2.5)
+    end
+  end
+
+  -- Roads are drawn in two passes, the way printed maps do it: first
+  -- every road a little wider in a darker colour (the casing), then every
+  -- road again in its own colour. Where roads meet, the second pass paints
+  -- over the first, so junctions join cleanly.
+  --
+  -- Each pass draws the roads one kind at a time. Changing the pen's
+  -- colour or width takes far longer than drawing a short line, so it
+  -- pays to change it once per kind instead of once per road.
+  draw_roads() do
+    across [Road_Kind.Street, Road_Kind.Lane, Road_Kind.Main] as kind do
+      set_pen(when kind = Road_Kind.Main then Palette.MAIN_CASING else Palette.CASING end,
+        road_width(kind) + 2.0)
+      across island.roads as r do
+        if r.kind = kind then
+          segments(island.points_of(r.node_ids))
+        end
+      end
+    end
+    across Road_Kind.values.reverse as kind do
+      if kind = Road_Kind.Footpath then
+        canvas.set_pen_color(Palette.FOOTPATH)
+      elseif kind = Road_Kind.Track then
+        set_pen(Palette.TRACK, 2.0)
+      else
+        set_pen(when kind = Road_Kind.Main then Palette.MAIN_ROAD else Palette.MINOR_ROAD end,
+          road_width(kind))
+      end
+      across island.roads as r do
+        if r.kind = kind then
+          let pts: Array[Point] := island.points_of(r.node_ids)
+          if kind = Road_Kind.Footpath then
+            dots(pts, 1.3, 8.0)
+          else
+            segments(pts)
+          end
+        end
+      end
+    end
+    if metres_per_pixel < 2.5 then
+      canvas.set_pen_color(Palette.ROAD_LABEL)
+      across island.roads as r do
+        if r.is_one_way then
+          draw_one_way_arrows(island.points_of(r.node_ids))
+        end
+      end
+    end
+  end
+
+  -- The width in pixels of a road of a given kind.
+  road_width(kind: Road_Kind): Real do
+    if kind = Road_Kind.Main then
+      result := 5.0
+    elseif kind = Road_Kind.Lane then
+      result := 4.0
+    elseif kind = Road_Kind.Street then
+      result := 3.5
+    else
+      result := 2.0
+    end
+  end
+
+  -- Small arrowheads along a one-way road, pointing the way traffic goes.
+  draw_one_way_arrows(pts: Array[Point]) do
+    from
+      let i: Integer := 1
+    until
+      i >= pts.length
+    do
+      let a: Point := pts.get(i - 1)
+      let b: Point := pts.get(i)
+      if not off_canvas(a, b) then
+        arrowhead(a + (b - a) * 0.5, bearing(a, b), 5.0)
+      end
+      i := i + 1
+    end
+  end
+
+  -- A dot for every place: white, with a smaller dark dot on top.
+  draw_places() do
+    canvas.set_pen_color(Color.WHITE)
+    across island.places as p do
+      let at: Point := island.point(p.node_id)
+      canvas.filled_circle(at.x, at.y, metres(5.0))
+    end
+    canvas.set_pen_color(Palette.LABEL)
+    across island.places as p do
+      let at: Point := island.point(p.node_id)
+      canvas.filled_circle(at.x, at.y, metres(3.5))
+    end
+  end
+
+  -- Labels must not overlap, or none of them can be read. The map places
+  -- them greedily, most important first: each label goes in only if there
+  -- is still room for it, and takes that room from the labels after it.
+  -- Place names come first, then area names, then road names, main roads
+  -- before lanes before streets.
+
+  -- Each place's name, just to the right of its dot.
+  place_place_labels() do
+    across island.places as p do
+      let at: Point := island.point(p.node_id) + create Point.make(metres(8.0), 0.0)
+      add_label(create Label.make(at, p.name, PLACE_FONT, Palette.LABEL, false))
+    end
+  end
+
+  -- Area names in the middle of each area (except the island itself,
+  -- whose name is the map's title).
+  place_area_labels() do
+    across island.areas as a do
+      if a.kind /= "land" then
+        add_label(create Label.make(average(island.points_of(a.node_ids)), a.name,
+          AREA_FONT, when a.kind = "water" then Palette.WATER_LABEL else Palette.LABEL end,
+          true))
+      end
+    end
+  end
+
+  -- Each road's name, halfway along it if there is room there, or else a
+  -- quarter or three quarters of the way along.
+  place_road_labels() do
+    across Road_Kind.values as kind do
+      across island.roads as r do
+        if r.kind = kind then
+          let pts: Array[Point] := island.points_of(r.node_ids)
+          let length: Real := line_length(pts)
+          let placed: Boolean := false
+          across [0.5, 0.25, 0.75] as fraction do
+            if not placed then
+              placed := add_label(create Label.make(point_along(pts, length * fraction),
+                r.name, ROAD_FONT, Palette.ROAD_LABEL, true))
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- Add `label` if there is room for it, and answer whether there was.
+  add_label(label: Label): Boolean do
+    let w: Real := metres(label.text.length.to_real * label.font.size.to_real * 0.58 + 6.0)
+    let h: Real := metres(label.font.size.to_real + 4.0)
+    let left: Real := when label.centred then label.at.x - w / 2.0 else label.at.x end
+    let room: Box := create Box.make(left, label.at.y - h / 2.0, left + w, label.at.y + h / 2.0)
+    -- A label off the canvas takes no room, and isn't drawn.
+    result := room.right > canvas.x_min and room.left < canvas.x_max
+      and room.top > canvas.y_min and room.bottom < canvas.y_max
+    across taken as other do
+      if room.overlaps(other) then
+        result := false
+      end
+    end
+    if result then
+      taken.add(room)
+      labels.add(label)
+    end
+  end
+
+  -- Draw the labels that found room: first a white outline around every
+  -- one, so that they stay readable over roads and areas, then the text
+  -- itself.
+  draw_labels() do
+    canvas.set_pen_color(Palette.HALO)
+    across labels as label do
+      use_font(label.font)
+      across halo_offsets() as o do
+        label_text(label, label.at + o)
+      end
+    end
+    across labels as label do
+      use_font(label.font)
+      if label.colour /= canvas.pen_color then
+        canvas.set_pen_color(label.colour)
+      end
+      label_text(label, label.at)
+    end
+  end
+
+  -- Labels come in only a few fonts and colours, and the canvas is slow
+  -- to change them (see draw_roads), so they are changed only when they
+  -- differ.
+  use_font(f: Font) do
+    if f /= canvas.font then
+      canvas.set_font(f)
+    end
+  end
+
+  label_text(label: Label, p: Point) do
+    if label.centred then
+      canvas.text(p.x, p.y, label.text)
+    else
+      canvas.text_left(p.x, p.y, label.text)
+    end
+  end
+
+  -- One pixel's worth of nudge in eight directions.
+  halo_offsets(): Array[Point] do
+    let d: Real := metres(1.2)
+    across [-1.0, 0.0, 1.0] as i do
+      across [-1.0, 0.0, 1.0] as j do
+        if i /= 0.0 or j /= 0.0 then
+          result.add(create Point.make(i * d, j * d))
+        end
+      end
+    end
+  end
+
+  -- A bar of a round length (100 m, 200 m, 500 m, 1 km, ...) in the
+  -- bottom left corner.
+  draw_scale_bar() do
+    let target: Real := metres(150.0)
+    let length: Real := 10.0
+    across [20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0] as candidate do
+      if candidate <= target then
+        length := candidate
+      end
+    end
+    let left: Real := canvas.x_min + metres(20.0)
+    let base: Real := canvas.y_min + metres(inset_bottom + 20.0)
+    canvas.set_pen_color(Palette.HALO)
+    canvas.filled_rectangle(left + length / 2.0, base + metres(9.0),
+      length / 2.0 + metres(8.0), metres(16.0))
+    canvas.set_pen_color(Palette.LABEL)
+    canvas.set_pen_radius(1.0)
+    canvas.line(left, base, left + length, base)
+    canvas.line(left, base - metres(3.0), left, base + metres(3.0))
+    canvas.line(left + length, base - metres(3.0), left + length, base + metres(3.0))
+    canvas.set_font(Font.SANS.with_size(11))
+    canvas.text(left + length / 2.0, base + metres(12.0), distance_text(length))
+  end
+
+  -- An arrow pointing north, in the top right corner.
+  draw_north_arrow() do
+    let x: Real := canvas.x_max - metres(30.0)
+    let y: Real := canvas.y_max - metres(inset_top + 45.0)
+    canvas.set_pen_color(Palette.LABEL)
+    canvas.filled_polygon([x, x - metres(8.0), x + metres(8.0)],
+      [y + metres(14.0), y - metres(10.0), y - metres(10.0)])
+    canvas.set_font(Font.SANS.bold().with_size(13))
+    canvas.text(x, y + metres(26.0), "N")
+  end
+
+  -- Drawing tools, used by the map and by overlays such as a route.
+
+  -- A line through `pts`, `width` pixels wide.
+  line(pts: Array[Point], color: Color, width: Real) do
+    set_pen(color, width)
+    segments(pts)
+  end
+
+  set_pen(color: Color, width: Real) do
+    canvas.set_pen_color(color)
+    canvas.set_pen_radius(width / 2.0)
+  end
+
+  -- The line through `pts`, with the pen as it is.
+  segments(pts: Array[Point]) do
+    from
+      let i: Integer := 1
+    until
+      i >= pts.length
+    do
+      let a: Point := pts.get(i - 1)
+      let b: Point := pts.get(i)
+      if not off_canvas(a, b) then
+        canvas.line(a.x, a.y, b.x, b.y)
+      end
+      i := i + 1
+    end
+  end
+
+  -- Whether the segment a-b is certainly off the canvas, because both
+  -- its ends are beyond the same edge. Drawing it would be wasted work.
+  off_canvas(a, b: Point): Boolean do
+    let m: Real := metres(12.0)
+    result := (a.x < canvas.x_min - m and b.x < canvas.x_min - m)
+      or (a.x > canvas.x_max + m and b.x > canvas.x_max + m)
+      or (a.y < canvas.y_min - m and b.y < canvas.y_min - m)
+      or (a.y > canvas.y_max + m and b.y > canvas.y_max + m)
+  end
+
+  -- Dots along the line through `pts`, in the pen's colour.
+  dots(pts: Array[Point], radius, gap: Real) do
+    let step: Real := metres(gap)
+    -- How far along the whole line the current segment starts, and where
+    -- the next dot goes.
+    let start: Real := 0.0
+    let next_dot: Real := 0.0
+    from
+      let i: Integer := 1
+    until
+      i >= pts.length
+    do
+      let a: Point := pts.get(i - 1)
+      let b: Point := pts.get(i)
+      let finish: Real := start + a.distance_to(b)
+      if off_canvas(a, b) then
+        -- Skip the dots this segment would have had.
+        if next_dot <= finish then
+          next_dot := next_dot + ((finish - next_dot) / step).floor.to_real * step + step
+        end
+      else
+        from
+        until
+          next_dot > finish
+        do
+          let p: Point := a + (b - a) * ((next_dot - start) / (finish - start))
+          canvas.filled_circle(p.x, p.y, metres(radius))
+          next_dot := next_dot + step
+        end
+      end
+      start := finish
+      i := i + 1
+    end
+  end
+
+  fill_polygon(pts: Array[Point]) do
+    let xs: Array[Real] := []
+    let ys: Array[Real] := []
+    across pts as p do
+      xs.add(p.x)
+      ys.add(p.y)
+    end
+    canvas.filled_polygon(xs, ys)
+  end
+
+  -- A filled triangle `size` pixels long at `tip`, pointing along
+  -- `heading` (a compass bearing).
+  arrowhead(tip: Point, heading: Real, size: Real) do
+    let forward: Point := direction(heading) * metres(size)
+    let side: Point := direction(heading + 90.0) * metres(size * 0.6)
+    let back: Point := tip - forward
+    canvas.filled_polygon([tip.x, back.x + side.x, back.x - side.x],
+      [tip.y, back.y + side.y, back.y - side.y])
+  end
+
+  show() do
+    canvas.show()
+  end
+
+  save(file: String) do
+    canvas.save(user_path(file))
+  end
+
+private feature
+  area_color(kind: String): Color do
+    if kind = "water" then
+      result := Palette.WATER
+    elseif kind = "wood" then
+      result := Palette.WOOD
+    elseif kind = "sand" then
+      result := Palette.SAND
+    elseif kind = "town" then
+      result := Palette.TOWN
+    else
+      result := Palette.LAND
+    end
+  end
+end

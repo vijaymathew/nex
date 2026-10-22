@@ -1,0 +1,37 @@
+-- rng.nex: a small random number generator that can be seeded, for the
+-- simulated GPS. With a seed, the "random" numbers are the same on every
+-- run, so a simulated trip can be repeated exactly.
+--
+-- This is the Park-Miller "minimal standard" generator:
+--     state := state * 48271 mod (2^31 - 1)
+
+class Rng
+create
+  make(seed: Integer) do
+    state := 1 + seed.abs % (MODULUS - 1)
+  end
+feature
+  MODULUS = 2147483647
+  MULTIPLIER = 48271
+
+  state: Integer
+
+  -- A real number spread evenly over the open interval (0, 1).
+  uniform(): Real
+  do
+    state := (state * MULTIPLIER) % MODULUS
+    result := state.to_real / MODULUS.to_real
+  ensure
+    open_interval: result > 0.0 and result < 1.0
+  end
+
+  -- A number from the standard normal ("bell curve") distribution, with
+  -- mean 0 and standard deviation 1, by the Box-Muller transform.
+  gauss(): Real do
+    let radius: Real := (-2.0 * uniform().log).sqrt
+    let angle: Real := 2.0 * Real.PI * uniform()
+    result := radius * angle.cos
+  end
+invariant
+  state_in_range: state >= 1 and state < MODULUS
+end
