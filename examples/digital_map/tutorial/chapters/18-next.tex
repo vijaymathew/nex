@@ -1,0 +1,133 @@
+% ===========================================================================
+\chapter{Where to go next}\label{ch:next}
+
+Kestrel Island has 275 nodes. OpenStreetMap has more than nine billion,
+and a phone can still plan a route across a continent in a blink. The ideas
+in this tutorial are the ones the real thing is built on, but it adds a
+great deal on top. Here is a tour of the main differences, each a good
+place to dig further, followed by some things to try on the island.
+
+\section{Real map data}
+
+Our map format is a cousin of OpenStreetMap's, and real data can be
+converted to it. OpenStreetMap's data can be downloaded for any area, as
+XML or in a compact binary format, from its website (the Export tab), from
+the Overpass API, or, for whole countries, from sites such as Geofabrik.
+A road is a \emph{way} with a \code{highway} tag (\code{primary},
+\code{residential}, \code{track}, \code{footway} and many more), a name
+tag, and often a \code{oneway=yes} tag and a \code{maxspeed}. Writing a
+converter for a small town is a satisfying weekend project, and the
+navigator will then guide you round your own streets.
+
+Real data is messier than ours. Roads cross on bridges without sharing a
+node, one-way streets are tagged in both directions by mistake, and
+footpaths stop a metre short of the road they were meant to join. The
+checks of Chapter~\ref{ch:checks}, especially ``every place can reach every
+other'', find a surprising number of such problems.
+
+\section{Bigger maps}
+
+\textbf{Projections.} Our local projection is accurate to a few
+centimetres across an island, but to a few metres across a county, and it
+falls apart across a country. Real systems use projections designed for
+the job: Web Mercator for drawing, as in Chapter~\ref{ch:projection}, and
+for measuring, either the sphere directly, with the haversine formula, or
+a projection made for a region, such as one of the sixty zones of the
+Universal Transverse Mercator system, each six degrees of longitude wide.
+
+\textbf{Finding the nearest node.} We check every node. With a billion
+nodes, that is far too slow. A \emph{spatial index} divides the map into
+squares (or nested rectangles, in an \emph{R-tree}) and keeps a list of
+the nodes in each, so a search only looks at the few nearby.
+
+\textbf{Drawing.} A map of the world can't be drawn from scratch every
+frame. Web maps cut the world into \emph{tiles}, squares of 256 pixels,
+drawn once for each zoom level: one tile for the whole world at zoom 0,
+four at zoom 1, and $4^z$ at zoom $z$. At low zoom, most of the detail is
+left out, and lines are \emph{simplified}, with fewer points, by
+algorithms such as Douglas--Peucker. Modern maps send \emph{vector tiles}
+instead, the geometry itself, and the phone draws them, which is why
+labels stay upright when you rotate the map.
+
+\section{Faster routes}
+
+Dijkstra's algorithm and A* are where every route planner starts, but on a
+continent even A* explores millions of nodes. Real planners do a great deal
+of the work in advance.
+
+\begin{itemize}
+  \item \textbf{Fewer nodes.} Most nodes are just points along a road,
+    with one way in and one way out. Merging each chain of them into a
+    single edge shrinks the graph several times over, with no change to
+    any route.
+  \item \textbf{Searching from both ends.} \emph{Bidirectional} search
+    runs one search forwards from the start and another backwards from the
+    destination, and stops when they meet. Each covers a circle of half
+    the radius, so together they explore about half as much.
+  \item \textbf{Better estimates.} The \emph{ALT} technique picks a few
+    \emph{landmarks} on the edge of the map and computes, in advance, the
+    distance from every node to every landmark. The triangle inequality
+    then gives an estimate far closer to the truth than a straight line.
+  \item \textbf{Shortcuts.} \emph{Contraction hierarchies} rank the
+    nodes by importance and, in advance, add shortcut edges that skip
+    over the unimportant ones, so that a long route is found mostly along
+    shortcuts between important junctions. A query on a continent then
+    explores a few hundred nodes, and takes under a millisecond.
+\end{itemize}
+
+\section{Better navigation}
+
+\textbf{Turns.} Our graph has no idea that turning left across traffic
+takes longer than going straight on, or that a left turn may be banned at
+some junction. Real planners model the cost of each \emph{turn}, from one
+edge onto the next, which usually means building a graph whose nodes are
+the edges of the road graph.
+
+\textbf{Time.} Our speeds never change. Real ones depend on the time of
+day and on live traffic, so the cost of an edge depends on when you reach
+it, and the estimated arrival time is updated as the traffic changes.
+
+\textbf{Map matching.} Our navigator matches each fix to the nearest point
+of the route. Real ones consider several candidate roads for each fix, and
+choose the sequence of roads that best explains all the recent fixes
+together, taking into account how far apart they are and how fast the
+traveller could have gone between them. The standard method uses a
+\emph{hidden Markov model}, and it can follow a car through a city even
+when the fixes are tens of metres out.
+
+\textbf{Instructions.} ``Keep left at the fork''; ``take the third exit at
+the roundabout''; ``turn right after the bridge''. Good instructions depend
+on the shape of each junction and on landmarks, and spoken ones on timing:
+the first warning comes early enough to change lanes, the last just
+before the turn.
+
+\section{Things to try}
+
+\begin{enumerate}
+  \item \textbf{Change the island.} Add a road to \code{kestrel_island.map},
+    or make one one-way, and run the checks. (Did you keep every place
+    reachable from every other?) Add a place of your own.
+  \item \textbf{A ferry.} Add a new kind of road, \code{ferry}, from the
+    harbour to Fisher's Cove, slow but direct, and draw it as a dashed
+    blue line. When is it quicker than driving round?
+  \item \textbf{Avoid tracks.} Add an option to \code{route.nex} that
+    makes tracks twice as expensive, without making them slower. Which
+    estimate is still safe to use?
+  \item \textbf{Bidirectional Dijkstra.} Write it, add it to
+    \code{find_route}, and add a check that it agrees with the others.
+  \item \textbf{Simplify the coast.} Write the Douglas--Peucker algorithm:
+    keep a line's two ends; find the point furthest from the straight line
+    between them; if it is further than some tolerance, keep it, and
+    simplify the two halves the same way. Use it to draw the coastline
+    with fewer points when zoomed out.
+  \item \textbf{The frontier.} In the live map, draw the search's frontier
+    (the nodes in the queue) as well as the nodes it has explored. You will
+    need to record it in the search.
+  \item \textbf{Faster but worse.} Chapter~\ref{ch:checks} showed that an
+    estimate that overshoots breaks A*'s bookkeeping. Change \code{a_star}
+    so that it never updates a node that is already finished, and try the
+    doubled estimate again. Now the postcondition holds; which checks fail
+    instead? How much less does A* explore, and how much worse are its
+    routes? (This trade, a little quality for a lot of speed, is called
+    \emph{weighted A*}, and games use it all the time.)
+\end{enumerate}

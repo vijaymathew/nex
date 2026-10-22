@@ -1,0 +1,88 @@
+-- directions.nex: turning a route into instructions a person can follow.
+
+intern Search
+intern Helpers
+
+-- One instruction: what to do, where, and how far into the route.
+class Instruction
+create
+  make(words: String, at: Integer, metres, degrees: Real) do
+    text := words
+    node := at
+    distance := metres
+    turn := degrees
+  end
+feature
+  -- What to do: "Turn left onto Mill Lane".
+  once text: String
+  -- The node where it happens.
+  once node: Integer
+  -- How far it is from the start of the route, in metres.
+  once distance: Real
+  -- How sharply the traveller turns there, in degrees: positive to the
+  -- right, negative to the left, 0 for straight on.
+  once turn: Real
+end
+
+-- The words for a turn of `angle` degrees (positive to the right).
+function manoeuvre(angle: Real): String do
+  let side: String := when angle > 0.0 then "right" else "left" end
+  if angle.abs < 25.0 then
+    result := "Continue"
+  elseif angle.abs < 60.0 then
+    result := "Bear " + side
+  elseif angle.abs < 140.0 then
+    result := "Turn " + side
+  else
+    result := "Turn sharp " + side
+  end
+end
+
+-- Instructions for following `path` to `destination`.
+--
+-- A route can have dozens of nodes, but a person needs to be told
+-- something only where the road changes. So the route is cut into
+-- stretches along one road each. The first instruction says which way to
+-- set off; each later stretch starts with the turn onto its road; and the
+-- last instruction says that the traveller has arrived.
+function directions(g: Road_Graph, path: Array[Integer], destination: String): Array[Instruction]
+require
+  is_a_route: is_route(g, path)
+do
+  let pts: Array[Point] := g.island.points_of(path)
+  if path.length = 1 then
+    result.add(create Instruction.make("You are at " + destination, path.get(0), 0.0, 0.0))
+  else
+    let travelled: Real := 0.0
+    let previous: ?Edge := nil
+    from
+      let i: Integer := 0
+    until
+      i = path.length - 1
+    do
+      if ?g.edge_between(path.get(i), path.get(i + 1)) as e then
+        if ?previous as before then
+          if e.road.name /= before.road.name then
+            let angle: Real := turn_angle(bearing(pts.get(i - 1), pts.get(i)),
+              bearing(pts.get(i), pts.get(i + 1)))
+            result.add(create Instruction.make(manoeuvre(angle) + " onto " + e.road.name,
+              path.get(i), travelled, angle))
+          end
+        else
+          result.add(create Instruction.make("Head "
+            + compass_name(bearing(pts.get(0), pts.get(1))) + " on " + e.road.name,
+            path.get(0), 0.0, 0.0))
+        end
+        travelled := travelled + e.length
+        previous := e
+      end
+      i := i + 1
+    end
+    result.add(create Instruction.make("Arrive at " + destination,
+      path.get(path.length - 1), travelled, 0.0))
+  end
+ensure
+  starts_at_start: result.get(0).distance = 0.0
+  ends_at_end: (result.get(result.length - 1).distance
+    - route_cost(g, path, by_distance())).abs < 0.001
+end

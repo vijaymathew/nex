@@ -1,0 +1,138 @@
+-- geo.nex: positions on the Earth, positions on a flat map, and the
+-- projection that turns one into the other.
+
+intern Helpers
+
+class Earth
+feature
+  -- The Earth's mean radius in metres. The Earth is not quite a sphere
+  -- (it is about 21 km wider at the equator than pole to pole), but for
+  -- an island a few kilometres across a sphere is more than good enough.
+  RADIUS = 6371000.0
+end
+
+-- A position on the Earth's surface, in degrees, as a GPS reports it.
+-- Latitude is north (+) or south (-) of the equator; longitude is east
+-- (+) or west (-) of the meridian through Greenwich.
+class Lat_Lon
+create
+  make(lat, lon: Real)
+  require
+    latitude_in_range: lat >= -90.0 and lat <= 90.0
+    longitude_in_range: lon >= -180.0 and lon <= 180.0
+  do
+    latitude := lat
+    longitude := lon
+  end
+feature
+  once latitude: Real
+  once longitude: Real
+
+  -- The distance along the Earth's surface to `other`, in metres, by the
+  -- haversine formula.
+  distance_to(other: Lat_Lon): Real do
+    let phi1: Real := latitude.to_radians
+    let phi2: Real := other.latitude.to_radians
+    let half_dphi: Real := (phi2 - phi1) / 2.0
+    let half_dlambda: Real := (other.longitude - longitude).to_radians / 2.0
+    -- In Nex, ^ binds as tightly as * and groups left to right, so
+    -- a * b ^ 2 would mean (a * b) ^ 2. The parentheses matter.
+    let h: Real := (half_dphi.sin ^ 2)
+      + phi1.cos * phi2.cos * (half_dlambda.sin ^ 2)
+    result := 2.0 * Earth.RADIUS * h.sqrt.min(1.0).asin
+  ensure
+    non_negative: result >= 0.0
+  end
+
+  -- "47.05123 N, 34.59877 W"
+  to_string(): String do
+    result := fixed(latitude.abs, 5) + when latitude >= 0.0 then " N, " else " S, " end
+      + fixed(longitude.abs, 5) + when longitude >= 0.0 then " E" else " W" end
+  end
+end
+
+-- A position on a flat map, in metres: x east and y north of the map's
+-- centre.
+class Point
+create
+  make(px, py: Real) do
+    x := px
+    y := py
+  end
+feature
+  once x: Real
+  once y: Real
+
+  plus(other: Point): Point alias "+" do
+    result := create Point.make(x + other.x, y + other.y)
+  end
+
+  minus(other: Point): Point alias "-" do
+    result := create Point.make(x - other.x, y - other.y)
+  end
+
+  -- This point scaled by k, as an arrow from the origin.
+  times(k: Real): Point alias "*" do
+    result := create Point.make(x * k, y * k)
+  end
+
+  -- The dot product, treating both points as arrows from the origin.
+  dot(other: Point): Real do
+    result := x * other.x + y * other.y
+  end
+
+  -- The length of this point as an arrow from the origin.
+  length(): Real do
+    result := x.hypot(y)
+  end
+
+  distance_to(other: Point): Real do
+    result := (other - this).length
+  ensure
+    non_negative: result >= 0.0
+  end
+
+  -- "(123.4, -56.7)"
+  to_string(): String do
+    result := "(" + fixed(x, 1) + ", " + fixed(y, 1) + ")"
+  end
+end
+
+-- The local flat projection of the area around `centre`: a small piece of
+-- the globe laid flat, with `centre` at (0, 0), x pointing east and y
+-- north, both in metres.
+--
+-- A degree of latitude is the same length everywhere, but a degree of
+-- longitude shrinks towards the poles, in proportion to the cosine of the
+-- latitude: meridians meet at the poles. This projection measures both at
+-- the centre's latitude. That is exact along the centre's parallel and
+-- very nearly exact a few kilometres away, which is all a town or an
+-- island needs. (A whole country or continent needs a cleverer projection.)
+class Projection
+create
+  make(c: Lat_Lon) do
+    centre := c
+    metres_per_degree_lat := Earth.RADIUS * Real.PI / 180.0
+    metres_per_degree_lon := metres_per_degree_lat * c.latitude.to_radians.cos
+  end
+feature
+  centre: Lat_Lon
+  metres_per_degree_lat: Real
+  metres_per_degree_lon: Real
+
+  to_point(p: Lat_Lon): Point do
+    result := create Point.make(
+      (p.longitude - centre.longitude) * metres_per_degree_lon,
+      (p.latitude - centre.latitude) * metres_per_degree_lat)
+  end
+
+  to_lat_lon(p: Point): Lat_Lon do
+    result := create Lat_Lon.make(
+      centre.latitude + p.y / metres_per_degree_lat,
+      centre.longitude + p.x / metres_per_degree_lon)
+  ensure
+    round_trip: to_point(result).distance_to(p) < 0.001
+  end
+invariant
+  positive_scales: metres_per_degree_lat > 0.0 and metres_per_degree_lon > 0.0
+end

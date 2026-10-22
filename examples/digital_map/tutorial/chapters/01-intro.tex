@@ -1,0 +1,155 @@
+% ===========================================================================
+\chapter{What we are going to build}
+
+Kestrel Island is a small island in the North Atlantic, about four
+kilometres across. It has a harbour town, Port Kestrel, a lake, two woods, a
+brook, a lighthouse on its northern cape, and roads, lanes, tracks and
+footpaths joining them all. It is also entirely imaginary: it exists only
+as a file of numbers, \code{kestrel_island.map}.
+
+By the end of this tutorial you will have written a program that turns that
+file into a map in a window, and then lets you use it the way you use the
+map app on a phone. Click where you want to start and where you want to go.
+The program searches for the quickest way, and you can watch the search
+spread out across the roads. Then a traveller sets off, a blue dot moving
+along the highlighted route, while the program talks them through every
+turn: ``In 300 m, turn left onto Mill Lane.''
+
+\mappicture{nav_travel}
+
+Press \code{x}, and the traveller takes a wrong turn on purpose. A moment
+later the program notices that they have left the route, works out where
+they are, and plans a new route from there, just as a satnav does.
+
+There is a plain-text version too, for any two places:
+
+\laterout{route.nex "beach car park" lighthouse}{route_beach}
+
+\section{How digital maps work}
+
+A map app looks like one program, but it is several quite different ideas
+working together. Each of them is simple at heart, and this tutorial builds
+every one of them in a few dozen lines of Nex.
+
+\begin{description}[style=nextline, leftmargin=1.2em, itemsep=0.4em]
+  \item[Positions on a round Earth.] A GPS gives positions as
+    \emph{latitude} and \emph{longitude}: angles, not metres. We need to
+    measure distances between them, which means a little spherical
+    geometry (Chapter~\ref{ch:latlon}).
+  \item[Flattening the Earth.] A screen is flat and the Earth is not.
+    A \emph{map projection} turns latitude and longitude into flat
+    $x$ and $y$ coordinates in metres. For a small island one simple
+    projection is almost perfect (Chapter~\ref{ch:projection}).
+  \item[Geometry.] Once things are flat, we need the distance from a point
+    to a road, the area of a lake, whether a point is inside a wood, and
+    which way a road points (Chapter~\ref{ch:geometry}).
+  \item[The map as data.] The map file stores \emph{nodes} (single points)
+    and lists of nodes that make roads and areas, the way OpenStreetMap,
+    the world's largest open map, does it (Chapter~\ref{ch:mapfile}).
+  \item[Drawing.] Turning that data into a picture people can read:
+    colours, roads with outlines, labels that don't collide, a scale bar,
+    and zooming in and out (Chapters~\ref{ch:drawing}
+    and~\ref{ch:labels}).
+  \item[Roads as a graph.] For finding a way, a map is a \emph{graph}:
+    points joined by one-way or two-way connections, each with a length
+    and a travel time (Chapter~\ref{ch:graph}).
+  \item[Searching for a route.] Three classic algorithms: breadth-first
+    search, Dijkstra's algorithm, and A*, which is what real route
+    planners are built on (Chapters~\ref{ch:bfs}--\ref{ch:astar}).
+  \item[Navigation.] Turning a route into instructions, following a
+    moving traveller from noisy GPS fixes, and planning again when they go
+    wrong (Chapters~\ref{ch:directions}--\ref{ch:wrongturn}).
+\end{description}
+
+Chapter~\ref{ch:livemap} puts it all together in the live map, and
+Chapter~\ref{ch:next} looks at how the real thing differs: maps of whole
+countries, tiles, traffic, and the clever tricks that answer a route
+question about a continent in a few milliseconds.
+
+\section{How this tutorial works}
+
+We will build the whole project together, from an empty folder, in small
+steps. Each step adds a few lines of code to one of the project's files,
+and explains what the code does and why. When there is math behind the
+code, we work through the math first, in simple steps, and then turn it
+into code.
+
+The code comes in boxes like this one. The title of the box says which
+file the code belongs to, and where in the file it goes:
+
+\begin{tcolorbox}[codebox, title={\textbf{New file}\enspace\texttt{example.nex}}]
+\small Start a new file with this content.
+\end{tcolorbox}
+\begin{tcolorbox}[codebox, title={\texttt{example.nex}\enspace\textendash\enspace add at the end}]
+\small Add this code at the end of the file.
+\end{tcolorbox}
+\begin{tcolorbox}[codebox, title={\texttt{example.nex}\enspace\textendash\enspace add before the line ...}]
+\small Add this code at a particular place in the file, which the title tells you.
+\end{tcolorbox}
+\begin{tcolorbox}[codebox, title={\texttt{example.nex}\enspace\textendash\enspace continued}]
+\small Add this code right after the code from the previous box.
+\end{tcolorbox}
+
+Green boxes are \emph{try-it} scripts: small throwaway programs that use
+what we just built, so you can see it working. Their output follows in a
+dark box, and when they draw a picture, the picture follows too:
+
+\begin{tcolorbox}[trybox, title={\textbf{Try it}\enspace\texttt{try\_example.nex}}]
+\small A small program to run now. It is not part of the project.
+\end{tcolorbox}
+\begin{tcolorbox}[outbox]
+{\ttfamily\footnotesize\color{outfg}\$ nex try\_example.nex\\what it prints}
+\end{tcolorbox}
+
+Every program, every output and every picture in this tutorial was
+produced by running the code exactly as printed here, so if your output
+differs, compare your code with the boxes.
+
+\section{What you need}
+
+\begin{itemize}[nosep]
+  \item \textbf{Nex}, installed so that the \code{nex} command works in a
+        terminal. You should know the basics of the language: \code{let},
+        functions and \code{result}, classes, loops, and contracts
+        (\code{require}, \code{ensure}, \code{invariant}). We explain the
+        less common features as we meet them.
+  \item \textbf{The map file}, \code{kestrel_island.map}, from the
+        \code{examples/digital_map} folder of the Nex distribution.
+  \item \textbf{A display} for the live map in Chapter~\ref{ch:livemap}.
+        Everything else, including all the pictures, works without one.
+  \item \textbf{Math}: school geometry and trigonometry. We use
+        Pythagoras' theorem, sine and cosine, and vectors (arrows), and we
+        explain each one when it first comes up.
+\end{itemize}
+
+No mapping or graph library is used. Every distance, every projection,
+every search and every pixel of the map is computed in Nex, in about 2,500
+lines including comments and checks.
+
+\section{The plan}
+
+By the end you will have these files, each of which you will have written
+yourself:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+File & What it holds & Chapter \\
+\midrule
+\code{helpers.nex} & Printing numbers, distances and times neatly & \ref{ch:setup} \\
+\code{geo.nex} & Latitude and longitude, flat points, the projection & \ref{ch:latlon}, \ref{ch:projection} \\
+\code{geometry.nex} & Lines, segments, polygons and bearings & \ref{ch:geometry} \\
+\code{island_map.nex} & Roads, areas and places, read from the map file & \ref{ch:mapfile} \\
+\code{map_view.nex} & Drawing the map, at any zoom & \ref{ch:drawing}, \ref{ch:labels} \\
+\code{road_graph.nex} & The roads as a graph, for driving or walking & \ref{ch:graph} \\
+\code{search.nex} & Breadth-first search, Dijkstra's algorithm and A* & \ref{ch:bfs}--\ref{ch:astar} \\
+\code{checks.nex} & Automatic checks of everything & \ref{ch:checks} \\
+\code{directions.nex} & Turn-by-turn instructions & \ref{ch:directions} \\
+\code{route.nex} & Directions between two places, printed & \ref{ch:directions} \\
+\code{navigation.nex} & Following a traveller along a route & \ref{ch:following}, \ref{ch:wrongturn} \\
+\code{rng.nex}, \code{simulation.nex} & A pretend traveller with a pretend GPS & \ref{ch:wrongturn} \\
+\code{navigate.nex} & The live map & \ref{ch:livemap} \\
+\bottomrule
+\end{tabular}
+\end{center}

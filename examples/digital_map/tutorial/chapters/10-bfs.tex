@@ -1,0 +1,303 @@
+% ===========================================================================
+\chapter{The fewest steps: breadth-first search}\label{ch:bfs}
+
+We have a graph. Now: what is the best way from one node to another? This
+chapter and the next two answer that question three times, each time a
+little better. All three algorithms share one idea. Starting from the
+source, they explore the graph outwards, keeping a list of nodes they know
+how to reach but haven't explored yet, called the \emph{frontier}. They
+differ only in which frontier node they explore next.
+
+\section{What a search finds}
+
+Every search gives back the same kind of answer: the path it found, as a
+list of nodes from the source to the target, and the total cost of that
+path. It also gives back two things that describe its work, so that we can
+compare the algorithms and draw them: the nodes it explored, in the order
+it explored them, and how it reached each node.
+
+That last part is the trick that makes all these searches cheap. When the
+search first reaches node $n$ from node $m$, it writes down
+``$n$ came from $m$'': $m$ is $n$'s \emph{parent}. It never needs to store
+whole paths. When it reaches the target, it follows the parent links back
+to the source, and that is the path, backwards.
+
+\begin{newfile}{search.nex}
+-- search.nex: finding a way from one node to another. Breadth-first
+-- search, Dijkstra's algorithm and A*.
+
+intern Road_Graph
+
+-- What a search found, and how much work it did to find it.
+class Search_Result
+create
+  make(name: String, nodes: Array[Integer], total: Real,
+    order: Array[Integer], tree: Map[Integer, Integer]) do
+    algorithm := name
+    path := nodes
+    cost := total
+    explored := order
+    parents := tree
+  end
+feature
+  algorithm: String
+  -- The nodes of the way found, from start to finish; empty if there is
+  -- no way.
+  path: Array[Integer]
+  -- What the search was minimising, added up along the path.
+  cost: Real
+  -- Every node the search finished with, in the order it did so.
+  explored: Array[Integer]
+  -- How the search reached each node it saw: parents.get(n) is the node
+  -- it came to n from. Together these links form a tree.
+  parents: Map[Integer, Integer]
+
+  found(): Boolean do
+    result := not path.is_empty
+  end
+end
+
+-- The way from `source` to `target`, following the parent links back
+-- from `target` and then turning the list around.
+function trace_back(parents: Map[Integer, Integer], source, target: Integer): Array[Integer] do
+  let backwards: Array[Integer] := [target]
+  let at: Integer := target
+  from
+  until
+    at = source
+  do
+    at := parents.get(at)
+    backwards.add(at)
+  end
+  result := backwards.reverse
+ensure
+  starts_at_source: result.get(0) = source
+  ends_at_target: result.get(result.length - 1) = target
+end
+\end{newfile}
+
+Two more helpers, which we'll use in contracts and checks: whether a list
+of nodes really is a route through the graph (every step must be an
+edge), and the total cost of a route, for any way of costing an edge.
+
+\begin{append}{search.nex}
+-- Whether `path` is a way through the graph: every step is an edge.
+function is_route(g: Road_Graph, path: Array[Integer]): Boolean do
+  result := not path.is_empty
+  from
+    let i: Integer := 1
+  until
+    not result or i >= path.length
+  do
+    result := g.edge_between(path.get(i - 1), path.get(i)) /= nil
+    i := i + 1
+  end
+end
+
+-- The total of `cost` over the steps of a route.
+function route_cost(g: Road_Graph, path: Array[Integer], cost: Function(Edge): Real): Real
+require
+  is_a_route: is_route(g, path)
+do
+  from
+    let i: Integer := 1
+  until
+    i >= path.length
+  do
+    if ?g.edge_between(path.get(i - 1), path.get(i)) as e then
+      result := result + cost(e)
+    end
+    i := i + 1
+  end
+end
+\end{append}
+
+\code{route_cost}'s last parameter is a \emph{function}:
+\code{Function(Edge): Real} is the type of a function that takes an edge
+and gives back a number. Passing it in lets one routine add up lengths,
+times, or anything else. Here are the two ways of costing an edge we will
+use, each as a function that returns the costing function:
+
+\begin{append}{search.nex}
+-- Two ways to measure an edge: by its length, or by how long it takes.
+function by_distance(): Function(Edge): Real do
+  result := fn (e: Edge): Real do result := e.length end
+end
+
+function by_time(): Function(Edge): Real do
+  result := fn (e: Edge): Real do result := e.seconds end
+end
+\end{append}
+
+\code{fn (e: Edge): Real do ... end} is an \emph{anonymous function}: a
+function written as a value, without a name. Inside it, \code{result} is
+the anonymous function's own result.
+
+\section{Breadth-first search}
+
+The simplest search explores the frontier in the order it found it: first
+in, first out, like a queue at a shop. Start with just the source in the
+queue. Repeatedly take the node at the front of the queue; if it is the
+target, stop; otherwise put each of its neighbours that hasn't been seen
+before at the back of the queue, with the node as its parent.
+
+\begin{center}
+\begin{tikzpicture}[
+  n/.style={circle, draw=accent, fill=white, inner sep=0pt, minimum size=5.5mm, font=\scriptsize},
+  e/.style={color=cm}]
+  \node[n, fill=st!30] (s) at (0,0) {0};
+  \foreach \i/\x/\y in {a/1.4/0.9, b/1.4/-0.9, c/-1.4/0} \node[n, fill=accent!25] (\i) at (\x,\y) {1};
+  \foreach \i/\x/\y in {d/2.8/1.5, f/2.8/0.2, g/2.8/-1.4, h/-2.8/0.8, k/-2.8/-0.8} \node[n, fill=accent!10] (\i) at (\x,\y) {2};
+  \node[n] (m) at (4.2,0.9) {3};
+  \draw[e] (s) -- (a) (s) -- (b) (s) -- (c) (a) -- (d) (a) -- (f) (b) -- (g) (c) -- (h) (c) -- (k) (d) -- (m) (f) -- (m);
+  \node[font=\small, text=cm, align=left, anchor=west] at (5,0) {each node's number:\\how many steps it is\\from the source};
+\end{tikzpicture}
+\end{center}
+
+Nodes come out of the queue in rings: the source, then every node one step
+from it, then every node two steps away, and so on. A node is put in the
+queue the first time it is seen, from a node one ring further in. So when
+the target comes out, the parent links lead back to the source along a
+path with \emph{the fewest steps} there is. That is what breadth-first
+search finds.
+
+Removing the first element of a Nex array shifts all the others down, so
+instead of removing anything, we keep an index, \code{front}, of the next
+node to take. The nodes before it have all been explored.
+
+\begin{append}{search.nex}
+-- Breadth-first search: the way with the fewest steps.
+--
+-- The search keeps a queue of nodes to visit, first in, first out. It
+-- starts with just the source. It takes the node at the front of the
+-- queue and puts every neighbour it has not seen before at the back, and
+-- repeats until it takes out the target. Nodes come out in order of how
+-- many steps they are from the source: all the nodes 1 step away, then
+-- all those 2 steps away, and so on. So the first time the search reaches
+-- the target, it has reached it in as few steps as possible.
+function breadth_first(g: Road_Graph, source, target: Integer): Search_Result
+require
+  source_on_roads: g.has_node(source)
+  target_on_roads: g.has_node(target)
+do
+  let queue: Array[Integer] := [source]
+  let front: Integer := 0
+  let seen: Set[Integer] := #{source}
+  let parents: Map[Integer, Integer] := {}
+  let explored: Array[Integer] := []
+  let found: Boolean := false
+  from
+  until
+    found or front = queue.length
+  do
+    let node: Integer := queue.get(front)
+    front := front + 1
+    explored.add(node)
+    if node = target then
+      found := true
+    else
+      across g.edges_from(node) as e do
+        if not seen.contains(e.target) then
+          seen.add(e.target)
+          parents.put(e.target, node)
+          queue.add(e.target)
+        end
+      end
+    end
+  end
+  let path: Array[Integer] := []
+  if found then
+    path := trace_back(parents, source, target)
+  end
+  result := create Search_Result.make("breadth-first", path,
+    (path.length - 1).max(0).to_real, explored, parents)
+ensure
+  valid_path: not result.found() or is_route(g, result.path)
+end
+\end{append}
+
+If the queue runs out before the target turns up, the target can't be
+reached, and the path is empty. The cost of a breadth-first path is its
+number of steps.
+
+The postcondition says that whatever the search finds is a real route:
+``either nothing was found, or the path is a route''. It is checked every
+time the search runs.
+
+\section{Watching a search}
+
+To see what the searches do, we'll draw them: the map, then a line from
+every explored node to its parent in purple, which shows the part of the
+graph the search covered, and the path it found in blue. This try-it file
+holds the drawing code, and the next few chapters' try-its use it with
+\code{intern Try_Pictures}.
+
+\begin{tryit}{try_pictures.nex}
+-- try_pictures.nex: drawing a search on the map, for the try-its of the
+-- next few chapters.
+
+intern Map_View
+intern Search
+intern Helpers
+
+-- Draw the map, then the part of the graph that `found` explored in
+-- purple, then the way it found in blue, and save the picture.
+function picture_of_search(view: Map_View, found: Search_Result, file: String) do
+  let island: Island_Map := view.island
+  view.draw_map()
+  view.set_pen(create Color.make_rgba(150, 60, 200, 170), 4.0)
+  across found.explored as n do
+    if found.parents.contains_key(n) then
+      let a: Point := island.point(found.parents.get(n))
+      let b: Point := island.point(n)
+      view.canvas.line(a.x, a.y, b.x, b.y)
+    end
+  end
+  view.line(island.points_of(found.path), create Color.make(40, 110, 220), 5.0)
+  view.save(file)
+end
+
+-- A one-line summary of a search, for driving.
+function summary(g: Road_Graph, found: Search_Result): String do
+  result := found.algorithm + ": " + found.explored.length.to_string + " nodes explored, "
+    + (found.path.length - 1).to_string + " steps, "
+    + distance_text(route_cost(g, found.path, by_distance())) + ", "
+    + duration_text(route_cost(g, found.path, by_time()))
+end
+\end{tryit}
+
+Now a search from the beach car park, on the south-west coast, to the
+lighthouse, on the northern cape. A place isn't a node of the graph, so we
+snap each one to its nearest node first.
+
+\begin{tryit}{try_bfs.nex}
+intern Try_Pictures
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let g: Road_Graph := create Road_Graph.build(island, Mode.Driving)
+if ?island.find_place("beach") as a and ?island.find_place("lighthouse") as b then
+  let source: Integer := g.nearest_node(island.point(a.node_id))
+  let target: Integer := g.nearest_node(island.point(b.node_id))
+  let found: Search_Result := breadth_first(g, source, target)
+  say(summary(g, found))
+  picture_of_search(create Map_View.make(island, 1000, 700), found, "bfs.png")
+end
+\end{tryit}
+\tryoutput{try_bfs}
+\mappicture{bfs}
+
+The purple spreads out evenly in every direction from the car park, along
+every road, until it touches the lighthouse. The path it found goes all the
+way round the west of the island on the Coast Road.
+
+Is that the best way? It is the way with the fewest steps, but a step is
+not a fixed distance. Look back at the map file: the nodes along the Coast
+Road are about 320 metres apart, while the lanes have one every 170 metres
+or so, and the town's streets one every 100. So a route along the Coast
+Road has few, long steps, and breadth-first search likes it for that
+reason alone. The road up the middle of the island, by Lake Road and Hill
+Road, is shorter in metres, but it has more steps.
+
+Breadth-first search is the right tool when every step costs the same,
+like moves in a puzzle or links between web pages. Roads are not like
+that. We need a search that counts metres, or seconds.

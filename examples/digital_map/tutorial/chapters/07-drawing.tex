@@ -1,0 +1,617 @@
+% ===========================================================================
+\chapter{Drawing the map}\label{ch:drawing}
+
+Now for a picture. Nex's \code{graphics/Canvas} library gives us a canvas
+of pixels to draw on, which we can save as a PNG file or show in a window.
+This chapter draws the island's land, water, woods and roads; the next one
+adds the words.
+
+\section{From metres to pixels}
+
+The canvas does the arithmetic of turning map coordinates into pixels for
+us. We tell it which rectangle of the map to show, with
+\code{set_x_scale(x0, x1)} and \code{set_y_scale(y0, y1)}, and then draw
+in map coordinates: metres. A canvas \code{w} pixels wide showing $x$ from
+$x_0$ to $x_1$ puts the point $x$ at pixel column
+\[
+  \frac{x - x_0}{x_1 - x_0}\, w,
+\]
+and similarly for $y$, except that pixel rows count \emph{down} from the
+top of the image, while our $y$ counts \emph{up} towards the north. The
+canvas turns it over for us, so north is at the top, as on any map.
+
+The one thing we must get right is the shape. If the rectangle we show
+has a different shape from the canvas, the map is stretched. So instead of
+choosing a rectangle, we choose a \emph{centre} and a \emph{scale}, in
+metres per pixel, and work out the rectangle from those:
+\[
+  x_0 = c_x - \tfrac{1}{2}\, w \cdot \text{scale}, \qquad
+  x_1 = c_x + \tfrac{1}{2}\, w \cdot \text{scale},
+\]
+and the same for $y$ with the canvas's height. Every pixel is then the same
+number of metres wide as it is high. Zooming in is making the scale
+smaller; panning is moving the centre.
+
+There is one complication, for later. In Chapter~\ref{ch:livemap} the live
+map draws panels across the top and the bottom of the window, with
+instructions and settings, and the map should be centred in the space
+between them. So the view knows how many pixels at the top and bottom are
+covered, its \emph{insets}, and centres the map in the rest. For now both
+are zero.
+
+\section{The colours}
+
+Map makers spend a long time on colours. Ours are close to the ones
+OpenStreetMap's standard style uses, which are tuned so that the important
+things (roads and names) stand out from the background (land and water):
+pale, quiet colours for areas, stronger ones for roads.
+
+\begin{newfile}{map_view.nex}
+-- map_view.nex: drawing the map on a canvas, at any zoom.
+
+intern Island_Map
+intern Helpers
+intern graphics/Canvas
+
+-- The map's colours.
+class Palette
+feature
+  SEA = create Color.make(170, 211, 223)
+  LAND = create Color.make(242, 239, 233)
+  SAND = create Color.make(240, 228, 190)
+  TOWN = create Color.make(232, 224, 218)
+  WOOD = create Color.make(181, 214, 160)
+  WATER = create Color.make(170, 211, 223)
+  RIVER = create Color.make(120, 175, 205)
+  CASING = create Color.make(150, 140, 130)
+  MAIN_ROAD = create Color.make(250, 205, 140)
+  MAIN_CASING = create Color.make(205, 140, 70)
+  MINOR_ROAD = create Color.make(255, 255, 255)
+  TRACK = create Color.make(160, 115, 70)
+  FOOTPATH = create Color.make(225, 95, 80)
+  LABEL = create Color.make(60, 60, 60)
+  ROAD_LABEL = create Color.make(90, 85, 80)
+  WATER_LABEL = create Color.make(50, 110, 150)
+  HALO = create Color.make_rgba(255, 255, 255, 220)
+end
+\end{newfile}
+
+\code{HALO} is white and slightly see-through: its fourth number, the
+\emph{alpha}, is 220 out of 255.
+
+\section{The view}
+
+A \code{Map_View} holds the map, a canvas, and where the canvas is looking.
+
+\begin{append}{map_view.nex}
+class Map_View
+create
+  -- A view of `m` on a new canvas `width` by `height` pixels, showing the
+  -- whole map.
+  make(m: Island_Map, width, height: Integer) do
+    island := m
+    canvas := create Canvas.make(width, height)
+    centre := create Point.make(0.0, 0.0)
+    metres_per_pixel := 1.0
+    show_all()
+  end
+feature
+  island: Island_Map
+  canvas: Canvas
+  -- The point of the map at the middle of the canvas...
+  centre: Point
+  -- ...and how many metres of the map one pixel covers. Bigger means
+  -- zoomed out.
+  metres_per_pixel: Real
+
+  -- Pixels at the top and bottom of the canvas that something else covers
+  -- (a program's own panels), to keep the scale bar and north arrow clear
+  -- of.
+  inset_top: Real
+  inset_bottom: Real
+
+  set_insets(top, bottom: Real)
+  require
+    non_negative: top >= 0.0 and bottom >= 0.0
+    room_left: top + bottom < canvas.height.to_real
+  do
+    inset_top := top
+    inset_bottom := bottom
+    look_at(centre, metres_per_pixel)
+  end
+\end{append}
+
+To show the whole map, take the map's width and height in metres, and see
+how many metres per pixel it takes to fit each of them on the canvas. The
+larger of the two fits both; making it 8\% larger leaves a margin of sea
+all round.
+
+\begin{continued}{map_view.nex}
+  -- Zoom and pan so that the whole map fits, with a little sea around it.
+  show_all() do
+    let w: Real := island.max_x() - island.min_x()
+    let h: Real := island.max_y() - island.min_y()
+    let mpp: Real := (w / canvas.width.to_real).max(h / free_height()) * 1.08
+    look_at(create Point.make((island.min_x() + island.max_x()) / 2.0,
+      (island.min_y() + island.max_y()) / 2.0), mpp)
+  end
+
+  -- Centre the view on c, at mpp metres per pixel. "Centre" means the
+  -- middle of the part of the canvas that the insets leave free.
+  look_at(c: Point, mpp: Real)
+  require
+    positive_scale: mpp > 0.0
+  do
+    centre := c
+    metres_per_pixel := mpp
+    let half_w: Real := canvas.width.to_real * mpp / 2.0
+    let top: Real := c.y + (inset_top + free_height() / 2.0) * mpp
+    canvas.set_x_scale(c.x - half_w, c.x + half_w)
+    canvas.set_y_scale(top - canvas.height.to_real * mpp, top)
+  end
+
+  -- The height of the canvas that the insets leave free, in pixels.
+  free_height(): Real do
+    result := canvas.height.to_real - inset_top - inset_bottom
+  end
+
+  -- A distance on the canvas in pixels, as metres on the map.
+  metres(pixels: Real): Real do
+    result := pixels * metres_per_pixel
+  end
+\end{continued}
+
+In \code{look_at}, the centre \code{c} should land in the middle of the
+free part of the canvas: \code{inset_top + free_height() / 2.0} pixels
+down from the top. So the top edge of the canvas is that many pixels'
+worth of metres north of \code{c}, and the bottom edge is the canvas's
+whole height further south.
+
+\code{metres} converts a size in pixels into metres at the current scale.
+We use it for everything that should look the same size at every zoom:
+dots, arrows, the gap between a label and its place. Roads, too, are drawn
+a fixed number of pixels wide, however far we zoom, as on every map app.
+
+\section{Layers}
+
+A map is drawn in \emph{layers}, from the bottom up: the sea first, then
+the land on top of it, then lakes and woods on the land, then rivers, then
+roads, then the dots for places. Each layer paints over the ones below.
+
+\begin{continued}{map_view.nex}
+  -- Draw the whole map, layer by layer, from the sea up.
+  draw_map() do
+    canvas.clear(Palette.SEA)
+    draw_areas()
+    draw_rivers()
+    draw_roads()
+    draw_places()
+    draw_scale_bar()
+    draw_north_arrow()
+  end
+
+  draw_areas() do
+    across island.areas as a do
+      canvas.set_pen_color(area_color(a.kind))
+      fill_polygon(island.points_of(a.node_ids))
+    end
+  end
+
+  draw_rivers() do
+    across island.rivers as r do
+      line(island.points_of(r.node_ids), Palette.RIVER, 2.5)
+    end
+  end
+\end{continued}
+
+The order of the areas in the map file is the order they are drawn: the
+island first, then the town, the woods and the lake on top of it. That is
+why \code{area_at} in the last chapter took the \emph{last} area containing
+a point.
+
+\section{Roads}
+
+Look closely at a road on a printed map or a map app. It is not one line
+but two: a darker, wider line underneath, called the \emph{casing}, and
+the road's own colour on top. The casing gives the road an outline, which
+makes it stand out from the land. And because every road's casing is drawn
+before any road's colour, where two roads meet the colour of one paints
+over the casing of the other, and the junction looks joined, not crossed.
+
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm]
+  \begin{scope}
+    \draw[line width=7pt, black!45] (0,0) -- (3,0);
+    \draw[line width=5pt, white] (0,0) -- (3,0);
+    \draw[line width=7pt, black!45] (1.5,-1) -- (1.5,1);
+    \draw[line width=5pt, white] (1.5,-1) -- (1.5,1);
+    \node[font=\small, text=cm] at (1.5,-1.4) {one road at a time};
+  \end{scope}
+  \begin{scope}[xshift=5cm]
+    \draw[line width=7pt, black!45] (0,0) -- (3,0);
+    \draw[line width=7pt, black!45] (1.5,-1) -- (1.5,1);
+    \draw[line width=5pt, white] (0,0) -- (3,0);
+    \draw[line width=5pt, white] (1.5,-1) -- (1.5,1);
+    \node[font=\small, text=cm] at (1.5,-1.4) {all casings first};
+  \end{scope}
+\end{tikzpicture}
+\end{center}
+
+Tracks are drawn as a thin brown line with no casing, and footpaths as a
+line of red dots, which is how most maps show them. One-way streets get
+small arrows, but only when the map is zoomed in far enough for them to
+fit.
+
+There is one more thing to know about the canvas. Changing its pen, its
+colour or width, costs about as much as drawing a short line: each change
+makes several calls into the Java libraries underneath, which build a new
+colour, a new stroke and so on. So each pass draws all the roads of one
+kind together, and sets the pen only once per kind, a handful of times a
+frame rather than once or twice for every road.
+
+\begin{continued}{map_view.nex}
+  -- Roads are drawn in two passes, the way printed maps do it: first
+  -- every road a little wider in a darker colour (the casing), then every
+  -- road again in its own colour. Where roads meet, the second pass paints
+  -- over the first, so junctions join cleanly.
+  --
+  -- Each pass draws the roads one kind at a time. Changing the pen's
+  -- colour or width costs about as much as drawing a short line, so it
+  -- pays to change it once per kind instead of once per road.
+  draw_roads() do
+    across [Road_Kind.Street, Road_Kind.Lane, Road_Kind.Main] as kind do
+      set_pen(when kind = Road_Kind.Main then Palette.MAIN_CASING else Palette.CASING end,
+        road_width(kind) + 2.0)
+      across island.roads as r do
+        if r.kind = kind then
+          segments(island.points_of(r.node_ids))
+        end
+      end
+    end
+    across Road_Kind.values.reverse as kind do
+      if kind = Road_Kind.Footpath then
+        canvas.set_pen_color(Palette.FOOTPATH)
+      elseif kind = Road_Kind.Track then
+        set_pen(Palette.TRACK, 2.0)
+      else
+        set_pen(when kind = Road_Kind.Main then Palette.MAIN_ROAD else Palette.MINOR_ROAD end,
+          road_width(kind))
+      end
+      across island.roads as r do
+        if r.kind = kind then
+          let pts: Array[Point] := island.points_of(r.node_ids)
+          if kind = Road_Kind.Footpath then
+            dots(pts, 1.3, 8.0)
+          else
+            segments(pts)
+          end
+        end
+      end
+    end
+    if metres_per_pixel < 2.5 then
+      canvas.set_pen_color(Palette.ROAD_LABEL)
+      across island.roads as r do
+        if r.is_one_way then
+          draw_one_way_arrows(island.points_of(r.node_ids))
+        end
+      end
+    end
+  end
+
+  -- The width in pixels of a road of a given kind.
+  road_width(kind: Road_Kind): Real do
+    if kind = Road_Kind.Main then
+      result := 5.0
+    elseif kind = Road_Kind.Lane then
+      result := 4.0
+    elseif kind = Road_Kind.Street then
+      result := 3.5
+    else
+      result := 2.0
+    end
+  end
+
+  -- Small arrowheads along a one-way road, pointing the way traffic goes.
+  draw_one_way_arrows(pts: Array[Point]) do
+    from
+      let i: Integer := 1
+    until
+      i >= pts.length
+    do
+      let a: Point := pts.get(i - 1)
+      let b: Point := pts.get(i)
+      if not off_canvas(a, b) then
+        arrowhead(a + (b - a) * 0.5, bearing(a, b), 5.0)
+      end
+      i := i + 1
+    end
+  end
+\end{continued}
+
+The second pass goes through the kinds in reverse, from footpaths to main
+roads, so that more important roads are drawn on top of less important
+ones.
+
+Places get a dot: a white one with a smaller dark one on top, so that it
+shows up on any background.
+
+\begin{continued}{map_view.nex}
+  -- A dot for every place: white, with a smaller dark dot on top.
+  draw_places() do
+    canvas.set_pen_color(Color.WHITE)
+    across island.places as p do
+      let at: Point := island.point(p.node_id)
+      canvas.filled_circle(at.x, at.y, metres(5.0))
+    end
+    canvas.set_pen_color(Palette.LABEL)
+    across island.places as p do
+      let at: Point := island.point(p.node_id)
+      canvas.filled_circle(at.x, at.y, metres(3.5))
+    end
+  end
+\end{continued}
+
+\section{The scale bar and the north arrow}
+
+Two things every map should have: a \emph{scale bar}, to show how far
+things are, and a \emph{north arrow}, to show which way is up. Our maps are
+always drawn with north up, but saying so costs nothing.
+
+A scale bar should be a round length: 500 m, not 487 m. We aim for about
+150 pixels, and take the largest round length that fits.
+
+\begin{continued}{map_view.nex}
+  -- A bar of a round length (100 m, 200 m, 500 m, 1 km, ...) in the
+  -- bottom left corner.
+  draw_scale_bar() do
+    let target: Real := metres(150.0)
+    let length: Real := 10.0
+    across [20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0] as candidate do
+      if candidate <= target then
+        length := candidate
+      end
+    end
+    let left: Real := canvas.x_min + metres(20.0)
+    let base: Real := canvas.y_min + metres(inset_bottom + 20.0)
+    canvas.set_pen_color(Palette.HALO)
+    canvas.filled_rectangle(left + length / 2.0, base + metres(9.0),
+      length / 2.0 + metres(8.0), metres(16.0))
+    canvas.set_pen_color(Palette.LABEL)
+    canvas.set_pen_radius(1.0)
+    canvas.line(left, base, left + length, base)
+    canvas.line(left, base - metres(3.0), left, base + metres(3.0))
+    canvas.line(left + length, base - metres(3.0), left + length, base + metres(3.0))
+    canvas.set_font(Font.SANS.with_size(11))
+    canvas.text(left + length / 2.0, base + metres(12.0), distance_text(length))
+  end
+
+  -- An arrow pointing north, in the top right corner.
+  draw_north_arrow() do
+    let x: Real := canvas.x_max - metres(30.0)
+    let y: Real := canvas.y_max - metres(inset_top + 45.0)
+    canvas.set_pen_color(Palette.LABEL)
+    canvas.filled_polygon([x, x - metres(8.0), x + metres(8.0)],
+      [y + metres(14.0), y - metres(10.0), y - metres(10.0)])
+    canvas.set_font(Font.SANS.bold().with_size(13))
+    canvas.text(x, y + metres(26.0), "N")
+  end
+\end{continued}
+
+The canvas's \code{x_min}, \code{x_max}, \code{y_min} and \code{y_max} are
+the edges of what it shows, so these are placed relative to the corners,
+whatever the zoom. \code{filled_rectangle} takes a centre and half the
+width and height, and the canvas's \code{filled_polygon} takes the corners'
+$x$ and $y$ coordinates as two separate arrays.
+
+\section{Drawing tools}
+
+Last, the drawing tools used above, which the live map will use too, for
+drawing routes and markers on top of the map.
+
+A line through a list of points is drawn one segment at a time. Before
+drawing a segment, we check whether it is anywhere near the canvas. When
+the map is zoomed in, most of the island is off the canvas, and drawing it
+would be wasted work. A segment is certainly off the canvas if both its
+ends are beyond the same edge, which takes a few comparisons to check.
+(A segment can be off the canvas without that, cutting across a corner,
+but drawing a few of those is harmless.)
+
+\begin{continued}{map_view.nex}
+  -- Drawing tools, used by the map and by overlays such as a route.
+
+  -- A line through `pts`, `width` pixels wide.
+  line(pts: Array[Point], color: Color, width: Real) do
+    set_pen(color, width)
+    segments(pts)
+  end
+
+  set_pen(color: Color, width: Real) do
+    canvas.set_pen_color(color)
+    canvas.set_pen_radius(width / 2.0)
+  end
+
+  -- The line through `pts`, with the pen as it is.
+  segments(pts: Array[Point]) do
+    from
+      let i: Integer := 1
+    until
+      i >= pts.length
+    do
+      let a: Point := pts.get(i - 1)
+      let b: Point := pts.get(i)
+      if not off_canvas(a, b) then
+        canvas.line(a.x, a.y, b.x, b.y)
+      end
+      i := i + 1
+    end
+  end
+
+  -- Whether the segment a-b is certainly off the canvas, because both
+  -- its ends are beyond the same edge. Drawing it would be wasted work.
+  off_canvas(a, b: Point): Boolean do
+    let m: Real := metres(12.0)
+    result := (a.x < canvas.x_min - m and b.x < canvas.x_min - m)
+      or (a.x > canvas.x_max + m and b.x > canvas.x_max + m)
+      or (a.y < canvas.y_min - m and b.y < canvas.y_min - m)
+      or (a.y > canvas.y_max + m and b.y > canvas.y_max + m)
+  end
+\end{continued}
+
+The canvas's pen \emph{radius} is half the line's width, hence
+\code{width / 2.0} in \code{set_pen}.
+
+A dotted line puts a dot every \code{gap} pixels along the line. The dots
+must be evenly spaced along the whole line, not restarting at each segment,
+so we keep track of how far along the whole line the current segment
+starts, and where along the line the next dot is due.
+
+\begin{continued}{map_view.nex}
+  -- Dots along the line through `pts`, in the pen's colour.
+  dots(pts: Array[Point], radius, gap: Real) do
+    let step: Real := metres(gap)
+    -- How far along the whole line the current segment starts, and where
+    -- the next dot goes.
+    let start: Real := 0.0
+    let next_dot: Real := 0.0
+    from
+      let i: Integer := 1
+    until
+      i >= pts.length
+    do
+      let a: Point := pts.get(i - 1)
+      let b: Point := pts.get(i)
+      let finish: Real := start + a.distance_to(b)
+      if off_canvas(a, b) then
+        -- Skip the dots this segment would have had.
+        if next_dot <= finish then
+          next_dot := next_dot + ((finish - next_dot) / step).floor.to_real * step + step
+        end
+      else
+        from
+        until
+          next_dot > finish
+        do
+          let p: Point := a + (b - a) * ((next_dot - start) / (finish - start))
+          canvas.filled_circle(p.x, p.y, metres(radius))
+          next_dot := next_dot + step
+        end
+      end
+      start := finish
+      i := i + 1
+    end
+  end
+\end{continued}
+
+A filled polygon needs its corners as two arrays, and an arrowhead is a
+small triangle: its tip, and two corners a little way back from the tip,
+one on each side. \code{direction(heading)} is an arrow of length 1
+pointing along the heading, and \code{direction(heading + 90.0)} points
+square to its right.
+
+\begin{continued}{map_view.nex}
+  fill_polygon(pts: Array[Point]) do
+    let xs: Array[Real] := []
+    let ys: Array[Real] := []
+    across pts as p do
+      xs.add(p.x)
+      ys.add(p.y)
+    end
+    canvas.filled_polygon(xs, ys)
+  end
+
+  -- A filled triangle `size` pixels long at `tip`, pointing along
+  -- `heading` (a compass bearing).
+  arrowhead(tip: Point, heading: Real, size: Real) do
+    let forward: Point := direction(heading) * metres(size)
+    let side: Point := direction(heading + 90.0) * metres(size * 0.6)
+    let back: Point := tip - forward
+    canvas.filled_polygon([tip.x, back.x + side.x, back.x - side.x],
+      [tip.y, back.y + side.y, back.y - side.y])
+  end
+
+  show() do
+    canvas.show()
+  end
+
+  save(file: String) do
+    canvas.save(user_path(file))
+  end
+
+private feature
+  area_color(kind: String): Color do
+    if kind = "water" then
+      result := Palette.WATER
+    elseif kind = "wood" then
+      result := Palette.WOOD
+    elseif kind = "sand" then
+      result := Palette.SAND
+    elseif kind = "town" then
+      result := Palette.TOWN
+    else
+      result := Palette.LAND
+    end
+  end
+end
+\end{continued}
+
+\section{The first picture}
+
+\begin{tryit}{try_draw.nex}
+intern Map_View
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let view: Map_View := create Map_View.make(island, 1000, 700)
+view.draw_map()
+view.save("first_map.png")
+say("saved first_map.png, at " + fixed(view.metres_per_pixel, 2) + " metres per pixel")
+\end{tryit}
+\tryoutput{try_draw}
+\mappicture{first_map}
+
+That is Kestrel Island. The orange ring is the Coast Road, the white lines
+are lanes and the town's streets, the brown lines are tracks through the
+woods, and the red dots are footpaths. The blue line from the lake to the
+sea is Kestrel Brook. Port Kestrel is the grid of streets on the south
+coast.
+
+\section{Why we projected}
+
+What if we had drawn the latitudes and longitudes directly, a degree east
+the same size as a degree north? This script does exactly that for the
+island and its lake, scaling degrees to metres with the length of a degree
+of latitude, both ways:
+
+\begin{tryit}{try_unprojected.nex}
+intern Map_View
+
+-- A node's position, pretending a degree is the same length both ways.
+function naive(ll: Lat_Lon, middle: Lat_Lon, scale: Real): Point do
+  result := create Point.make((ll.longitude - middle.longitude) * scale,
+    (ll.latitude - middle.latitude) * scale)
+end
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let view: Map_View := create Map_View.make(island, 1000, 700)
+let k: Real := island.projection.metres_per_degree_lat
+let centre: Lat_Lon := island.projection.centre
+view.look_at(create Point.make(0.0, 0.0), view.metres_per_pixel * 1.45)
+view.canvas.clear(Palette.SEA)
+across island.areas as a do
+  if a.kind = "land" or a.kind = "water" then
+    let pts: Array[Point] := []
+    across a.node_ids as id do
+      pts.add(naive(island.positions.get(id), centre, k))
+    end
+    view.canvas.set_pen_color(when a.kind = "land" then Palette.LAND else Palette.WATER end)
+    view.fill_polygon(pts)
+  end
+end
+view.save("unprojected.png")
+say("saved unprojected.png")
+\end{tryit}
+\tryoutput{try_unprojected}
+\mappicture[0.8\linewidth]{unprojected}
+
+The island is stretched sideways by $1/\cos 47^\circ$, about one and a
+half times, and the round lake has become a long oval. Every distance and
+every angle measured on that picture would be wrong.

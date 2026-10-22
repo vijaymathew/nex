@@ -1,0 +1,341 @@
+% ===========================================================================
+\chapter{Trust, but verify}\label{ch:checks}
+
+Route planning is the kind of code where a bug hides well. A search that
+is wrong now and then still finds a route every time, and the route still
+looks reasonable on the map; it is just not quite the best one, for some
+pairs of places. Nobody notices until somebody does.
+
+Our contracts already check every single call: every path found is a real
+route, its cost adds up, every projection goes back where it came from.
+What contracts can't easily say is how different parts relate to each
+other, or what should be true of the map as a whole. So the last file of
+the core gets a set of \emph{checks}: a program that tests properties we
+know must hold, over every pair of places on the island, for both drivers
+and walkers.
+
+\section{A checker}
+
+A checker counts what passes and what fails, and prints each result. At
+the end it prints a summary, and if anything failed it stops the program
+with a non-zero exit code, the signal that scripts and build tools look
+for.
+
+\begin{newfile}{checks.nex}
+-- checks.nex: executable checks for every piece of the project.
+-- Run: nex checks.nex
+
+intern Search
+intern Helpers
+
+class Checker
+feature
+  passed: Integer
+  failed: Integer
+
+  check(label: String, ok: Boolean) do
+    if ok then
+      passed := passed + 1
+      say("PASS " + label)
+    else
+      failed := failed + 1
+      say("FAIL " + label)
+    end
+  end
+
+  close_to(label: String, expected, actual, tolerance: Real) do
+    check(label + " (expected " + fixed(expected, 3) + ", got " + fixed(actual, 3) + ")",
+      (expected - actual).abs <= tolerance)
+  end
+
+  summary() do
+    say("---")
+    say(passed.to_string + " passed, " + failed.to_string + " failed")
+    if failed > 0 then
+      exit(1)
+    end
+  end
+end
+
+function pt(x, y: Real): Point do
+  result := create Point.make(x, y)
+end
+\end{newfile}
+
+\code{close_to} is for numbers worked out with \code{Real}s, which are
+rarely exactly equal to what we expect, because of rounding. It passes if
+the two are within a given tolerance.
+
+\section{The basics}
+
+The first checks are of the helpers, the geography and the geometry. Each
+compares a result with an answer we know independently: one degree of
+latitude is $2\pi R / 360$; a 10-metre square has an area of 100; the
+point 5 metres along a line that goes 3 metres east and then 4 north is
+2 metres up its second segment.
+
+\begin{append}{checks.nex}
+function check_helpers(c: Checker) do
+  c.check("fixed rounds", fixed(2.345, 2) = "2.35" and fixed(-0.5, 1) = "-0.5")
+  c.check("distance_text", distance_text(347.0) = "350 m" and distance_text(1234.0) = "1.2 km")
+  c.check("duration_text", duration_text(20.0) = "under a minute"
+    and duration_text(150.0) = "3 min" and duration_text(3900.0) = "1 h 05 min")
+end
+
+function check_geo(c: Checker) do
+  let a: Lat_Lon := create Lat_Lon.make(47.0, -34.0)
+  let b: Lat_Lon := create Lat_Lon.make(48.0, -34.0)
+  -- A degree of latitude is 1/360 of a circle around the Earth.
+  c.close_to("one degree of latitude, in metres", 2.0 * Real.PI * Earth.RADIUS / 360.0,
+    a.distance_to(b), 0.01)
+  c.close_to("distance is symmetric", a.distance_to(b), b.distance_to(a), 0.000001)
+  let p: Projection := create Projection.make(a)
+  let q: Lat_Lon := create Lat_Lon.make(47.02, -33.97)
+  c.close_to("projection keeps distances, a few km from the centre", a.distance_to(q),
+    p.to_point(a).distance_to(p.to_point(q)), a.distance_to(q) * 0.001)
+  let back: Lat_Lon := p.to_lat_lon(p.to_point(q))
+  c.close_to("projection round trip", 0.0, back.distance_to(q), 0.001)
+  c.check("east is +x, north is +y", p.to_point(q).x > 0.0 and p.to_point(q).y > 0.0)
+end
+
+function check_geometry(c: Checker) do
+  let square: Array[Point] := [pt(0.0, 0.0), pt(10.0, 0.0), pt(10.0, 10.0), pt(0.0, 10.0)]
+  c.close_to("area of a 10 m square", 100.0, polygon_area(square), 0.000001)
+  c.check("inside the square", polygon_contains(square, pt(5.0, 5.0)))
+  c.check("outside the square", not polygon_contains(square, pt(15.0, 5.0))
+    and not polygon_contains(square, pt(-1.0, 5.0)))
+  c.close_to("distance to a segment, beside it", 5.0,
+    distance_to_segment(pt(5.0, 5.0), pt(0.0, 0.0), pt(10.0, 0.0)), 0.000001)
+  c.close_to("distance to a segment, past its end", 5.0,
+    distance_to_segment(pt(13.0, 4.0), pt(0.0, 0.0), pt(10.0, 0.0)), 0.000001)
+  c.check("bearings", bearing(pt(0.0, 0.0), pt(0.0, 1.0)) = 0.0
+    and bearing(pt(0.0, 0.0), pt(1.0, 0.0)) = 90.0
+    and bearing(pt(0.0, 0.0), pt(0.0, -1.0)) = 180.0
+    and bearing(pt(0.0, 0.0), pt(-1.0, 0.0)) = 270.0)
+  c.check("turn angles wrap around north", turn_angle(350.0, 10.0) = 20.0
+    and turn_angle(10.0, 350.0) = -20.0 and turn_angle(0.0, 180.0) = 180.0)
+  c.check("compass names", compass_name(0.0) = "north" and compass_name(100.0) = "east"
+    and compass_name(350.0) = "north")
+  let line: Array[Point] := [pt(0.0, 0.0), pt(3.0, 0.0), pt(3.0, 4.0)]
+  c.close_to("line length", 7.0, line_length(line), 0.000001)
+  c.close_to("point along a line", 2.0, point_along(line, 5.0).y, 0.000001)
+end
+\end{append}
+
+\section{The map and its graphs}
+
+Next, the map. Every place should be on land, and not in the lake; the
+middle of the lake should be water; a point out at sea should be in no
+area at all. And the graphs should obey the rules of the road: Market
+Street is one-way, eastbound, so the driving graph must not have an edge
+going west along it, while the walking graph must; and no footpath may
+appear in the driving graph.
+
+\begin{append}{checks.nex}
+function check_map(c: Checker, m: Island_Map) do
+  c.check("map loaded", m.name = "Kestrel Island" and m.places.length = 10
+    and m.roads.length > 0 and m.areas.length > 0)
+  let all_on_land: Boolean := true
+  across m.places as p do
+    if ?m.area_at(m.point(p.node_id)) as a then
+      if a.kind = "water" then
+        all_on_land := false
+      end
+    else
+      all_on_land := false
+    end
+  end
+  c.check("every place is on land", all_on_land)
+  let lake_centre: Point := pt(0.0, 0.0)
+  across m.areas as a do
+    if a.kind = "water" then
+      lake_centre := average(m.points_of(a.node_ids))
+    end
+  end
+  if ?m.area_at(lake_centre) as a then
+    c.check("the middle of the lake is water", a.kind = "water")
+  else
+    c.check("the middle of the lake is water", false)
+  end
+  c.check("out at sea is no area", m.area_at(pt(m.max_x() + 100.0, 0.0)) = nil)
+  c.check("find_place by part of a name", ?m.find_place("mill") as p and p.name = "Old Mill")
+end
+
+function check_graphs(c: Checker, m: Island_Map, driving, walking: Road_Graph) do
+  c.check("walking can use more roads than driving", walking.edge_count > driving.edge_count)
+  -- Market Street is one-way, eastbound.
+  let eastward: Boolean := true
+  let westward_on_foot: Boolean := false
+  across m.roads as r do
+    if r.name = "Market Street" then
+      across driving.edges_from(r.node_ids.get(1)) as e do
+        if e.road.name = "Market Street" and e.target = r.node_ids.get(0) then
+          eastward := false
+        end
+      end
+      across walking.edges_from(r.node_ids.get(1)) as e do
+        if e.road.name = "Market Street" and e.target = r.node_ids.get(0) then
+          westward_on_foot := true
+        end
+      end
+    end
+  end
+  c.check("cars may not drive the wrong way up a one-way street", eastward)
+  c.check("walkers may", westward_on_foot)
+  let no_footpaths: Boolean := true
+  across driving.nodes as id do
+    across driving.edges_from(id) as e do
+      if e.road.kind = Road_Kind.Footpath then
+        no_footpaths := false
+      end
+    end
+  end
+  c.check("no footpaths in the driving graph", no_footpaths)
+end
+\end{append}
+
+\section{The searches}
+
+Now the important ones. For every pair of places, and for drivers and
+walkers alike, we run every search, and check:
+
+\begin{itemize}[nosep]
+  \item \textbf{Every place can reach every other.} With one-way streets,
+    it is easy to make a map where a car can get into a street but never
+    out. A real map gets this wrong surprisingly often.
+  \item \textbf{A* agrees with Dijkstra's algorithm}, for the quickest
+    routes and for the shortest. This is what A*'s mathematics promises,
+    and if our estimate were ever too high, it is where we would see it.
+  \item \textbf{Breadth-first search finds the fewest steps}: no route the
+    others find has fewer.
+  \item \textbf{The estimates never overshoot}: the estimate from the
+    start is never more than the true cost.
+  \item \textbf{A* does less work}, over all the pairs together.
+  \item \textbf{The triangle inequality}: for any three places $a$, $b$
+    and $x$, the shortest way from $a$ to $b$ is no longer than the
+    shortest way from $a$ to $x$ plus the shortest from $x$ to $b$. If it
+    ever were, the way through $x$ would be a shorter way from $a$ to $b$
+    that the search had missed.
+\end{itemize}
+
+That is 100 pairs of places (each place to itself included) and five
+searches for each, twice over: a thousand searches. They take a few
+seconds.
+
+\begin{append}{checks.nex}
+-- The node a traveller in graph g starts from to go to or from a place.
+function node_of(g: Road_Graph, p: Place): Integer do
+  result := g.nearest_node(g.island.point(p.node_id))
+end
+
+function check_searches(c: Checker, m: Island_Map, g: Road_Graph, label: String) do
+  -- Shortest distances between every pair of places, for the triangle
+  -- check below.
+  let dist: Map[String, Real] := {}
+  let all_found: Boolean := true
+  let same_time: Boolean := true
+  let same_distance: Boolean := true
+  let bfs_fewest: Boolean := true
+  let admissible: Boolean := true
+  let a_star_work: Integer := 0
+  let dijkstra_work: Integer := 0
+  across m.places as a do
+    across m.places as b do
+      let s: Integer := node_of(g, a)
+      let t: Integer := node_of(g, b)
+      let fast: Search_Result := dijkstra(g, s, t, by_time())
+      let fast_a: Search_Result := a_star(g, s, t, by_time(), time_estimate(g, t))
+      let short: Search_Result := dijkstra(g, s, t, by_distance())
+      let short_a: Search_Result := a_star(g, s, t, by_distance(), distance_estimate(g, t))
+      let fewest: Search_Result := breadth_first(g, s, t)
+      all_found := all_found and fast.found() and short.found() and fewest.found()
+      same_time := same_time and (fast.cost - fast_a.cost).abs < 0.001
+      same_distance := same_distance and (short.cost - short_a.cost).abs < 0.001
+      bfs_fewest := bfs_fewest and fewest.path.length <= short.path.length
+        and fewest.path.length <= fast.path.length
+      admissible := admissible and time_estimate(g, t)(s) <= fast.cost + 0.001
+        and distance_estimate(g, t)(s) <= short.cost + 0.001
+      a_star_work := a_star_work + fast_a.explored.length
+      dijkstra_work := dijkstra_work + fast.explored.length
+      dist.put(a.name + ">" + b.name, short.cost)
+    end
+  end
+  c.check(label + ": every place can reach every other", all_found)
+  c.check(label + ": A* finds routes as quick as Dijkstra's", same_time)
+  c.check(label + ": A* finds routes as short as Dijkstra's", same_distance)
+  c.check(label + ": breadth-first search finds the fewest steps", bfs_fewest)
+  c.check(label + ": the estimates never overshoot", admissible)
+  c.check(label + ": A* explores fewer nodes than Dijkstra ("
+    + a_star_work.to_string + " against " + dijkstra_work.to_string + ")",
+    a_star_work < dijkstra_work)
+  let triangle: Boolean := true
+  across m.places as a do
+    across m.places as b do
+      across m.places as x do
+        triangle := triangle and dist.get(a.name + ">" + b.name)
+          <= dist.get(a.name + ">" + x.name) + dist.get(x.name + ">" + b.name) + 0.001
+      end
+    end
+  end
+  c.check(label + ": no detour through a third place is shorter", triangle)
+end
+\end{append}
+
+\code{time_estimate(g, t)(s)} makes the estimate function for target
+\code{t} and calls it straight away, on \code{s}.
+
+The shortest distances are remembered in a \code{Map} with keys like
+\code{"Old Mill>Lighthouse"}, so the triangle check, with its thousand
+combinations, needs no more searches.
+
+Last, the program itself:
+
+\begin{append}{checks.nex}
+function main() do
+  let c: Checker := create Checker
+  let m: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+  let driving: Road_Graph := create Road_Graph.build(m, Mode.Driving)
+  let walking: Road_Graph := create Road_Graph.build(m, Mode.Walking)
+  check_helpers(c)
+  check_geo(c)
+  check_geometry(c)
+  check_map(c, m)
+  check_graphs(c, m, driving, walking)
+  check_searches(c, m, driving, "driving")
+  check_searches(c, m, walking, "walking")
+  c.summary()
+end
+
+main()
+\end{append}
+
+\runoutput{checks.nex}{checks_core}
+
+Everything passes. Look at the work done: over all the pairs, A* explores
+about half as many nodes as Dijkstra's algorithm for drivers, and about a
+third for walkers, for whom the straight-line estimate is closer to the
+truth, just as the last chapter said.
+
+Run the checks again whenever you change anything: the map file, a speed,
+an algorithm. If you break something, a line saying \code{FAIL} tells you
+what.
+
+Try it. In \code{time_estimate}, divide by \code{speed / 2.0} instead of
+\code{speed}, so that the estimate is twice what it should be, and run the
+checks again. They don't even get as far as the search checks:
+
+\begin{textout}
+Error: Postcondition violation: cost_adds_up
+  a_star, called ... in check_searches, does not deliver its postcondition
+  `cost_adds_up`.
+\end{textout}
+
+With an estimate that is too high, A* can finish a node before it has found
+the cheapest way to it. When the cheaper way turns up later, the search
+gives the node a new parent and a new cost, but the nodes it already
+reached from it keep the costs they got through the old way. The path
+traced back through the parents then no longer costs what the search
+says it does, and \code{a_star}'s own postcondition catches the
+contradiction the first time it happens, long before anyone could notice a
+slightly wrong route on the map. Put \code{speed} back, and everything
+passes again.

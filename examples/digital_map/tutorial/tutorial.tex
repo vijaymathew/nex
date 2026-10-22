@@ -1,0 +1,257 @@
+\documentclass[11pt,a4paper,oneside,openany]{book}
+
+% ---------------------------------------------------------------------------
+% This file, with the chapters it \inputs, is also the source of the
+% project's code. build.py pulls every code chunk out of it, rebuilds the
+% .nex files from them, runs every program, and checks the result against
+% ../*.nex. See build.py.
+% ---------------------------------------------------------------------------
+
+\usepackage[margin=2.5cm,top=2.4cm,bottom=2.7cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[sc]{mathpazo}
+\usepackage{tgpagella}
+\renewcommand{\ttdefault}{txtt}
+\usepackage{microtype}
+\DisableLigatures[-]{encoding=T1, family=tt*}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,backgrounds,decorations.pathreplacing}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\linespread{1.06}
+
+\definecolor{accent}{HTML}{1F5F8B}
+\definecolor{codebg}{HTML}{F6F8FA}
+\definecolor{codeframe}{HTML}{C9D3DD}
+\definecolor{titlebg}{HTML}{E4ECF3}
+\definecolor{trybg}{HTML}{F3F8EE}
+\definecolor{tryframe}{HTML}{B9D3A3}
+\definecolor{trytitle}{HTML}{E2EED8}
+\definecolor{outbg}{HTML}{2B2F36}
+\definecolor{outfg}{HTML}{E8EAED}
+\definecolor{kw}{HTML}{0B4F8A}
+\definecolor{ty}{HTML}{7A3E9D}
+\definecolor{cm}{HTML}{6A737D}
+\definecolor{st}{HTML}{22863A}
+\definecolor{mathbg}{HTML}{FBF6EA}
+\definecolor{mathframe}{HTML}{E2CF9E}
+
+\titleformat{\chapter}[display]
+  {\normalfont\color{accent}}
+  {\large\scshape \chaptertitlename\ \thechapter}
+  {0.2em}
+  {\LARGE\bfseries}
+\titlespacing*{\chapter}{0pt}{-10pt}{22pt}
+\titleformat{\section}{\normalfont\large\bfseries\color{accent}}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\normalfont\normalsize\bfseries}{}{0em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\small\thepage}
+\fancyhead[L]{\small\scshape\leftmark}
+\renewcommand{\chaptermark}[1]{\markboth{#1}{}}
+\renewcommand{\headrulewidth}{0.3pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+\lstdefinelanguage{Nex}{
+  morekeywords={class,feature,inherit,end,do,if,then,else,elseif,when,from,
+    until,invariant,variant,require,ensure,let,as,and,or,not,fn,deferred,
+    convert,to,old,create,private,note,with,import,intern,function,raise,
+    rescue,retry,assert,repeat,across,case,of,declare,once,match,this,super,
+    enum,union,alias,elseif,until},
+  morekeywords=[2]{Integer,Real,Boolean,String,Char,Array,Map,Set,Any,
+    Function,Console,Process,Min_Heap,Canvas,Color,Font},
+  morekeywords=[3]{true,false,nil,result,exception},
+  sensitive=true,
+  morecomment=[l]{--},
+  morestring=[b]",
+}
+\lstdefinestyle{nex}{
+  language=Nex,
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  breakindent=2em,
+  postbreak=\mbox{\textcolor{cm}{$\hookrightarrow$}\space},
+  keywordstyle=\color{kw}\bfseries,
+  keywordstyle=[2]\color{ty},
+  keywordstyle=[3]\color{kw},
+  commentstyle=\color{cm}\itshape,
+  stringstyle=\color{st},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  upquote=true,
+  extendedchars=true,
+  literate={·}{{$\cdot$}}1,
+}
+\lstdefinestyle{out}{
+  language={},
+  basicstyle=\ttfamily\footnotesize\color{outfg},
+  columns=fullflexible,
+  breaklines=true,
+  breakindent=2em,
+  keepspaces=true,
+  extendedchars=true,
+}
+\lstdefinestyle{shell}{
+  language={},
+  basicstyle=\ttfamily\footnotesize,
+  columns=fullflexible,
+  keepspaces=true,
+}
+\lstset{style=nex}
+
+\tcbset{
+  codebox/.style={enhanced, breakable, colback=codebg, colframe=codeframe,
+    boxrule=0.5pt, arc=2pt, left=5pt, right=5pt, top=3pt, bottom=3pt,
+    colbacktitle=titlebg, coltitle=black, fonttitle=\small,
+    toptitle=1.5pt, bottomtitle=1.5pt, before skip=8pt, after skip=8pt},
+  trybox/.style={codebox, colback=trybg, colframe=tryframe, colbacktitle=trytitle},
+  outbox/.style={enhanced, breakable, colback=outbg, colframe=outbg, arc=2pt,
+    boxrule=0pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
+    before skip=6pt, after skip=10pt},
+}
+
+% The code chunks. The arguments are read by build.py too, so they must
+% not contain braces.
+%   newfile{file}                    start a new file
+%   append{file}                     add at the end of a file
+%   addbefore{file}{where}{marker}   add before the line(s) `marker`
+%                                    ("|" separates lines); `where` is shown
+%   tightaddbefore{...}              the same, without a blank line after
+%   continued{file}                  add right after the previous chunk
+%   tryit{file}                      a throwaway script to run now
+\newtcblisting{newfile}[1]{codebox, listing only, listing options={style=nex},
+  title={\textbf{New file}\enspace\texttt{\detokenize{#1}}}}
+\newtcblisting{append}[1]{codebox, listing only, listing options={style=nex},
+  title={\texttt{\detokenize{#1}}\enspace\textendash\enspace add at the end}}
+\newtcblisting{addbefore}[3]{codebox, listing only, listing options={style=nex},
+  title={\texttt{\detokenize{#1}}\enspace\textendash\enspace add \detokenize{#2}}}
+\newtcblisting{tightaddbefore}[3]{codebox, listing only, listing options={style=nex},
+  title={\texttt{\detokenize{#1}}\enspace\textendash\enspace add \detokenize{#2}}}
+\newtcblisting{continued}[1]{codebox, listing only, listing options={style=nex},
+  title={\texttt{\detokenize{#1}}\enspace\textendash\enspace continued}}
+\newtcblisting{tryit}[1]{trybox, listing only, listing options={style=nex},
+  title={\textbf{Try it}\enspace\texttt{\detokenize{#1}}}}
+\newtcblisting{shell}{codebox, listing only, listing options={style=shell}}
+\newtcblisting{textout}{outbox, listing only, listing options={style=out}}
+
+% The output of the try-it script just shown (written by build.py).
+\newcommand{\tryoutput}[1]{%
+  \begin{tcolorbox}[outbox]
+  {\ttfamily\footnotesize\color{outfg}\$ nex \detokenize{#1}.nex}\par\vspace{2pt}
+  \lstinputlisting[style=out]{build/out/#1.txt}
+  \end{tcolorbox}}
+% Run a program at this point of the tutorial and show its output.
+\newcommand{\runoutput}[2]{%
+  \begin{tcolorbox}[outbox]
+  {\ttfamily\footnotesize\color{outfg}\$ nex \detokenize{#1}}\par\vspace{2pt}
+  \lstinputlisting[style=out]{build/out/#2.txt}
+  \end{tcolorbox}}
+
+% The output saved by a \runoutput later in the tutorial, shown early.
+\newcommand{\laterout}[2]{%
+  \begin{tcolorbox}[outbox]
+  {\ttfamily\footnotesize\color{outfg}\$ nex \detokenize{#1}}\par\vspace{2pt}
+  \lstinputlisting[style=out]{build/out/#2.txt}
+  \end{tcolorbox}}
+
+\newtcolorbox{mathbox}[1][]{enhanced, breakable, colback=mathbg,
+  colframe=mathframe, boxrule=0.5pt, arc=2pt, left=8pt, right=8pt,
+  top=4pt, bottom=4pt, fonttitle=\bfseries\small, coltitle=black,
+  colbacktitle=mathframe!45, title={#1}, before skip=8pt, after skip=8pt}
+\newtcolorbox{aside}{enhanced, breakable, colback=white, colframe=accent,
+  boxrule=0pt, leftrule=2.5pt, arc=0pt, left=8pt, right=4pt, top=2pt,
+  bottom=2pt, before skip=8pt, after skip=8pt}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\vect}[1]{\mathbf{#1}}
+% A picture that a program in the tutorial drew (build/out/NAME.png).
+\newcommand{\mappicture}[2][\linewidth]{%
+  \begin{center}\includegraphics[width=#1]{build/out/#2.png}\end{center}}
+
+\hypersetup{pdftitle={Maps and Navigation in Nex},
+  pdfsubject={Digital maps, shortest paths and turn-by-turn navigation, step by step}}
+
+\begin{document}
+
+% ---------------------------------------------------------------------------
+\begin{titlepage}
+\centering
+\vspace*{3.0cm}
+{\color{accent}\rule{\linewidth}{0.8pt}}\par\vspace{0.9cm}
+{\Huge\bfseries Maps and Navigation\par}
+\vspace{0.35cm}
+{\LARGE in Nex\par}
+\vspace{0.9cm}
+{\large Digital maps, shortest paths and turn-by-turn directions,\\[2pt]
+  built from scratch on an imaginary island\par}
+\vspace{0.9cm}
+{\color{accent}\rule{\linewidth}{0.8pt}}\par
+\vspace{1.6cm}
+
+\begin{tikzpicture}[x=1cm,y=1cm]
+  \fill[codebg] (-0.3,-0.4) rectangle (9.3,4.4);
+  \fill[titlebg, draw=accent!60] plot[smooth cycle, tension=0.7] coordinates
+    {(0.6,0.5) (3.0,0.1) (6.0,0.3) (8.6,1.2) (8.8,3.0) (6.5,4.0) (3.5,3.9) (0.9,3.0)};
+  \draw[codeframe, line width=2.4pt] (1.4,1.0) -- (3.0,1.4) -- (4.6,1.1) -- (6.4,1.6) -- (7.8,2.4);
+  \draw[codeframe, line width=2.4pt] (3.0,1.4) -- (3.4,3.2) -- (5.6,3.4);
+  \draw[codeframe, line width=2.4pt] (4.6,1.1) -- (5.6,3.4) -- (7.8,2.4);
+  \draw[accent, line width=3.2pt, line cap=round, line join=round]
+    (1.4,1.0) -- (3.0,1.4) -- (4.6,1.1) -- (5.6,3.4);
+  \fill[st] (1.4,1.0) circle (0.16);
+  \fill[red!70!black] (5.6,3.4) circle (0.16);
+  \node[font=\small, text=cm, anchor=north] at (1.4,0.85) {start};
+  \node[font=\small, text=cm, anchor=south] at (5.6,3.55) {destination};
+\end{tikzpicture}
+
+\vfill
+{\large A step-by-step tutorial\par}
+\vspace{0.3cm}
+{\normalsize Every line of code, every formula, nothing hidden\par}
+\vspace{1.5cm}
+\end{titlepage}
+
+\frontmatter
+\tableofcontents
+\mainmatter
+
+\input{chapters/01-intro}
+\input{chapters/02-setup}
+\input{chapters/03-latlon}
+\input{chapters/04-projection}
+\input{chapters/05-geometry}
+\input{chapters/06-mapfile}
+\input{chapters/07-drawing}
+\input{chapters/08-labels}
+\input{chapters/09-graph}
+\input{chapters/10-bfs}
+\input{chapters/11-dijkstra}
+\input{chapters/12-astar}
+\input{chapters/13-checks}
+\input{chapters/14-directions}
+\input{chapters/15-following}
+\input{chapters/16-wrongturn}
+\input{chapters/17-livemap}
+\input{chapters/18-next}
+
+\appendix
+\input{chapters/19-appendix}
+
+\end{document}

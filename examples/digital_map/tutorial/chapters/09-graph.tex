@@ -1,0 +1,313 @@
+% ===========================================================================
+\chapter{Roads as a graph}\label{ch:graph}
+
+To find a way from one place to another, a route planner forgets almost
+everything about the map: the colours, the lake, the names of the woods.
+What is left is a \emph{graph}.
+
+\section{Graphs}
+
+A graph is a set of \emph{nodes} (also called vertices) joined by
+\emph{edges}. For a road map, the nodes are the points along the roads and
+the edges are the stretches of road between neighbouring points. An edge
+has a direction, from its \emph{source} node to its \emph{target} node: a
+two-way road gives two edges, one each way, and a one-way road gives only
+the one in the direction of traffic. And every edge has a \emph{cost}:
+its length in metres, or the time it takes to travel, which depends on the
+kind of road.
+
+\begin{center}
+\begin{tikzpicture}[
+  n/.style={circle, fill=accent, inner sep=1.8pt},
+  e/.style={-{Stealth[length=2.2mm]}, thick, color=cm},
+  lab/.style={font=\scriptsize, text=cm}]
+  \node[n] (a) at (0,0) {};
+  \node[n] (b) at (2.4,0) {};
+  \node[n] (c) at (4.8,0) {};
+  \node[n] (d) at (2.4,1.8) {};
+  \node[n] (e) at (2.4,-1.6) {};
+  \draw[e] (a) to[bend left=12] node[above, lab] {100 m, 12 s} (b);
+  \draw[e] (b) to[bend left=12] (a);
+  \draw[e] (b) to[bend left=12] (c);
+  \draw[e] (c) to[bend left=12] (b);
+  \draw[e] (b) -- node[right, lab] {one-way} (d);
+  \draw[e] (e) to[bend left=12] (b);
+  \draw[e] (b) to[bend left=12] (e);
+  \node[font=\small, text=cm, anchor=west] at (5.4,0) {a two-way street: two edges};
+  \node[font=\small, text=cm, anchor=west] at (2.8,1.8) {a one-way street: one edge};
+\end{tikzpicture}
+\end{center}
+
+The same map gives different graphs to different travellers. A driver
+can't use footpaths and must respect one-way streets. A walker can use
+every road and path, in either direction. So the graph is built for a
+\emph{mode} of travel: driving or walking.
+
+\section{Speeds}
+
+How fast does a traveller go? Real route planners use the speed limit of
+each road, adjusted by the time of day and live traffic. We use one speed
+for each kind of road: 60\,km/h on the main road, 40 on the lanes, 30 in
+town and 20 on the bumpy tracks, while a walker goes at a steady
+5\,km/h anywhere. A speed of 0 means the traveller can't use that kind of
+road at all.
+
+\begin{newfile}{road_graph.nex}
+-- road_graph.nex: the roads as a graph, for one way of travelling.
+
+intern Island_Map
+
+-- How the traveller gets about.
+enum union Mode
+  Driving
+  Walking
+end
+
+-- How fast a traveller goes on a kind of road, in km/h; 0 means the
+-- traveller may not use it at all.
+function speed_kmh(mode: Mode, kind: Road_Kind): Real do
+  if mode = Mode.Walking then
+    result := 5.0
+  elseif kind = Road_Kind.Main then
+    result := 60.0
+  elseif kind = Road_Kind.Lane then
+    result := 40.0
+  elseif kind = Road_Kind.Street then
+    result := 30.0
+  elseif kind = Road_Kind.Track then
+    result := 20.0
+  else
+    result := 0.0
+  end
+ensure
+  non_negative: result >= 0.0
+end
+\end{newfile}
+
+An edge knows its two nodes, its length, and the road it belongs to. The
+time it takes is worked out once, when the edge is made: a speed of $v$
+km/h is $v / 3.6$ metres per second (a kilometre is 1,000 metres and an
+hour 3,600 seconds), and time is distance divided by speed.
+
+\begin{append}{road_graph.nex}
+-- One step of travel: from node `source` straight to the next node
+-- along a road, `target`.
+class Edge
+create
+  make(s, t: Integer, metres, kmh: Real, r: Road)
+  require
+    different_nodes: s /= t
+    positive_length: metres > 0.0
+    positive_speed: kmh > 0.0
+  do
+    source := s
+    target := t
+    length := metres
+    seconds := metres / (kmh / 3.6)
+    road := r
+  end
+feature
+  once source: Integer
+  once target: Integer
+  -- How long the step is, in metres...
+  once length: Real
+  -- ...and how long it takes, in seconds.
+  once seconds: Real
+  -- The road the step is part of.
+  once road: Road
+end
+\end{append}
+
+\section{Building the graph}
+
+How should a graph be stored? The question a route planner asks over and
+over is ``where can I go from this node?'', so we store, for every node,
+the list of edges leaving it. This is called an \emph{adjacency list}. A
+map from node ids to arrays of edges does it.
+
+To build the graph, go through every road the traveller may use, and every
+pair of neighbouring nodes along it. Add the edge in the road's direction,
+and, unless the road is one-way and the traveller is driving, the edge
+back.
+
+\begin{append}{road_graph.nex}
+class Road_Graph
+create
+  -- The graph of the roads of `m` that a traveller can use in mode `how`.
+  build(m: Island_Map, how: Mode) do
+    island := m
+    mode := how
+    adjacency := {}
+    edge_count := 0
+    top_speed := 0.0
+    across m.roads as r do
+      let kmh: Real := speed_kmh(how, r.kind)
+      if kmh > 0.0 then
+        top_speed := top_speed.max(kmh / 3.6)
+        let both_ways: Boolean := not r.is_one_way or how = Mode.Walking
+        from
+          let i: Integer := 1
+        until
+          i >= r.node_ids.length
+        do
+          let a: Integer := r.node_ids.get(i - 1)
+          let b: Integer := r.node_ids.get(i)
+          let metres: Real := m.point(a).distance_to(m.point(b))
+          add_edge(create Edge.make(a, b, metres, kmh, r))
+          if both_ways then
+            add_edge(create Edge.make(b, a, metres, kmh, r))
+          end
+          i := i + 1
+        end
+      end
+    end
+  end
+feature
+  island: Island_Map
+  mode: Mode
+  -- For every node, the edges that leave it.
+  adjacency: Map[Integer, Array[Edge]]
+  edge_count: Integer
+  -- The fastest speed on any edge, in metres per second.
+  top_speed: Real
+\end{append}
+
+The graph also remembers the fastest speed on any of its edges. That will
+be useful in Chapter~\ref{ch:astar}.
+
+The questions the graph answers: is a node on its roads, which nodes it
+has, which edges leave a node, and is there an edge from one node to
+another. A node with no edges leaving it, such as the last node of a
+one-way street that ends at nothing, is still a node of the graph, so
+\code{add_edge} makes sure both ends are in the map.
+
+\begin{continued}{road_graph.nex}
+  -- Whether `id` is on a road this graph's traveller can use.
+  has_node(id: Integer): Boolean do
+    result := adjacency.contains_key(id)
+  end
+
+  -- Every node of the graph.
+  nodes(): Array[Integer] do
+    result := adjacency.keys
+  end
+
+  -- The edges leaving `id` (none if it is not in the graph).
+  edges_from(id: Integer): Array[Edge] do
+    result := adjacency.try_get(id, [])
+  end
+
+  -- The edge from a to b, if there is one.
+  edge_between(a, b: Integer): ?Edge do
+    across edges_from(a) as e do
+      if e.target = b then
+        result := e
+      end
+    end
+  end
+\end{continued}
+
+\section{Joining the roads}
+
+A place, or a point someone clicks on the map, is usually not on a road
+at all. The harbour is at the water's edge, a little south of Quay
+Street; the campsite is in a field at the end of a track. To plan a route
+from it, we first join the roads at the nearest node, which is called
+\emph{snapping}. The nearest node is simply the one at the smallest
+distance; for the few hundred nodes of an island, checking them all is
+instant. (A real map has hundreds of millions of nodes, and finds the
+nearest with a \emph{spatial index}, which narrows the search to the
+nodes in the same small square of the map.)
+
+\begin{continued}{road_graph.nex}
+  -- The node of the graph closest to p: where a traveller standing at p
+  -- joins the roads.
+  nearest_node(p: Point): Integer
+  require
+    not_empty: edge_count > 0
+  do
+    let best: Real := -1.0
+    across adjacency.keys as id do
+      let d: Real := island.point(id).distance_to(p)
+      if best < 0.0 or d < best then
+        best := d
+        result := id
+      end
+    end
+  ensure
+    in_graph: has_node(result)
+  end
+
+private feature
+  add_edge(e: Edge) do
+    if not adjacency.contains_key(e.source) then
+      adjacency.put(e.source, [])
+    end
+    -- A one-way road's last node has no edge leaving it, but it is still a
+    -- node of the graph.
+    if not adjacency.contains_key(e.target) then
+      adjacency.put(e.target, [])
+    end
+    adjacency.get(e.source).add(e)
+    edge_count := edge_count + 1
+  end
+invariant
+  non_negative_count: edge_count >= 0
+end
+\end{continued}
+
+Because the snapping is done in the traveller's own graph, a walker can be
+snapped to a footpath, but a driver never is.
+
+\section{Looking at a junction}
+
+Where Harbour Street crosses Market Street, in the middle of town, four
+stretches of road meet. Market Street is one-way, eastbound. This script
+finds the node the two streets share and lists the edges leaving it, for a
+driver and for a walker:
+
+\begin{tryit}{try_graph.nex}
+intern Road_Graph
+intern Helpers
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let driving: Road_Graph := create Road_Graph.build(island, Mode.Driving)
+let walking: Road_Graph := create Road_Graph.build(island, Mode.Walking)
+say("driving: " + driving.nodes.length.to_string + " nodes, "
+  + driving.edge_count.to_string + " edges")
+say("walking: " + walking.nodes.length.to_string + " nodes, "
+  + walking.edge_count.to_string + " edges")
+
+-- The node that Harbour Street and Market Street share.
+let crossing: Integer := 0
+across island.roads as a do
+  across island.roads as b do
+    if a.name = "Harbour Street" and b.name = "Market Street" then
+      across a.node_ids as id do
+        if b.node_ids.contains(id) then
+          crossing := id
+        end
+      end
+    end
+  end
+end
+across [driving, walking] as g do
+  say("")
+  say(g.mode.to_string + " from node " + crossing.to_string + ":")
+  across g.edges_from(crossing) as e do
+    say("  to node " + e.target.to_string.pad_end(" ", 4) + " along " + e.road.name
+      + ", " + bearing(island.point(e.source), island.point(e.target)).round.to_string
+      + " degrees, " + fixed(e.length, 0) + " m, " + fixed(e.seconds, 1) + " s")
+  end
+end
+\end{tryit}
+\tryoutput{try_graph}
+
+A driver can leave the junction three ways: north and south on Harbour
+Street, and east on Market Street. A walker has a fourth: west on Market
+Street, against the traffic. The same 100 metres takes 12 seconds to
+drive and 72 seconds to walk.
+
+The walking graph has more nodes than the driving one, since it includes
+the footpaths, and nearly twice as many edges per road, since every road
+is two-way on foot.

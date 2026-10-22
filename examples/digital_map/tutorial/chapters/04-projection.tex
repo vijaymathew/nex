@@ -1,0 +1,243 @@
+% ===========================================================================
+\chapter{Flattening the Earth}\label{ch:projection}
+
+A screen is flat. To draw a map we need every position as an $x$ and a $y$
+on a flat surface, and it would be nice if those were in metres, so that
+the ordinary geometry of the flat plane (Pythagoras' theorem, straight
+lines, areas of polygons) just works. Turning latitude and longitude into
+flat coordinates is called a \emph{map projection}.
+
+\section{You can't flatten an orange peel}
+
+Try to flatten a piece of orange peel and it tears or stretches. A sphere
+cannot be laid flat without distorting it somehow, and every projection is
+a choice about what to distort. Some keep areas right and bend shapes; some
+keep shapes right in small patches and blow up areas far from the equator;
+none keeps everything right everywhere.
+
+\begin{aside}
+\textbf{Web maps and Mercator.} Almost every map on the web, from
+OpenStreetMap to the big commercial ones, uses the \emph{Web Mercator}
+projection:
+\[
+  x = R\lambda, \qquad y = R \ln\tan\Big(\frac{\pi}{4} + \frac{\varphi}{2}\Big).
+\]
+Its great virtue is that it keeps angles right: a street corner that is a
+right angle on the ground is a right angle on the screen, at every zoom.
+Its great vice is scale: a metre on the ground is stretched by
+$1/\cos\varphi$ on the map, more and more towards the poles. That is why
+Greenland looks as big as Africa on a web map, when it is fourteen times
+smaller. A map app that shows Mercator still has to measure distances on
+the sphere, or correct for the stretch, as we do.
+\end{aside}
+
+The good news is that the smaller the area, the less any of this matters. A
+piece of orange peel the size of a fingernail lies almost flat. Kestrel
+Island is about four kilometres across, a fingernail on a twelve-thousand
+kilometre ball, and the simplest projection there is will be accurate to a
+few centimetres.
+
+\section{How a degree of longitude shrinks}
+
+The parallel at latitude $\varphi$ is a circle. Slice the Earth through
+the poles and look at it side on:
+
+\begin{center}
+\begin{tikzpicture}[scale=1.2]
+  \draw[accent!60, fill=titlebg!40] (0,0) circle (2);
+  \draw[color=cm, dashed] (0,-2.3) -- (0,2.3) node[above, font=\small] {axis};
+  \draw[color=cm] (-2.2,0) -- (2.2,0) node[right, font=\small] {equator};
+  \coordinate (P) at (47:2);
+  \draw[st, thick] (0,0) -- (P) node[midway, above left, font=\small] {$R$};
+  \draw[accent, thick] (0,{2*sin(47)}) -- (P) node[midway, above, font=\small] {$r = R\cos\varphi$};
+  \draw[color=cm, dashed] ({-2*cos(47)},{2*sin(47)}) -- (0,{2*sin(47)});
+  \draw (0.55,0) arc[start angle=0, end angle=47, radius=0.55];
+  \node[font=\small] at (24:0.85) {$\varphi$};
+  \fill[st] (P) circle (0.06);
+\end{tikzpicture}
+\end{center}
+
+The parallel's radius is the side of a right-angled triangle whose
+hypotenuse is the Earth's radius $R$, with the angle $\varphi$ at the
+centre, so it is $r = R\cos\varphi$. A degree of longitude is $1/360$ of
+that circle, $2\pi R \cos\varphi / 360$: the 111,195 metres of a degree at
+the equator, times $\cos\varphi$. At Kestrel Island's latitude,
+$\cos 47^\circ \approx 0.68$, so a degree east is only about 75.8 km, while
+a degree north is still 111.2 km.
+
+\section{A local projection}
+
+So here is the projection. Pick a centre for the map, at latitude
+$\varphi_0$ and longitude $\lambda_0$. Then a place at $\varphi$, $\lambda$
+(in degrees) goes to
+\[
+  x = (\lambda - \lambda_0) \cdot k_\lambda, \qquad
+  y = (\varphi - \varphi_0) \cdot k_\varphi,
+\]
+where $k_\varphi = 2\pi R/360$ metres per degree of latitude, and
+$k_\lambda = k_\varphi \cos\varphi_0$ metres per degree of longitude,
+measured at the centre. The centre goes to $(0, 0)$; $x$ grows to the east
+and $y$ to the north, both in metres. This is called the
+\emph{equirectangular} projection.
+
+It is exactly right along the centre's parallel, where we measured
+$k_\lambda$. North or south of it, the true size of a degree of longitude
+differs a little from $k_\lambda$. How little? Moving 1.6 km north, the
+distance from the centre to Kestrel Island's northern tip, changes the
+latitude by $0.0144^\circ$, which changes $\cos\varphi$ by about 0.03\%.
+So an east-west distance up there comes out 0.03\% too long: 30
+centimetres in a kilometre. For a road map, that is perfect.
+
+Going back is just as easy: $\lambda = \lambda_0 + x / k_\lambda$ and
+$\varphi = \varphi_0 + y / k_\varphi$.
+
+\section{Points on the flat map}
+
+A flat position is a \code{Point} with an \code{x} and a \code{y}. We will
+use points in two ways: as positions, and as \emph{arrows} (vectors), such
+as ``the arrow from the harbour to the lighthouse'', which is
+\code{lighthouse - harbour}. Adding an arrow to a position moves the
+position along the arrow; multiplying an arrow by a number stretches it.
+
+Nex lets a class give a method the name of an arithmetic operator with
+\code{alias}, so that \code{a + b} on two points means \code{a.plus(b)}.
+That keeps geometry readable: \code{a + (b - a) * 0.5} is the point halfway
+from \code{a} to \code{b}.
+
+\begin{append}{geo.nex}
+-- A position on a flat map, in metres: x east and y north of the map's
+-- centre.
+class Point
+create
+  make(px, py: Real) do
+    x := px
+    y := py
+  end
+feature
+  once x: Real
+  once y: Real
+
+  plus(other: Point): Point alias "+" do
+    result := create Point.make(x + other.x, y + other.y)
+  end
+
+  minus(other: Point): Point alias "-" do
+    result := create Point.make(x - other.x, y - other.y)
+  end
+
+  -- This point scaled by k, as an arrow from the origin.
+  times(k: Real): Point alias "*" do
+    result := create Point.make(x * k, y * k)
+  end
+\end{append}
+
+Two more operations on arrows. The \emph{length} of an arrow $(x, y)$ is
+$\sqrt{x^2 + y^2}$, by Pythagoras; Nex's \code{hypot} computes exactly
+that. The \emph{dot product} of two arrows, $a_x b_x + a_y b_y$, will be
+useful in the next chapter, where we explain what it measures. The distance
+between two points is the length of the arrow from one to the other.
+
+\begin{continued}{geo.nex}
+  -- The dot product, treating both points as arrows from the origin.
+  dot(other: Point): Real do
+    result := x * other.x + y * other.y
+  end
+
+  -- The length of this point as an arrow from the origin.
+  length(): Real do
+    result := x.hypot(y)
+  end
+
+  distance_to(other: Point): Real do
+    result := (other - this).length
+  ensure
+    non_negative: result >= 0.0
+  end
+
+  -- "(123.4, -56.7)"
+  to_string(): String do
+    result := "(" + fixed(x, 1) + ", " + fixed(y, 1) + ")"
+  end
+end
+\end{continued}
+
+\section{The projection}
+
+The projection holds the centre and the two scale factors, worked out once:
+
+\begin{append}{geo.nex}
+-- The local flat projection of the area around `centre`: a small piece of
+-- the globe laid flat, with `centre` at (0, 0), x pointing east and y
+-- north, both in metres.
+--
+-- A degree of latitude is the same length everywhere, but a degree of
+-- longitude shrinks towards the poles, in proportion to the cosine of the
+-- latitude: meridians meet at the poles. This projection measures both at
+-- the centre's latitude. That is exact along the centre's parallel and
+-- very nearly exact a few kilometres away, which is all a town or an
+-- island needs. (A whole country or continent needs a cleverer projection.)
+class Projection
+create
+  make(c: Lat_Lon) do
+    centre := c
+    metres_per_degree_lat := Earth.RADIUS * Real.PI / 180.0
+    metres_per_degree_lon := metres_per_degree_lat * c.latitude.to_radians.cos
+  end
+feature
+  centre: Lat_Lon
+  metres_per_degree_lat: Real
+  metres_per_degree_lon: Real
+
+  to_point(p: Lat_Lon): Point do
+    result := create Point.make(
+      (p.longitude - centre.longitude) * metres_per_degree_lon,
+      (p.latitude - centre.latitude) * metres_per_degree_lat)
+  end
+
+  to_lat_lon(p: Point): Lat_Lon do
+    result := create Lat_Lon.make(
+      centre.latitude + p.y / metres_per_degree_lat,
+      centre.longitude + p.x / metres_per_degree_lon)
+  ensure
+    round_trip: to_point(result).distance_to(p) < 0.001
+  end
+invariant
+  positive_scales: metres_per_degree_lat > 0.0 and metres_per_degree_lon > 0.0
+end
+\end{append}
+
+The postcondition of \code{to_lat_lon} checks the two directions against
+each other: projecting the answer forward again must land within a
+millimetre of where we started. A contract like this is cheap insurance.
+If someone later ``improves'' one direction and forgets the other, the
+program stops at the first mismatch instead of drawing roads a few metres
+off.
+
+\begin{tryit}{try_projection.nex}
+intern Geo
+
+let harbour: Lat_Lon := create Lat_Lon.make(47.052428, -34.569106)
+let lighthouse: Lat_Lon := create Lat_Lon.make(47.079318, -34.565277)
+let flat: Projection := create Projection.make(create Lat_Lon.make(47.066, -34.5695))
+let h: Point := flat.to_point(harbour)
+let l: Point := flat.to_point(lighthouse)
+say("harbour    " + h.to_string())
+say("lighthouse " + l.to_string())
+say("on the sphere:   " + fixed(harbour.distance_to(lighthouse), 2) + " m")
+say("on the flat map: " + fixed(h.distance_to(l), 2) + " m")
+say("back again: " + flat.to_lat_lon(l).to_string())
+
+-- Pretending a degree is the same length both ways:
+let k: Real := flat.metres_per_degree_lat
+let naive: Point := create Point.make((lighthouse.longitude - harbour.longitude) * k,
+  (lighthouse.latitude - harbour.latitude) * k)
+say("degrees as if they were squares: " + fixed(naive.length(), 2) + " m")
+\end{tryit}
+\tryoutput{try_projection}
+
+The flat map agrees with the sphere to within a few centimetres over three
+kilometres. Pretending that a degree of longitude is as long as a degree of
+latitude gets the distance wrong by several metres here, and it would be
+much worse for two places side by side east and west. A map drawn that way
+would look stretched sideways, by $1/\cos 47^\circ$, nearly one and a
+half times.

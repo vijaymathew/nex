@@ -1,0 +1,246 @@
+-- simulation.nex: a pretend traveller with a pretend GPS, so that the
+-- navigator has someone to guide.
+
+intern Navigation
+intern Rng
+
+-- The traveller, moving along a path of nodes at the speed of each road.
+-- Usually the path is the navigator's route, but a traveller can take a
+-- wrong turn.
+class Traveller
+create
+  make(g: Road_Graph, nodes: Array[Integer])
+  require
+    is_a_route: is_route(g, nodes)
+    can_move: nodes.length >= 2
+  do
+    graph := g
+    path := nodes
+    leg := 0
+    offset := 0.0
+    wrong_turn_pending := false
+  end
+feature
+  graph: Road_Graph
+  -- The nodes the traveller means to pass through.
+  path: Array[Integer]
+  -- The traveller is `offset` metres along the edge from path[leg] to
+  -- path[leg + 1].
+  leg: Integer
+  offset: Real
+  -- Set to make the traveller go the wrong way at the next junction.
+  wrong_turn_pending: Boolean
+
+  has_arrived(): Boolean do
+    result := leg >= path.length - 1
+  end
+
+  -- The edge the traveller is on.
+  edge(): Edge
+  require
+    on_the_way: not has_arrived()
+  do
+    if ?graph.edge_between(path.get(leg), path.get(leg + 1)) as e then
+      result := e
+    else
+      raise "the traveller's path has a step that is not an edge"
+    end
+  end
+
+  -- Where the traveller really is.
+  position(): Point do
+    if has_arrived() then
+      result := graph.island.point(path.get(path.length - 1))
+    else
+      let a: Point := graph.island.point(path.get(leg))
+      let b: Point := graph.island.point(path.get(leg + 1))
+      result := a + (b - a) * (offset / a.distance_to(b))
+    end
+  end
+
+  -- Which way the traveller is facing, as a compass bearing.
+  heading(): Real do
+    if path.length < 2 then
+      result := 0.0
+    else
+      let i: Integer := leg.min(path.length - 2)
+      result := bearing(graph.island.point(path.get(i)), graph.island.point(path.get(i + 1)))
+    end
+  end
+
+  -- Go the wrong way at the next junction.
+  take_wrong_turn() do
+    wrong_turn_pending := true
+  end
+
+  -- Move on by `seconds` of travel.
+  advance(seconds: Real)
+  require
+    non_negative: seconds >= 0.0
+  do
+    let left: Real := seconds
+    from
+    until
+      left <= 0.0 or has_arrived()
+    do
+      let e: Edge := edge()
+      let speed: Real := e.length / e.seconds
+      let to_go: Real := (e.length - offset) / speed
+      if left < to_go then
+        offset := offset + left * speed
+        left := 0.0
+      else
+        left := left - to_go
+        offset := 0.0
+        leg := leg + 1
+        if wrong_turn_pending and not has_arrived() then
+          go_wrong()
+        end
+      end
+    end
+  end
+
+  -- Take the navigator's new route, which starts on the traveller's edge
+  -- or at the node the traveller is about to reach.
+  follow(nodes: Array[Integer]) do
+    if has_arrived() then
+      if nodes.get(0) = path.get(path.length - 1) and nodes.length >= 2 then
+        path := nodes
+        leg := 0
+        offset := 0.0
+      end
+    elseif nodes.length >= 2 and nodes.get(0) = path.get(leg)
+        and nodes.get(1) = path.get(leg + 1) then
+      path := nodes
+      leg := 0
+    elseif nodes.get(0) = path.get(leg + 1) then
+      path := [path.get(leg)].concat(nodes)
+      leg := 0
+    end
+  end
+
+private feature
+  -- At path[leg], turn off the planned way onto another road, and keep
+  -- going straight on, wherever that leads.
+  go_wrong() do
+    let here: Integer := path.get(leg)
+    let came_from: Integer := path.get(leg - 1)
+    let planned: Integer := path.get(leg + 1)
+    let options: Array[Edge] := []
+    across graph.edges_from(here) as e do
+      if e.target /= came_from and e.target /= planned then
+        options.add(e)
+      end
+    end
+    if not options.is_empty then
+      let wrong: Edge := straightest(came_from, here, options)
+      let detour: Array[Integer] := [wrong.target]
+      let previous: Integer := here
+      repeat 12 do
+        let at: Integer := detour.get(detour.length - 1)
+        let onward: Array[Edge] := []
+        across graph.edges_from(at) as e do
+          if e.target /= previous then
+            onward.add(e)
+          end
+        end
+        if not onward.is_empty then
+          detour.add(straightest(previous, at, onward).target)
+          previous := at
+        end
+      end
+      path := path.take(leg + 1).concat(detour)
+      wrong_turn_pending := false
+    end
+  end
+
+  -- Of `options`, the edges leaving `at`, the one that turns least for a
+  -- traveller arriving from `before`.
+  straightest(before, at: Integer, options: Array[Edge]): Edge
+  require
+    has_options: not options.is_empty
+  do
+    let island: Island_Map := graph.island
+    let heading_in: Real := bearing(island.point(before), island.point(at))
+    result := options.get(0)
+    across options as e do
+      let turn: Real := turn_angle(heading_in, bearing(island.point(at), island.point(e.target))).abs
+      let best: Real := turn_angle(heading_in, bearing(island.point(at),
+        island.point(result.target))).abs
+      if turn < best then
+        result := e
+      end
+    end
+  end
+end
+
+-- A pretend GPS receiver. Every fix is the true position plus a random
+-- error of a few metres, the way a real one is.
+class Gps
+create
+  make(seed: Integer, metres: Real) do
+    rng := create Rng.make(seed)
+    error := metres
+  end
+feature
+  rng: Rng
+  -- The typical size of the error, in metres (its standard deviation).
+  error: Real
+
+  fix(truth: Point): Point do
+    result := truth + create Point.make(rng.gauss() * error, rng.gauss() * error)
+  end
+end
+
+-- A trip: a traveller, their GPS, and the navigator guiding them, with
+-- the clock that moves them all on together.
+class Trip
+create
+  make(g: Road_Graph, path: Array[Integer], destination, algorithm: String, seed: Integer)
+  require
+    is_a_route: is_route(g, path)
+    can_move: path.length >= 2
+  do
+    traveller := create Traveller.make(g, path)
+    gps := create Gps.make(seed, 4.0)
+    navigator := create Navigator.make(g, path, destination, algorithm)
+    clock := 0.0
+    next_fix := 0.0
+    fix := traveller.position()
+  end
+feature
+  traveller: Traveller
+  gps: Gps
+  navigator: Navigator
+  -- Seconds since the trip began...
+  clock: Real
+  -- ...and when the GPS gives its next fix (once a second).
+  next_fix: Real
+  -- The latest fix.
+  fix: Point
+
+  -- Move the trip on by `seconds`.
+  advance(seconds: Real) do
+    let stop: Real := clock + seconds
+    from
+    until
+      next_fix > stop
+    do
+      traveller.advance(next_fix - clock)
+      clock := next_fix
+      fix := gps.fix(traveller.position())
+      navigator.update(fix)
+      if navigator.is_off_route() then
+        navigator.reroute()
+        traveller.follow(navigator.route.nodes)
+      end
+      next_fix := next_fix + 1.0
+    end
+    traveller.advance(stop - clock)
+    clock := stop
+  end
+
+  is_over(): Boolean do
+    result := traveller.has_arrived() and navigator.has_arrived()
+  end
+end

@@ -13,7 +13,8 @@
             [nex.types.datetime :as dt]
             [nex.types.regex :as regex-types]
             [nex.types.http :as http]
-            [nex.types.concurrency :as conc])
+            [nex.types.concurrency :as conc]
+            [nex.types.reflect :as reflect])
   (:import [java.nio.charset StandardCharsets]
            [java.util.concurrent CompletableFuture ExecutionException TimeUnit
             TimeoutException CancellationException]
@@ -1837,20 +1838,30 @@
    ctx
    handle))
 
+(def ^:private ^java.util.concurrent.ConcurrentHashMap qualified-names
+  "[imports class-name] -> the qualified name the imports give class-name."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- qualified-java-name
+  "The qualified name IMPORTS give CLASS-NAME (CLASS-NAME itself if none
+   does), worked out once for each list of imports."
+  ^String [imports ^String class-name]
+  (let [k [imports class-name]]
+    (or (.get qualified-names k)
+        (let [q (or (some (fn [{:keys [qualified-name source]}]
+                            (when (and (nil? source)
+                                       qualified-name
+                                       (= class-name (last (str/split qualified-name #"\."))))
+                              qualified-name))
+                          imports)
+                    class-name)]
+          (.put qualified-names k q)
+          q))))
+
 (defn resolve-imported-java-class
   "Resolve a Java class name using imports in the context."
   [ctx class-name]
-  (let [imports @(:imports ctx)
-        match (some (fn [{:keys [qualified-name source]}]
-                      (when (and (nil? source)
-                                 qualified-name
-                                 (= class-name (last (str/split qualified-name #"\."))))
-                        qualified-name))
-                    imports)
-        qualified (or match class-name)]
-    (try
-      (Class/forName qualified)
-      (catch Exception _ nil))))
+  (reflect/class-for-name (qualified-java-name @(:imports ctx) class-name)))
 
 (defn- class-def-if-exists
   "Nex class-def lookup mirroring nex.interpreter/lookup-class-if-exists,
@@ -1973,13 +1984,13 @@
     (when-not klass
       (throw (ex-info (str "Undefined class: " class-name)
                       {:class-name class-name})))
-    (clojure.lang.Reflector/invokeConstructor klass (to-array (java-args ctx arg-values)))))
+    (reflect/invoke-constructor klass (to-array (java-args ctx arg-values)))))
 
 (defn java-call-method
   "Call a Java method via reflection."
   [ctx target method-name arg-values]
   (rt/java->nex
-   (clojure.lang.Reflector/invokeInstanceMethod target method-name (to-array (java-args ctx arg-values)))))
+   (reflect/invoke-method target method-name (to-array (java-args ctx arg-values)))))
 
 (def core-builtins
   {"print"

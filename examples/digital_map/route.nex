@@ -1,0 +1,92 @@
+-- route.nex: directions from one place to another, printed.
+--
+--   nex route.nex                              -- list the places
+--   nex route.nex "The Harbour" Lighthouse     -- the quickest way by car
+--   nex route.nex harbour lighthouse --walk    -- on foot
+--   nex route.nex harbour lighthouse --shortest
+--   nex route.nex harbour lighthouse --algorithm dijkstra   (or bfs, astar)
+--
+-- A place can be given by part of its name: "mill" is "Old Mill".
+
+intern Directions
+intern Helpers
+
+function main() do
+  let args: Array[String] := (create Process).command_line()
+  let names: Array[String] := []
+  let mode: Mode := Mode.Driving
+  let shortest: Boolean := false
+  let algorithm: String := "astar"
+  let map_file: String := "kestrel_island.map"
+  from
+    let i: Integer := 0
+  until
+    i >= args.length
+  do
+    let arg: String := args.get(i)
+    if arg = "--walk" then
+      mode := Mode.Walking
+    elseif arg = "--shortest" then
+      shortest := true
+    elseif arg = "--algorithm" and i + 1 < args.length then
+      algorithm := args.get(i + 1)
+      i := i + 1
+    elseif arg = "--map" and i + 1 < args.length then
+      map_file := args.get(i + 1)
+      i := i + 1
+    else
+      names.add(arg)
+    end
+    i := i + 1
+  end
+
+  let island: Island_Map := create Island_Map.load(user_path(map_file))
+  if names.length /= 2 then
+    say("usage: nex route.nex FROM TO [--walk] [--shortest] [--algorithm bfs|dijkstra|astar]")
+    say("")
+    say("Places on " + island.name + ":")
+    across island.places as p do
+      say("  " + p.name)
+    end
+  elseif ?island.find_place(names.get(0)) as start
+      and ?island.find_place(names.get(1)) as finish then
+    let g: Road_Graph := create Road_Graph.build(island, mode)
+    let source: Integer := g.nearest_node(island.point(start.node_id))
+    let target: Integer := g.nearest_node(island.point(finish.node_id))
+    let found: Search_Result := find_route(g, source, target, algorithm, shortest)
+    if found.found() then
+      print_route(g, found, start.name, finish.name)
+    else
+      say("There is no way from " + start.name + " to " + finish.name + ".")
+    end
+  else
+    say("I don't know one of those places. Run nex route.nex to list them.")
+  end
+end
+
+function print_route(g: Road_Graph, found: Search_Result, from_name, to_name: String) do
+  let how: String := when g.mode = Mode.Walking then "Walking" else "Driving" end
+  say(how + " from " + from_name + " to " + to_name + ": "
+    + distance_text(route_cost(g, found.path, by_distance())) + ", about "
+    + duration_text(route_cost(g, found.path, by_time())) + ".")
+  say(found.algorithm + " explored " + found.explored.length.to_string
+    + " of the " + g.nodes.length.to_string + " nodes.")
+  say("")
+  let steps: Array[Instruction] := directions(g, found.path, to_name)
+  from
+    let i: Integer := 0
+  until
+    i = steps.length
+  do
+    let step: Instruction := steps.get(i)
+    let line: String := (i + 1).to_string.pad_start(" ", 3) + ". " + step.text
+    if i + 1 < steps.length then
+      line := line.pad_end(" ", 42)
+        + distance_text(steps.get(i + 1).distance - step.distance).pad_start(" ", 8)
+    end
+    say(line)
+    i := i + 1
+  end
+end
+
+main()

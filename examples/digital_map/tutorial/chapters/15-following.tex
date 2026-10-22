@@ -1,0 +1,457 @@
+% ===========================================================================
+\chapter{Following the traveller}\label{ch:following}
+
+Printed directions are planned once and read once. A navigator is
+different: it rides along. About once a second, the GPS gives it a new
+position, a \emph{fix}, and it must work out:
+
+\begin{itemize}[nosep]
+  \item how far along the route the traveller has got;
+  \item what the next instruction is, and how far away;
+  \item how far there is still to go, and how long it will take;
+  \item and whether the traveller is still on the route at all.
+\end{itemize}
+
+\section{Noisy fixes}
+
+A GPS fix is never exactly right. Out in the open, a phone is usually
+within about five metres of the truth; between tall buildings, where the
+satellites' signals bounce off walls, it can be out by fifty. A fix taken
+while driving down the middle of a road might put the car in a garden.
+
+So a navigator never takes a fix at face value. It assumes the traveller
+is on the road, most likely on the route it planned, and moves each fix to
+the nearest point of the route. This is called \emph{map matching}. The
+distance between the fix and that point, the \emph{offset}, says how well
+they match: a few metres is noise, but fifty metres, again and again, means
+the traveller is somewhere else.
+
+\section{The route as a line}
+
+For following a route, we want it as a line on the map, with a ruler
+along it: for any point of the route, how far along it is. We store, for
+each node of the route, the distance from the start of the route to that
+node, and the time it takes to get there.
+
+\begin{center}
+\begin{tikzpicture}[x=1cm, y=1cm]
+  \draw[accent, very thick] (0,0) -- (3,0.6) -- (5,0.2) -- (7.5,1.4);
+  \foreach \p/\d in {(0,0)/0, (3,0.6)/310, (5,0.2)/520, (7.5,1.4)/800}
+    \fill \p circle (0.06) node[below=2pt, font=\scriptsize] {\d\,m};
+  \fill[st] (4,0.4) circle (0.07);
+  \node[font=\scriptsize, text=st, above] at (4,0.45) {415\,m along};
+\end{tikzpicture}
+\end{center}
+
+A point $d$ metres along the route is on the segment whose start is at
+most $d$ along and whose end is more than $d$ along. Within that segment,
+it is a fraction of the way from start to end, and so is its time: the
+time at the start of the segment, plus the same fraction of the segment's
+time.
+
+\begin{newfile}{navigation.nex}
+-- navigation.nex: following a route as the traveller moves. Knowing how
+-- far along the route they are, what to tell them next, and when they
+-- have left the route.
+
+intern Directions
+intern Helpers
+
+-- Where a position lies relative to a line: the nearest point of the
+-- line, how far along the line that point is, and how far the position
+-- is from it.
+class Line_Match
+create
+  make(p: Point, d, off: Real) do
+    point := p
+    along := d
+    offset := off
+  end
+feature
+  once point: Point
+  -- Metres from the start of the line.
+  once along: Real
+  -- Metres from the line.
+  once offset: Real
+end
+
+-- A route as a line on the map, measured along its length.
+class Route_Line
+create
+  make(g: Road_Graph, path: Array[Integer])
+  require
+    is_a_route: is_route(g, path)
+  do
+    nodes := path
+    points := g.island.points_of(path)
+    along := [0.0]
+    times := [0.0]
+    from
+      let i: Integer := 1
+    until
+      i = path.length
+    do
+      if ?g.edge_between(path.get(i - 1), path.get(i)) as e then
+        along.add(along.get(i - 1) + e.length)
+        times.add(times.get(i - 1) + e.seconds)
+      end
+      i := i + 1
+    end
+  end
+feature
+  nodes: Array[Integer]
+  points: Array[Point]
+  -- How far along the route each node is, in metres...
+  along: Array[Real]
+  -- ...and how long it takes to get there, in seconds.
+  times: Array[Real]
+
+  length(): Real do
+    result := along.get(along.length - 1)
+  end
+
+  duration(): Real do
+    result := times.get(times.length - 1)
+  end
+\end{newfile}
+
+Now the questions about a point $d$ metres along: which segment it is on,
+where it is, which way the route is heading there, and how long it takes to
+get there. A route with only one node, from a place to itself, has no
+segments at all, and each query handles that first.
+
+\begin{continued}{navigation.nex}
+  -- The segment that the point `d` metres along the route is on: i for
+  -- the segment from node i to node i + 1.
+  segment_at(d: Real): Integer do
+    result := 0
+    from
+    until
+      result >= points.length - 2 or along.get(result + 1) > d
+    do
+      result := result + 1
+    end
+  ensure
+    valid_segment: result >= 0 and (result < points.length - 1 or points.length = 1)
+  end
+
+  -- The point `d` metres along the route.
+  point_at(d: Real): Point do
+    if points.length = 1 then
+      result := points.get(0)
+    else
+      let i: Integer := segment_at(d)
+      result := points.get(i) + (points.get(i + 1) - points.get(i)) * fraction(i, d)
+    end
+  end
+
+  -- The direction of travel `d` metres along the route.
+  heading_at(d: Real): Real do
+    if points.length = 1 then
+      result := 0.0
+    else
+      let i: Integer := segment_at(d)
+      result := bearing(points.get(i), points.get(i + 1))
+    end
+  end
+
+  -- How long it takes to travel the first `d` metres of the route.
+  time_at(d: Real): Real do
+    if points.length = 1 then
+      result := 0.0
+    else
+      let i: Integer := segment_at(d)
+      result := times.get(i) + (times.get(i + 1) - times.get(i)) * fraction(i, d)
+    end
+  end
+\end{continued}
+
+For drawing, the live map will show the part of the route already travelled
+in grey and the rest in blue, so the line can be cut in two at any point:
+
+\begin{continued}{navigation.nex}
+  -- The route from `d` metres on (or up to `d` metres, if not `after`),
+  -- as a line, for drawing.
+  part(d: Real, after: Boolean): Array[Point] do
+    let i: Integer := segment_at(d)
+    if after then
+      result.add(point_at(d))
+      result := result.concat(points.drop(i + 1))
+    else
+      result := points.take(i + 1)
+      result.add(point_at(d))
+    end
+  end
+\end{continued}
+
+\section{Map matching}
+
+To match a fix to the route, we use \code{closest_point_on_segment}, from
+Chapter~\ref{ch:geometry}, to find the closest point of every segment, and
+keep the nearest. How far along the route is it? As far as the start of its
+segment, plus its distance from that start.
+
+There is a catch. Routes can double back, or run close beside themselves:
+out along a lane and back along the same lane, or down one street and up
+the next. The nearest point of the whole route might be on a part the
+traveller won't reach for minutes, and if we believed it, the navigator
+would suddenly announce the instructions for the way back. So we search
+only a \emph{window} of the route, between \code{low} and \code{high}
+metres along it, around where the traveller was a moment ago. Real
+navigators do the same, and more: they also use the direction and speed of
+travel, and they weigh up several candidate roads over several fixes before
+deciding.
+
+\begin{continued}{navigation.nex}
+  -- Where p is relative to the stretch of the route between `low` and
+  -- `high` metres along it.
+  locate(p: Point, low, high: Real): Line_Match do
+    result := create Line_Match.make(points.get(0), 0.0, p.distance_to(points.get(0)))
+    from
+      let i: Integer := 0
+    until
+      i >= points.length - 1
+    do
+      if along.get(i + 1) >= low and along.get(i) <= high then
+        let a: Point := points.get(i)
+        let c: Point := closest_point_on_segment(p, a, points.get(i + 1))
+        let off: Real := p.distance_to(c)
+        if off < result.offset then
+          result := create Line_Match.make(c, along.get(i) + a.distance_to(c), off)
+        end
+      end
+      i := i + 1
+    end
+  end
+
+private feature
+  -- How far through segment i the point d metres along the route is,
+  -- from 0 at its start to 1 at its end.
+  fraction(i: Integer, d: Real): Real do
+    let seg: Real := along.get(i + 1) - along.get(i)
+    if seg > 0.0 then
+      result := ((d - along.get(i)) / seg).clamp(0.0, 1.0)
+    end
+  end
+end
+\end{continued}
+
+\section{The navigator}
+
+The navigator holds the route and its instructions, and the one number
+that matters most: its \emph{progress}, how far along the route the
+traveller is. It also keeps the graph and the search algorithm, which it
+will need in the next chapter, to plan a new route when the traveller goes
+astray.
+
+\begin{append}{navigation.nex}
+-- The navigator: it knows the route, takes in GPS fixes, and says what to
+-- do next.
+class Navigator
+create
+  make(g: Road_Graph, path: Array[Integer], place: String, how: String)
+  require
+    is_a_route: is_route(g, path)
+  do
+    graph := g
+    destination := place
+    algorithm := how
+    progress := 0.0
+    misses := 0
+    reroutes := 0
+    route := create Route_Line.make(g, path)
+    instructions := directions(g, path, place)
+    last_fix := route.point_at(0.0)
+  end
+feature
+  graph: Road_Graph
+  -- The destination's name, and the algorithm used to plan routes to it.
+  destination: String
+  algorithm: String
+  route: Route_Line
+  instructions: Array[Instruction]
+  -- How far along the route the traveller is, in metres.
+  progress: Real
+  -- How many fixes in a row have been too far from the route.
+  misses: Integer
+  -- How many times the route has been planned again.
+  reroutes: Integer
+  last_fix: Point
+\end{append}
+
+Each fix is matched to the route, looking from 40 metres behind the last
+progress to 250 metres ahead of it. Driving at 60\,km/h, a car covers about
+17 metres a second, so 250 metres is plenty of room ahead.
+
+If the fix matches within 25 metres, the traveller is on the route, and
+the progress moves up to where the fix matched. It never goes backwards:
+the noise in the fixes makes the matched point jitter back and forth by a
+few metres, and a navigator whose ``in 200 m'' becomes ``in 205 m'' looks
+broken. The postcondition holds the navigator to that, with \code{old}:
+in an \code{ensure}, \code{old progress} is the value \code{progress} had
+when the routine was called.
+
+If the fix is further away, it is a \emph{miss}. One miss might be a bad
+fix. Three in a row, and the traveller has left the route.
+
+\begin{continued}{navigation.nex}
+  -- A fix further than this from the route doesn't count as on it...
+  TOLERANCE = 25.0
+  -- ...and this many of those in a row mean the traveller has left it.
+  PATIENCE = 3
+  -- How far back and ahead of the last known progress to look for the
+  -- traveller on the route.
+  LOOK_BACK = 40.0
+  LOOK_AHEAD = 250.0
+
+  -- Take in a new GPS fix.
+  --
+  -- GPS fixes are a few metres off, so the navigator moves each one to the
+  -- nearest point of the route: this is called map matching. It looks
+  -- only near where the traveller was a moment ago. A route can pass the
+  -- same place twice, or run close to itself, and the nearest point of the
+  -- whole route might be on a part the traveller has not reached yet.
+  update(fix: Point) do
+    last_fix := fix
+    let m: Line_Match := route.locate(fix, (progress - LOOK_BACK).max(0.0),
+      progress + LOOK_AHEAD)
+    if m.offset <= TOLERANCE then
+      progress := progress.max(m.along)
+      misses := 0
+    else
+      misses := misses + 1
+    end
+  ensure
+    no_going_back: progress >= old progress
+  end
+
+  is_off_route(): Boolean do
+    result := misses >= PATIENCE
+  end
+
+  has_arrived(): Boolean do
+    result := progress >= route.length() - 15.0
+  end
+\end{continued}
+
+\section{What to say}
+
+The next instruction is the first one further along the route than the
+traveller. What to say about it depends on how far away it is: far off,
+``In 300 m, turn left onto Mill Lane''; close by, ``Turn left onto Mill
+Lane now''. And the time still to go is the route's whole duration, less
+the time it takes to get to where the traveller is.
+
+\begin{continued}{navigation.nex}
+  -- The next instruction the traveller has not reached yet.
+  next_instruction(): Instruction do
+    result := instructions.get(instructions.length - 1)
+    let found: Boolean := false
+    across instructions as step do
+      if not found and step.distance > progress + 1.0 then
+        result := step
+        found := true
+      end
+    end
+  end
+
+  -- What to say now: "In 300 m, turn left onto Mill Lane".
+  prompt(): String do
+    let next: Instruction := next_instruction()
+    let d: Real := next.distance - progress
+    if has_arrived() then
+      result := "You have arrived at " + destination
+    elseif d < 30.0 then
+      result := next.text + " now"
+    else
+      result := "In " + distance_text(d) + ", " + lowercase_first(next.text)
+    end
+  end
+
+  remaining_distance(): Real do
+    result := (route.length() - progress).max(0.0)
+  end
+
+  remaining_time(): Real do
+    result := (route.duration() - route.time_at(progress)).max(0.0)
+  end
+end
+
+-- s with its first letter in lower case: "Turn left" -> "turn left".
+function lowercase_first(s: String): String do
+  if s.length = 0 then
+    result := s
+  else
+    result := s.substring(0, 1).to_lower() + s.substring(1, s.length)
+  end
+end
+\end{continued}
+
+The remaining time comes from the route's own times, edge by edge, so it
+knows that the rest of the trip is on a slow track or a fast main road.
+Real navigators improve on this all the time, with the traveller's actual
+speed and with live traffic.
+
+\section{A pretend drive}
+
+We don't have a traveller yet; the next chapter makes one. For now we can
+pretend: take points along the route every 100 metres, push each one a few
+metres off to the side, the way a GPS would, and give them to the
+navigator. \code{direction(heading + 90.0)} is an arrow pointing square to
+the right of the route, so adding six metres of it moves a point six metres
+to the right.
+
+\begin{tryit}{try_navigator.nex}
+intern Navigation
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let g: Road_Graph := create Road_Graph.build(island, Mode.Driving)
+if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b then
+  let found: Search_Result := find_route(g, g.nearest_node(island.point(a.node_id)),
+    g.nearest_node(island.point(b.node_id)), "astar", false)
+  let nav: Navigator := create Navigator.make(g, found.path, b.name, "astar")
+  let line: Route_Line := nav.route
+  say("route: " + distance_text(line.length()) + ", " + duration_text(line.duration()))
+  let d: Real := 0.0
+  let side: Real := 6.0
+  from
+  until
+    d > line.length() + 100.0
+  do
+    let fix: Point := line.point_at(d) + direction(line.heading_at(d) + 90.0) * side
+    nav.update(fix)
+    if (d / 100.0).round % 5 = 0 or nav.has_arrived() then
+      say(fixed(nav.progress, 0).pad_start(" ", 5) + " m  " + nav.prompt().pad_end(" ", 42)
+        + distance_text(nav.remaining_distance()) + ", " + duration_text(nav.remaining_time()))
+    end
+    d := d + 100.0
+    side := -side
+  end
+
+  -- Another drive, which turns off the route 600 m from the start.
+  let lost: Navigator := create Navigator.make(g, found.path, b.name, "astar")
+  from
+    d := 0.0
+  until
+    d > 600.0
+  do
+    lost.update(line.point_at(d))
+    d := d + 100.0
+  end
+  repeat 3 do
+    lost.update(line.point_at(600.0) + direction(line.heading_at(600.0) + 90.0) * 60.0)
+    say("a fix 60 m from the route: " + lost.misses.to_string + " in a row, off the route: "
+      + lost.is_off_route().to_string)
+  end
+end
+\end{tryit}
+\tryoutput{try_navigator}
+
+Every fix was six metres to the left or right of the road, and every one
+was matched back onto it. The prompts count down to the next change of
+road, and the time left comes down as the distance does.
+
+On the second drive, after 600 metres the fixes are suddenly 60 metres
+from the route. One or two such fixes could be bad readings; three in a
+row mean the traveller has left the route. What then? That is the next
+chapter.

@@ -1,0 +1,238 @@
+% ===========================================================================
+\chapter{A sense of direction: A*}\label{ch:astar}
+
+Dijkstra's algorithm explores in order of cost so far, so it spreads in
+every direction alike. But we know where the target is. A node a kilometre
+from the source and two from the target is a better bet than one a
+kilometre from the source and five from the target. In 1968 Peter Hart,
+Nils Nilsson and Bertram Raphael, building a robot called Shakey at the
+Stanford Research Institute, turned that thought into an algorithm, and
+called it A*.
+
+\section{The idea}
+
+A* is Dijkstra's algorithm with one change: the priority of a frontier
+node $n$ is not just $g(n)$, the cost of the best way to it so far, but
+\[
+  f(n) = g(n) + h(n),
+\]
+where $h(n)$ is an \emph{estimate} of the cost still to come, from $n$ to
+the target. $f(n)$ is an estimate of the cost of the whole route through
+$n$. Nodes on the way to the target have low estimates, so they come out of
+the queue early; nodes leading away have high ones, and wait, very often
+until the target has been found and the search is over.
+
+That raises a worry. Dijkstra's algorithm is right because it explores
+nodes in order of their true cost. If the estimate pushes a node to the
+front of the queue, could A* finish the target before finding its cheapest
+way? Not if the estimate is never too high.
+
+\begin{mathbox}[When A* finds the best route]
+Call an estimate \emph{admissible} if it never overestimates:
+$h(n)$ is at most the true cost of the cheapest way from $n$ to the
+target. When the target $t$ comes out of the queue, its priority is
+$f(t) = g(t) + 0$, the cost of the route found. Every node $m$ still in the
+queue has $f(m) \ge f(t)$, and $f(m)$ is \emph{at most} the cost of the
+best route through $m$, since $h(m)$ doesn't overestimate. So no route
+through any waiting node can be cheaper than the one found.
+
+Our estimates have a slightly stronger property, called being
+\emph{consistent}: for every edge from $n$ to $m$, $h(n) \le
+\text{cost}(n, m) + h(m)$. The estimate never drops by more than the edge
+costs. With a consistent estimate, a node is also finished the first time
+it comes out of the queue, exactly as in Dijkstra's algorithm, so the same
+code works.
+\end{mathbox}
+
+With $h(n) = 0$ for every node, A* is Dijkstra's algorithm. The better the
+estimate, the fewer nodes A* explores; a perfect estimate would lead it
+straight to the target without a single wasted step.
+
+\section{Estimates}
+
+When the cost is distance, the obvious estimate is the straight-line
+distance to the target. No road between two points is shorter than the
+straight line between them, so it never overestimates. And it is
+consistent, because of the \emph{triangle inequality}: going from $n$
+straight to the target is never longer than going from $n$ to $m$ and then
+straight to the target.
+
+When the cost is time, the straight-line distance must be turned into a
+time that is never too much. Dividing it by the fastest speed on any road
+does it: no trip can be quicker than travelling the straight line at top
+speed all the way. That is what the graph's \code{top_speed} is for.
+
+Each estimate is a function from a node to a number, built for one target.
+Note how the anonymous function uses \code{goal} and \code{speed}, which
+are local variables of the function that made it. The anonymous function
+\emph{captures} them, and keeps them for as long as it lives, after
+\code{time_estimate} itself has returned. A function value with captured
+variables is called a \emph{closure}.
+
+\begin{append}{search.nex}
+-- A straight-line estimate of the cost from any node to `target`, when
+-- the cost is distance: no road between two points is shorter than the
+-- straight line between them.
+function distance_estimate(g: Road_Graph, target: Integer): Function(Integer): Real do
+  let goal: Point := g.island.point(target)
+  result := fn (n: Integer): Real do
+    result := g.island.point(n).distance_to(goal)
+  end
+end
+
+-- The same when the cost is time: no trip is quicker than the straight
+-- line at the top speed of any road.
+function time_estimate(g: Road_Graph, target: Integer): Function(Integer): Real do
+  let goal: Point := g.island.point(target)
+  let speed: Real := g.top_speed
+  result := fn (n: Integer): Real do
+    result := g.island.point(n).distance_to(goal) / speed
+  end
+end
+\end{append}
+
+\section{The algorithm}
+
+Here is A*. The only differences from \code{dijkstra} are the extra
+parameter, \code{estimate}, and the priority given to each node added to
+the queue: \code{c + estimate(e.target)} instead of \code{c}.
+
+\begin{append}{search.nex}
+-- A* ("A star"): Dijkstra's algorithm with a sense of direction.
+--
+-- The priority of a waiting node is the cost of the best way to it so
+-- far, plus an estimate of the cost from it to the target. Nodes that
+-- lead towards the target come out sooner, and nodes that lead away wait,
+-- often until the target is found and they are never explored at all.
+-- As long as the estimate is never more than the true cost, the way A*
+-- finds is just as cheap as the one Dijkstra finds.
+function a_star(g: Road_Graph, source, target: Integer,
+  cost: Function(Edge): Real, estimate: Function(Integer): Real): Search_Result
+require
+  source_on_roads: g.has_node(source)
+  target_on_roads: g.has_node(target)
+do
+  let waiting: Min_Heap[Waiting] := create Min_Heap[Waiting].from_comparator(by_priority())
+  waiting.insert(create Waiting.make(source, 0.0, estimate(source)))
+  let best: Map[Integer, Real] := {source: 0.0}
+  let parents: Map[Integer, Integer] := {}
+  let finished: Set[Integer] := #{}
+  let explored: Array[Integer] := []
+  let found: Boolean := false
+  from
+  until
+    found or waiting.is_empty
+  do
+    let w: Waiting := waiting.extract_min
+    if not finished.contains(w.node) then
+      finished.add(w.node)
+      explored.add(w.node)
+      if w.node = target then
+        found := true
+      else
+        across g.edges_from(w.node) as e do
+          let c: Real := w.cost + cost(e)
+          if not best.contains_key(e.target) or c < best.get(e.target) then
+            best.put(e.target, c)
+            parents.put(e.target, w.node)
+            waiting.insert(create Waiting.make(e.target, c, c + estimate(e.target)))
+          end
+        end
+      end
+    end
+  end
+  let path: Array[Integer] := []
+  if found then
+    path := trace_back(parents, source, target)
+  end
+  result := create Search_Result.make("A*", path,
+    best.try_get(target, 0.0), explored, parents)
+ensure
+  valid_path: not result.found() or is_route(g, result.path)
+  cost_adds_up: not result.found()
+    or (route_cost(g, result.path, cost) - result.cost).abs < 0.001
+end
+\end{append}
+
+We could have written \code{dijkstra} as a call to \code{a_star} with an
+estimate of zero. Keeping both, side by side, makes it easy to see how
+little separates them.
+
+Last, one function that chooses an algorithm by name and plans the
+quickest route, or the shortest. The programs at the end of the tutorial
+use it, so that you can switch algorithms while they run.
+
+\begin{append}{search.nex}
+-- Search with the algorithm called `algorithm` ("bfs", "dijkstra" or
+-- "astar"), for the quickest way, or the shortest one if `shortest`.
+function find_route(g: Road_Graph, source, target: Integer, algorithm: String,
+  shortest: Boolean): Search_Result
+require
+  source_on_roads: g.has_node(source)
+  target_on_roads: g.has_node(target)
+  known_algorithm: algorithm = "bfs" or algorithm = "dijkstra" or algorithm = "astar"
+do
+  let cost: Function(Edge): Real := when shortest then by_distance() else by_time() end
+  let estimate: Function(Integer): Real :=
+    when shortest then distance_estimate(g, target) else time_estimate(g, target) end
+  if algorithm = "bfs" then
+    result := breadth_first(g, source, target)
+  elseif algorithm = "dijkstra" then
+    result := dijkstra(g, source, target, cost)
+  else
+    result := a_star(g, source, target, cost, estimate)
+  end
+end
+\end{append}
+
+\section{Dijkstra against A*}
+
+\begin{tryit}{try_astar.nex}
+intern Try_Pictures
+
+let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
+let g: Road_Graph := create Road_Graph.build(island, Mode.Driving)
+if ?island.find_place("beach") as a and ?island.find_place("lighthouse") as b then
+  let source: Integer := g.nearest_node(island.point(a.node_id))
+  let target: Integer := g.nearest_node(island.point(b.node_id))
+  say(summary(g, dijkstra(g, source, target, by_time())))
+  let found: Search_Result := a_star(g, source, target, by_time(), time_estimate(g, target))
+  say(summary(g, found))
+  picture_of_search(create Map_View.make(island, 1000, 700), found, "astar.png")
+end
+
+say("")
+say("Nodes explored for the quickest route by car:")
+across [["harbour", "lighthouse"], ["campsite", "fisher"], ["school", "peak"],
+    ["mill", "beach"]] as trip do
+  if ?island.find_place(trip.get(0)) as a and ?island.find_place(trip.get(1)) as b then
+    let s: Integer := g.nearest_node(island.point(a.node_id))
+    let t: Integer := g.nearest_node(island.point(b.node_id))
+    say("  " + (a.name + " to " + b.name).pad_end(" ", 34)
+      + dijkstra(g, s, t, by_time()).explored.length.to_string.pad_start(" ", 4)
+      + a_star(g, s, t, by_time(), time_estimate(g, t)).explored.length.to_string.pad_start(" ", 5))
+  end
+end
+\end{tryit}
+\tryoutput{try_astar}
+\mappicture{astar}
+
+A* finds the same route as Dijkstra's algorithm, exactly as quick, but
+explores less than half as many nodes: the purple now leans towards the
+lighthouse, and most of the town, off to the east of the car park, is
+left alone.
+
+The other trips show that the saving varies. From the mill to the beach,
+A* explores a fifth as many nodes as Dijkstra's algorithm. But from the
+school to Kestrel Peak it saves hardly anything. The quickest way to the
+peak ends on the slow tracks through the wood, and the estimate, which
+assumes 60\,km/h all the way, is far below the true time. When the
+estimate is that far off, A* has little to go on, and behaves almost like
+Dijkstra's algorithm.
+
+That is the general rule: the closer the estimate is to the truth, the
+less A* explores. Our estimate for time is cautious, because it has to be:
+it must never be too high, so it assumes the top speed everywhere. When
+walking, every road has the same speed, so the straight-line estimate is
+much closer to the truth, and A* is even more focused. The checks in the next chapter compare the two over every pair of
+places.

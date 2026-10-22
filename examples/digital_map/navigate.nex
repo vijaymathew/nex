@@ -1,0 +1,632 @@
+-- navigate.nex: the live map. Choose where to start and where to go,
+-- watch the route being searched for, then watch a traveller follow it
+-- while the navigator talks them through every turn.
+--
+--   nex navigate.nex                        -- click to choose the places
+--   nex navigate.nex harbour lighthouse     -- start with these two
+--   nex navigate.nex harbour lighthouse --walk --algorithm dijkstra
+--
+-- Keys, while the window is open:
+--   w        walk or drive              a        change search algorithm
+--   s        shortest or quickest way   x        take a wrong turn
+--   z        follow the traveller or show the whole map
+--   space    pause                      + / -    faster / slower
+--   n        new trip                   q        quit
+--
+-- Without a display, it draws the start of the trip into navigate.png.
+-- For pictures of a trip without opening a window:
+--   --snapshot SECONDS FILE   draw the trip SECONDS into the journey
+--   --wrong-turn SECONDS      and make the traveller go wrong then
+--   --search-snapshot FILE    draw the search, partway through
+
+intern Simulation
+intern Map_View
+intern graphics/Key
+intern time/Date_Time
+
+enum union Stage
+  Choosing_Start
+  Choosing_Finish
+  Searching
+  Travelling
+  Arrived
+end
+
+class Colours
+feature
+  ROUTE = create Color.make(40, 110, 220)
+  ROUTE_CASING = create Color.make(20, 60, 140)
+  TRAVELLED = create Color.make(150, 160, 175)
+  EXPLORED = create Color.make_rgba(150, 60, 200, 160)
+  START = create Color.make(40, 160, 70)
+  FINISH = create Color.make(210, 50, 50)
+  TRAVELLER = create Color.make(20, 90, 200)
+  FIX = create Color.make_rgba(20, 90, 200, 90)
+  PANEL = create Color.make_rgba(255, 255, 255, 230)
+  WARNING = create Color.make_rgba(255, 235, 200, 240)
+  TEXT = create Color.make(40, 40, 40)
+  DIM = create Color.make(110, 110, 110)
+end
+
+class App
+create
+  make(m: Island_Map) do
+    island := m
+    view := create Map_View.make(m, 1100, 760)
+    view.set_insets(64.0, 26.0)
+    view.canvas.set_title(m.name)
+    driving := create Road_Graph.build(m, Mode.Driving)
+    walking := create Road_Graph.build(m, Mode.Walking)
+    graph := driving
+    algorithm := "astar"
+    shortest := false
+    stage := Stage.Choosing_Start
+    start_node := 0
+    finish_node := 0
+    start_name := ""
+    finish_name := ""
+    revealed := 0
+    hold := 0.0
+    speedup := 1.0
+    following := true
+    paused := false
+    quitting := false
+    was_pressed := false
+    alert := 0.0
+    seen_reroutes := 0
+    trail := []
+  end
+feature
+  island: Island_Map
+  view: Map_View
+  driving: Road_Graph
+  walking: Road_Graph
+  -- The graph for the current way of travelling: driving or walking.
+  graph: Road_Graph
+  algorithm: String
+  shortest: Boolean
+  stage: Stage
+  start_node: Integer
+  finish_node: Integer
+  start_name: String
+  finish_name: String
+  -- The latest search, and how many of its explored nodes are on screen.
+  search: ?Search_Result
+  revealed: Integer
+  -- Seconds to wait, showing the route, before the traveller sets off.
+  hold: Real
+  trip: ?Trip
+  -- How many seconds of the trip pass in one second on screen.
+  speedup: Real
+  -- Whether the view follows the traveller, zoomed in.
+  following: Boolean
+  paused: Boolean
+  quitting: Boolean
+  was_pressed: Boolean
+  -- Seconds left to show the "off route" warning.
+  alert: Real
+  seen_reroutes: Integer
+  -- The latest GPS fixes, oldest first.
+  trail: Array[Point]
+
+  -- How long the search takes to unfold on screen, and how long a whole
+  -- trip takes at the starting speed, in seconds.
+  SEARCH_SECONDS = 2.0
+  TRIP_SECONDS = 30.0
+  -- The zoom while following the traveller, in metres per pixel.
+  CLOSE_UP = 1.4
+
+  use_algorithm(name: String) do
+    algorithm := name
+  end
+
+  -- Start a trip between two places, given by (part of) their names.
+  choose_places(from_name, to_name: String) do
+    if ?island.find_place(from_name) as a and ?island.find_place(to_name) as b then
+      start_name := a.name
+      start_node := graph.nearest_node(island.point(a.node_id))
+      finish_name := b.name
+      finish_node := graph.nearest_node(island.point(b.node_id))
+      plan()
+    else
+      raise "unknown place: " + from_name + " or " + to_name
+    end
+  end
+
+  -- Search for a route from the start to the finish, and show the search
+  -- unfolding.
+  plan() do
+    -- After a change of mode, the start and finish move to the nearest
+    -- nodes of the new graph.
+    start_node := graph.nearest_node(island.point(start_node))
+    finish_node := graph.nearest_node(island.point(finish_node))
+    search := find_route(graph, start_node, finish_node, algorithm, shortest)
+    revealed := 0
+    trip := nil
+    trail := []
+    stage := Stage.Searching
+    if ?search as s then
+      print_directions(s)
+    end
+  end
+
+  -- Read the mouse and the keyboard.
+  handle_input() do
+    let c: Canvas := view.canvas
+    let pressed: Boolean := c.is_mouse_pressed()
+    if pressed and not was_pressed and c.has_mouse_position() then
+      clicked(create Point.make(c.mouse_x(), c.mouse_y()))
+    end
+    was_pressed := pressed
+    from
+    until
+      not c.has_next_key_typed()
+    do
+      key_typed(c.next_key_typed())
+    end
+    if c.is_key_pressed(Key.ESCAPE) then
+      quitting := true
+    end
+  end
+
+  clicked(p: Point) do
+    let name: String := name_near(p)
+    let node: Integer := graph.nearest_node(p)
+    if stage = Stage.Choosing_Start then
+      start_node := node
+      start_name := name
+      stage := Stage.Choosing_Finish
+    elseif stage = Stage.Choosing_Finish or stage = Stage.Arrived then
+      if stage = Stage.Arrived then
+        start_node := finish_node
+        start_name := finish_name
+      end
+      if node = start_node then
+        start_node := node
+        start_name := name
+        stage := Stage.Choosing_Finish
+      else
+        finish_node := node
+        finish_name := name
+        plan()
+      end
+    end
+  end
+
+  key_typed(k: String) do
+    if k = "q" then
+      quitting := true
+    elseif k = " " then
+      paused := not paused
+    elseif k = "+" or k = "=" then
+      speedup := speedup * 2.0
+    elseif k = "-" then
+      speedup := (speedup / 2.0).max(1.0)
+    elseif k = "z" then
+      following := not following
+    elseif k = "n" then
+      stage := Stage.Choosing_Start
+      search := nil
+      trip := nil
+    elseif k = "x" then
+      if ?trip as t then
+        t.traveller.take_wrong_turn()
+      end
+    elseif k = "w" or k = "a" or k = "s" then
+      if k = "w" then
+        graph := when graph == driving then walking else driving end
+      elseif k = "a" then
+        if algorithm = "astar" then
+          algorithm := "bfs"
+        elseif algorithm = "bfs" then
+          algorithm := "dijkstra"
+        else
+          algorithm := "astar"
+        end
+      else
+        shortest := not shortest
+      end
+      if stage /= Stage.Choosing_Start and stage /= Stage.Choosing_Finish then
+        plan()
+      end
+    end
+  end
+
+  -- Move everything on by `seconds` of real time.
+  update(seconds: Real) do
+    alert := (alert - seconds).max(0.0)
+    if not paused and ?search as s then
+      if stage = Stage.Searching then
+        let per_second: Real := s.explored.length.to_real / SEARCH_SECONDS
+        revealed := (revealed + (per_second * seconds).ceiling.max(1)).min(s.explored.length)
+        if revealed = s.explored.length then
+          if s.path.length < 2 then
+            stage := Stage.Arrived
+          else
+            stage := Stage.Travelling
+            hold := 1.5
+            let t: Trip := create Trip.make(graph, s.path, finish_name, algorithm, 42)
+            speedup := (t.navigator.route.duration() / TRIP_SECONDS).max(1.0)
+            trip := t
+            seen_reroutes := 0
+          end
+        end
+      elseif stage = Stage.Travelling and ?trip as t then
+        if hold > 0.0 then
+          hold := hold - seconds
+        else
+          t.advance(seconds * speedup)
+          note_fix(t)
+          if t.is_over() then
+            stage := Stage.Arrived
+          end
+        end
+      end
+    end
+  end
+
+  -- Remember the trip's latest GPS fix, and whether the navigator has just
+  -- planned a new route.
+  note_fix(t: Trip) do
+    if trail.is_empty or trail.get(trail.length - 1).distance_to(t.fix) > 0.0 then
+      trail.add(t.fix)
+      if trail.length > 40 then
+        trail := trail.drop(1)
+      end
+    end
+    if t.navigator.reroutes > seen_reroutes then
+      seen_reroutes := t.navigator.reroutes
+      alert := 2.5
+      say("Off the route: planning a new one.")
+    end
+  end
+
+  -- Draw one frame.
+  draw() do
+    if following and stage = Stage.Travelling and ?trip as t then
+      view.look_at(t.traveller.position(), CLOSE_UP)
+    else
+      view.show_all()
+    end
+    view.draw_map()
+    if stage = Stage.Searching then
+      draw_explored()
+    end
+    if stage = Stage.Travelling or stage = Stage.Arrived then
+      draw_route()
+    end
+    draw_markers()
+    if ?trip as t then
+      draw_traveller(t)
+    end
+    draw_banner()
+    draw_status()
+  end
+
+  -- The search so far: a line from each explored node to the node the
+  -- search reached it from.
+  draw_explored() do
+    if ?search as s then
+      let c: Canvas := view.canvas
+      c.set_pen_color(Colours.EXPLORED)
+      c.set_pen_radius(2.5)
+      across s.explored.take(revealed) as n do
+        if s.parents.contains_key(n) then
+          let a: Point := island.point(s.parents.get(n))
+          let b: Point := island.point(n)
+          c.line(a.x, a.y, b.x, b.y)
+        end
+      end
+      c.set_pen_radius(1.0)
+      across s.explored.take(revealed) as n do
+        let p: Point := island.point(n)
+        c.filled_circle(p.x, p.y, view.metres(3.0))
+      end
+      if revealed = s.explored.length and s.found() then
+        view.line(island.points_of(s.path), Colours.ROUTE, 5.0)
+      end
+    end
+  end
+
+  -- The route: the part already travelled in grey, the rest in blue.
+  draw_route() do
+    if ?trip as t then
+      let r: Route_Line := t.navigator.route
+      let d: Real := t.navigator.progress
+      view.line(r.part(d, false), Colours.TRAVELLED, 6.0)
+      view.line(r.part(d, true), Colours.ROUTE_CASING, 9.0)
+      view.line(r.part(d, true), Colours.ROUTE, 6.0)
+    elseif ?search as s then
+      view.line(island.points_of(s.path), Colours.ROUTE, 6.0)
+    end
+  end
+
+  draw_markers() do
+    if stage /= Stage.Choosing_Start then
+      pin(island.point(start_node), Colours.START, "A")
+    end
+    if stage /= Stage.Choosing_Start and stage /= Stage.Choosing_Finish then
+      pin(island.point(finish_node), Colours.FINISH, "B")
+    end
+  end
+
+  -- A map pin with its point at p.
+  pin(p: Point, colour: Color, letter: String) do
+    let c: Canvas := view.canvas
+    let r: Real := view.metres(10.0)
+    let head: Point := p + create Point.make(0.0, view.metres(22.0))
+    c.set_pen_color(colour)
+    c.filled_polygon([p.x, head.x - r * 0.8, head.x + r * 0.8],
+      [p.y, head.y - r * 0.5, head.y - r * 0.5])
+    c.filled_circle(head.x, head.y, r)
+    c.set_pen_color(Color.WHITE)
+    c.set_font(Font.SANS.bold().with_size(12))
+    c.text(head.x, head.y, letter)
+  end
+
+  -- The traveller as a blue dot with an arrow, and the recent GPS fixes
+  -- as faint dots around their path.
+  draw_traveller(t: Trip) do
+    let c: Canvas := view.canvas
+    c.set_pen_color(Colours.FIX)
+    across trail as f do
+      c.filled_circle(f.x, f.y, view.metres(3.0))
+    end
+    let p: Point := t.traveller.position()
+    c.set_pen_color(Color.WHITE)
+    c.filled_circle(p.x, p.y, view.metres(10.0))
+    c.set_pen_color(Colours.TRAVELLER)
+    c.filled_circle(p.x, p.y, view.metres(7.5))
+    c.set_pen_color(Color.WHITE)
+    view.arrowhead(p + direction(t.traveller.heading()) * view.metres(5.0),
+      t.traveller.heading(), 8.0)
+  end
+
+  -- The panel along the top: what to do next.
+  draw_banner() do
+    let c: Canvas := view.canvas
+    let top: Real := c.y_max
+    let left: Real := c.x_min
+    let height: Real := view.metres(64.0)
+    let width: Real := c.x_max - c.x_min
+    let headline: String := ""
+    let detail: String := ""
+    let turn: Real := 0.0
+    let warn: Boolean := alert > 0.0
+    if stage = Stage.Choosing_Start then
+      headline := "Click where you want to start"
+      detail := "or on one of the places"
+    elseif stage = Stage.Choosing_Finish then
+      headline := "Now click where you want to go"
+      detail := "Starting at " + start_name
+    elseif stage = Stage.Searching then
+      headline := search_name() + " is searching..."
+      detail := revealed.to_string + " of " + graph.nodes.length.to_string + " nodes explored"
+    elseif stage = Stage.Travelling and ?trip as t then
+      let nav: Navigator := t.navigator
+      if warn then
+        headline := "Off the route: planning a new one"
+      elseif hold > 0.0 then
+        headline := nav.instructions.get(0).text
+      else
+        headline := nav.prompt()
+        turn := nav.next_instruction().turn
+      end
+      detail := distance_text(nav.remaining_distance()) + " to go, about "
+        + duration_text(nav.remaining_time())
+      if nav.reroutes > 0 then
+        detail := detail + "   (new route " + nav.reroutes.to_string + "x)"
+      end
+    else
+      headline := "You have arrived at " + finish_name
+      detail := "Click to choose where to go next"
+    end
+    c.set_pen_color(when warn then Colours.WARNING else Colours.PANEL end)
+    c.filled_rectangle(left + width / 2.0, top - height / 2.0, width / 2.0, height / 2.0)
+    let text_left: Real := left + view.metres(16.0)
+    if stage = Stage.Travelling and not warn and hold <= 0.0 then
+      draw_turn_arrow(create Point.make(left + view.metres(36.0), top - height / 2.0), turn)
+      text_left := left + view.metres(70.0)
+    end
+    c.set_pen_color(Colours.TEXT)
+    c.set_font(Font.SANS.bold().with_size(20))
+    c.text_left(text_left, top - view.metres(22.0), headline)
+    c.set_pen_color(Colours.DIM)
+    c.set_font(Font.SANS.with_size(13))
+    c.text_left(text_left, top - view.metres(47.0), detail)
+  end
+
+  -- An arrow showing a turn of `angle` degrees: up for straight on,
+  -- bending right or left.
+  draw_turn_arrow(at: Point, angle: Real) do
+    let c: Canvas := view.canvas
+    let stem: Point := at - create Point.make(0.0, view.metres(20.0))
+    let bend: Point := at
+    let tip: Point := bend + direction(angle) * view.metres(16.0)
+    view.line([stem, bend, tip], Colours.ROUTE, 6.0)
+    c.set_pen_color(Colours.ROUTE)
+    view.arrowhead(tip + direction(angle) * view.metres(8.0), angle, 12.0)
+  end
+
+  -- The line along the bottom: the settings, and the keys.
+  draw_status() do
+    let c: Canvas := view.canvas
+    let height: Real := view.metres(26.0)
+    let width: Real := c.x_max - c.x_min
+    let bottom: Real := c.y_min
+    c.set_pen_color(Colours.PANEL)
+    c.filled_rectangle(c.x_min + width / 2.0, bottom + height / 2.0, width / 2.0, height / 2.0)
+    let how: String := when graph == driving then "Driving" else "Walking" end
+    let what: String := when shortest then "shortest" else "quickest" end
+    let status: String := how + ", " + what + " way, " + search_name()
+    if ?search as s then
+      status := status + " explored " + s.explored.length.to_string + " nodes"
+    end
+    if stage = Stage.Travelling then
+      status := status + ", " + fixed(speedup, 0) + "x speed"
+      if paused then
+        status := status + " (paused)"
+      end
+    end
+    c.set_pen_color(Colours.TEXT)
+    c.set_font(Font.SANS.bold().with_size(12))
+    c.text_left(c.x_min + view.metres(12.0), bottom + height / 2.0, status)
+    c.set_pen_color(Colours.DIM)
+    c.set_font(Font.SANS.with_size(12))
+    c.text_right(c.x_max - view.metres(12.0), bottom + height / 2.0,
+      "w walk/drive  a algorithm  s shortest  x wrong turn  z zoom  space pause  +/- speed  n new  q quit")
+  end
+
+  search_name(): String do
+    if algorithm = "bfs" then
+      result := "Breadth-first search"
+    elseif algorithm = "dijkstra" then
+      result := "Dijkstra"
+    else
+      result := "A*"
+    end
+  end
+
+  -- The name of the place at p, if p is on or near one.
+  name_near(p: Point): String do
+    result := "the marked spot"
+    let best: Real := view.metres(25.0)
+    across island.places as place do
+      let d: Real := island.point(place.node_id).distance_to(p)
+      if d < best then
+        best := d
+        result := place.name
+      end
+    end
+  end
+
+  print_directions(s: Search_Result) do
+    say("")
+    if s.found() then
+      say(start_name + " to " + finish_name + ": "
+        + distance_text(route_cost(graph, s.path, by_distance())) + ", about "
+        + duration_text(route_cost(graph, s.path, by_time())) + " ("
+        + search_name() + " explored " + s.explored.length.to_string + " nodes)")
+      across directions(graph, s.path, finish_name) as step do
+        say("  " + step.text)
+      end
+    else
+      say("No way from " + start_name + " to " + finish_name)
+    end
+  end
+end
+
+-- Run the window until it is closed.
+function run_window(app: App) do
+  let c: Canvas := app.view.canvas
+  c.enable_double_buffering()
+  app.draw()
+  app.view.show()
+  let last: Integer := (create Date_Time.now()).millis
+  from
+  until
+    app.quitting or not c.is_window_open()
+  do
+    app.handle_input()
+    let now: Integer := (create Date_Time.now()).millis
+    app.update(((now - last).to_real / 1000.0).min(0.1))
+    last := now
+    app.draw()
+    app.view.show()
+    c.pause(15)
+  end
+end
+
+-- Draw the search partway through, without a window.
+function search_snapshot(app: App, file: String) do
+  app.update(App.SEARCH_SECONDS * 0.6)
+  app.draw()
+  app.view.save(file)
+  say("saved " + file)
+end
+
+-- Draw the trip as it is `seconds` into the journey, without a window.
+function snapshot(app: App, seconds, wrong_turn: Real, file: String) do
+  app.update(App.SEARCH_SECONDS + 1.0)
+  app.update(2.0)
+  if ?app.trip as t then
+    let step: Real := 0.25
+    let clock: Real := 0.0
+    from
+    until
+      clock >= seconds or t.is_over()
+    do
+      if wrong_turn >= 0.0 and clock <= wrong_turn and clock + step > wrong_turn then
+        t.traveller.take_wrong_turn()
+      end
+      t.advance(step)
+      app.note_fix(t)
+      clock := clock + step
+    end
+    if t.is_over() then
+      app.update(0.0)
+    end
+  end
+  app.draw()
+  app.view.save(file)
+  say("saved " + file)
+end
+
+function main() do
+  let args: Array[String] := (create Process).command_line()
+  let names: Array[String] := []
+  let walk: Boolean := false
+  let algorithm: String := "astar"
+  let shot_seconds: Real := -1.0
+  let shot_file: String := ""
+  let search_file: String := ""
+  let wrong_turn: Real := -1.0
+  from
+    let i: Integer := 0
+  until
+    i >= args.length
+  do
+    let arg: String := args.get(i)
+    if arg = "--walk" then
+      walk := true
+    elseif arg = "--algorithm" and i + 1 < args.length then
+      algorithm := args.get(i + 1)
+      i := i + 1
+    elseif arg = "--snapshot" and i + 2 < args.length then
+      shot_seconds := args.get(i + 1).to_real
+      shot_file := args.get(i + 2)
+      i := i + 2
+    elseif arg = "--search-snapshot" and i + 1 < args.length then
+      search_file := args.get(i + 1)
+      i := i + 1
+    elseif arg = "--wrong-turn" and i + 1 < args.length then
+      wrong_turn := args.get(i + 1).to_real
+      i := i + 1
+    else
+      names.add(arg)
+    end
+    i := i + 1
+  end
+  let app: App := create App.make(create Island_Map.load(user_path("kestrel_island.map")))
+  if walk then
+    app.key_typed("w")
+  end
+  if algorithm = "bfs" or algorithm = "dijkstra" or algorithm = "astar" then
+    app.use_algorithm(algorithm)
+  end
+  if names.length = 2 then
+    app.choose_places(names.get(0), names.get(1))
+  end
+  if search_file /= "" then
+    search_snapshot(app, search_file)
+  elseif shot_file /= "" then
+    snapshot(app, shot_seconds, wrong_turn, shot_file)
+  elseif app.view.canvas.has_display() then
+    run_window(app)
+  else
+    say("No display: drawing navigate.png instead of opening a window.")
+    snapshot(app, 0.0, -1.0, "navigate.png")
+  end
+end
+
+main()

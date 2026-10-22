@@ -1,0 +1,254 @@
+% ===========================================================================
+\chapter{Where on Earth}\label{ch:latlon}
+
+Every position on a digital map starts life as two numbers: a
+\emph{latitude} and a \emph{longitude}. That is what a GPS receiver
+reports, what the map file stores, and what you get if you ask a map app to
+``share this location''. This chapter is about what those two numbers mean,
+and how to measure the distance between two of them.
+
+\section{Latitude and longitude}
+
+Picture the Earth as a ball spinning about an axis through the North and
+South Poles. The \emph{equator} is the circle around the middle, halfway
+between the poles.
+
+\begin{center}
+\begin{tikzpicture}[scale=1.2]
+  \shade[ball color=titlebg!70!white] (0,0) circle (2);
+  % the equator: the front half solid, the back half dashed
+  \draw[accent, thick] (-2,0) arc[start angle=180, end angle=360, x radius=2, y radius=0.5];
+  \draw[accent, dashed] (2,0) arc[start angle=0, end angle=180, x radius=2, y radius=0.5];
+  % a meridian, from pole to pole across the front
+  \draw[color=cm, thick] plot[smooth, tension=0.8] coordinates
+    {(0,2) (0.75,1.3) (0.95,-0.47) (0.6,-1.55) (0,-2)};
+  \coordinate (O) at (0,0);
+  \coordinate (E) at (0.95,-0.47);
+  \coordinate (P) at (0.75,1.3);
+  \draw[color=cm, dashed] (O) -- (E);
+  \draw[st, thick, -{Stealth}] (O) -- (P);
+  \fill[st] (P) circle (0.08);
+  \fill (O) circle (0.04);
+  \draw[st] ($(O)!0.6cm!(E)$) arc[start angle=-26, end angle=60, radius=0.6cm];
+  \node[st, font=\small] at (0.75,0.25) {lat};
+  \fill (0,2) circle (0.05);
+  \node[font=\small, above] at (0,2) {North Pole};
+  \node[font=\small, right, st] at (P) {\ a place};
+  \node[font=\small, text=accent, right] at (2,0) {equator};
+  \draw[color=cm] (0.6,-1.55) -- (2.2,-1.9) node[right, font=\small, text=cm] {a meridian};
+\end{tikzpicture}
+\end{center}
+
+\begin{itemize}
+  \item \textbf{Latitude} says how far north or south a place is: the angle
+    between the equator and the place, seen from the centre of the Earth.
+    It runs from $0^\circ$ at the equator to $90^\circ$ at the North Pole,
+    and to $-90^\circ$ at the South Pole. All the places with the same
+    latitude form a circle around the Earth, called a \emph{parallel}.
+  \item \textbf{Longitude} says how far east or west a place is. Every
+    half circle from the North Pole to the South Pole is a
+    \emph{meridian}, and longitude is the angle between a place's meridian
+    and the one through Greenwich, in London, which was chosen in 1884 as
+    the zero. It runs from $-180^\circ$ (west) to $180^\circ$ (east).
+\end{itemize}
+
+Kestrel Island's harbour is at latitude 47.052428 and longitude
+-34.569106: about 47 degrees north of the equator, and about 34.6 degrees
+west of Greenwich, out in the Atlantic. Positive latitudes are north,
+negative ones south; positive longitudes are east, negative ones west.
+People often write the same position as 47.05243\,N, 34.56911\,W.
+
+Degrees with decimals are how computers store positions. Six decimal
+places is plenty: one millionth of a degree of latitude is about 11
+centimetres.
+
+\section{The size of a degree}
+
+How far is one degree? Going north along a meridian, a full circle of
+$360^\circ$ is the whole way around the Earth, $2\pi R$, where $R$ is the
+Earth's radius, about 6,371 km. So one degree of latitude is
+\[
+  \frac{2\pi \times 6\,371\,000}{360} \approx 111\,195 \text{ metres},
+\]
+everywhere on Earth.
+
+A degree of longitude is different. The parallels get smaller towards the
+poles, and a degree of longitude is $1/360$ of the parallel you are on. At
+the equator that is 111 km too; at the poles it is nothing at all, because
+every meridian meets there. We'll work out exactly how it shrinks in the
+next chapter. What matters now is that a degree east and a degree north are
+\emph{not} the same distance, so we can't find the distance between two
+places by applying Pythagoras' theorem to their latitudes and longitudes.
+
+\section{The distance between two places}
+
+The shortest way between two places on a sphere is along a
+\emph{great circle}: a circle around the sphere whose centre is the centre
+of the sphere, such as the equator or any meridian. Airliners fly great
+circles, which is why a flight from Europe to America goes up past
+Greenland. The distance along it is given by the \emph{haversine formula}.
+
+\begin{mathbox}[The haversine formula]
+For two places with latitudes $\varphi_1, \varphi_2$ and longitudes
+$\lambda_1, \lambda_2$, all in radians, work out
+\[
+  h = \sin^2\!\Big(\frac{\varphi_2 - \varphi_1}{2}\Big)
+    + \cos\varphi_1 \cos\varphi_2 \, \sin^2\!\Big(\frac{\lambda_2 - \lambda_1}{2}\Big).
+\]
+Then the distance along the Earth's surface is
+\[
+  d = 2R \arcsin\sqrt{h}.
+\]
+\end{mathbox}
+
+Where does that come from? Imagine a straight tunnel through the Earth
+between the two places. Its length, the \emph{chord}, is easy to find with
+3D coordinates: a place at latitude $\varphi$ and longitude $\lambda$ is at
+\[
+  R\,(\cos\varphi\cos\lambda,\ \cos\varphi\sin\lambda,\ \sin\varphi)
+\]
+measured from the centre of the Earth. Work out the squared distance
+between two such points, simplify with a few trigonometric identities, and
+you get $(2R)^2 h$, so the chord is $c = 2R\sqrt{h}$.
+
+\begin{center}
+\begin{tikzpicture}[scale=1.1]
+  \draw[accent!50, fill=titlebg!40] (0,0) circle (2);
+  \coordinate (O) at (0,0);
+  \coordinate (A) at (150:2);
+  \coordinate (B) at (50:2);
+  \draw[color=cm] (O) -- (A) node[midway, below left, font=\small] {$R$};
+  \draw[color=cm] (O) -- (B) node[midway, below right, font=\small] {$R$};
+  \draw[st, thick] (A) -- (B) node[midway, below, font=\small] {chord $c$};
+  \draw[accent, very thick] (A) arc[start angle=150, end angle=50, radius=2]
+    node[midway, above, font=\small] {distance $d$};
+  \draw (O) ++(50:0.5) arc[start angle=50, end angle=150, radius=0.5];
+  \node[font=\small] at (100:0.75) {$\theta$};
+  \fill (A) circle (0.05) (B) circle (0.05) (O) circle (0.04);
+\end{tikzpicture}
+\end{center}
+
+The chord and the two radii make a triangle with angle $\theta$ at the
+centre. Cutting it in half gives two right-angled triangles, each with
+hypotenuse $R$, angle $\theta/2$, and opposite side $c/2$, so
+$c/2 = R\sin(\theta/2)$. Putting the two together,
+$\sin(\theta/2) = c / 2R = \sqrt{h}$, so $\theta = 2\arcsin\sqrt{h}$, and
+the distance along the surface, an arc of angle $\theta$ on a circle of
+radius $R$, is $d = R\theta = 2R\arcsin\sqrt{h}$.
+
+The name comes from old navigators' tables: $\sin^2(x/2)$ was called the
+\emph{haversine} of $x$, ``half the versed sine''.
+
+\section{Positions in Nex}
+
+The Earth is not quite a sphere. It is about 21 km wider at the equator
+than from pole to pole, and over long distances the haversine formula can
+be out by up to half a percent. For an island a few kilometres across, a
+sphere of the Earth's average radius is far more accurate than we need.
+
+\begin{newfile}{geo.nex}
+-- geo.nex: positions on the Earth, positions on a flat map, and the
+-- projection that turns one into the other.
+
+intern Helpers
+
+class Earth
+feature
+  -- The Earth's mean radius in metres. The Earth is not quite a sphere
+  -- (it is about 21 km wider at the equator than pole to pole), but for
+  -- an island a few kilometres across a sphere is more than good enough.
+  RADIUS = 6371000.0
+end
+\end{newfile}
+
+A position is a pair of angles. The class checks that they are in range
+when one is made, and \code{once} makes them unchangeable afterwards: a
+position is a value, like a number, and code that wants a different
+position makes a new one.
+
+\begin{append}{geo.nex}
+-- A position on the Earth's surface, in degrees, as a GPS reports it.
+-- Latitude is north (+) or south (-) of the equator; longitude is east
+-- (+) or west (-) of the meridian through Greenwich.
+class Lat_Lon
+create
+  make(lat, lon: Real)
+  require
+    latitude_in_range: lat >= -90.0 and lat <= 90.0
+    longitude_in_range: lon >= -180.0 and lon <= 180.0
+  do
+    latitude := lat
+    longitude := lon
+  end
+feature
+  once latitude: Real
+  once longitude: Real
+\end{append}
+
+Now the haversine formula. Nex's trigonometry works in radians, so the
+angles are converted first with \code{to_radians}.
+
+\begin{continued}{geo.nex}
+  -- The distance along the Earth's surface to `other`, in metres, by the
+  -- haversine formula.
+  distance_to(other: Lat_Lon): Real do
+    let phi1: Real := latitude.to_radians
+    let phi2: Real := other.latitude.to_radians
+    let half_dphi: Real := (phi2 - phi1) / 2.0
+    let half_dlambda: Real := (other.longitude - longitude).to_radians / 2.0
+    -- In Nex, ^ binds as tightly as * and groups left to right, so
+    -- a * b ^ 2 would mean (a * b) ^ 2. The parentheses matter.
+    let h: Real := (half_dphi.sin ^ 2)
+      + phi1.cos * phi2.cos * (half_dlambda.sin ^ 2)
+    result := 2.0 * Earth.RADIUS * h.sqrt.min(1.0).asin
+  ensure
+    non_negative: result >= 0.0
+  end
+\end{continued}
+
+Two details deserve a second look.
+
+\textbf{The parentheses around the squares.} In mathematics, a power
+binds more tightly than a multiplication, so $ab^2$ means $a(b^2)$. In
+Nex, \code{^} has the same precedence as \code{*}, and operators of the
+same precedence are worked out from left to right, so
+\code{a * b ^ 2} means \code{(a * b) ^ 2}. Without the parentheses,
+\code{phi1.cos * phi2.cos * half_dlambda.sin ^ 2} would square all three
+factors, and every east-west distance would come out about 30\% too short
+at Kestrel Island's latitude. It is the kind of mistake that runs without
+complaint and gives plausible numbers, so it pays to remember.
+
+\textbf{\code{h.sqrt.min(1.0)}.} In exact arithmetic $h$ is never more
+than 1, but for two places on opposite sides of the Earth rounding can push
+it a hair above, and $\arcsin$ of a number above 1 is undefined. Clamping
+it costs nothing.
+
+Last, a readable form for printing: the size of each angle, followed by its
+direction.
+
+\begin{continued}{geo.nex}
+  -- "47.05123 N, 34.59877 W"
+  to_string(): String do
+    result := fixed(latitude.abs, 5) + when latitude >= 0.0 then " N, " else " S, " end
+      + fixed(longitude.abs, 5) + when longitude >= 0.0 then " E" else " W" end
+  end
+end
+\end{continued}
+
+\begin{tryit}{try_geo.nex}
+intern Geo
+
+let harbour: Lat_Lon := create Lat_Lon.make(47.052428, -34.569106)
+let lighthouse: Lat_Lon := create Lat_Lon.make(47.079318, -34.565277)
+say("The harbour is at " + harbour.to_string())
+say("The lighthouse is at " + lighthouse.to_string())
+say("As the crow flies: " + fixed(harbour.distance_to(lighthouse), 1) + " m")
+
+let london: Lat_Lon := create Lat_Lon.make(51.5074, -0.1278)
+let new_york: Lat_Lon := create Lat_Lon.make(40.7128, -74.0060)
+say("London to New York: " + fixed(london.distance_to(new_york) / 1000.0, 0) + " km")
+\end{tryit}
+\tryoutput{try_geo}
+
+The lighthouse is about 3 km from the harbour. And London to New York
+comes out at about 5,570 km, which is what an atlas says.

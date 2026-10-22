@@ -197,6 +197,26 @@
                 "c.disable_double_buffering()"
                 "print(c.is_double_buffered)")))))
 
+(deftest double-buffering-keeps-the-drawing
+  ;; Switching buffering on and off changes which image a window shows, never
+  ;; what has been drawn.
+  (is (= ["Color(255, 0, 0)" "Color(255, 0, 0)"]
+         (both (program
+                "let c := create Canvas.make(10, 10)"
+                "c.enable_double_buffering()"
+                "c.clear(Color.RED)"
+                "print(c.color_at(0.5, 0.5))"
+                "c.disable_double_buffering()"
+                "print(c.color_at(0.5, 0.5))")))))
+
+(deftest window-title
+  (is (= ["\"Nex Canvas\"" "\"Kestrel Island\""]
+         (both (program
+                "let c := create Canvas.make(10, 10)"
+                "print(c.title)"
+                "c.set_title(\"Kestrel Island\")"
+                "print(c.title)")))))
+
 ;; ---------------------------------------------------------------------------
 ;; Saving
 ;; ---------------------------------------------------------------------------

@@ -47,16 +47,32 @@
   #{"play.nex" "train.nex"})
 
 (defn- excluded-neural-network-path?
-  "neural_network/'s command-line mains, and anything under its tutorial's
-   build/ folder: the git-ignored output of tutorial/build.py, one copy of
-   the project per stage of the tutorial, present only where it has been
-   built and checked by that build itself."
+  "neural_network/'s command-line mains."
   [^java.io.File f]
-  (let [sep java.io.File/separator
-        path (.getPath f)]
-    (and (str/includes? path (str sep "neural_network" sep))
-         (or (contains? excluded-neural-network-mains (.getName f))
-             (str/includes? path (str sep "tutorial" sep "build" sep))))))
+  (and (str/includes? (.getPath f) (str java.io.File/separator "neural_network" java.io.File/separator))
+       (contains? excluded-neural-network-mains (.getName f))))
+
+(defn- tutorial-build-path?
+  "Anything under a tutorial's build/ folder (neural_network/, digital_map/):
+   the git-ignored output of tutorial/build.py, one copy of the project per
+   stage of the tutorial, present only where it has been built and checked
+   by that build itself."
+  [^java.io.File f]
+  (let [sep java.io.File/separator]
+    (str/includes? (.getPath f) (str sep "tutorial" sep "build" sep))))
+
+(defn- runs-in-its-own-folder?
+  "digital_map/'s programs read kestrel_island.map from the folder they are
+   started in (via NEX_USER_DIR, as `nex` sets it), so they run in a
+   subprocess started there; see run-failure-with-nex-user-dir. Its library
+   files, which only define things, run in-process like any other example."
+  [^java.io.File f]
+  (and (str/includes? (.getPath f) (str java.io.File/separator "digital_map" java.io.File/separator))
+       (str/includes? (slurp f) "kestrel_island.map")))
+
+;; Files examples write into the folder they run in: navigate.nex, run with
+;; no display, draws its window into navigate.png instead.
+(def ^:private example-written-files ["examples/digital_map/navigate.png"])
 
 ;; Relative directories the file-I/O examples create; they normally clean up
 ;; after themselves (delete_tree), but we remove these defensively in case an
@@ -76,6 +92,7 @@
        (remove #(contains? excluded-network-examples (.getName ^java.io.File %)))
        (remove excluded-contracts-at-work-path?)
        (remove excluded-neural-network-path?)
+       (remove tutorial-build-path?)
        (sort-by #(.getPath ^java.io.File %))))
 
 (defn- root-cause [^Throwable t]
@@ -104,15 +121,18 @@
 
 (defn- run-failure-with-nex-user-dir
   "Like run-failure, but for an example that reads NEX_USER_DIR: run it in a
-   fresh subprocess with that env var set explicitly (mirroring what `bin/nex`
-   exports before running a script), reusing this JVM's already-resolved
-   classpath so it doesn't re-run dependency resolution."
-  [^java.io.File f]
+   fresh subprocess with that env var set explicitly to DIR (mirroring what
+   `bin/nex` exports before running a script), reusing this JVM's
+   already-resolved classpath so it doesn't re-run dependency resolution.
+   Headless, so that a program that would open a window takes its
+   no-display path instead of waiting for someone to close it."
+  [^java.io.File f ^String dir]
   (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
             (into-array String
-                        ["java" "-cp" (System/getProperty "java.class.path")
+                        ["java" "-Djava.awt.headless=true"
+                         "-cp" (System/getProperty "java.class.path")
                          "clojure.main" "-m" "nex.eval" (.getPath f)]))]
-    (.put (.environment pb) "NEX_USER_DIR" (System/getProperty "user.dir"))
+    (.put (.environment pb) "NEX_USER_DIR" dir)
     (.redirectErrorStream pb true)
     (let [proc (.start pb)
           output (slurp (.getInputStream proc))
@@ -133,8 +153,14 @@
         (is (<= 100 (count files))
             "sanity check: the example corpus was found")
         (doseq [^java.io.File f files]
-          (let [failure (if (needs-nex-user-dir? f)
-                          (run-failure-with-nex-user-dir f)
+          (let [failure (cond
+                          (runs-in-its-own-folder? f)
+                          (run-failure-with-nex-user-dir f (.getAbsolutePath (.getParentFile f)))
+
+                          (needs-nex-user-dir? f)
+                          (run-failure-with-nex-user-dir f (System/getProperty "user.dir"))
+
+                          :else
                           (run-failure f))]
             (is (nil? failure)
                 (str "example failed: " (.getPath f)
@@ -142,5 +168,5 @@
       (finally
         (doseq [d example-temp-dirs]
           (delete-recursively (io/file d)))
-        (doseq [f example-temp-files]
+        (doseq [f (concat example-temp-files example-written-files)]
           (.delete (io/file f)))))))
