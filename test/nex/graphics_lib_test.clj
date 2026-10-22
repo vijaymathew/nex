@@ -210,7 +210,7 @@
                 "print(c.color_at(0.5, 0.5))")))))
 
 (deftest window-title
-  (is (= ["Nex Canvas" "Kestrel Island"]
+  (is (= ["\"Nex Canvas\"" "\"Kestrel Island\""]
          (both (program
                 "let c := create Canvas.make(10, 10)"
                 "print(c.title)"
