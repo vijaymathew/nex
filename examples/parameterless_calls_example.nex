@@ -75,17 +75,17 @@ class Account
 
     -- Inside a class, a parameterless call on the current object drops the
     -- target as well: `show_name`, not `self.show_name()`.
-    show_all(c: Console) do
-      show_name(c)
-      show_balance(c)
+    show_all() do
+      show_name()
+      show_balance()
     end
 
-    show_name(c: Console) do
-      c.print_line("    owner:   " + name)
+    show_name() do
+      console.print_line("    owner:   " + name)
     end
 
-    show_balance(c: Console) do
-      c.print_line("    balance: " + balance.to_string)
+    show_balance() do
+      console.print_line("    balance: " + balance.to_string)
     end
 
     deposit(amount: Integer)
@@ -105,39 +105,37 @@ class Account
 end
 
 function main() do
-  let c: Console := create Console
-
   -- 1. Parameterless queries read like fields.
-  c.print_line("1. queries")
+  console.print_line("1. queries")
   let p: Point := create Point.make(3, 4)
-  c.print_line("  " + p.to_text + " -- x = " + p.get_x.to_string +
-               ", y = " + p.get_y.to_string)
+  console.print_line("  " + p.to_text + " -- x = " + p.get_x.to_string +
+                     ", y = " + p.get_y.to_string)
 
   -- 2. Parameterless commands, same shape.
-  c.print_line("2. commands")
+  console.print_line("2. commands")
   p.reset
-  c.print_line("  after reset: " + p.to_text)
+  console.print_line("  after reset: " + p.to_text)
 
   let counter: Counter := create Counter.make
   counter.increment
   counter.increment
   counter.increment
   counter.decrement
-  c.print_line("  counter after 3 increments and 1 decrement: " +
-               counter.count.to_string)
+  console.print_line("  counter after 3 increments and 1 decrement: " +
+                     counter.count.to_string)
   counter.reset
-  c.print_line("  after reset: " + counter.count.to_string)
+  console.print_line("  after reset: " + counter.count.to_string)
 
   -- 3. `count` above is a stored field and `get_x` is computed, yet both are
   --    reached the same way. That uniformity is what lets a class replace one
   --    with the other later without breaking any caller.
-  c.print_line("3. fields and functions are called alike")
+  console.print_line("3. fields and functions are called alike")
   let a: Account := create Account.make("Grace", 500)
-  a.show_all(c)
+  a.show_all()
   a.deposit(250)
   a.withdraw(100)
-  c.print_line("  after deposit(250) and withdraw(100):")
-  a.show_all(c)
+  console.print_line("  after deposit(250) and withdraw(100):")
+  a.show_all()
 end
 
 main()

@@ -1289,12 +1289,44 @@
   (reset! program-args-atom (vec args))
   nil)
 
+;; The running program, as the predeclared `program` (and `create Program`)
+;; gives it: its arguments, environment, process id and the folder it was
+;; started from. A thin view of the self Process, without the child-only
+;; operations, which the self Process can only refuse.
+(defn nex-program [] {:nex-builtin-type :Program})
+
+(defn nex-program-arguments []
+  (nex-array-from @program-args-atom))
+
+(defn nex-program-env
+  "The environment variable NAME, or \"\" when it is not set."
+  [name]
+  (or (System/getenv name) ""))
+
+(defn nex-program-has-env [name]
+  (some? (System/getenv name)))
+
+(defn nex-program-pid []
+  (.pid (java.lang.ProcessHandle/current)))
+
+(defn nex-program-working-directory
+  "The folder the program was started from. The `nex` launcher runs the JVM
+   from its own installation folder and records the user's folder in
+   NEX_USER_DIR; a program run some other way (`java -jar`) is in its own
+   folder already."
+  []
+  (let [d (System/getenv "NEX_USER_DIR")]
+    (if (and d (not= d ""))
+      d
+      (System/getProperty "user.dir"))))
+
 (defn nex-process-command-line [proc]
   (if (process-self? proc)
     (nex-array-from @program-args-atom)
     (nex-array-from (into [(:command proc)] (:arguments proc)))))
 
 (defn nex-console? [v] (and (map? v) (= (:nex-builtin-type v) :Console)))
+(defn nex-program? [v] (and (map? v) (= (:nex-builtin-type v) :Program)))
 (defn nex-process? [v] (and (map? v) (= (:nex-builtin-type v) :Process)))
 (defn nex-task? [v] (and (map? v) (= (:nex-builtin-type v) :Task)))
 (defn nex-channel? [v] (and (map? v) (= (:nex-builtin-type v) :Channel)))

@@ -51,6 +51,10 @@ fully in the Nex documentation.
   \item[\code{intern}] loads another file of the project, as
     \code{intern Geo} loads \code{geo.nex}, or a file of the library, as
     \code{intern graphics/Canvas} does.
+  \item[\code{console} and \code{program}] are in every program without
+    being declared: \code{console}, a \code{Console}, prints text without
+    quotes, and \code{program}, the running \code{Program}, knows its
+    arguments and the folder it was started from.
   \item[\code{once} fields] can be set by a constructor and never changed,
     which makes \code{Point}, \code{Lat_Lon} and \code{Edge} values.
   \item[Constants] such as \code{Earth.RADIUS} and \code{Palette.SEA} are

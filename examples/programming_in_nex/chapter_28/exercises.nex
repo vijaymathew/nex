@@ -4,8 +4,6 @@
 -- ============================================================================
 
 function main() do
-  let c: Console := create Console
-
   -- 1. A task that sums 1..100, returns through `result`, printed via await.
   let summer: Task[Integer] := spawn do
     let total: Integer := 0
@@ -16,7 +14,7 @@ function main() do
     result := total
   end
   let total_1_100: Integer := summer.await
-  c.print_line("1. sum 1..100 = " + total_1_100.to_string)   -- 5050
+  console.print_line("1. sum 1..100 = " + total_1_100.to_string)   -- 5050
   assert total_1_100 = 5050
 
   -- 2. A buffered Channel[String] of capacity 3: send three, print size, then
@@ -25,12 +23,12 @@ function main() do
   words.send("alpha")
   words.send("beta")
   words.send("gamma")
-  c.print_line("2. channel size after three sends = " + words.size.to_string)   -- 3
+  console.print_line("2. channel size after three sends = " + words.size.to_string)   -- 3
   assert words.size = 3
   let w1: String := words.receive
   let w2: String := words.receive
   let w3: String := words.receive
-  c.print_line("2. received in order: " + w1 + " " + w2 + " " + w3)             -- alpha beta gamma
+  console.print_line("2. received in order: " + w1 + " " + w2 + " " + w3)             -- alpha beta gamma
   assert w1 = "alpha"
   assert w2 = "beta"
   assert w3 = "gamma"
@@ -43,9 +41,9 @@ function main() do
   let sender_b: Task := spawn do ch_b.send("from B") end
   select
     when ch_a.receive as msg then
-      c.print_line("3. select received: " + msg)
+      console.print_line("3. select received: " + msg)
     when ch_b.receive as msg then
-      c.print_line("3. select received: " + msg)
+      console.print_line("3. select received: " + msg)
   end
   sender_a.await
   sender_b.await
@@ -55,8 +53,8 @@ function main() do
   let b: Task[Integer] := spawn do result := 3 * 3 end
   let d: Task[Integer] := spawn do result := 4 * 4 end
   let results: Array[Integer] := await_all([a, b, d])
-  c.print_line("4. await_all = " + results.get(0).to_string + ", " +
-               results.get(1).to_string + ", " + results.get(2).to_string)   -- 4, 9, 16
+  console.print_line("4. await_all = " + results.get(0).to_string + ", " +
+                     results.get(1).to_string + ", " + results.get(2).to_string)   -- 4, 9, 16
   assert results = [4, 9, 16]
 
   -- 5. A pipeline that processes SEVERAL values. The producer sends each value
@@ -71,7 +69,7 @@ function main() do
     end
     pipe.close          -- signal: no more values are coming
   end
-  c.print("5. consumed until closed: ")
+  console.print("5. consumed until closed: ")
   -- Only receive when a value is buffered; this avoids blocking on an empty
   -- channel and racing the producer's close. We stop once it is closed AND
   -- drained.
@@ -79,11 +77,11 @@ function main() do
   from until pipe.is_closed and pipe.size = 0 do
     if pipe.size > 0 then
       let v: Integer := pipe.receive
-      c.print(v.to_string + " ")
+      console.print(v.to_string + " ")
       pipe_out := pipe_out + v.to_string + " "
     end
   end
-  c.new_line
+  console.new_line
   producer.await
   assert pipe_out.trim = "10 20 30 40 50"
 
@@ -112,16 +110,16 @@ function main() do
     end
     input.close
   end
-  c.print("6. transformed (squares): ")
+  console.print("6. transformed (squares): ")
   let squares_out: String := ""
   from until output.is_closed and output.size = 0 do
     if output.size > 0 then
       let v: Integer := output.receive
-      c.print(v.to_string + " ")
+      console.print(v.to_string + " ")
       squares_out := squares_out + v.to_string + " "
     end
   end
-  c.new_line
+  console.new_line
   feeder.await
   worker.await
   assert squares_out.trim = "1 4 9 16"

@@ -4,14 +4,12 @@
 -- ============================================================================
 
 function main() do
-  let c: Console := create Console
-
   -- --------------------------------------------------------------------------
   -- 1. if/elseif: "positive" / "negative" / "zero".
   -- --------------------------------------------------------------------------
-  c.print_line("1. sign(5)  = " + sign_word(5))     -- positive
-  c.print_line("1. sign(-3) = " + sign_word(-3))    -- negative
-  c.print_line("1. sign(0)  = " + sign_word(0))     -- zero
+  console.print_line("1. sign(5)  = " + sign_word(5))     -- positive
+  console.print_line("1. sign(-3) = " + sign_word(-3))    -- negative
+  console.print_line("1. sign(0)  = " + sign_word(0))     -- zero
   assert sign_word(5) = "positive"
   assert sign_word(-3) = "negative"
   assert sign_word(0) = "zero"
@@ -19,8 +17,8 @@ function main() do
   -- --------------------------------------------------------------------------
   -- 2. The weekday/weekend if-chain rewritten as a `case`.
   -- --------------------------------------------------------------------------
-  c.print_line("2. Mon -> " + day_kind("Mon"))      -- weekday
-  c.print_line("2. Sun -> " + day_kind("Sun"))      -- weekend
+  console.print_line("2. Mon -> " + day_kind("Mon"))      -- weekday
+  console.print_line("2. Sun -> " + day_kind("Sun"))      -- weekend
   assert day_kind("Mon") = "weekday"
   assert day_kind("Sun") = "weekend"
 
@@ -29,16 +27,16 @@ function main() do
   -- --------------------------------------------------------------------------
   let n3: Integer := 7
   let parity: String := when n3 % 2 = 0 then "even" else "odd" end
-  c.print_line("3. parity of " + n3.to_string + " = " + parity)   -- odd
+  console.print_line("3. parity of " + n3.to_string + " = " + parity)   -- odd
   assert parity = "odd"
 
   -- --------------------------------------------------------------------------
   -- 4. Fizz-Buzz.
   -- --------------------------------------------------------------------------
-  c.print_line("4. 15 -> " + fizzbuzz(15))   -- FizzBuzz
-  c.print_line("4. 9  -> " + fizzbuzz(9))    -- Fizz
-  c.print_line("4. 10 -> " + fizzbuzz(10))   -- Buzz
-  c.print_line("4. 7  -> " + fizzbuzz(7))    -- 7
+  console.print_line("4. 15 -> " + fizzbuzz(15))   -- FizzBuzz
+  console.print_line("4. 9  -> " + fizzbuzz(9))    -- Fizz
+  console.print_line("4. 10 -> " + fizzbuzz(10))   -- Buzz
+  console.print_line("4. 7  -> " + fizzbuzz(7))    -- 7
   assert fizzbuzz(15) = "FizzBuzz"
   assert fizzbuzz(9) = "Fizz"
   assert fizzbuzz(10) = "Buzz"
@@ -51,9 +49,9 @@ function main() do
   --       25.0 kg -> tier 10-50:  4.0 * 25.0 = 100.0
   --       75.0 kg -> tier > 50 :  3.0 * 75.0 = 225.0
   -- --------------------------------------------------------------------------
-  shipping_report(c, 5.0)    -- 25.0
-  shipping_report(c, 25.0)   -- 100.0
-  shipping_report(c, 75.0)   -- 225.0
+  shipping_report(5.0)    -- 25.0
+  shipping_report(25.0)   -- 100.0
+  shipping_report(75.0)   -- 225.0
   assert shipping_cost(5.0) = 25.0
   assert shipping_cost(25.0) = 100.0
   assert shipping_cost(75.0) = 225.0
@@ -101,9 +99,9 @@ function shipping_cost(weight: Real): Real do
   end
 end
 
-function shipping_report(c: Console, weight: Real) do
-  c.print_line("5. Weight: " + weight.to_string + " kg, Cost: " +
-               shipping_cost(weight).to_string)
+function shipping_report(weight: Real) do
+  console.print_line("5. Weight: " + weight.to_string + " kg, Cost: " +
+                     shipping_cost(weight).to_string)
 end
 
 main()

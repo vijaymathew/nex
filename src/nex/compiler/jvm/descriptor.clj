@@ -70,6 +70,7 @@
       "Function" (ir/object-jvm-type "java/lang/Object")
       "Cursor" (ir/object-jvm-type "java/lang/Object")
       "Console" (ir/object-jvm-type "java/lang/Object")
+      "Program" (ir/object-jvm-type "java/lang/Object")
       "Process" (ir/object-jvm-type "java/lang/Object")
       "Task" (ir/object-jvm-type "java/lang/Object")
       "Channel" (ir/object-jvm-type "java/lang/Object")

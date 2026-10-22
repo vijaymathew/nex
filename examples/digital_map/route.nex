@@ -12,7 +12,7 @@ intern Directions
 intern Helpers
 
 function main() do
-  let args: Array[String] := (create Process).command_line()
+  let args: Array[String] := program.arguments
   let names: Array[String] := []
   let mode: Mode := Mode.Driving
   let shortest: Boolean := false
@@ -42,11 +42,11 @@ function main() do
 
   let island: Island_Map := create Island_Map.load(user_path(map_file))
   if names.length /= 2 then
-    say("usage: nex route.nex FROM TO [--walk] [--shortest] [--algorithm bfs|dijkstra|astar]")
-    say("")
-    say("Places on " + island.name + ":")
+    console.print_line("usage: nex route.nex FROM TO [--walk] [--shortest] [--algorithm bfs|dijkstra|astar]")
+    console.print_line("")
+    console.print_line("Places on " + island.name + ":")
     across island.places as p do
-      say("  " + p.name)
+      console.print_line("  " + p.name)
     end
   elseif ?island.find_place(names.get(0)) as start
       and ?island.find_place(names.get(1)) as finish then
@@ -57,21 +57,21 @@ function main() do
     if found.found() then
       print_route(g, found, start.name, finish.name)
     else
-      say("There is no way from " + start.name + " to " + finish.name + ".")
+      console.print_line("There is no way from " + start.name + " to " + finish.name + ".")
     end
   else
-    say("I don't know one of those places. Run nex route.nex to list them.")
+    console.print_line("I don't know one of those places. Run nex route.nex to list them.")
   end
 end
 
 function print_route(g: Road_Graph, found: Search_Result, from_name, to_name: String) do
   let how: String := when g.mode = Mode.Walking then "Walking" else "Driving" end
-  say(how + " from " + from_name + " to " + to_name + ": "
+  console.print_line(how + " from " + from_name + " to " + to_name + ": "
     + distance_text(route_cost(g, found.path, by_distance())) + ", about "
     + duration_text(route_cost(g, found.path, by_time())) + ".")
-  say(found.algorithm + " explored " + found.explored.length.to_string
+  console.print_line(found.algorithm + " explored " + found.explored.length.to_string
     + " of the " + g.nodes.length.to_string + " nodes.")
-  say("")
+  console.print_line("")
   let steps: Array[Instruction] := directions(g, found.path, to_name)
   from
     let i: Integer := 0
@@ -84,7 +84,7 @@ function print_route(g: Road_Graph, found: Search_Result, from_name, to_name: St
       line := line.pad_end(" ", 42)
         + distance_text(steps.get(i + 1).distance - step.distance).pad_start(" ", 8)
     end
-    say(line)
+    console.print_line(line)
     i := i + 1
   end
 end

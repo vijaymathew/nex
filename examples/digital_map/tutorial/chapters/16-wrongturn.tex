@@ -479,7 +479,7 @@ if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b 
   let found: Search_Result := find_route(g, g.nearest_node(island.point(a.node_id)),
     g.nearest_node(island.point(b.node_id)), "astar", false)
   let trip: Trip := create Trip.make(g, found.path, b.name, "astar", 7)
-  say("   0 s  " + trip.navigator.prompt())
+  console.print_line("   0 s  " + trip.navigator.prompt())
   let step: String := trip.navigator.next_instruction().text
   let told: Boolean := false
   from
@@ -494,17 +494,17 @@ if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b 
     trip.advance(1.0)
     let time: String := fixed(trip.clock, 0).pad_start(" ", 4) + " s  "
     if trip.navigator.reroutes > before then
-      say(time + "Off the route: planning a new one")
+      console.print_line(time + "Off the route: planning a new one")
     end
     let next: String := trip.navigator.next_instruction().text
     if next /= step or trip.clock.round % 30 = 0 then
-      say(time + trip.navigator.prompt().pad_end(" ", 44)
+      console.print_line(time + trip.navigator.prompt().pad_end(" ", 44)
         + distance_text(trip.navigator.remaining_distance()) + " to go")
       step := next
     end
   end
-  say(fixed(trip.clock, 0).pad_start(" ", 4) + " s  " + trip.navigator.prompt())
-  say("The trip took " + fixed(trip.clock, 0) + " seconds; the route planned at the start takes "
+  console.print_line(fixed(trip.clock, 0).pad_start(" ", 4) + " s  " + trip.navigator.prompt())
+  console.print_line("The trip took " + fixed(trip.clock, 0) + " seconds; the route planned at the start takes "
     + fixed(create Route_Line.make(g, found.path).duration(), 0) + ".")
 end
 \end{tryit}

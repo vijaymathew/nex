@@ -411,7 +411,7 @@ if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b 
     g.nearest_node(island.point(b.node_id)), "astar", false)
   let nav: Navigator := create Navigator.make(g, found.path, b.name, "astar")
   let line: Route_Line := nav.route
-  say("route: " + distance_text(line.length()) + ", " + duration_text(line.duration()))
+  console.print_line("route: " + distance_text(line.length()) + ", " + duration_text(line.duration()))
   let d: Real := 0.0
   let side: Real := 6.0
   from
@@ -421,7 +421,7 @@ if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b 
     let fix: Point := line.point_at(d) + direction(line.heading_at(d) + 90.0) * side
     nav.update(fix)
     if (d / 100.0).round % 5 = 0 or nav.has_arrived() then
-      say(fixed(nav.progress, 0).pad_start(" ", 5) + " m  " + nav.prompt().pad_end(" ", 42)
+      console.print_line(fixed(nav.progress, 0).pad_start(" ", 5) + " m  " + nav.prompt().pad_end(" ", 42)
         + distance_text(nav.remaining_distance()) + ", " + duration_text(nav.remaining_time()))
     end
     d := d + 100.0
@@ -440,7 +440,7 @@ if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b 
   end
   repeat 3 do
     lost.update(line.point_at(600.0) + direction(line.heading_at(600.0) + 90.0) * 60.0)
-    say("a fix 60 m from the route: " + lost.misses.to_string + " in a row, off the route: "
+    console.print_line("a fix 60 m from the route: " + lost.misses.to_string + " in a row, off the route: "
       + lost.is_off_route().to_string)
   end
 end

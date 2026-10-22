@@ -23,8 +23,8 @@ function greeting_for_hour(hour: Integer): String do
   end
 end
 
-function greet_by_time(c: Console, hour: Integer) do
-  c.print_line(greeting_for_hour(hour))   -- thin effectful wrapper
+function greet_by_time(hour: Integer) do
+  console.print_line(greeting_for_hour(hour))   -- thin effectful wrapper
 end
 
 -- 3. is_prime, written with is_divisor as a helper (from Section 7.6).
@@ -83,50 +83,48 @@ function collatz_length(n: Integer): Integer do
 end
 
 function main() do
-  let c: Console := create Console
-
   -- 1.
-  c.print_line("1. safe_percentage(50,200) = " + safe_percentage(50.0, 200.0).to_string)  -- 25.0
-  c.print_line("1. safe_percentage(0,100)  = " + safe_percentage(0.0, 100.0).to_string)   -- 0.0
-  c.print_line("1. safe_percentage(10,0)   = " + safe_percentage(10.0, 0.0).to_string)    -- 0.0
+  console.print_line("1. safe_percentage(50,200) = " + safe_percentage(50.0, 200.0).to_string)  -- 25.0
+  console.print_line("1. safe_percentage(0,100)  = " + safe_percentage(0.0, 100.0).to_string)   -- 0.0
+  console.print_line("1. safe_percentage(10,0)   = " + safe_percentage(10.0, 0.0).to_string)    -- 0.0
   assert safe_percentage(50.0, 200.0) = 25.0
   assert safe_percentage(0.0, 100.0) = 0.0
   assert safe_percentage(10.0, 0.0) = 0.0
 
   -- 2.
-  c.print("2. ")
-  greet_by_time(c, 9)
-  c.print("2. ")
-  greet_by_time(c, 14)
-  c.print("2. ")
-  greet_by_time(c, 20)
-  c.print_line("2. pure: greeting_for_hour(9)='" + greeting_for_hour(9) + "'")
+  console.print("2. ")
+  greet_by_time(9)
+  console.print("2. ")
+  greet_by_time(14)
+  console.print("2. ")
+  greet_by_time(20)
+  console.print_line("2. pure: greeting_for_hour(9)='" + greeting_for_hour(9) + "'")
   assert greeting_for_hour(9) = "Good morning!"
   assert greeting_for_hour(14) = "Good afternoon!"
   assert greeting_for_hour(20) = "Good evening!"
 
   -- 3.
-  c.print_line("3. is_prime(2)=" + is_prime(2).to_string +
-               " is_prime(9)=" + is_prime(9).to_string +
-               " is_prime(17)=" + is_prime(17).to_string +
-               " is_prime(1)=" + is_prime(1).to_string)   -- true false true false
+  console.print_line("3. is_prime(2)=" + is_prime(2).to_string +
+                     " is_prime(9)=" + is_prime(9).to_string +
+                     " is_prime(17)=" + is_prime(17).to_string +
+                     " is_prime(1)=" + is_prime(1).to_string)   -- true false true false
   assert is_prime(2)
   assert not is_prime(9)
   assert is_prime(17)
   assert not is_prime(1)
 
   -- 4.
-  c.print_line("4. count_vowels('Hello')=" + count_vowels("Hello").to_string +
-               " 'rhythm'=" + count_vowels("rhythm").to_string +
-               " 'aeiou'=" + count_vowels("aeiou").to_string)   -- 2 0 5
+  console.print_line("4. count_vowels('Hello')=" + count_vowels("Hello").to_string +
+                     " 'rhythm'=" + count_vowels("rhythm").to_string +
+                     " 'aeiou'=" + count_vowels("aeiou").to_string)   -- 2 0 5
   assert count_vowels("Hello") = 2
   assert count_vowels("rhythm") = 0
   assert count_vowels("aeiou") = 5
 
   -- 5.*
-  c.print_line("5. collatz_length(6)=" + collatz_length(6).to_string +
-               " (27)=" + collatz_length(27).to_string +
-               " (1)=" + collatz_length(1).to_string)   -- 8 111 0
+  console.print_line("5. collatz_length(6)=" + collatz_length(6).to_string +
+                     " (27)=" + collatz_length(27).to_string +
+                     " (1)=" + collatz_length(1).to_string)   -- 8 111 0
   assert collatz_length(6) = 8
   assert collatz_length(27) = 111
   assert collatz_length(1) = 0

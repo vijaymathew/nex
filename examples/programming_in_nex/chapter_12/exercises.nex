@@ -108,14 +108,12 @@ function reverse_with_stack(s: String): String do
 end
 
 function main() do
-  let c: Console := create Console
-
   -- 1.
   let r: Rectangle := create Rectangle.make(4.0, 6.0)
   let sq: Rectangle := create Rectangle.make(5.0, 5.0)
-  c.print_line("1. 4x6: area=" + r.area.to_string + " perimeter=" + r.perimeter.to_string +
-               " is_square=" + r.is_square.to_string)                     -- 24.0 20.0 false
-  c.print_line("1. 5x5: is_square=" + sq.is_square.to_string)             -- true
+  console.print_line("1. 4x6: area=" + r.area.to_string + " perimeter=" + r.perimeter.to_string +
+                     " is_square=" + r.is_square.to_string)                     -- 24.0 20.0 false
+  console.print_line("1. 5x5: is_square=" + sq.is_square.to_string)             -- true
   assert r.area = 24.0
   assert r.perimeter = 20.0
   assert not r.is_square
@@ -123,14 +121,14 @@ function main() do
 
   -- 2.
   let t: Temperature := create Temperature.make(20.0)
-  c.print_line("2. 20C: F=" + t.fahrenheit.to_string + " K=" + t.kelvin.to_string +
-               " describe=" + t.describe)                                 -- 68.0 293.15 mild
+  console.print_line("2. 20C: F=" + t.fahrenheit.to_string + " K=" + t.kelvin.to_string +
+                     " describe=" + t.describe)                                 -- 68.0 293.15 mild
   assert t.fahrenheit = 68.0
   assert t.kelvin = 293.15
   assert t.describe = "mild"
 
   -- 3.
-  c.print_line("3. reverse 'classes' = '" + reverse_with_stack("classes") + "'")  -- sessalc
+  console.print_line("3. reverse 'classes' = '" + reverse_with_stack("classes") + "'")  -- sessalc
   assert reverse_with_stack("classes") = "sessalc"
 
   -- 4.
@@ -138,10 +136,10 @@ function main() do
   acc.add(10.0)
   acc.add(20.0)
   acc.add(30.0)
-  c.print_line("4. average of 10,20,30 = " + acc.average.to_string)       -- 20.0
+  console.print_line("4. average of 10,20,30 = " + acc.average.to_string)       -- 20.0
   assert acc.average = 20.0
   acc.reset()
-  c.print_line("4. after reset: count=" + acc.count.to_string)            -- 0
+  console.print_line("4. after reset: count=" + acc.count.to_string)            -- 0
   assert acc.count = 0
 
   -- 5.*
@@ -154,17 +152,17 @@ function main() do
     q.enqueue(i)
     i := i + 1
   end
-  c.print("5. dequeue order (expect 1..5 FIFO): ")
+  console.print("5. dequeue order (expect 1..5 FIFO): ")
   let order: String := ""
   from
   until
     q.is_empty
   do
     let v: Integer := q.dequeue
-    c.print(v.to_string + " ")
+    console.print(v.to_string + " ")
     order := order + v.to_string + " "
   end
-  c.new_line
+  console.new_line
   assert order = "1 2 3 4 5 "
 end
 

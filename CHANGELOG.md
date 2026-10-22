@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **`console` and `program` are predeclared.** Every program can write
+  `console.print_line("hi")` (text without quotes, unlike `print`) and read
+  `program.arguments`, `program.env("HOME")`, `program.working_directory` and
+  so on, without creating anything first. They are read-only globals, usable at
+  the top level and in every function and class, on both backends and in the
+  REPL. A program that declares either name itself (a top-level `let`, a
+  function, or its own `Console` or `Program` class) keeps its own, so existing
+  programs are unaffected; a parameter, field or local of the same name shadows
+  it.
+- **New `Program` type** for the running program: `arguments`, `env`,
+  `has_env`, `pid`, `working_directory` (the folder `nex` was started from, not
+  the launcher's own) and `exit`.
+
 - **Java interop calls are much faster.** A call in a `with "java"` block used
   to be resolved from scratch every time it ran: every public method of the
   class scanned for the name, an overload picked, and, for a method of a JDK
@@ -30,6 +43,9 @@
 - **`Picture.grayscale` is about a thousand times faster**, done by one
   Java2D operation instead of a call per pixel, with exactly the same result
   (checked against all 16,777,216 colors).
+- **Fixed: under `--interpret`, a `let` inside an `if` branch overwrote an
+  outer variable of the same name** instead of hiding it until the branch
+  ended. Each branch now has its own scope, as on the compiled backend.
 
 ## 0.6.2 - 2026-10-22
 

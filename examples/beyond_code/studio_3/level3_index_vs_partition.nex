@@ -179,7 +179,6 @@ function build_tasks(): Array [Delivery_Task] do
 end
 
 function main() do
-  let console: Console := create Console
   let rows: Array [Delivery_Task] := build_tasks()
   let idx: Id_Index_Strategy := create Id_Index_Strategy.make(rows)
   let par: Status_Partition_Strategy := create Status_Partition_Strategy.make(rows)

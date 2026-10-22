@@ -279,7 +279,7 @@ if ?island.find_place("beach") as a and ?island.find_place("lighthouse") as b th
   let source: Integer := g.nearest_node(island.point(a.node_id))
   let target: Integer := g.nearest_node(island.point(b.node_id))
   let found: Search_Result := breadth_first(g, source, target)
-  say(summary(g, found))
+  console.print_line(summary(g, found))
   picture_of_search(create Map_View.make(island, 1000, 700), found, "bfs.png")
 end
 \end{tryit}

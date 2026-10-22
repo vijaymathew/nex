@@ -11,6 +11,7 @@
             [nex.intern :as intern]
             [nex.lower :as lower]
             [nex.parser :as p]
+            [nex.predeclared :as predeclared]
             [nex.typechecker :as tc]
             [nex.walker :as walker])
   (:import [java.io ByteArrayInputStream File FileInputStream]
@@ -406,7 +407,9 @@
   ([nex-file output-dir] (compile-file nex-file output-dir {}))
   ([nex-file output-dir opts]
    (let [source-path (.getPath (io/file nex-file))
-         ast (p/ast (slurp source-path))
+         ;; `console` and `program` (see nex.predeclared), as nex.eval/eval-file
+         ;; declares them.
+         ast (predeclared/add (p/ast (slurp source-path)))
          result (compile-ast source-path ast opts)]
      (if output-dir
        (let [out-dir (io/file output-dir)

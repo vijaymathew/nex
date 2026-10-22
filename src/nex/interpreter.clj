@@ -1719,6 +1719,7 @@
       "Min_Heap" (make-min-heap nil)
       "Console" {:nex-builtin-type :Console}
       "Process" (nex-process-self)
+      "Program" (rt/nex-program)
       "Task" nil
       "Channel" nil
       nil)
@@ -3065,17 +3066,22 @@
 (defmethod eval-node :if
   [ctx {:keys [condition then elseif else]}]
   (maybe-debug-pause ctx {:type :if :condition condition :then then :elseif elseif :else else})
-  ;; Evaluate condition, then elseif chain, then optional else
-  (let [cond-val (eval-node ctx condition)]
+  ;; Evaluate condition, then elseif chain, then optional else. Each branch
+  ;; runs in its own scope, so a `let` inside it shadows rather than
+  ;; overwriting an outer variable of the same name.
+  (let [run-branch (fn [stmts]
+                     (let [branch-ctx (assoc ctx :current-env (make-env (:current-env ctx)))]
+                       (last (mapv #(eval-node branch-ctx %) stmts))))
+        cond-val (eval-node ctx condition)]
     (if cond-val
-      (last (map #(eval-node ctx %) then))
+      (run-branch then)
       (if-let [matched (some (fn [clause]
                                (when (eval-node ctx (:condition clause))
                                  clause))
                              elseif)]
-        (last (map #(eval-node ctx %) (:then matched)))
+        (run-branch (:then matched))
         (when else
-          (last (map #(eval-node ctx %) else)))))))
+          (run-branch else))))))
 
 (defmethod eval-node :case
   [ctx {:keys [expr clauses else]}]
@@ -3416,6 +3422,10 @@
   [_ctx _constructor _args]
   {:nex-builtin-type :Console})
 
+(defn- create-program-builtin
+  [_ctx _constructor _args]
+  (rt/nex-program))
+
 (defn- create-process-builtin
   [ctx constructor args]
   (let [arg-values (mapv #(eval-node ctx %) args)]
@@ -3549,6 +3559,7 @@
    `eval-node :create`. A class name with no entry here is a user-defined
    (or Java interop) class, handled by `create-user-object`."
   {"Console"          create-console-builtin
+   "Program"          create-program-builtin
    "Process"          create-process-builtin
    "Array"            create-array-builtin
    "Map"              create-map-builtin
@@ -3683,7 +3694,11 @@
 
 (defmethod eval-node :create
   [ctx {:keys [class-name generic-args constructor args]}]
-  (if-let [handler (get create-builtin-dispatch class-name)]
+  ;; Program became a builtin type after programs could already have a class
+  ;; called Program; such a class keeps its meaning.
+  (if-let [handler (and (not (and (= "Program" class-name)
+                                  (lookup-class-if-exists ctx class-name)))
+                        (get create-builtin-dispatch class-name))]
     (handler ctx constructor args)
     (create-user-object ctx class-name generic-args constructor args)))
 

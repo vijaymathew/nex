@@ -563,7 +563,7 @@ let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map")
 let view: Map_View := create Map_View.make(island, 1000, 700)
 view.draw_map()
 view.save("first_map.png")
-say("saved first_map.png, at " + fixed(view.metres_per_pixel, 2) + " metres per pixel")
+console.print_line("saved first_map.png, at " + fixed(view.metres_per_pixel, 2) + " metres per pixel")
 \end{tryit}
 \tryoutput{try_draw}
 \mappicture{first_map}
@@ -607,7 +607,7 @@ across island.areas as a do
   end
 end
 view.save("unprojected.png")
-say("saved unprojected.png")
+console.print_line("saved unprojected.png")
 \end{tryit}
 \tryoutput{try_unprojected}
 \mappicture[0.8\linewidth]{unprojected}

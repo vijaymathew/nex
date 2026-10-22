@@ -1544,6 +1544,28 @@
    "read_real"    ^{:returns "Real" :signatures [{:params [] :return-type "Real"}]}
    (fn [_ & _] (nex-parse-real (nex-console-read-line)))})
 
+(def program-type-methods
+  {"arguments"    ^{:returns {:base-type "Array" :type-params ["String"]}
+                    :signatures [{:params []
+                                  :return-type {:base-type "Array" :type-params ["String"]}}]}
+   (fn [_ & _] (rt/nex-program-arguments))
+   "env"          ^{:returns "String"
+                    :signatures [{:params [{:name "name" :type "String"}]
+                                  :return-type "String"}]}
+   (fn [_ name & _] (rt/nex-program-env (str name)))
+   "has_env"      ^{:returns "Boolean"
+                    :signatures [{:params [{:name "name" :type "String"}]
+                                  :return-type "Boolean"}]}
+   (fn [_ name & _] (rt/nex-program-has-env (str name)))
+   "pid"          ^{:returns "Integer" :signatures [{:params [] :return-type "Integer"}]}
+   (fn [_ & _] (rt/nex-program-pid))
+   "working_directory" ^{:returns "String" :signatures [{:params [] :return-type "String"}]}
+   (fn [_ & _] (rt/nex-program-working-directory))
+   "exit"         ^{:returns "Void"
+                    :signatures [{:params [{:name "code" :type "Integer"}]
+                                  :return-type "Void"}]}
+   (fn [_ code & _] (System/exit (int code)))})
+
 (def process-type-methods
   {"getenv"       ^{:returns "String"
                     :signatures [{:params [{:name "name" :type "String"}]
@@ -1728,6 +1750,7 @@
    :Channel channel-type-methods
    :Console console-type-methods
    :Process process-type-methods
+   :Program program-type-methods
    :ArrayCursor arraycursor-type-methods
    :StringCursor stringcursor-type-methods
    :MapCursor mapcursor-type-methods

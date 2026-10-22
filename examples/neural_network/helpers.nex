@@ -33,14 +33,11 @@ end
 
 -- The full path of a file the user named. The `nex` launcher runs
 -- programs from its own installation folder, so a relative name is
--- resolved against the folder `nex` was started from, NEX_USER_DIR.
--- Run some other way (no NEX_USER_DIR), a relative name is left as it is,
--- relative to the current folder.
+-- resolved against the folder the program was started from.
 function user_path(raw: String): String do
-  let user_dir: String := (create Process).getenv("NEX_USER_DIR")
-  if raw.starts_with("/") or user_dir = "" then
+  if raw.starts_with("/") then
     result := raw
   else
-    result := user_dir + "/" + raw
+    result := program.working_directory + "/" + raw
   end
 end

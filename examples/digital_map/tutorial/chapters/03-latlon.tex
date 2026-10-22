@@ -240,13 +240,13 @@ intern Geo
 
 let harbour: Lat_Lon := create Lat_Lon.make(47.052428, -34.569106)
 let lighthouse: Lat_Lon := create Lat_Lon.make(47.079318, -34.565277)
-say("The harbour is at " + harbour.to_string())
-say("The lighthouse is at " + lighthouse.to_string())
-say("As the crow flies: " + fixed(harbour.distance_to(lighthouse), 1) + " m")
+console.print_line("The harbour is at " + harbour.to_string())
+console.print_line("The lighthouse is at " + lighthouse.to_string())
+console.print_line("As the crow flies: " + fixed(harbour.distance_to(lighthouse), 1) + " m")
 
 let london: Lat_Lon := create Lat_Lon.make(51.5074, -0.1278)
 let new_york: Lat_Lon := create Lat_Lon.make(40.7128, -74.0060)
-say("London to New York: " + fixed(london.distance_to(new_york) / 1000.0, 0) + " km")
+console.print_line("London to New York: " + fixed(london.distance_to(new_york) / 1000.0, 0) + " km")
 \end{tryit}
 \tryoutput{try_geo}
 

@@ -14,12 +14,14 @@
    project's own checks.nex is a self-contained, self-checking regression suite
    (verified individually: pure computation in 01-04, loopback-only sockets/HTTP
    in 06/07, a headless Swing check in 08, and scratch-directory I/O under
-   NEX_USER_DIR in 05/09), so those run alongside everything else. The
-   NEX_USER_DIR-dependent pair can't run in-process like the rest — see
-   run-failure-with-nex-user-dir below — because Process.getenv reads the real
-   OS environment, which is fixed for this JVM's whole lifetime; there is no
-   way to make eval-file itself see a NEX_USER_DIR the test's own caller never
-   set."
+   program.working_directory in 05/09), so those run alongside everything
+   else. An example that reads NEX_USER_DIR itself can't run in-process like
+   the rest — see run-failure-with-nex-user-dir below — because environment
+   variables are the real OS environment, fixed for this JVM's whole
+   lifetime; there is no way to make eval-file itself see a NEX_USER_DIR the
+   test's own caller never set. (program.working_directory needs no such
+   care: without NEX_USER_DIR it is this JVM's own folder, the repository
+   root, which is what the subprocess would be given anyway.)"
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -78,7 +80,7 @@
 ;; after themselves (delete_tree), but we remove these defensively in case an
 ;; example fails part-way through. tmp_dupcheck/tmp_radar_check come from
 ;; contracts_at_work/05_dup_finder and .../09_radar's checks.nex, created
-;; under NEX_USER_DIR (see run-failure-with-nex-user-dir).
+;; under program.working_directory, the repository root here.
 (def ^:private example-temp-dirs ["tmp_io" "tmp_bin_io" "tmp_dupcheck" "tmp_radar_check"])
 
 ;; Files examples write into the folder they run in, which is the repository
@@ -112,10 +114,10 @@
              (first (str/split-lines (or (.getMessage c) ""))))))))
 
 (defn- needs-nex-user-dir?
-  "Whether an example's own source reads NEX_USER_DIR (today: 05_dup_finder and
-   09_radar's checks.nex, for their scratch directories) — detected from the
-   source itself, not a hardcoded path list, so a future example gains the
-   same treatment automatically instead of failing this same way again."
+  "Whether an example's own source reads NEX_USER_DIR (none does today:
+   program.working_directory has replaced it) — detected from the source
+   itself, not a hardcoded path list, so a future example gains the same
+   treatment automatically instead of failing for want of it."
   [^java.io.File f]
   (str/includes? (slurp f) "NEX_USER_DIR"))
 

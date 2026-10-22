@@ -80,19 +80,18 @@ function seconds_since(start: Integer): Real do
 end
 
 function main() do
-  let con: Console := create Console
-  let opts: Options := create Options.from_command_line((create Process).command_line())
+  let opts: Options := create Options.from_command_line(program.arguments)
   let rng: Rng := create Rng.make(opts.seed)
 
   let words_path: Path := create Path.make(user_path(opts.words))
   if not words_path.exists() then
-    con.print_line("Word list not found: " + opts.words)
-    con.print_line("Pass one with --words (one word per line).")
+    console.print_line("Word list not found: " + opts.words)
+    console.print_line("Pass one with --words (one word per line).")
     exit(1)
   end
   let words: Array[String] := load_words(words_path.path)
   if words.length < 10 then
-    con.print_line("Too few usable lowercase words in " + opts.words)
+    console.print_line("Too few usable lowercase words in " + opts.words)
     exit(1)
   end
 
@@ -111,17 +110,17 @@ function main() do
 
   let model: Next_Letter_Model :=
     create Next_Letter_Model.make(opts.context, opts.emb, opts.hidden, opts.seed)
-  con.print_line(train_words.length.to_string + " training words -> "
+  console.print_line(train_words.length.to_string + " training words -> "
     + train.length.to_string + " examples; "
     + val_words.length.to_string + " validation words")
-  con.print_line("model has " + model.num_parameters.to_string + " parameters (context="
+  console.print_line("model has " + model.num_parameters.to_string + " parameters (context="
     + opts.context.to_string + ", emb=" + opts.emb.to_string
     + ", hidden=" + opts.hidden.to_string + ")")
 
   let before: Evaluation := evaluate(model, val_sample)
-  con.print_line("before training: val loss " + fixed(before.loss, 3)
+  console.print_line("before training: val loss " + fixed(before.loss, 3)
     + " (guessing uniformly would give " + fixed(Vocabulary.SIZE.to_real.log, 3) + ")")
-  con.print_line("")
+  console.print_line("")
 
   let report_every: Integer := (opts.steps / 20).max(1)
   let running_loss: Real := 0.0
@@ -151,7 +150,7 @@ function main() do
       let train_loss: Real := running_loss / (report_every * opts.batch).to_real
       running_loss := 0.0
       let val_now: Evaluation := evaluate(model, val_sample)
-      con.print_line("step " + step.to_string.pad_start(" ", 6) + "/" + opts.steps.to_string
+      console.print_line("step " + step.to_string.pad_start(" ", 6) + "/" + opts.steps.to_string
         + "  lr " + fixed(lr, 3)
         + "  train loss " + fixed(train_loss, 3)
         + "  val loss " + fixed(val_now.loss, 3)
@@ -162,8 +161,8 @@ function main() do
     step := step + 1
   end
 
-  con.print_line("")
-  con.print_line("saved to " + opts.out + ". Try:  nex play.nex")
+  console.print_line("")
+  console.print_line("saved to " + opts.out + ". Try:  nex play.nex")
 end
 
 main()

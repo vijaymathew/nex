@@ -76,16 +76,14 @@ feature
 end
 
 function main() do
-  let c: Console := create Console
-
   -- ========================================================================
   -- DELIVERY: before — failure is an in-band magic string the caller may use
   --           as if it were a real stop.        after — illegal states blocked.
   -- ========================================================================
-  c.print_line("### DELIVERY ###")
+  console.print_line("### DELIVERY ###")
   let flat_d: Delivery_Tiny := create Delivery_Tiny
-  c.print_line("before: next_stop(\"X\",\"C\") = " + flat_d.next_stop("X", "C"))  -- "UNREACHABLE"
-  c.print_line("        ^ a String, indistinguishable from a real stop name")
+  console.print_line("before: next_stop(\"X\",\"C\") = " + flat_d.next_stop("X", "C"))  -- "UNREACHABLE"
+  console.print_line("        ^ a String, indistinguishable from a real stop name")
   assert flat_d.next_stop("X", "C") = "UNREACHABLE"
 
   let r: Route := create Route.make("RT-AC", ["A", "B", "C"])
@@ -93,9 +91,9 @@ function main() do
   let delivery_blocked: Boolean := false
   do
     task.advance()                 -- still PENDING (never assigned)
-    c.print_line("after:  BUG — moved an unassigned task")
+    console.print_line("after:  BUG — moved an unassigned task")
   rescue
-    c.print_line("after:  blocked — " + exception + " (an unassigned task cannot move)")
+    console.print_line("after:  blocked — " + exception + " (an unassigned task cannot move)")
     delivery_blocked := true
   end
   assert delivery_blocked
@@ -104,24 +102,24 @@ function main() do
   -- KNOWLEDGE: before — "NOT_FOUND" sentinel shares the String type with real
   --            note ids.   after — real entities + a link that cannot be invalid.
   -- ========================================================================
-  c.print_line("### KNOWLEDGE ###")
+  console.print_line("### KNOWLEDGE ###")
   let flat_n: Notes_Tiny := create Notes_Tiny
-  c.print_line("before: find_by_tag(\"unknown\") = " + flat_n.find_by_tag("unknown")) -- "NOT_FOUND"
-  c.print_line("        ^ in-band failure; same type as find_by_tag(\"graphs\") = " + flat_n.find_by_tag("graphs"))
+  console.print_line("before: find_by_tag(\"unknown\") = " + flat_n.find_by_tag("unknown")) -- "NOT_FOUND"
+  console.print_line("        ^ in-band failure; same type as find_by_tag(\"graphs\") = " + flat_n.find_by_tag("graphs"))
   assert flat_n.find_by_tag("unknown") = "NOT_FOUND"
   assert flat_n.find_by_tag("graphs") = "note_002"
 
   let good: Doc_Link := create Doc_Link.make("D1", "D2", "references")
   -- The invariant rejects an unknown type or a self-link at construction,
   -- so any link that exists is valid.
-  c.print_line("after:  valid link " + good.from_doc_id + "->" + good.to_doc_id + " " + good.link_type)
+  console.print_line("after:  valid link " + good.from_doc_id + "->" + good.to_doc_id + " " + good.link_type)
   assert good.link_type = "references"
   let self_link_blocked: Boolean := false
   do
     let bad: Doc_Link := create Doc_Link.make("D1", "D1", "references")
-    c.print_line("after:  BUG — built a self-link")
+    console.print_line("after:  BUG — built a self-link")
   rescue
-    c.print_line("after:  blocked — " + exception + " (a document cannot link to itself)")
+    console.print_line("after:  blocked — " + exception + " (a document cannot link to itself)")
     self_link_blocked := true
   end
   assert self_link_blocked
@@ -130,17 +128,17 @@ function main() do
   -- WORLD: before — an already-out-of-bounds position is silently clamped, so
   --        the bug is invisible.   after — such an object cannot be created.
   -- ========================================================================
-  c.print_line("### WORLD ###")
+  console.print_line("### WORLD ###")
   let flat_w: World_Tiny := create World_Tiny
-  c.print_line("before: step(-5, 0, 10) = " + flat_w.step(-5, 0, 10) + "  (invalid input -5 silently became 0)")
+  console.print_line("before: step(-5, 0, 10) = " + flat_w.step(-5, 0, 10) + "  (invalid input -5 silently became 0)")
   assert flat_w.step(-5, 0, 10) = 0
 
   let out_of_bounds_blocked: Boolean := false
   do
     let obj: World_Object := create World_Object.make("o1", -5, 0, 10)
-    c.print_line("after:  BUG — created an out-of-bounds object")
+    console.print_line("after:  BUG — created an out-of-bounds object")
   rescue
-    c.print_line("after:  blocked — " + exception + " (cannot place an object out of bounds)")
+    console.print_line("after:  blocked — " + exception + " (cannot place an object out of bounds)")
     out_of_bounds_blocked := true
   end
   assert out_of_bounds_blocked

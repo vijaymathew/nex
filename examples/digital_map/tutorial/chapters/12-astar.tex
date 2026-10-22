@@ -195,20 +195,20 @@ let g: Road_Graph := create Road_Graph.build(island, Mode.Driving)
 if ?island.find_place("beach") as a and ?island.find_place("lighthouse") as b then
   let source: Integer := g.nearest_node(island.point(a.node_id))
   let target: Integer := g.nearest_node(island.point(b.node_id))
-  say(summary(g, dijkstra(g, source, target, by_time())))
+  console.print_line(summary(g, dijkstra(g, source, target, by_time())))
   let found: Search_Result := a_star(g, source, target, by_time(), time_estimate(g, target))
-  say(summary(g, found))
+  console.print_line(summary(g, found))
   picture_of_search(create Map_View.make(island, 1000, 700), found, "astar.png")
 end
 
-say("")
-say("Nodes explored for the quickest route by car:")
+console.print_line("")
+console.print_line("Nodes explored for the quickest route by car:")
 across [["harbour", "lighthouse"], ["campsite", "fisher"], ["school", "peak"],
     ["mill", "beach"]] as trip do
   if ?island.find_place(trip.get(0)) as a and ?island.find_place(trip.get(1)) as b then
     let s: Integer := g.nearest_node(island.point(a.node_id))
     let t: Integer := g.nearest_node(island.point(b.node_id))
-    say("  " + (a.name + " to " + b.name).pad_end(" ", 34)
+    console.print_line("  " + (a.name + " to " + b.name).pad_end(" ", 34)
       + dijkstra(g, s, t, by_time()).explored.length.to_string.pad_start(" ", 4)
       + a_star(g, s, t, by_time(), time_estimate(g, t)).explored.length.to_string.pad_start(" ", 5))
   end

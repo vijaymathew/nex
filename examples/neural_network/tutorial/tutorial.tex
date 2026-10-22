@@ -488,18 +488,18 @@ Let's check that it works. Make this file and run it:
 \begin{tryit}{try_helpers.nex}
 intern Helpers
 
-let con: Console := create Console
-con.print_line(fixed(2.5, 3))
-con.print_line(fixed(-3.14159, 2))
-con.print_line(percent(0.257))
-con.print_line("[" + "42".pad_start(" ", 6) + "]")
-con.print_line(vector_text([0.5, 0.25, 1.0 / 3.0], 3))
+console.print_line(fixed(2.5, 3))
+console.print_line(fixed(-3.14159, 2))
+console.print_line(percent(0.257))
+console.print_line("[" + "42".pad_start(" ", 6) + "]")
+console.print_line(vector_text([0.5, 0.25, 1.0 / 3.0], 3))
 \end{tryit}
 \tryoutput{try_helpers}
 
-We print with \code{con.print_line} from a \code{Console} object, because
-Nex's \code{print} shows strings with their quotes (\code{"2.500"}), which
-is handy for debugging but not for neat output.
+We print with \code{console.print_line}, because Nex's \code{print} shows
+strings with their quotes (\code{"2.500"}), which is handy for debugging
+but not for neat output. Every Nex program has \code{console}, a
+\code{Console} that writes text as it is, without our having to create it.
 
 Try-it scripts are not part of the project. Keep them around to experiment
 with, or delete them when you are done.
@@ -608,17 +608,16 @@ fails because \code{+} asks for at least one character.
 \begin{tryit}{try_vocabulary.nex}
 intern Vocabulary
 
-let con: Console := create Console
-con.print_line("symbols: " + Vocabulary.SYMBOLS)
-con.print_line("id of a: " + symbol_id("a").to_string)
-con.print_line("id of p: " + symbol_id("p").to_string)
-con.print_line("symbol 16: " + symbol_at(16))
-con.print_line("apple: " + is_lowercase_word("apple").to_string)
-con.print_line("Paris: " + is_lowercase_word("Paris").to_string)
+console.print_line("symbols: " + Vocabulary.SYMBOLS)
+console.print_line("id of a: " + symbol_id("a").to_string)
+console.print_line("id of p: " + symbol_id("p").to_string)
+console.print_line("symbol 16: " + symbol_at(16))
+console.print_line("apple: " + is_lowercase_word("apple").to_string)
+console.print_line("Paris: " + is_lowercase_word("Paris").to_string)
 do
-  con.print_line(symbol_id("A").to_string)
+  console.print_line(symbol_id("A").to_string)
 rescue
-  con.print_line("symbol_id(\"A\") refused: " + exception.to_string)
+  console.print_line("symbol_id(\"A\") refused: " + exception.to_string)
 end
 \end{tryit}
 \tryoutput{try_vocabulary}
@@ -737,16 +736,15 @@ end
 \begin{tryit}{try_vectors.nex}
 intern Vector_Math
 
-let con: Console := create Console
 let u: Array[Real] := [1.0, 2.0, 3.0]
 let v: Array[Real] := [4.0, 5.0, 6.0]
-con.print_line("zeros(3)  = " + zeros(3).to_string)
-con.print_line("sum(u)    = " + sum(u).to_string)
-con.print_line("dot(u, v) = " + dot(u, v).to_string)
+console.print_line("zeros(3)  = " + zeros(3).to_string)
+console.print_line("sum(u)    = " + sum(u).to_string)
+console.print_line("dot(u, v) = " + dot(u, v).to_string)
 do
-  con.print_line(dot([1.0, 2.0], [1.0]).to_string)
+  console.print_line(dot([1.0, 2.0], [1.0]).to_string)
 rescue
-  con.print_line("dot of different lengths: " + exception.to_string)
+  console.print_line("dot of different lengths: " + exception.to_string)
 end
 \end{tryit}
 \tryoutput{try_vectors}
@@ -892,17 +890,16 @@ end
 intern Vector_Math
 intern Helpers
 
-let con: Console := create Console
 -- The example from the box: two neurons with two inputs each.
 let w: Array[Array[Real]] := [[1.0, 0.0], [1.0, 1.0]]
 let x: Array[Real] := [2.0, 3.0]
 let b: Array[Real] := [0.5, -1.0]
-con.print_line("W x + b = " + vector_text(affine(w, x, b), 1))
+console.print_line("W x + b = " + vector_text(affine(w, x, b), 1))
 
 let t: Array[Real] := [1.0, 1.0]
 add_scaled(t, 0.5, [2.0, 4.0])
-con.print_line("[1, 1] + 0.5 * [2, 4] = " + vector_text(t, 1))
-con.print_line("a 2 x 3 zero matrix: " + zero_matrix(2, 3).to_string)
+console.print_line("[1, 1] + 0.5 * [2, 4] = " + vector_text(t, 1))
+console.print_line("a 2 x 3 zero matrix: " + zero_matrix(2, 3).to_string)
 \end{tryit}
 \tryoutput{try_layer}
 
@@ -1033,15 +1030,14 @@ end
 intern Vector_Math
 intern Helpers
 
-let con: Console := create Console
-con.print_line("     v    tanh(v)   1 - tanh(v)^2")
+console.print_line("     v    tanh(v)   1 - tanh(v)^2")
 across [-3.0, -1.0, -0.1, 0.0, 0.1, 1.0, 3.0] as v do
   let h: Real := tanh(v)
-  con.print_line(fixed(v, 1).pad_start(" ", 6) + fixed(h, 4).pad_start(" ", 11)
+  console.print_line(fixed(v, 1).pad_start(" ", 6) + fixed(h, 4).pad_start(" ", 11)
     + fixed(1.0 - h * h, 4).pad_start(" ", 16))
 end
-con.print_line("tanh(1000)  = " + tanh(1000.0).to_string)
-con.print_line("tanh(-1000) = " + tanh(-1000.0).to_string)
+console.print_line("tanh(1000)  = " + tanh(1000.0).to_string)
+console.print_line("tanh(-1000) = " + tanh(-1000.0).to_string)
 \end{tryit}
 \tryoutput{try_tanh}
 
@@ -1181,14 +1177,13 @@ end
 intern Vector_Math
 intern Helpers
 
-let con: Console := create Console
 let p: Array[Real] := softmax([2.0, 1.0, 0.1])
-con.print_line("softmax([2.0, 1.0, 0.1]) = " + vector_text(p, 3))
-con.print_line("sum = " + sum(p).to_string)
+console.print_line("softmax([2.0, 1.0, 0.1]) = " + vector_text(p, 3))
+console.print_line("sum = " + sum(p).to_string)
 let shifted: Array[Real] := softmax([1002.0, 1001.0, 1000.1])
-con.print_line("scores shifted by 1000  = " + vector_text(shifted, 3))
-con.print_line("equal scores            = " + vector_text(softmax([5.0, 5.0, 5.0, 5.0]), 3))
-con.print_line("argmax = " + argmax(p).to_string)
+console.print_line("scores shifted by 1000  = " + vector_text(shifted, 3))
+console.print_line("equal scores            = " + vector_text(softmax([5.0, 5.0, 5.0, 5.0]), 3))
+console.print_line("argmax = " + argmax(p).to_string)
 \end{tryit}
 \tryoutput{try_softmax}
 
@@ -1391,10 +1386,9 @@ end
 intern Rng
 intern Helpers
 
-let con: Console := create Console
 let rng: Rng := create Rng.make(42)
-con.print_line("uniform: " + fixed(rng.uniform(), 4) + " " + fixed(rng.uniform(), 4))
-con.print_line("below(10): " + rng.below(10).to_string + " " + rng.below(10).to_string)
+console.print_line("uniform: " + fixed(rng.uniform(), 4) + " " + fixed(rng.uniform(), 4))
+console.print_line("below(10): " + rng.below(10).to_string + " " + rng.below(10).to_string)
 
 -- Draw many normal numbers and measure their mean and spread.
 let n: Integer := 100000
@@ -1410,15 +1404,15 @@ repeat n do
   end
 end
 let mean: Real := total / n.to_real
-con.print_line("mean " + fixed(mean, 3) + ", standard deviation "
+console.print_line("mean " + fixed(mean, 3) + ", standard deviation "
   + fixed((squares / n.to_real - mean * mean).sqrt, 3)
   + ", within 1 of the mean: " + percent(within_one.to_real / n.to_real))
 
 let words: Array[String] := ["one", "two", "three", "four", "five"]
 shuffle(rng, words)
-con.print_line("shuffled: " + words.to_string)
+console.print_line("shuffled: " + words.to_string)
 let again: Rng := create Rng.make(42)
-con.print_line("same seed again: " + fixed(again.uniform(), 4))
+console.print_line("same seed again: " + fixed(again.uniform(), 4))
 \end{tryit}
 \tryoutput{try_rng}
 
@@ -1656,13 +1650,12 @@ back into a one-letter \code{String} for \code{symbol_id}.
 intern Next_Letter_Model
 intern Helpers
 
-let con: Console := create Console
 let model: Next_Letter_Model := create Next_Letter_Model.make(4, 8, 64, 42)
-con.print_line("parameters: " + model.num_parameters.to_string)
-con.print_line("context of \"app\":    " + model.context_ids("app").to_string)
-con.print_line("context of \"banana\": " + model.context_ids("banana").to_string)
-con.print_line("context of \"\":       " + model.context_ids("").to_string)
-con.print_line("embedding of \"a\": " + vector_text(model.c.get(1), 2))
+console.print_line("parameters: " + model.num_parameters.to_string)
+console.print_line("context of \"app\":    " + model.context_ids("app").to_string)
+console.print_line("context of \"banana\": " + model.context_ids("banana").to_string)
+console.print_line("context of \"\":       " + model.context_ids("").to_string)
+console.print_line("embedding of \"a\": " + vector_text(model.c.get(1), 2))
 \end{tryit}
 \tryoutput{try_model}
 
@@ -1734,25 +1727,24 @@ output layer and softmax.
 intern Next_Letter_Model
 intern Helpers
 
-let con: Console := create Console
 let model: Next_Letter_Model := create Next_Letter_Model.make(4, 8, 64, 42)
 let fp: Forward_Pass := model.forward(model.context_ids("app"))
-con.print_line("x has " + fp.x.length.to_string + " numbers, h has "
+console.print_line("x has " + fp.x.length.to_string + " numbers, h has "
   + fp.h.length.to_string + ", probs has " + fp.probs.length.to_string)
-con.print_line("first hidden values: " + vector_text(fp.h.take(6), 3))
-con.print_line("probabilities after \"app\":")
+console.print_line("first hidden values: " + vector_text(fp.h.take(6), 3))
+console.print_line("probabilities after \"app\":")
 from
   let i: Integer := 0
 until
   i = Vocabulary.SIZE
 do
-  con.print(symbol_at(i) + " " + percent(fp.probs.get(i)).pad_start(" ", 3) + "   ")
+  console.print(symbol_at(i) + " " + percent(fp.probs.get(i)).pad_start(" ", 3) + "   ")
   if i % 9 = 8 then
-    con.print_line("")
+    console.print_line("")
   end
   i := i + 1
 end
-con.print_line("they add up to " + fixed(sum(fp.probs), 6))
+console.print_line("they add up to " + fixed(sum(fp.probs), 6))
 \end{tryit}
 \tryoutput{try_forward}
 
@@ -1987,24 +1979,23 @@ intern Training_Data
 intern Next_Letter_Model
 intern Helpers
 
-let con: Console := create Console
 across make_examples(["apple"], 4) as ex do
   let context: String := ""
   across ex.ids as id do
     context := context + symbol_at(id)
   end
-  con.print_line(context + " -> " + symbol_at(ex.target))
+  console.print_line(context + " -> " + symbol_at(ex.target))
 end
 
 let words: Array[String] := load_words("/usr/share/dict/words")
-con.print_line(words.length.to_string + " usable words, from "
+console.print_line(words.length.to_string + " usable words, from "
   + words.get(0) + " to " + words.get(words.length - 1))
 let examples: Array[Example] := make_examples(words.take(2000), 4)
 let model: Next_Letter_Model := create Next_Letter_Model.make(4, 8, 64, 42)
 let e: Evaluation := evaluate(model, examples)
-con.print_line("untrained model on " + examples.length.to_string + " examples: loss "
+console.print_line("untrained model on " + examples.length.to_string + " examples: loss "
   + fixed(e.loss, 3) + ", accuracy " + percent(e.accuracy))
-con.print_line("knowing nothing would give: loss " + fixed(27.0.log, 3)
+console.print_line("knowing nothing would give: loss " + fixed(27.0.log, 3)
   + ", accuracy about " + percent(1.0 / 27.0))
 \end{tryit}
 \tryoutput{try_examples}
@@ -2064,8 +2055,7 @@ intern Helpers
 
 -- Minimize L(w) = (w - 3)^2, starting from w = 0.
 function descend(lr: Real) do
-  let con: Console := create Console
-  con.print_line("learning rate " + fixed(lr, 2) + ":")
+  console.print_line("learning rate " + fixed(lr, 2) + ":")
   let w: Real := 0.0
   from
     let step: Integer := 0
@@ -2075,7 +2065,7 @@ function descend(lr: Real) do
     let loss: Real := (w - 3.0) * (w - 3.0)
     let slope: Real := 2.0 * (w - 3.0)
     if step % 3 = 0 then
-      con.print_line("  step " + step.to_string.pad_start(" ", 2) + ": w = "
+      console.print_line("  step " + step.to_string.pad_start(" ", 2) + ": w = "
         + fixed(w, 4).pad_start(" ", 9) + "   loss = " + fixed(loss, 4))
     end
     w := w - lr * slope
@@ -2525,20 +2515,18 @@ intern io/Path
 class Checker
 create
   make() do
-    con := create Console
   end
 feature
-  con: Console
   passed: Integer
   failed: Integer
 
   check(label: String, ok: Boolean) do
     if ok then
       passed := passed + 1
-      con.print_line("PASS " + label)
+      console.print_line("PASS " + label)
     else
       failed := failed + 1
-      con.print_line("FAIL " + label)
+      console.print_line("FAIL " + label)
     end
   end
 
@@ -2549,8 +2537,8 @@ feature
   end
 
   summary() do
-    con.print_line("---")
-    con.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
+    console.print_line("---")
+    console.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
     if failed > 0 then
       exit(1)
     end
@@ -2762,7 +2750,6 @@ intern Next_Letter_Model
 intern Training_Data
 intern Helpers
 
-let con: Console := create Console
 let model: Next_Letter_Model := create Next_Letter_Model.make(4, 8, 64, 42)
 let examples: Array[Example] := make_examples(["apple", "apply", "maple"], 4)
 from
@@ -2771,7 +2758,7 @@ until
   step > 300
 do
   if step % 50 = 0 then
-    con.print_line("step " + step.to_string.pad_start(" ", 3) + ": loss "
+    console.print_line("step " + step.to_string.pad_start(" ", 3) + ": loss "
       + fixed(evaluate(model, examples).loss, 4))
   end
   let g: Gradients := create Gradients.make(model)
@@ -2782,7 +2769,7 @@ do
   step := step + 1
 end
 let probs: Array[Real] := model.forward(model.context_ids("appl")).probs
-con.print_line("after \"appl\": e " + percent(probs.get(symbol_id("e")))
+console.print_line("after \"appl\": e " + percent(probs.get(symbol_id("e")))
   + ", y " + percent(probs.get(symbol_id("y"))))
 \end{tryit}
 \tryoutput{try_learning}
@@ -2924,24 +2911,21 @@ wrong shapes is rejected right away.
 One last detail before we can test this. The \code{nex} command starts
 programs from its own installation folder, so a file name like
 \code{model.json} would be looked for there, not in our project folder.
-\code{nex} records the folder it was started from in the environment
-variable \code{NEX_USER_DIR}, and we use that to turn a relative file name
-into a full one. A program run some other way has no \code{NEX_USER_DIR}
-(\code{getenv} gives the empty string), and then we leave the name as it is,
-relative to the current folder:
+\code{nex} records the folder it was started from, and every program can
+ask for it: \code{program}, which, like \code{console}, every Nex program
+has without creating it, describes the running program, and
+\code{program.working_directory} is that folder. We use it to turn a
+relative file name into a full one:
 
 \begin{append}{helpers.nex}
 -- The full path of a file the user named. The `nex` launcher runs
 -- programs from its own installation folder, so a relative name is
--- resolved against the folder `nex` was started from, NEX_USER_DIR.
--- Run some other way (no NEX_USER_DIR), a relative name is left as it is,
--- relative to the current folder.
+-- resolved against the folder the program was started from.
 function user_path(raw: String): String do
-  let user_dir: String := (create Process).getenv("NEX_USER_DIR")
-  if raw.starts_with("/") or user_dir = "" then
+  if raw.starts_with("/") then
     result := raw
   else
-    result := user_dir + "/" + raw
+    result := program.working_directory + "/" + raw
   end
 end
 \end{append}
@@ -3091,19 +3075,18 @@ array, and \code{drop(n)} all the others.
 
 \begin{append}{train.nex}
 function main() do
-  let con: Console := create Console
-  let opts: Options := create Options.from_command_line((create Process).command_line())
+  let opts: Options := create Options.from_command_line(program.arguments)
   let rng: Rng := create Rng.make(opts.seed)
 
   let words_path: Path := create Path.make(user_path(opts.words))
   if not words_path.exists() then
-    con.print_line("Word list not found: " + opts.words)
-    con.print_line("Pass one with --words (one word per line).")
+    console.print_line("Word list not found: " + opts.words)
+    console.print_line("Pass one with --words (one word per line).")
     exit(1)
   end
   let words: Array[String] := load_words(words_path.path)
   if words.length < 10 then
-    con.print_line("Too few usable lowercase words in " + opts.words)
+    console.print_line("Too few usable lowercase words in " + opts.words)
     exit(1)
   end
 
@@ -3129,17 +3112,17 @@ which is close enough.
 
   let model: Next_Letter_Model :=
     create Next_Letter_Model.make(opts.context, opts.emb, opts.hidden, opts.seed)
-  con.print_line(train_words.length.to_string + " training words -> "
+  console.print_line(train_words.length.to_string + " training words -> "
     + train.length.to_string + " examples; "
     + val_words.length.to_string + " validation words")
-  con.print_line("model has " + model.num_parameters.to_string + " parameters (context="
+  console.print_line("model has " + model.num_parameters.to_string + " parameters (context="
     + opts.context.to_string + ", emb=" + opts.emb.to_string
     + ", hidden=" + opts.hidden.to_string + ")")
 
   let before: Evaluation := evaluate(model, val_sample)
-  con.print_line("before training: val loss " + fixed(before.loss, 3)
+  console.print_line("before training: val loss " + fixed(before.loss, 3)
     + " (guessing uniformly would give " + fixed(Vocabulary.SIZE.to_real.log, 3) + ")")
-  con.print_line("")
+  console.print_line("")
 \end{continued}
 
 \section{The training loop}
@@ -3191,7 +3174,7 @@ worth of training.
       let train_loss: Real := running_loss / (report_every * opts.batch).to_real
       running_loss := 0.0
       let val_now: Evaluation := evaluate(model, val_sample)
-      con.print_line("step " + step.to_string.pad_start(" ", 6) + "/" + opts.steps.to_string
+      console.print_line("step " + step.to_string.pad_start(" ", 6) + "/" + opts.steps.to_string
         + "  lr " + fixed(lr, 3)
         + "  train loss " + fixed(train_loss, 3)
         + "  val loss " + fixed(val_now.loss, 3)
@@ -3202,8 +3185,8 @@ worth of training.
     step := step + 1
   end
 
-  con.print_line("")
-  con.print_line("saved to " + opts.out + ". Try:  nex play.nex")
+  console.print_line("")
+  console.print_line("saved to " + opts.out + ". Try:  nex play.nex")
 end
 \end{continued}
 
@@ -3448,8 +3431,8 @@ function others(ranked: Array[Prediction], skip: String): String do
 end
 
 -- Read a line, lowercased and trimmed; nil at end of input (Ctrl-D).
-function ask(con: Console, prompt: String): ?String do
-  let line: ?String := con.read_line(prompt)
+function ask(prompt: String): ?String do
+  let line: ?String := console.read_line(prompt)
   if ?line as text then
     result := text.trim().to_lower()
   end
@@ -3464,7 +3447,7 @@ shown; \code{n} moves it to the next one.
 \begin{append}{play.nex}
 -- Suggest letters for one word until it is finished or abandoned.
 -- Returns false when the input has ended.
-function complete_interactively(con: Console, model: Next_Letter_Model,
+function complete_interactively(model: Next_Letter_Model,
   start: String): Boolean do
   result := true
   let word: String := start
@@ -3482,11 +3465,11 @@ function complete_interactively(con: Console, model: Next_Letter_Model,
     else
       "  " + word + "[" + shown.symbol + "]   (" + percent(shown.probability) + ")   "
     end
-    con.print_line(prompt + "   others: " + others(ranked, shown.symbol))
+    console.print_line(prompt + "   others: " + others(ranked, shown.symbol))
 \end{append}
 
 \begin{continued}{play.nex}
-    let answer: ?String := ask(con, "  > ")
+    let answer: ?String := ask("  > ")
     if ?answer as ans then
       if ans = "" then                          -- accept the suggestion
         if shown.symbol = Vocabulary.END then
@@ -3503,7 +3486,7 @@ function complete_interactively(con: Console, model: Next_Letter_Model,
         word := word + ans
         choice := 0
       else
-        con.print_line("  Enter = accept, n = next option, letters = type your own, "
+        console.print_line("  Enter = accept, n = next option, letters = type your own, "
           + "q = new word")
       end
     else
@@ -3511,10 +3494,10 @@ function complete_interactively(con: Console, model: Next_Letter_Model,
     end
   end
   if abandoned or not result then
-    con.print_line("")
+    console.print_line("")
   else
-    con.print_line("  ==> " + word)
-    con.print_line("")
+    console.print_line("  ==> " + word)
+    console.print_line("")
   end
 end
 \end{continued}
@@ -3524,29 +3507,29 @@ The outer loop asks for the start of a word, and hands it to
 ends:
 
 \begin{append}{play.nex}
-function interactive(con: Console, model: Next_Letter_Model) do
-  con.print_line("Next-letter predictor. Type the start of a word "
+function interactive(model: Next_Letter_Model) do
+  console.print_line("Next-letter predictor. Type the start of a word "
     + "(empty line or Ctrl-D to quit).")
-  con.print_line("After each suggestion: Enter = accept, n = next option, "
+  console.print_line("After each suggestion: Enter = accept, n = next option, "
     + "letters = type your own, q = new word.")
-  con.print_line("")
+  console.print_line("")
   let going: Boolean := true
   from
   until
     not going
   do
-    let line: ?String := ask(con, "start of word> ")
+    let line: ?String := ask("start of word> ")
     if ?line as word then
       if word = "" then
         going := false
       elseif not is_lowercase_word(word) then
-        con.print_line("  please use letters a-z only")
-        con.print_line("")
+        console.print_line("  please use letters a-z only")
+        console.print_line("")
       else
-        going := complete_interactively(con, model, word)
+        going := complete_interactively(model, word)
       end
     else
-      con.print_line("")
+      console.print_line("")
       going := false
     end
   end
@@ -3559,8 +3542,7 @@ one of the two modes.
 
 \begin{append}{play.nex}
 function main() do
-  let con: Console := create Console
-  let args: Array[String] := (create Process).command_line()
+  let args: Array[String] := program.arguments
   let model_file: String := "model.json"
   let prefixes: Array[String] := []
   from
@@ -3578,7 +3560,7 @@ function main() do
   end
 
   if not create Path.make(user_path(model_file)).exists() then
-    con.print_line("No model at " + model_file + ". Train one first: nex train.nex")
+    console.print_line("No model at " + model_file + ". Train one first: nex train.nex")
     exit(1)
   end
   let model: Next_Letter_Model :=
@@ -3587,7 +3569,7 @@ function main() do
 
 \begin{continued}{play.nex}
   if prefixes.is_empty then
-    interactive(con, model)
+    interactive(model)
   else
     across prefixes as prefix do
       if is_lowercase_word(prefix) then
@@ -3599,10 +3581,10 @@ function main() do
           end
           top := top + describe(p.symbol) + " " + percent(p.probability)
         end
-        con.print_line(prefix.pad_start(" ", 12) + " -> "
+        console.print_line(prefix.pad_start(" ", 12) + " -> "
           + greedy_complete(model, prefix).pad_end(" ", 16) + "(next letter: " + top + ")")
       else
-        con.print_line(prefix.pad_start(" ", 12) + " -> please use letters a-z only")
+        console.print_line(prefix.pad_start(" ", 12) + " -> please use letters a-z only")
       end
     end
   end
@@ -3795,7 +3777,7 @@ Anonymous functions & \code{fn(a, b: Prediction): Integer do ... end} for \code{
 Detachable types, object test & \code{?String}, \code{if ?line as text then} \\
 \code{case ... of} & matching option names in \code{train.nex} \\
 Built-in \code{String} methods & \code{pad_start}, \code{pad_end}, \code{replicate}, \code{join}, \code{substring}, \code{trim} \\
-Libraries & \code{data/Json}, \code{text/Regex}, \code{io/Path}, \code{time/Date_Time}, \code{Console}, \code{Process} \\
+Libraries & \code{data/Json}, \code{text/Regex}, \code{io/Path}, \code{time/Date_Time}, \code{console}, \code{program} \\
 \bottomrule
 \end{tabular}
 \end{center}

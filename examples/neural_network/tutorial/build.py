@@ -108,7 +108,7 @@ def run(stage_files, directory, program, label, extra):
             shutil.copy(src, directory)
     args = program.split()
     # A line "% input: ..." just before \runoutput gives stdin; not used yet.
-    proc = subprocess.run(["nex"] + args, cwd=directory, capture_output=True,
+    proc = subprocess.run([os.environ.get("NEX", "nex")] + args, cwd=directory, capture_output=True,
                           text=True, timeout=900)
     output = proc.stdout + proc.stderr
     with open(os.path.join(OUT, label + ".txt"), "w") as f:

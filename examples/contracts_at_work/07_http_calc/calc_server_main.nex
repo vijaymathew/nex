@@ -11,7 +11,6 @@ function main() do
   print("press ctrl-c to stop")
 
   -- Block forever; Http_Server runs its own listener thread.
-  let console: Console := create Console
   console.read_line("")
 end
 

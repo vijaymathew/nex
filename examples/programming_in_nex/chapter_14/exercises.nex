@@ -108,8 +108,7 @@ class Logger
     make() do end
   feature
     log(message: String) do
-      let c: Console := create Console
-      c.print_line("[LOG] " + message)
+      console.print_line("[LOG] " + message)
     end
 end
 
@@ -119,8 +118,7 @@ class File_Logger inherit Logger
   feature
     log_history: String
     log(message: String) do
-      let c: Console := create Console
-      c.print_line("[FILE] " + message)
+      console.print_line("[FILE] " + message)
       log_history := log_history + message + "; "
     end
 end
@@ -133,15 +131,13 @@ class Silent_Logger inherit Logger
 end
 
 function main() do
-  let c: Console := create Console
-
   -- 1. Polymorphic dispatch through an Array[Animal].
   let zoo: Array[Animal] := []
   zoo.add(create Dog.make("Rex"))
   zoo.add(create Cat.make("Felix"))
   zoo.add(create Cow.make("Bessie"))
   across zoo as a do
-    c.print_line("1. " + a.name + " says " + a.sound)
+    console.print_line("1. " + a.name + " says " + a.sound)
   end
   assert zoo.get(0).sound = "Woof"
   assert zoo.get(1).sound = "Meow"
@@ -152,7 +148,7 @@ function main() do
   shapes.add(create Circle.make("red", 5.0))
   shapes.add(create Rect.make("blue", 4.0, 6.0))
   across shapes as s do
-    c.print_line("2. " + s.describe)
+    console.print_line("2. " + s.describe)
   end
   assert shapes.get(0).area > 78.5 and shapes.get(0).area < 78.54
   assert shapes.get(1).area = 24.0
@@ -166,16 +162,16 @@ function main() do
   --    success, which is Liskov-safe: no caller written against Account is
   --    surprised, because every withdrawal Account would have allowed is still
   --    allowed. A caller need know nothing extra; substitution is transparent.
-  c.print_line("3. LSP: Overdraft_Account.withdraw honours the Account promise" +
-               " (true=success/false=failure); it only succeeds MORE often. Safe.")
+  console.print_line("3. LSP: Overdraft_Account.withdraw honours the Account promise" +
+                     " (true=success/false=failure); it only succeeds MORE often. Safe.")
 
   -- 4.
   let p: Petrol_Car := create Petrol_Car.make("Saloon", 180.0)
   let e: Electric_Car := create Electric_Car.make("Hatch", 160.0)
-  c.print_line("4. petrol(" + p.fuel_type + "): 250km on 30L? " +
-               p.can_reach(250.0, 30.0).to_string)                    -- true (range 300)
-  c.print_line("4. electric(" + e.fuel_type + "): 250km on 40kWh? " +
-               e.can_reach(250.0, 40.0).to_string)                    -- false (range 200)
+  console.print_line("4. petrol(" + p.fuel_type + "): 250km on 30L? " +
+                     p.can_reach(250.0, 30.0).to_string)                    -- true (range 300)
+  console.print_line("4. electric(" + e.fuel_type + "): 250km on 40kWh? " +
+                     e.can_reach(250.0, 40.0).to_string)                    -- false (range 200)
   assert p.can_reach(250.0, 30.0)
   assert not e.can_reach(250.0, 40.0)
 
@@ -188,8 +184,8 @@ function main() do
   across loggers as lg do
     lg.log("test")
   end
-  c.print_line("5. -> the same log('test') call dispatches to three different" +
-               " implementations; the loop never names a concrete logger.")
+  console.print_line("5. -> the same log('test') call dispatches to three different" +
+                     " implementations; the loop never names a concrete logger.")
   assert fl.log_history = "test; "
 end
 

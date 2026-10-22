@@ -147,7 +147,7 @@
 (def ^:private builtin-runtime-receiver-types
   #{"Any" "Comparable" "Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
-    "Cursor" "Task" "Channel" "Console" "Process"})
+    "Cursor" "Task" "Channel" "Console" "Process" "Program"})
 
 ;; The only method names the compiled backend actually implements a
 ;; "builtin-method:Any:*" runtime wrapper for (see the `def-builtin-method-
@@ -1013,7 +1013,7 @@
                      (#(tc/resolve-generic-type % type-map)))))))
      (when (direct-collection-method? target-type (:method expr))
        (collection-method-return-type target-type (:method expr)))
-     (when (contains? #{"Console" "Process"} base-type)
+     (when (contains? #{"Console" "Process" "Program"} base-type)
        (bi/builtin-type-method-return-type (keyword base-type) (:method expr)))
        ;; Generic type parameter with constraint - look up method on constraint type
      (when-let [constraint (get (:generic-param-constraints env) base-type)]
@@ -5422,6 +5422,17 @@
                           nex-type
                           (resolve-jvm-type env nex-type))))
 
+(defn- lower-create-program
+  [env expr]
+  (let [nex-type (infer-type env expr)]
+    (when (or (:constructor expr) (seq (:args expr)))
+      (throw (ex-info "create Program takes no constructor or arguments in compiled lowering"
+                      {:expr expr})))
+    (ir/call-runtime-node "create-program"
+                          []
+                          nex-type
+                          (resolve-jvm-type env nex-type))))
+
 (defn- lower-create-process
   [env expr]
   (let [nex-type (infer-type env expr)
@@ -5614,6 +5625,7 @@
    the Java-import check, then to `lower-user-create` for an ordinary Nex
    class."
   {"Console"          lower-create-console
+   "Program"          lower-create-program
    "Process"          lower-create-process
    "Channel"          lower-create-channel
    "Array"            lower-create-array
@@ -5754,11 +5766,22 @@
                                                  (resolve-jvm-type env created-type))
                                     created-type))))))
 
+(defn- user-class-named-program?
+  "Whether CLASS-NAME is Program and the program defines a class of that
+   name itself. Program became a builtin type after programs could already
+   have a class called Program, so such a class keeps its meaning."
+  [class-name class-def]
+  ;; The builtin's own registration has no :body; a parsed class has one.
+  (and (= "Program" class-name)
+       (contains? class-def :body)
+       (not (:import class-def))))
+
 (defn- lower-create-expr [env expr]
   (let [class-name (:class-name expr)
         compiled (get (:compiled-classes env) class-name)
         class-def (get (visible-class-map env) class-name)]
-    (if-let [handler (get lower-create-builtin-dispatch class-name)]
+    (if-let [handler (and (not (user-class-named-program? class-name class-def))
+                          (get lower-create-builtin-dispatch class-name))]
       (handler env expr)
       (if (and class-def (:import class-def))
         (lower-java-create env expr class-name)

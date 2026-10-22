@@ -27,6 +27,36 @@ print(name)
 print("I am " + age + " years old")
 ```
 
+`print` shows a string with its quotes (`"Hello, world!"`), which is handy
+while you experiment. To write text as it is, use `console`:
+
+```nex
+console.print_line("Hello, world!")     -- Hello, world!
+```
+
+## Predeclared names: `console` and `program`
+
+Every program can use two names without declaring them:
+
+```nex
+console.print_line("Hello")                         -- the program's Console
+let name: String := console.read_line("Name? ")
+console.print_line("arguments: " + program.arguments.to_string)
+if program.has_env("DEBUG") then console.error("debugging") end
+```
+
+- `console` is a `Console`: `print`, `print_line`, `read_line`, `error`, ...
+- `program` is the running `Program`: `arguments`, `env(name)`,
+  `has_env(name)`, `pid`, `working_directory` (the folder `nex` was started
+  from) and `exit(code)`.
+
+They behave like top-level `let`s declared before your first line: you can
+use them at the top level and inside any function or class. They are
+read-only (`console := ...` is an error). A program that declares the name
+itself, with a top-level `let console := ...`, a function called `program`,
+or its own class `Console` or `Program`, gets its own instead. A
+parameter, field or local of the same name simply shadows it.
+
 ## Math
 
 ```nex

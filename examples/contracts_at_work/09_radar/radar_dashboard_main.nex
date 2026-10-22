@@ -49,7 +49,6 @@ function fetch_rescan(client: Http_Client, base: String, ticks_rx: Regex,
 end
 
 function main() do
-  let console: Console := create Console
   let base: String := console.read_line("radar_service [http://localhost:4323]: ").trim()
   if base = "" then
     base := "http://localhost:4323"

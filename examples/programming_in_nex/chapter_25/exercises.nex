@@ -9,11 +9,10 @@
 -- 1. A tiny assertion routine, generalised into a small Tester.
 class Tester
   create
-    make() do passed := 0  total := 0  console := create Console end
+    make() do passed := 0  total := 0 end
   feature
     passed: Integer
     total: Integer
-    console: Console
     -- the "tiny assertion routine for strings" the exercise asks for:
     assert_equal_string(label, expected, actual: String) do
       total := total + 1
@@ -98,16 +97,15 @@ function absolute_value(x: Integer): Integer
 
 function main() do
   let t: Tester := create Tester.make()
-  let c: Console := t.console
 
   -- 1.
-  c.print_line("1. reverse tests:")
+  console.print_line("1. reverse tests:")
   t.assert_equal_string("reverse('hello')", "olleh", reverse("hello"))
   t.assert_equal_string("reverse('') = ''", "", reverse(""))
   t.assert_equal_string("reverse('a')", "a", reverse("a"))
 
   -- 2. push / pop / peek, plus the empty-stack precondition.
-  c.print_line("2. Stack tests:")
+  console.print_line("2. Stack tests:")
   let s: Stack[Integer] := create Stack[Integer].make()
   s.push(1)
   s.push(2)
@@ -125,7 +123,7 @@ function main() do
   t.assert_true("pop on empty stack violates not_empty", refused)
 
   -- 3. Bank_Account: deposit, withdrawal, and one invalid call.
-  c.print_line("3. Bank_Account tests:")
+  console.print_line("3. Bank_Account tests:")
   let acct: Bank_Account := create Bank_Account.make(100.0)
   acct.deposit(50.0)
   t.assert_equal_string("balance after deposit", "150.0", acct.balance.to_string)
@@ -142,7 +140,7 @@ function main() do
   t.assert_true("deposit(-10) violates positive precondition", dep_refused)
 
   -- 4. word_frequencies with two additional boundary/formatting cases.
-  c.print_line("4. word_frequencies tests:")
+  console.print_line("4. word_frequencies tests:")
   let f: Map[String, Integer] := word_frequencies("the cat the dog the")
   t.assert_equal_int("'the' counted 3", 3, f.get("the"))
   t.assert_equal_int("'cat' counted 1", 1, f.get("cat"))
@@ -154,18 +152,18 @@ function main() do
   t.assert_equal_int("single word counts 1", 1, f3.get("solo"))
 
   -- 5.* Tests that catch a wrong implementation the weak contract would not.
-  c.print_line("5. absolute_value tests (stronger than its postcondition):")
+  console.print_line("5. absolute_value tests (stronger than its postcondition):")
   t.assert_equal_int("abs(-7) = 7", 7, absolute_value(-7))
   t.assert_equal_int("abs(7) = 7", 7, absolute_value(7))
   t.assert_equal_int("abs(0) = 0", 0, absolute_value(0))
   -- (A bug like `result := 0` satisfies result >= 0 but fails abs(-7)=7 above.)
 
   -- Summary.
-  c.print_line("")
+  console.print_line("")
   if t.passed = t.total then
-    c.print_line("TEST SUMMARY: PASS (" + t.passed.to_string + "/" + t.total.to_string + ")")
+    console.print_line("TEST SUMMARY: PASS (" + t.passed.to_string + "/" + t.total.to_string + ")")
   else
-    c.print_line("TEST SUMMARY: FAIL (" + t.passed.to_string + "/" + t.total.to_string + ")")
+    console.print_line("TEST SUMMARY: FAIL (" + t.passed.to_string + "/" + t.total.to_string + ")")
   end
   assert t.passed = t.total
 end

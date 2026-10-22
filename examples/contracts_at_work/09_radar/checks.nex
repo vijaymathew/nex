@@ -39,8 +39,7 @@ end
 
 let c: Checker := create Checker.make()
 
-let proc: Process := create Process
-let base_dir: String := proc.getenv("NEX_USER_DIR") + "/tmp_radar_check"
+let base_dir: String := program.working_directory + "/tmp_radar_check"
 let root: Directory := create Directory.make(base_dir)
 if root.exists() then
   root.delete_tree()

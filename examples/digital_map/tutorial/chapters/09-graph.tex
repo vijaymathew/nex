@@ -273,9 +273,9 @@ intern Helpers
 let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
 let driving: Road_Graph := create Road_Graph.build(island, Mode.Driving)
 let walking: Road_Graph := create Road_Graph.build(island, Mode.Walking)
-say("driving: " + driving.nodes.length.to_string + " nodes, "
+console.print_line("driving: " + driving.nodes.length.to_string + " nodes, "
   + driving.edge_count.to_string + " edges")
-say("walking: " + walking.nodes.length.to_string + " nodes, "
+console.print_line("walking: " + walking.nodes.length.to_string + " nodes, "
   + walking.edge_count.to_string + " edges")
 
 -- The node that Harbour Street and Market Street share.
@@ -292,10 +292,10 @@ across island.roads as a do
   end
 end
 across [driving, walking] as g do
-  say("")
-  say(g.mode.to_string + " from node " + crossing.to_string + ":")
+  console.print_line("")
+  console.print_line(g.mode.to_string + " from node " + crossing.to_string + ":")
   across g.edges_from(crossing) as e do
-    say("  to node " + e.target.to_string.pad_end(" ", 4) + " along " + e.road.name
+    console.print_line("  to node " + e.target.to_string.pad_end(" ", 4) + " along " + e.road.name
       + ", " + bearing(island.point(e.source), island.point(e.target)).round.to_string
       + " degrees, " + fixed(e.length, 0) + " m, " + fixed(e.seconds, 1) + " s")
   end

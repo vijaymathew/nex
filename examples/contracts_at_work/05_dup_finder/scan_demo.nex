@@ -5,8 +5,7 @@
 intern Dup_Finder
 
 function main() do
-  let proc: Process := create Process
-  let root: String := proc.getenv("NEX_USER_DIR")
+  let root: String := program.working_directory
   print("scanning " + root)
 
   let finder: Dup_Finder := create Dup_Finder.make()

@@ -277,7 +277,7 @@ feature
     if t.navigator.reroutes > seen_reroutes then
       seen_reroutes := t.navigator.reroutes
       alert := 2.5
-      say("Off the route: planning a new one.")
+      console.print_line("Off the route: planning a new one.")
     end
   end
 
@@ -501,17 +501,17 @@ feature
   end
 
   print_directions(s: Search_Result) do
-    say("")
+    console.print_line("")
     if s.found() then
-      say(start_name + " to " + finish_name + ": "
+      console.print_line(start_name + " to " + finish_name + ": "
         + distance_text(route_cost(graph, s.path, by_distance())) + ", about "
         + duration_text(route_cost(graph, s.path, by_time())) + " ("
         + search_name() + " explored " + s.explored.length.to_string + " nodes)")
       across directions(graph, s.path, finish_name) as step do
-        say("  " + step.text)
+        console.print_line("  " + step.text)
       end
     else
-      say("No way from " + start_name + " to " + finish_name)
+      console.print_line("No way from " + start_name + " to " + finish_name)
     end
   end
 end
@@ -542,7 +542,7 @@ function search_snapshot(app: App, file: String) do
   app.update(App.SEARCH_SECONDS * 0.6)
   app.draw()
   app.view.save(file)
-  say("saved " + file)
+  console.print_line("saved " + file)
 end
 
 -- Draw the trip as it is `seconds` into the journey, without a window.
@@ -569,11 +569,11 @@ function snapshot(app: App, seconds, wrong_turn: Real, file: String) do
   end
   app.draw()
   app.view.save(file)
-  say("saved " + file)
+  console.print_line("saved " + file)
 end
 
 function main() do
-  let args: Array[String] := (create Process).command_line()
+  let args: Array[String] := program.arguments
   let names: Array[String] := []
   let walk: Boolean := false
   let algorithm: String := "astar"
@@ -624,7 +624,7 @@ function main() do
   elseif app.view.canvas.has_display() then
     run_window(app)
   else
-    say("No display: drawing navigate.png instead of opening a window.")
+    console.print_line("No display: drawing navigate.png instead of opening a window.")
     snapshot(app, 0.0, -1.0, "navigate.png")
   end
 end

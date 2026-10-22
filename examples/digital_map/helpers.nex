@@ -1,10 +1,5 @@
--- helpers.nex: printing text, numbers, distances and times neatly, and
--- finding the user's files.
-
--- Print s on a line of its own, without quotes.
-function say(s: String) do
-  (create Console).print_line(s)
-end
+-- helpers.nex: printing numbers, distances and times neatly, and finding
+-- the user's files.
 
 -- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
 -- is "2.500".
@@ -54,12 +49,11 @@ end
 
 -- The full path of a file the user named. The `nex` launcher runs
 -- programs from its own installation folder, so a relative name is
--- resolved against the folder `nex` was started from, NEX_USER_DIR.
+-- resolved against the folder the program was started from.
 function user_path(raw: String): String do
-  let user_dir: String := (create Process).getenv("NEX_USER_DIR")
-  if raw.starts_with("/") or user_dir = "" then
+  if raw.starts_with("/") then
     result := raw
   else
-    result := user_dir + "/" + raw
+    result := program.working_directory + "/" + raw
   end
 end

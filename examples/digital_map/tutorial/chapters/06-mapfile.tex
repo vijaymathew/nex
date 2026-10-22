@@ -461,17 +461,17 @@ intern Island_Map
 intern Helpers
 
 let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map"))
-say(island.name + ": " + island.positions.size.to_string + " nodes, "
+console.print_line(island.name + ": " + island.positions.size.to_string + " nodes, "
   + island.roads.length.to_string + " roads, " + island.places.length.to_string + " places")
-say("centred on " + island.projection.centre.to_string())
-say(fixed(island.max_x() - island.min_x(), 0) + " m from west to east, "
+console.print_line("centred on " + island.projection.centre.to_string())
+console.print_line(fixed(island.max_x() - island.min_x(), 0) + " m from west to east, "
   + fixed(island.max_y() - island.min_y(), 0) + " m from south to north")
-say("")
+console.print_line("")
 across island.areas as a do
-  say(a.name.pad_end(" ", 16) + fixed(polygon_area(island.points_of(a.node_ids)) / 10000.0, 1)
+  console.print_line(a.name.pad_end(" ", 16) + fixed(polygon_area(island.points_of(a.node_ids)) / 10000.0, 1)
     .pad_start(" ", 7) + " hectares of " + a.kind)
 end
-say("")
+console.print_line("")
 across Road_Kind.values as kind do
   let total: Real := 0.0
   across island.roads as r do
@@ -479,12 +479,12 @@ across Road_Kind.values as kind do
       total := total + line_length(island.points_of(r.node_ids))
     end
   end
-  say(kind.to_string.pad_end(" ", 10) + distance_text(total).pad_start(" ", 7))
+  console.print_line(kind.to_string.pad_end(" ", 10) + distance_text(total).pad_start(" ", 7))
 end
-say("")
+console.print_line("")
 across island.places as p do
   if ?island.area_at(island.point(p.node_id)) as a then
-    say(p.name + when a.kind = "land" then " is on " else " is in " end + a.name)
+    console.print_line(p.name + when a.kind = "land" then " is on " else " is in " end + a.name)
   end
 end
 \end{tryit}
@@ -506,7 +506,7 @@ create Path.make(file).write_text("map Broken\nnode 1 47.0 -34.0\nnode 2 47.0 -3
 do
   let island: Island_Map := create Island_Map.load(file)
 rescue
-  say(exception.to_string.replace(user_path(""), ""))
+  console.print_line(exception.to_string.replace(user_path(""), ""))
 end
 \end{tryit}
 \tryoutput{try_bad_map}

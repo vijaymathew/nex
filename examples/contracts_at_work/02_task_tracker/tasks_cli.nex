@@ -79,18 +79,14 @@ function handle_remove(store: Task_Store, rest: String) do
 end
 
 function main() do
-  let console: Console := create Console
   -- A bare relative path ("tasks.jsonl") resolves against the `nex` CLI's
   -- own installation directory, not the directory this program was run
   -- from: the `nex` launcher script `cd`s into NEX_HOME before starting
   -- the JVM, and io/Path's relative-path resolution uses the process's
-  -- real working directory rather than NEX_USER_DIR (which the launcher
-  -- sets, but only `intern` module resolution consults it) — confirmed
-  -- directly. NEX_USER_DIR is
-  -- still available as a plain environment variable, so building the path
-  -- from it explicitly is the workaround.
-  let proc: Process := create Process
-  let store_path: Path := create Path.make(proc.getenv("NEX_USER_DIR") + "/tasks.jsonl")
+  -- real working directory, not the one the program was started from —
+  -- confirmed directly. program.working_directory is the folder the program
+  -- was started from, so the path is built from it explicitly.
+  let store_path: Path := create Path.make(program.working_directory + "/tasks.jsonl")
   let store: Task_Store := create Task_Store.make()
   store.load_from(store_path)
 

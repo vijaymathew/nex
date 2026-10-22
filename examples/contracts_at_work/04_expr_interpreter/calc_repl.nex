@@ -7,7 +7,6 @@
 intern Expr
 
 function main() do
-  let console: Console := create Console
   let env: Map[String, Real] := {}
 
   print("calc_repl — type an expression, `let name := expr`, or `quit`")

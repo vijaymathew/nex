@@ -84,6 +84,7 @@
    "boolean"   [:Boolean `boolean?]
    "console"   [:Console `rt/nex-console?]
    "process"   [:Process `rt/nex-process?]
+   "program"   [:Program `rt/nex-program?]
    "map_entry" [:Map_Entry `rt/nex-map-entry?]})
 
 (defmacro ^:private def-builtin-method-wrapper
@@ -2950,6 +2951,13 @@
 (def-builtin-method-wrapper builtin-method-console-read-integer "read_integer")
 (def-builtin-method-wrapper builtin-method-console-read-real "read_real")
 
+(def-builtin-method-wrapper builtin-method-program-arguments "arguments")
+(def-builtin-method-wrapper builtin-method-program-env "env")
+(def-builtin-method-wrapper builtin-method-program-has-env "has_env")
+(def-builtin-method-wrapper builtin-method-program-pid "pid")
+(def-builtin-method-wrapper builtin-method-program-working-directory "working_directory")
+(def-builtin-method-wrapper builtin-method-program-exit "exit")
+
 (def-builtin-method-wrapper builtin-method-process-getenv "getenv")
 (def-builtin-method-wrapper builtin-method-process-setenv "setenv")
 (def-builtin-method-wrapper builtin-method-process-command-line "command_line")
@@ -3504,6 +3512,9 @@
 
    "create-console"
    (fn [_state _args] {:nex-builtin-type :Console})
+
+   "create-program"
+   (fn [_state _args] (rt/nex-program))
 
    "create-process"
    (fn [_state _args] (rt/nex-process-self))
