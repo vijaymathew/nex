@@ -301,10 +301,10 @@ photo.grayscale().rotated_right().save("photo_gray.png")
 ```
 
 A per-pixel loop is fine for small and medium images: on the compiled backend
-one `get` and one `set` per pixel over a 512x512 picture takes a second or two
-(`grayscale` is such a loop, so it costs about the same). `fill`, `cropped`,
-`scaled` and the flips and turns are done by Java2D in a single call, so they are
-much faster.
+one `get` and one `set` per pixel over a 512x512 picture takes about half a
+second. `grayscale`, `fill`, `cropped`, `scaled` and the flips and turns are
+done by Java2D in a single call, so they are much faster: `grayscale` takes a
+few tens of milliseconds for a million pixels.
 
 ## `Color`
 
