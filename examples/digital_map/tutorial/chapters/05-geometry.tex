@@ -368,24 +368,24 @@ function pt(x, y: Real): Point do
 end
 
 let road: Array[Point] := [pt(0.0, 0.0), pt(300.0, 0.0), pt(300.0, 400.0)]
-say("the road is " + fixed(line_length(road), 0) + " m long")
-say("200 m along it: " + point_along(road, 200.0).to_string())
-say("500 m along it: " + point_along(road, 500.0).to_string())
+console.print_line("the road is " + fixed(line_length(road), 0) + " m long")
+console.print_line("200 m along it: " + point_along(road, 200.0).to_string())
+console.print_line("500 m along it: " + point_along(road, 500.0).to_string())
 let fix: Point := pt(120.0, 9.0)
-say("closest point to " + fix.to_string() + ": "
+console.print_line("closest point to " + fix.to_string() + ": "
   + closest_point_on_segment(fix, road.get(0), road.get(1)).to_string()
   + ", " + fixed(distance_to_segment(fix, road.get(0), road.get(1)), 1) + " m away")
 
 let field: Array[Point] := [pt(0.0, 0.0), pt(100.0, 0.0), pt(100.0, 50.0), pt(0.0, 50.0)]
-say("the field is " + fixed(polygon_area(field), 0) + " square metres")
-say("(50, 25) inside? " + polygon_contains(field, pt(50.0, 25.0)).to_string)
-say("(150, 25) inside? " + polygon_contains(field, pt(150.0, 25.0)).to_string)
+console.print_line("the field is " + fixed(polygon_area(field), 0) + " square metres")
+console.print_line("(50, 25) inside? " + polygon_contains(field, pt(50.0, 25.0)).to_string)
+console.print_line("(150, 25) inside? " + polygon_contains(field, pt(150.0, 25.0)).to_string)
 
 let heading: Real := bearing(road.get(0), road.get(1))
 let turned: Real := bearing(road.get(1), road.get(2))
-say("first heading " + fixed(heading, 0) + " (" + compass_name(heading) + "), then "
+console.print_line("first heading " + fixed(heading, 0) + " (" + compass_name(heading) + "), then "
   + fixed(turned, 0) + " (" + compass_name(turned) + ")")
-say("the turn: " + fixed(turn_angle(heading, turned), 0) + " degrees")
+console.print_line("the turn: " + fixed(turn_angle(heading, turned), 0) + " degrees")
 \end{tryit}
 \tryoutput{try_geometry}
 

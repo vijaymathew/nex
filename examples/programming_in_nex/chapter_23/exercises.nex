@@ -18,12 +18,10 @@ intern Contact
 intern Long_Descriptive_Module_Name as Shorty
 
 function main() do
-  let c: Console := create Console
-
   -- 1. A class defined in temperature.nex, used here via `intern Temperature`.
   let t: Temperature := create Temperature.make(25.0)
-  c.print_line("1. Temperature (from temperature.nex): 25C = " +
-               t.fahrenheit.to_string + "F")                               -- 77.0F
+  console.print_line("1. Temperature (from temperature.nex): 25C = " +
+                     t.fahrenheit.to_string + "F")                               -- 77.0F
   assert t.fahrenheit = 77.0
 
   -- 2. The over-broad "contact manager" split across three files: Contact (data),
@@ -31,21 +29,21 @@ function main() do
   let book: Address_Book := create Address_Book.make()
   book.add(create Contact.make("Ada", "ada@example.com"))
   book.add(create Contact.make("Alan", "alan@example.com"))
-  c.print_line("2. Address_Book size = " + book.size.to_string)           -- 2
+  console.print_line("2. Address_Book size = " + book.size.to_string)           -- 2
   assert book.size = 2
-  c.print_line("2. find('Ada') = " + book.find("Ada"))                    -- Ada <...>
+  console.print_line("2. find('Ada') = " + book.find("Ada"))                    -- Ada <...>
   assert book.find("Ada") = "Ada <ada@example.com>"
   assert book.find("Nobody") = "NOT FOUND"
   let exporter: Csv_Exporter := create Csv_Exporter.make()
-  c.print_line("2. CSV export:")
-  c.print_line(exporter.export(book.contacts))
+  console.print_line("2. CSV export:")
+  console.print_line(exporter.export(book.contacts))
 
   -- 3. `intern Long_Descriptive_Module_Name as Shorty` lets a verbose class be
   --    referred to briefly at the use site. The alias helps when the descriptive
   --    name is good documentation in its own file but noisy when repeated in
   --    client code (or when two interned modules would otherwise clash on a name).
   let s: Shorty := create Shorty.make()
-  c.print_line("3. aliased class: Shorty.shout('hi') = " + s.shout("hi"))  -- HI!
+  console.print_line("3. aliased class: Shorty.shout('hi') = " + s.shout("hi"))  -- HI!
   assert s.shout("hi") = "HI!"
 
   -- 4. Directory layout for a small address-book program:
@@ -56,7 +54,7 @@ function main() do
   --        csv_exporter.nex    -- Csv_Exporter: renders Contacts as CSV
   --    Each file is one class with one reason to change; main.nex interns the
   --    other three. (This exercise's files mirror that layout.)
-  c.print_line("4. layout: main.nex + contact.nex + address_book.nex + csv_exporter.nex")
+  console.print_line("4. layout: main.nex + contact.nex + address_book.nex + csv_exporter.nex")
 
   -- 5.* A chapter-26-sized program of my own — a "library checkout tracker":
   --      library/
@@ -69,8 +67,8 @@ function main() do
   --    Justification, one line each: keep DATA (book, member, loan) separate from
   --    the COLLECTION (catalogue) and the POLICY (checkout_service); main only
   --    orchestrates. Each file changes for exactly one reason.
-  c.print_line("5. my program: a library checkout tracker, one class per file" +
-               " (book/member/loan/catalogue/checkout_service + main).")
+  console.print_line("5. my program: a library checkout tracker, one class per file" +
+                     " (book/member/loan/catalogue/checkout_service + main).")
 end
 
 main()

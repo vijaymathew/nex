@@ -166,8 +166,6 @@ class Countdown
 end
 
 function main() do
-  let c: Console := create Console
-
   -- 1. Happy path; pop on an empty stack would trip `not_empty` (a precondition
   --    violation that halts the program) — the contract turns a silent bad
   --    index into a loud, located failure. We exercise only the valid path here.
@@ -176,8 +174,8 @@ function main() do
   s.push(20)
   let popped: Integer := s.pop
   let peeked: Integer := s.peek
-  c.print_line("1. pop=" + popped.to_string + " then peek=" + peeked.to_string)  -- 20, 10
-  c.print_line("1. (pop on an empty stack would violate not_empty and halt.)")
+  console.print_line("1. pop=" + popped.to_string + " then peek=" + peeked.to_string)  -- 20, 10
+  console.print_line("1. (pop on an empty stack would violate not_empty and halt.)")
   assert popped = 20
   assert peeked = 10
 
@@ -185,21 +183,21 @@ function main() do
   let lb: Logged_Box[String] := create Logged_Box[String].make("a")
   lb.set("b")
   lb.set("c")
-  c.print_line("2. Logged_Box value=" + lb.get + " changes=" + lb.changes.to_string)  -- c, 2
+  console.print_line("2. Logged_Box value=" + lb.get + " changes=" + lb.changes.to_string)  -- c, 2
   assert lb.get = "c"
   assert lb.changes = 2
 
   -- 3.
   let ri: Range[Integer] := create Range[Integer].make(1, 10)
-  c.print_line("3. int range [1,10] contains 5? " + ri.contains(5).to_string +
-               " contains 11? " + ri.contains(11).to_string)              -- true false
+  console.print_line("3. int range [1,10] contains 5? " + ri.contains(5).to_string +
+                     " contains 11? " + ri.contains(11).to_string)              -- true false
   assert ri.contains(5)
   assert not ri.contains(11)
   let rr: Range[Real] := create Range[Real].make(0.0, 1.0)
-  c.print_line("3. real range [0,1] contains 0.5? " + rr.contains(0.5).to_string)  -- true
+  console.print_line("3. real range [0,1] contains 0.5? " + rr.contains(0.5).to_string)  -- true
   assert rr.contains(0.5)
   let ri2: Range[Integer] := create Range[Integer].make(8, 12)
-  c.print_line("3. [1,10] overlaps [8,12]? " + ri.overlaps(ri2).to_string)  -- true
+  console.print_line("3. [1,10] overlaps [8,12]? " + ri.overlaps(ri2).to_string)  -- true
   assert ri.overlaps(ri2)
 
   -- 4. Why ?V in Result[V] (discussion):
@@ -209,25 +207,25 @@ function main() do
   --    is no universal default). Making it `?V` (detachable) lets the field be
   --    `nil` in the failure case; the success case attaches a real V. Callers
   --    are then forced to check before use, which is the point.
-  c.print_line("4. Result.value is ?V so the failure case can hold nil; a plain" +
-               " V would demand a value that failure does not have.")
+  console.print_line("4. Result.value is ?V so the failure case can hold nil; a plain" +
+                     " V would demand a value that failure does not have.")
 
   -- 5.*
   let pq: Priority_Queue[Integer] := create Priority_Queue[Integer].make()
   across [5, 2, 8, 1, 9] as n do
     pq.enqueue(n)
   end
-  c.print("5. dequeue from Priority_Queue (expect ascending): ")
+  console.print("5. dequeue from Priority_Queue (expect ascending): ")
   let pq_order: String := ""
   from
   until
     pq.is_empty
   do
     let v: Integer := pq.dequeue
-    c.print(v.to_string + " ")
+    console.print(v.to_string + " ")
     pq_order := pq_order + v.to_string + " "
   end
-  c.new_line
+  console.new_line
   assert pq_order.trim = "1 2 5 8 9"
 
   -- Section 15.8: a user-defined type used as the source for `across`.
@@ -238,7 +236,7 @@ function main() do
   across week as day do
     days := days + day.to_string + " "
   end
-  c.print_line("15.8 Interval(1..7)  = " + days.trim)               -- 1 2 3 4 5 6 7
+  console.print_line("15.8 Interval(1..7)  = " + days.trim)               -- 1 2 3 4 5 6 7
   assert days.trim = "1 2 3 4 5 6 7"
 
   let total: Integer := 0
@@ -247,7 +245,7 @@ function main() do
       total := total + value
     end
   end
-  c.print_line("15.8 sum 1..100      = " + total.to_string)         -- 5050
+  console.print_line("15.8 sum 1..100      = " + total.to_string)         -- 5050
   assert total = 5050
 
   -- 6. Countdown, iterated twice to show each `cursor` call is independent.
@@ -256,7 +254,7 @@ function main() do
   across cd as k do first := first + k.to_string + " " end
   let again: String := ""
   across cd as k do again := again + k.to_string + " " end
-  c.print_line("6. Countdown(5) twice = " + first.trim + " | " + again.trim)  -- 5 4 3 2 1 | 5 4 3 2 1
+  console.print_line("6. Countdown(5) twice = " + first.trim + " | " + again.trim)  -- 5 4 3 2 1 | 5 4 3 2 1
   assert first.trim = "5 4 3 2 1"
   assert again.trim = "5 4 3 2 1"
 
@@ -276,7 +274,7 @@ function main() do
       sum := sum + v
     end
   end
-  c.print_line("7. Stack top->bottom  = " + order.trim + " (sum " + sum.to_string + ")")  -- 30 20 10 (sum 60)
+  console.print_line("7. Stack top->bottom  = " + order.trim + " (sum " + sum.to_string + ")")  -- 30 20 10 (sum 60)
   assert order.trim = "30 20 10"
   assert sum = 60
 end

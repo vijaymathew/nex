@@ -27,12 +27,8 @@ intern World_Scale_From_Studio2
 
 -- A small helper so the report lines stay uniform across domains.
 class Report
-feature
-  console: Console
 create
-  make() do
-    this.console := create Console
-  end
+  make() do end
 feature
   line(s: String) do console.print_line(s) end
 

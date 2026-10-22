@@ -2,7 +2,7 @@
 -- tree under a temp folder, runs find_duplicates against it, cleans up.
 -- Run: nex checks.nex
 --
--- Uses NEX_USER_DIR rather than a bare relative path for the same reason
+-- Uses program.working_directory rather than a bare relative path for the same reason
 -- documented in Project 2: the `nex` CLI launcher's own working directory
 -- is not the caller's.
 
@@ -41,8 +41,7 @@ end
 
 let c: Checker := create Checker.make()
 
-let proc: Process := create Process
-let base: String := proc.getenv("NEX_USER_DIR") + "/tmp_dupcheck"
+let base: String := program.working_directory + "/tmp_dupcheck"
 let root: Directory := create Directory.make(base)
 if root.exists() then
   root.delete_tree()

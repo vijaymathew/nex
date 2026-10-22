@@ -17,20 +17,18 @@ intern io/Path
 class Checker
 create
   make() do
-    con := create Console
   end
 feature
-  con: Console
   passed: Integer
   failed: Integer
 
   check(label: String, ok: Boolean) do
     if ok then
       passed := passed + 1
-      con.print_line("PASS " + label)
+      console.print_line("PASS " + label)
     else
       failed := failed + 1
-      con.print_line("FAIL " + label)
+      console.print_line("FAIL " + label)
     end
   end
 
@@ -41,8 +39,8 @@ feature
   end
 
   summary() do
-    con.print_line("---")
-    con.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
+    console.print_line("---")
+    console.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
     if failed > 0 then
       exit(1)
     end

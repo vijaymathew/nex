@@ -15,10 +15,8 @@ intern Algorithm_Lab_1
 
 -- Small reporting helper so every result row is formatted the same way.
 class Lab_Report
-feature
-  console: Console
 create
-  make() do this.console := create Console end
+  make() do end
 feature
   line(s: String) do console.print_line(s) end
 

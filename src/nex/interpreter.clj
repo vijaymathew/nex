@@ -1719,6 +1719,7 @@
       "Min_Heap" (make-min-heap nil)
       "Console" {:nex-builtin-type :Console}
       "Process" (nex-process-self)
+      "Program" (rt/nex-program)
       "Task" nil
       "Channel" nil
       nil)
@@ -3416,6 +3417,10 @@
   [_ctx _constructor _args]
   {:nex-builtin-type :Console})
 
+(defn- create-program-builtin
+  [_ctx _constructor _args]
+  (rt/nex-program))
+
 (defn- create-process-builtin
   [ctx constructor args]
   (let [arg-values (mapv #(eval-node ctx %) args)]
@@ -3549,6 +3554,7 @@
    `eval-node :create`. A class name with no entry here is a user-defined
    (or Java interop) class, handled by `create-user-object`."
   {"Console"          create-console-builtin
+   "Program"          create-program-builtin
    "Process"          create-process-builtin
    "Array"            create-array-builtin
    "Map"              create-map-builtin
@@ -3683,7 +3689,11 @@
 
 (defmethod eval-node :create
   [ctx {:keys [class-name generic-args constructor args]}]
-  (if-let [handler (get create-builtin-dispatch class-name)]
+  ;; Program became a builtin type after programs could already have a class
+  ;; called Program; such a class keeps its meaning.
+  (if-let [handler (and (not (and (= "Program" class-name)
+                                  (lookup-class-if-exists ctx class-name)))
+                        (get create-builtin-dispatch class-name))]
     (handler ctx constructor args)
     (create-user-object ctx class-name generic-args constructor args)))
 

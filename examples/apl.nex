@@ -14,7 +14,6 @@ function is[T](a: T, b: T): String do
   result := (when a = b then "✅" else "❌" end)
 end
 
-let console := create Console
 let r1 := zip([1, 2, 3], [4, 5, 6], fn(a, b: Integer): Integer do result := a + b end)
 console.print_line("zip([1, 2, 3], [4, 5, 6], a+b) = " + r1 + " " + is(r1, [5, 7, 9]))
 

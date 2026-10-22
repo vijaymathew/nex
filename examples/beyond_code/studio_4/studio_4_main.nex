@@ -19,10 +19,9 @@ intern World_Arch_Refactor
 
 class Studio4_Report
 feature
-  console: Console
   failures: Integer
 create
-  make() do this.console := create Console this.failures := 0 end
+  make() do this.failures := 0 end
 feature
   line(s: String) do console.print_line(s) end
 

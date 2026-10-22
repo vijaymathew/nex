@@ -12,7 +12,6 @@
 intern net/Tcp_Socket
 
 function main() do
-  let console: Console := create Console
   let host: String := console.read_line("server host [localhost]: ").trim()
   if host = "" then
     host := "localhost"

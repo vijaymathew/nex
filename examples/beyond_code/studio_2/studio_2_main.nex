@@ -15,7 +15,6 @@ intern Delivery_Task
 
 function main() do
   let r: Route := create Route.make("RT-AC", ["A", "B", "C"])
-  let console: Console := create Console
   
   -- ---------- NOMINAL: A -> B -> C, delivered ----------
   console.print_line("== nominal: pending -> assign -> advance -> advance -> complete ==")

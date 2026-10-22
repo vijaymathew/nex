@@ -18,21 +18,14 @@ inside it in Chapter~\ref{ch:mapfile}.
 The first file holds a few small helpers that the rest of the project uses
 for printing.
 
-Nex's \code{print} shows a string with its quotes, as \code{"hello"}, which
-is handy when debugging but not in a program's output. A \code{Console}
-prints text as it is, so our first helper wraps one:
+First, a word about printing itself. Nex's \code{print} shows a string
+with its quotes, as \code{"hello"}, which is handy when debugging but not
+in a program's output. Every Nex program has a \code{Console} called
+\code{console}, ready to use without creating it, and
+\code{console.print_line("hello")} prints the text as it is, on a line of
+its own. We use it for all our output.
 
-\begin{newfile}{helpers.nex}
--- helpers.nex: printing text, numbers, distances and times neatly, and
--- finding the user's files.
-
--- Print s on a line of its own, without quotes.
-function say(s: String) do
-  (create Console).print_line(s)
-end
-\end{newfile}
-
-Next, numbers. Nex prints a \code{Real} with all its digits, like
+Now numbers. Nex prints a \code{Real} with all its digits, like
 \code{1879.3774630534463}, which is far more than anyone wants to read. The
 helper \code{fixed} writes a number with a fixed number of decimal places.
 It multiplies by $10^{\text{places}}$, rounds to a whole number, and then
@@ -44,7 +37,10 @@ with 3 places, a fraction of \code{5} must be written \code{005}. The
 built-in \code{pad_start} does that: \code{s.pad_start("0", 3)} adds
 \code{"0"}s on the left of \code{s} until it is 3 characters long.
 
-\begin{append}{helpers.nex}
+\begin{newfile}{helpers.nex}
+-- helpers.nex: printing numbers, distances and times neatly, and finding
+-- the user's files.
+
 -- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
 -- is "2.500".
 function fixed(r: Real, places: Integer): String
@@ -60,7 +56,7 @@ do
     result := result + "." + frac
   end
 end
-\end{append}
+\end{newfile}
 
 \code{when ... then ... else ... end} is an \code{if} that gives a value. We
 work on the absolute value \code{r.abs} and put the minus sign back at the
@@ -116,20 +112,20 @@ than 1,000? Because 997 metres rounds to ``1000 m'', which looks odd; from
 The last helper finds a file the user names on the command line. The
 \code{nex} launcher runs programs from its own installation folder, so a
 plain name like \code{kestrel_island.map} would be looked for in the wrong
-place. The launcher records the folder you ran \code{nex} from in the
-environment variable \code{NEX_USER_DIR}, and we put that in front of any
-name that isn't already a full path:
+place. Every program also has \code{program}, the running
+\code{Program}, which knows the folder you ran \code{nex} from:
+\code{program.working_directory}. We put that in front of any name that
+isn't already a full path:
 
 \begin{append}{helpers.nex}
 -- The full path of a file the user named. The `nex` launcher runs
 -- programs from its own installation folder, so a relative name is
--- resolved against the folder `nex` was started from, NEX_USER_DIR.
+-- resolved against the folder the program was started from.
 function user_path(raw: String): String do
-  let user_dir: String := (create Process).getenv("NEX_USER_DIR")
-  if raw.starts_with("/") or user_dir = "" then
+  if raw.starts_with("/") then
     result := raw
   else
-    result := user_dir + "/" + raw
+    result := program.working_directory + "/" + raw
   end
 end
 \end{append}
@@ -141,11 +137,11 @@ Let's check that it works. Make this file and run it:
 \begin{tryit}{try_helpers.nex}
 intern Helpers
 
-say(fixed(2.5, 3))
-say(fixed(-3.14159, 2))
-say(distance_text(347.2) + ", " + distance_text(997.0) + ", "
+console.print_line(fixed(2.5, 3))
+console.print_line(fixed(-3.14159, 2))
+console.print_line(distance_text(347.2) + ", " + distance_text(997.0) + ", "
   + distance_text(1234.0))
-say(duration_text(25.0) + ", " + duration_text(150.0) + ", "
+console.print_line(duration_text(25.0) + ", " + duration_text(150.0) + ", "
   + duration_text(3900.0))
 \end{tryit}
 \tryoutput{try_helpers}

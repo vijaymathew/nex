@@ -2,6 +2,7 @@
   "Interactive REPL for the Nex programming language"
   (:require [nex.parser :as p]
             [nex.walker :as walker]
+            [nex.predeclared :as predeclared]
             [nex.interpreter :as interp]
             [nex.intern :as intern]
             [nex.compiler.jvm.repl :as compiled-repl]
@@ -63,7 +64,7 @@
 (def nex-types
   ["Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
    "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
-   "Task" "Channel" "Function" "Cursor" "Console" "Process"])
+   "Task" "Channel" "Function" "Cursor" "Console" "Process" "Program"])
 
 (def nex-builtins ["print" "println" "type_of" "type_is"])
 
@@ -469,8 +470,19 @@
                                     ")"))]
             (println (str "  • " class-name parent-names))))))))
 
+(defn- predeclared-binding?
+  "Whether NAME = VALUE is still a predeclared name's own value (`console`,
+   `program`), not one the user has since given it."
+  [name value]
+  (and (contains? predeclared/name-set name)
+       (map? value)
+       (contains? #{:Console :Program} (:nex-builtin-type value))))
+
 (defn show-vars [ctx]
-  (let [bindings @(:bindings (:globals ctx))]
+  ;; The predeclared names are in every session; listing them would only
+  ;; bury the user's own variables.
+  (let [bindings (remove (fn [[name value]] (predeclared-binding? name value))
+                         @(:bindings (:globals ctx)))]
     (if (empty? bindings)
       (println "No variables defined.")
       (do
@@ -535,6 +547,19 @@
 (defn- repl-cmd-help [ctx input]
   (do (show-help) ctx))
 
+(declare eval-code)
+
+(defn session-context
+  "A fresh context for an interactive session: init-repl-context, with the
+   predeclared names (`console`, `program`; see nex.predeclared) already
+   declared, as every program has them. Their declaration prints nothing."
+  []
+  (let [ctx (init-repl-context)
+        source (str/join "\n" (for [[name type] predeclared/names]
+                                 (str "let " name " := create " type)))]
+    (binding [*out* (java.io.StringWriter.)]
+      (eval-code ctx source))))
+
 (defn- repl-cmd-quit [ctx input]
   :quit)
 
@@ -545,7 +570,7 @@
     (reset! *repl-type-aliases* {})
     (reset! *compiled-repl-session* (compiled-repl/reset-session))
     (dbg/reset-run-state!)
-    (init-repl-context)))
+    (session-context)))
 
 (defn- repl-cmd-classes [ctx input]
   (do (show-classes ctx) ctx))
@@ -1973,7 +1998,7 @@
 (defn repl-loop
   "Main REPL loop"
   []
-  (let [ctx (init-repl-context)]
+  (let [ctx (session-context)]
     (reset! *completer-ctx* ctx)
     (loop [ctx ctx]
       (if-let [input (read-input)]

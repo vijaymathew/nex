@@ -36,10 +36,10 @@ feature
   check(label: String, ok: Boolean) do
     if ok then
       passed := passed + 1
-      say("PASS " + label)
+      console.print_line("PASS " + label)
     else
       failed := failed + 1
-      say("FAIL " + label)
+      console.print_line("FAIL " + label)
     end
   end
 
@@ -49,8 +49,8 @@ feature
   end
 
   summary() do
-    say("---")
-    say(passed.to_string + " passed, " + failed.to_string + " failed")
+    console.print_line("---")
+    console.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
     if failed > 0 then
       exit(1)
     end

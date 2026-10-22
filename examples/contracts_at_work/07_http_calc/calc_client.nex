@@ -23,7 +23,6 @@ intern data/Json
 intern text/Regex
 
 function main() do
-  let console: Console := create Console
   let base: String := console.read_line("server [http://localhost:4322]: ").trim()
   if base = "" then
     base := "http://localhost:4322"

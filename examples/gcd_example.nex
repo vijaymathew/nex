@@ -67,40 +67,39 @@ class Math
       end
 end
 
-function check(c: Console, m: Math, a, b, expected: Integer) do
+function check(m: Math, a, b, expected: Integer) do
   let g: Integer := m.gcd(a, b)
   let mark: String := "ok"
   if g /= expected then
     mark := "MISMATCH"
   end
-  c.print_line("  gcd(" + a.to_string + ", " + b.to_string + ") = " +
-               g.to_string + "   expected " + expected.to_string +
-               "   " + mark)
+  console.print_line("  gcd(" + a.to_string + ", " + b.to_string + ") = " +
+                     g.to_string + "   expected " + expected.to_string +
+                     "   " + mark)
 end
 
 function main() do
-  let c: Console := create Console
   let m: Math := create Math
 
-  c.print_line("loop contracts -- gcd")
-  check(c, m, 48, 18, 6)
-  check(c, m, 24, 18, 6)
-  check(c, m, 100, 35, 5)
-  check(c, m, 17, 19, 1)     -- coprime
-  check(c, m, 54, 24, 6)
+  console.print_line("loop contracts -- gcd")
+  check(m, 48, 18, 6)
+  check(m, 24, 18, 6)
+  check(m, 100, 35, 5)
+  check(m, 17, 19, 1)     -- coprime
+  check(m, 54, 24, 6)
 
-  c.print_line("grouped parameters -- clamp(value, low, high: Integer)")
-  c.print_line("  clamp(5, 1, 10)   = " + m.clamp(5, 1, 10).to_string)
-  c.print_line("  clamp(-3, 1, 10)  = " + m.clamp(-3, 1, 10).to_string)
-  c.print_line("  clamp(99, 1, 10)  = " + m.clamp(99, 1, 10).to_string)
+  console.print_line("grouped parameters -- clamp(value, low, high: Integer)")
+  console.print_line("  clamp(5, 1, 10)   = " + m.clamp(5, 1, 10).to_string)
+  console.print_line("  clamp(-3, 1, 10)  = " + m.clamp(-3, 1, 10).to_string)
+  console.print_line("  clamp(99, 1, 10)  = " + m.clamp(99, 1, 10).to_string)
 
   -- The precondition rejects a call the loop could not terminate on.
-  c.print_line("preconditions")
+  console.print_line("preconditions")
   do
     let bad: Integer := m.gcd(0, 5)
-    c.print_line("  gcd(0, 5) returned " + bad.to_string + " -- unexpected!")
+    console.print_line("  gcd(0, 5) returned " + bad.to_string + " -- unexpected!")
   rescue
-    c.print_line("  gcd(0, 5) rejected by require a_positive")
+    console.print_line("  gcd(0, 5) rejected by require a_positive")
   end
 end
 

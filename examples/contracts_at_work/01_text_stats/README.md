@@ -24,19 +24,14 @@ nex nexwc.nex sample.txt --top 3      # top 3 words instead
 
 ## Status: works, both backends, exit codes correct
 
-`Process.command_line()` was fixed upstream after this project was first
-built — it originally returned the JVM's own launch flags instead of the
-program's real arguments, which meant no Nex CLI tool could read `argv` at
-all. Confirmed fixed directly: a standalone compiled jar now reports the
-real `argc`/`argv` it was invoked with, on the interpreter, the default JVM
-backend, and a `nex compile jvm` standalone jar alike. `nexwc.nex` needed no
-changes to its argument-parsing logic — it was written correct against the
-language as documented and simply started working once the bug was fixed.
+`nexwc.nex` reads its arguments from the predeclared `program.arguments`
+— exactly the words after the script name, on the interpreter, the default
+JVM backend, and a `nex compile jvm` standalone jar alike.
 
-One thing it *did* need: a bare relative path (`nexwc.nex sample.txt`)
-resolves against the `nex` CLI's own installation directory, not wherever
+One thing to know: a bare relative path (`nexwc.nex sample.txt`) would
+resolve against the `nex` CLI's own installation directory, not wherever
 the program was actually run from (the launcher `cd`s into `NEX_HOME`
 before starting the JVM). This is by design, not a bug.
-`resolve_path` in `nexwc.nex` reads `NEX_USER_DIR`
-via `Process.getenv` and resolves any non-absolute path against it, the
-same workaround used in Projects 2, 5, and 9.
+`resolve_path` in `nexwc.nex` resolves any non-absolute path against
+`program.working_directory` — the folder the program was started from —
+the same approach used in Projects 2, 5, and 9.

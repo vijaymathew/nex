@@ -3,6 +3,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [nex.parser :as parser]
+            [nex.predeclared :as predeclared]
             [nex.intern :as intern]
             [nex.typechecker :as tc]
             [nex.types.runtime :as rt]
@@ -245,7 +246,9 @@
   ([file-path opts]
    (let [source-id (.getCanonicalPath (io/file file-path))
          source (slurp source-id)
-         ast (parser/ast source)]
+         ;; `console` and `program` (see nex.predeclared), declared before
+         ;; the program's first statement.
+         ast (predeclared/add (parser/ast source))]
      (type-check-ast! source-id ast (:max-errors opts))
      (run-ast source-id ast opts))))
 

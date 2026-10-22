@@ -73,7 +73,6 @@ feature
 end
 
 function main() do
-  let c: Console := create Console
   let rows: Array [Delivery_Task] := [
     create Delivery_Task.make("T-1", "Hub-A", "Zone-1", "PENDING",    "R-1"),
     create Delivery_Task.make("T-2", "Hub-A", "Zone-2", "IN_TRANSIT", "R-2")
@@ -86,34 +85,34 @@ function main() do
   -- Style B: feature module.
   let b_mod: Delivery_Feature_Module := create Delivery_Feature_Module.make(rows)
 
-  c.print_line("== Level 3: port/adapter+service (A) vs feature module (B) ==")
-  c.print_line("A dispatch_view(T-2) = " + a_wf.dispatch_view("T-2"))
-  c.print_line("B dispatch_view(T-2) = " + b_mod.dispatch_view("T-2"))
-  c.print_line("A dispatch_view(T-9) = " + a_wf.dispatch_view("T-9"))
-  c.print_line("B dispatch_view(T-9) = " + b_mod.dispatch_view("T-9"))
+  console.print_line("== Level 3: port/adapter+service (A) vs feature module (B) ==")
+  console.print_line("A dispatch_view(T-2) = " + a_wf.dispatch_view("T-2"))
+  console.print_line("B dispatch_view(T-2) = " + b_mod.dispatch_view("T-2"))
+  console.print_line("A dispatch_view(T-9) = " + a_wf.dispatch_view("T-9"))
+  console.print_line("B dispatch_view(T-9) = " + b_mod.dispatch_view("T-9"))
 
   -- 1. Behavior parity.
   let parity_ok: Boolean :=
     a_wf.dispatch_view("T-2") = b_mod.dispatch_view("T-2") and
     a_wf.dispatch_view("T-9") = b_mod.dispatch_view("T-9")
-  c.print_line("behavior parity A vs B: " + bool_str(parity_ok))
+  console.print_line("behavior parity A vs B: " + bool_str(parity_ok))
   assert parity_ok
 
   -- 2. Testability: Style A's workflow runs over a STUB port, no real storage.
   let stub: Stub_Task_Port := create Stub_Task_Port
   let a_wf_stub: Delivery_Workflow := create Delivery_Workflow.make(stub)
-  c.print_line("A over STUB port, dispatch_view(T-2) = " + a_wf_stub.dispatch_view("T-2"))
+  console.print_line("A over STUB port, dispatch_view(T-2) = " + a_wf_stub.dispatch_view("T-2"))
   assert a_wf_stub.dispatch_view("T-2") = "TASK_STATUS:IN_TRANSIT"
-  c.print_line("  ^ Style A: the use case is tested with zero storage, via the seam.")
-  c.print_line("  Style B cannot do this: its store is internal, no port to substitute.")
+  console.print_line("  ^ Style A: the use case is tested with zero storage, via the seam.")
+  console.print_line("  Style B cannot do this: its store is internal, no port to substitute.")
 
   -- 3. Coupling / ceremony.
-  c.print_line("")
-  c.print_line("Tradeoff:")
-  c.print_line("  A: more classes (port+adapter+service) but a substitution seam ->")
-  c.print_line("     swappable storage, isolated unit tests; pays off as the system grows.")
-  c.print_line("  B: one cohesive class, less ceremony -> faster to write/read now, but")
-  c.print_line("     opening it up later (extracting the port) is the migration cost.")
+  console.print_line("")
+  console.print_line("Tradeoff:")
+  console.print_line("  A: more classes (port+adapter+service) but a substitution seam ->")
+  console.print_line("     swappable storage, isolated unit tests; pays off as the system grows.")
+  console.print_line("  B: one cohesive class, less ceremony -> faster to write/read now, but")
+  console.print_line("     opening it up later (extracting the port) is the migration cost.")
 end
 
 function bool_str(b: Boolean): String do

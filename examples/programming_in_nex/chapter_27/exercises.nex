@@ -56,21 +56,19 @@ function count_with_prefix(items: Array[String], prefix: String): Integer do
 end
 
 function main() do
-  let c: Console := create Console
-
   -- 1. Which pattern best describes each routine:
   --      max_of          -> Accumulator Loop (carries the best-so-far)
   --      contains        -> Search Through a Sequence (scan until found)
   --      word_frequencies-> Accumulator Loop (accumulates counts into a map)
   --      count_nodes     -> Recursive Structure Matches Recursive Data
   --                         (the routine's recursion mirrors the tree's shape)
-  c.print_line("1. max_of=Accumulator, contains=Search, word_frequencies=" +
-               "Accumulator(into a map), count_nodes=Recursive-structure.")
+  console.print_line("1. max_of=Accumulator, contains=Search, word_frequencies=" +
+                     "Accumulator(into a map), count_nodes=Recursive-structure.")
 
   -- 2.
-  c.print_line("2. status_message(200)=" + status_message(200) +
-               " (404)=" + status_message(404) +
-               " (999)=" + status_message(999))   -- OK, Not Found, Unknown
+  console.print_line("2. status_message(200)=" + status_message(200) +
+                     " (404)=" + status_message(404) +
+                     " (999)=" + status_message(999))   -- OK, Not Found, Unknown
   assert status_message(200) = "OK"
   assert status_message(404) = "Not Found"
   assert status_message(999) = "Unknown"
@@ -79,19 +77,19 @@ function main() do
   let counter: Bounded_Counter := create Bounded_Counter.make(2)
   counter.increment()
   counter.increment()
-  c.print_line("3. counter at max=" + counter.value.to_string +
-               " (further increment would violate room_to_grow, protecting" +
-               " the 0<=value<=max invariant)")   -- 2
+  console.print_line("3. counter at max=" + counter.value.to_string +
+                     " (further increment would violate room_to_grow, protecting" +
+                     " the 0<=value<=max invariant)")   -- 2
   assert counter.value = 2
   counter.decrement()
-  c.print_line("3. after decrement=" + counter.value.to_string)   -- 1
+  console.print_line("3. after decrement=" + counter.value.to_string)   -- 1
   assert counter.value = 1
 
   -- 4.
   let names: Array[String] := ["apple", "apricot", "banana", "avocado", "app"]
-  c.print_line("4. count_with_prefix(..., 'ap') = " +
-               count_with_prefix(names, "ap").to_string +
-               " (pattern: accumulator loop with a search test)")   -- 3 (apple, apricot, app)
+  console.print_line("4. count_with_prefix(..., 'ap') = " +
+                     count_with_prefix(names, "ap").to_string +
+                     " (pattern: accumulator loop with a search test)")   -- 3 (apple, apricot, app)
   assert count_with_prefix(names, "ap") = 3
 
   -- 5.* A larger problem — a grade book / inventory report — would COMBINE:
@@ -102,8 +100,8 @@ function main() do
   --     * Table-Driven Lookup: to map a category code to a label or reorder
   --       threshold without a sprawling if/elseif chain.
   --     (and optionally Result Objects at the edges where a lookup may miss.)
-  c.print_line("5. for a grade book/inventory: combine Class-Around-an-Invariant" +
-               " (valid core) + Accumulator Loop (reports) + Table-Driven Lookup.")
+  console.print_line("5. for a grade book/inventory: combine Class-Around-an-Invariant" +
+                     " (valid core) + Accumulator Loop (reports) + Table-Driven Lookup.")
 end
 
 main()

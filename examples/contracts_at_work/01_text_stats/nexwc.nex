@@ -11,9 +11,8 @@
 -- A bare relative path resolves against the `nex` CLI's own installation
 -- directory, not wherever this program was actually run from — the
 -- launcher `cd`s into NEX_HOME before starting the JVM (documented, not a
--- bug to fix). NEX_USER_DIR is
--- set beforehand and read here via Process.getenv to resolve a relative
--- file argument against the caller's real working directory instead.
+-- bug to fix). program.working_directory is the caller's real working
+-- directory, so a relative file argument is resolved against that instead.
 
 intern Word_Stats
 intern io/Path
@@ -23,11 +22,11 @@ function fail(message: String, code: Integer) do
   exit(code)
 end
 
-function resolve_path(proc: Process, raw: String): String do
+function resolve_path(raw: String): String do
   if raw.starts_with("/") then
     result := raw
   else
-    result := proc.getenv("NEX_USER_DIR") + "/" + raw
+    result := program.working_directory + "/" + raw
   end
 end
 
@@ -57,13 +56,12 @@ function parse_top_count(args: Array[String]): Integer
   end
 
 function main() do
-  let proc: Process := create Process
-  let args: Array[String] := proc.command_line()
+  let args: Array[String] := program.arguments
   if args.length = 0 then
     fail("usage: nexwc <file> [--top n]", 2)
   end
 
-  let path: Path := create Path.make(resolve_path(proc, args.get(0)))
+  let path: Path := create Path.make(resolve_path(args.get(0)))
   if not path.exists() then
     fail("no such file: " + args.get(0), 1)
   end

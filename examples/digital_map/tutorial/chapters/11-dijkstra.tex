@@ -170,9 +170,9 @@ if ?island.find_place("beach") as a and ?island.find_place("lighthouse") as b th
   let source: Integer := g.nearest_node(island.point(a.node_id))
   let target: Integer := g.nearest_node(island.point(b.node_id))
   let shortest: Search_Result := dijkstra(g, source, target, by_distance())
-  say("shortest  " + summary(g, shortest))
+  console.print_line("shortest  " + summary(g, shortest))
   let quickest: Search_Result := dijkstra(g, source, target, by_time())
-  say("quickest  " + summary(g, quickest))
+  console.print_line("quickest  " + summary(g, quickest))
   picture_of_search(create Map_View.make(island, 1000, 700), shortest, "dijkstra.png")
 end
 \end{tryit}

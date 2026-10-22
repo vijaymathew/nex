@@ -221,17 +221,17 @@ let lighthouse: Lat_Lon := create Lat_Lon.make(47.079318, -34.565277)
 let flat: Projection := create Projection.make(create Lat_Lon.make(47.066, -34.5695))
 let h: Point := flat.to_point(harbour)
 let l: Point := flat.to_point(lighthouse)
-say("harbour    " + h.to_string())
-say("lighthouse " + l.to_string())
-say("on the sphere:   " + fixed(harbour.distance_to(lighthouse), 2) + " m")
-say("on the flat map: " + fixed(h.distance_to(l), 2) + " m")
-say("back again: " + flat.to_lat_lon(l).to_string())
+console.print_line("harbour    " + h.to_string())
+console.print_line("lighthouse " + l.to_string())
+console.print_line("on the sphere:   " + fixed(harbour.distance_to(lighthouse), 2) + " m")
+console.print_line("on the flat map: " + fixed(h.distance_to(l), 2) + " m")
+console.print_line("back again: " + flat.to_lat_lon(l).to_string())
 
 -- Pretending a degree is the same length both ways:
 let k: Real := flat.metres_per_degree_lat
 let naive: Point := create Point.make((lighthouse.longitude - harbour.longitude) * k,
   (lighthouse.latitude - harbour.latitude) * k)
-say("degrees as if they were squares: " + fixed(naive.length(), 2) + " m")
+console.print_line("degrees as if they were squares: " + fixed(naive.length(), 2) + " m")
 \end{tryit}
 \tryoutput{try_projection}
 

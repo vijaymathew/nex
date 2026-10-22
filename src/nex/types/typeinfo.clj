@@ -22,6 +22,7 @@
     (rt/nex-set? value) :Set
     (rt/nex-console? value) :Console
     (rt/nex-process? value) :Process
+    (rt/nex-program? value) :Program
     (rt/nex-task? value) :Task
     (rt/nex-channel? value) :Channel
     (rt/nex-min-heap? value) :Min_Heap
@@ -143,7 +144,7 @@
 (def ^:private builtin-type-names
   #{"Integer" "Integer64" "Integer32" "Integer16" "Byte" "Real" "Char" "Boolean"
     "String" "Array" "Map" "Set" "Function" "Task" "Channel" "Cursor"
-    "Comparable" "Console" "Process" "Min_Heap" "Map_Entry"
+    "Comparable" "Console" "Process" "Program" "Min_Heap" "Map_Entry"
     "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"})
 
 (defn known-type-name-fn

@@ -96,7 +96,10 @@
     ;; Top-level `let` globals, readable (not assignable) from the static world
     ;; (function and class bodies). Populated by a pre-pass before body checking;
     ;; consulted via the root env by env-lookup-global. See §7 of the spec.
-    :globals (atom {})}))
+    :globals (atom {})
+    ;; Names bound in this (root) env by a predeclared `let` (`console`,
+    ;; `program`; see nex.predeclared), which may be read but not assigned.
+    :predeclared (atom #{})}))
 
 (defn env-add-warning
   "Record a non-fatal type-checker warning on the root environment."
@@ -613,7 +616,7 @@
 (def builtin-types
   #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
-    "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Function"
+    "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Program" "Function"
     "Cursor"})
 
 (defn builtin-type? [type-name]
@@ -4607,6 +4610,15 @@
   [_env _expr]
   "Console")
 
+(defn- check-create-program
+  [_env {:keys [constructor args]}]
+  (when (or constructor (seq args))
+    (throw (ex-info "create Program takes no constructor or arguments"
+                    {:error (type-error (str "create Program takes no constructor or arguments: "
+                                             "there is only the one running program, which "
+                                             "`program` already names."))})))
+  "Program")
+
 (defn- check-create-process
   [env {:keys [constructor args]}]
   (case constructor
@@ -4818,6 +4830,7 @@
    ordinary generic classes rather than special-cased here."
   {"Array"            check-create-array
    "Console"          check-create-console
+   "Program"          check-create-program
    "Process"          check-create-process
    "Min_Heap"         check-create-min-heap
    "Atomic_Integer"   (check-create-single-arg-atomic "Atomic_Integer" "Integer")
@@ -5485,9 +5498,27 @@
       (contains? @(:let-names e) target) true
       :else (recur (:parent e)))))
 
+(defn- predeclared-binding?
+  "True when TARGET, as seen from ENV, is a predeclared name (`console`,
+   `program`) not shadowed by anything nearer: the nearest env that binds
+   it is the root, where the predeclared `let` put it."
+  [env target]
+  (let [root (env-root env)]
+    (and (contains? @(:predeclared root) target)
+         (loop [e env]
+           (cond
+             (nil? e) false
+             (contains? @(:vars e) target) (identical? e root)
+             :else (recur (:parent e)))))))
+
 (defn check-assignment
   "Check an assignment statement"
   [env {:keys [target value] :as stmt}]
+  (when (predeclared-binding? env target)
+    (let [msg (str "Cannot assign to " target ": it is predeclared, and read-only. "
+                   "To use a different value, declare your own with "
+                   "`let " target " := ...` instead.")]
+      (throw (ex-info msg {:error (type-error msg)}))))
   (when-let [current-class (env-lookup-var env "__current_class__")]
     (when (lookup-class-constant env current-class target)
       (throw (ex-info (str "Cannot assign to constant: " target)
@@ -5714,6 +5745,8 @@
   ;; No two `let` declarations in the same block may bind the same identifier.
   ;; `:let-names` is per-env, so a nested block (its own env) may still shadow.
   ;; Compiler-synthesised lets (e.g. an across cursor) are exempt.
+  (when (:predeclared stmt)
+    (swap! (:predeclared (env-root env)) conj name))
   (when (and (not synthetic) (string? name) (:let-names env))
     (if (contains? @(:let-names env) name)
       (let [msg (str "Duplicate local variable '" name "' declared in the same block. "
@@ -8108,6 +8141,12 @@
                              :generic-params [{:name "T"}]})
   (register-builtin-type-signatures! env "Task"))
 
+(defn- register-program-methods!
+  [env]
+  (env-add-class env "Program" {:name "Program"
+                                :generic-params nil})
+  (register-builtin-type-signatures! env "Program"))
+
 (defn- register-process-methods!
   [env]
   (env-add-class env "Process" {:name "Process"
@@ -8216,6 +8255,7 @@
   (register-console-methods! env)
   (register-task-methods! env)
   (register-process-methods! env)
+  (register-program-methods! env)
   (register-array-methods! env)
   (register-map-methods! env)
   (register-set-methods! env)

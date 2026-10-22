@@ -138,43 +138,41 @@ class Car
 end
 
 function main() do
-  let c: Console := create Console
-
   -- Overriding: the same call reaches a different body per class.
-  c.print_line("1. single inheritance and overriding")
+  console.print_line("1. single inheritance and overriding")
   let plain: Account := create Account.make("Ada", 1000.0)
   plain.deposit(100.0)
-  c.print_line("  " + plain.describe)          -- 1100.0
+  console.print_line("  " + plain.describe)          -- 1100.0
 
   let savings: SavingsAccount := create SavingsAccount.make("Grace", 1000.0, 0.05)
   savings.deposit(100.0)                       -- same effect, plus bookkeeping
-  c.print_line("  " + savings.describe)        -- 1100.0, 1 deposit
+  console.print_line("  " + savings.describe)        -- 1100.0, 1 deposit
 
   -- Features inherited unchanged are simply available.
-  c.print_line("2. inherited features")
+  console.print_line("2. inherited features")
   savings.withdraw(105.0)
-  c.print_line("  after withdraw(105): " + savings.describe)
+  console.print_line("  after withdraw(105): " + savings.describe)
   savings.apply_interest()
-  c.print_line("  after apply_interest: " + savings.describe)
+  console.print_line("  after apply_interest: " + savings.describe)
 
   -- Inherited contracts still hold on the descendant.
-  c.print_line("3. inherited contracts")
+  console.print_line("3. inherited contracts")
   do
     savings.withdraw(1000000.0)
-    c.print_line("  large withdrawal succeeded -- unexpected!")
+    console.print_line("  large withdrawal succeeded -- unexpected!")
   rescue
-    c.print_line("  withdraw(1000000) rejected by Account's require sufficient")
+    console.print_line("  withdraw(1000000) rejected by Account's require sufficient")
   end
 
   -- Multiple inheritance: Car pulls features from two parents.
-  c.print_line("4. multiple inheritance")
+  console.print_line("4. multiple inheritance")
   let car: Car := create Car.make("Roadster")
-  c.print_line("  " + car.status)
+  console.print_line("  " + car.status)
   car.start()                                  -- from Engine
   car.navigate("the coast")                    -- from GPS
-  c.print_line("  " + car.status)
+  console.print_line("  " + car.status)
   car.stop()                                   -- from Engine
-  c.print_line("  " + car.status)
+  console.print_line("  " + car.status)
 end
 
 main()

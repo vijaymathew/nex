@@ -267,14 +267,14 @@ let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map")
 let view: Map_View := create Map_View.make(island, 1000, 700)
 view.draw_map()
 view.save("island.png")
-say(view.labels.length.to_string + " labels found room")
+console.print_line(view.labels.length.to_string + " labels found room")
 
 -- Zoom in on the town: 1.4 metres per pixel, centred on Market Square.
 if ?island.find_place("market") as market then
   view.look_at(island.point(market.node_id), 1.4)
   view.draw_map()
   view.save("town.png")
-  say(view.labels.length.to_string + " labels found room in the town")
+  console.print_line(view.labels.length.to_string + " labels found room in the town")
 end
 \end{tryit}
 \tryoutput{try_labels}

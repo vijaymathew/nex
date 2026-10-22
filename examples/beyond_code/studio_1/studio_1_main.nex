@@ -23,11 +23,10 @@ intern World_Tiny
 
 class Studio1_Checker
 feature
-  console: Console
   passed: Integer
   total: Integer
 create
-  make() do this.console := create Console this.passed := 0 this.total := 0 end
+  make() do this.passed := 0 this.total := 0 end
 feature
   -- Compare an actual String result against the expected one.
   check(label: String, expected: String, actual: String) do

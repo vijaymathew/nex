@@ -1,11 +1,23 @@
 # System Classes
 
+Every program has a `Console` and a `Program` already, under the predeclared
+names `console` and `program`:
+
+```nex
+console.print_line("Hello")
+console.print_line(program.arguments.to_string)
+```
+
+They are read-only, usable anywhere (top level, functions, classes), and give
+way to a declaration of the program's own: see *Predeclared names* in
+`docs/md/SYNTAX.md`.
+
 ## `Console`
 
 ### Construction
 
 ```nex
-create Console
+create Console      -- or use the predeclared `console`
 ```
 
 ### Methods
@@ -21,10 +33,38 @@ create Console
 | `read_integer` | none | `Integer` | Read and parse integer. |
 | `read_real` | none | `Real` | Read and parse real number. |
 
+## `Program`
+
+The running program: its arguments, environment, process id and the folder it
+was started from. Reach it through the predeclared `program`; every `Program`
+value is the same running program.
+
+### Construction
+
+```nex
+program             -- predeclared
+create Program      -- the same running program
+```
+
+### Methods
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `arguments` | none | `Array[String]` | The program's own command-line arguments: what came after the file name in `nex app.nex a b` (or `java -jar app.jar a b`). |
+| `env` | `name: String` | `String` | The environment variable `name`, or `""` when it is not set. |
+| `has_env` | `name: String` | `Boolean` | Whether the environment variable `name` is set. |
+| `pid` | none | `Integer` | The program's process id. |
+| `working_directory` | none | `String` | The folder the program was started from. (The `nex` launcher runs the JVM from its own installation folder and records yours in `NEX_USER_DIR`; this answers with yours.) |
+| `exit` | `code: Integer` | `Void` | End the program now with exit status `code`. |
+
+The running program's environment cannot be changed from the JVM, so there is
+no `set_env`; set variables for a child process with `Process.setenv` instead.
+
 ## `Process`
 
 A `Process` value is either the *self* process (the running Nex program) or a
-spawned *child*.
+spawned *child*. For the running program, the predeclared `program` (a
+`Program`, above) is usually simpler.
 
 ### Construction
 
