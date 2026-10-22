@@ -3066,17 +3066,22 @@
 (defmethod eval-node :if
   [ctx {:keys [condition then elseif else]}]
   (maybe-debug-pause ctx {:type :if :condition condition :then then :elseif elseif :else else})
-  ;; Evaluate condition, then elseif chain, then optional else
-  (let [cond-val (eval-node ctx condition)]
+  ;; Evaluate condition, then elseif chain, then optional else. Each branch
+  ;; runs in its own scope, so a `let` inside it shadows rather than
+  ;; overwriting an outer variable of the same name.
+  (let [run-branch (fn [stmts]
+                     (let [branch-ctx (assoc ctx :current-env (make-env (:current-env ctx)))]
+                       (last (mapv #(eval-node branch-ctx %) stmts))))
+        cond-val (eval-node ctx condition)]
     (if cond-val
-      (last (map #(eval-node ctx %) then))
+      (run-branch then)
       (if-let [matched (some (fn [clause]
                                (when (eval-node ctx (:condition clause))
                                  clause))
                              elseif)]
-        (last (map #(eval-node ctx %) (:then matched)))
+        (run-branch (:then matched))
         (when else
-          (last (map #(eval-node ctx %) else)))))))
+          (run-branch else))))))
 
 (defmethod eval-node :case
   [ctx {:keys [expr clauses else]}]

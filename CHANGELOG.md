@@ -43,6 +43,9 @@
 - **`Picture.grayscale` is about a thousand times faster**, done by one
   Java2D operation instead of a call per pixel, with exactly the same result
   (checked against all 16,777,216 colors).
+- **Fixed: under `--interpret`, a `let` inside an `if` branch overwrote an
+  outer variable of the same name** instead of hiding it until the branch
+  ended. Each branch now has its own scope, as on the compiled backend.
 
 ## 0.6.2 - 2026-10-22
 
