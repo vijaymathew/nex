@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **Java interop calls are much faster.** A call in a `with "java"` block used
+  to be resolved from scratch every time it ran: every public method of the
+  class scanned for the name, an overload picked, and, for a method of a JDK
+  class its module keeps private (the `SunGraphics2D` behind every
+  `Graphics2D`), the class's supertypes searched for an accessible declaration.
+  Now each call shape is resolved once and remembered (`nex.types.reflect`),
+  making exactly the choice it made before, with the same errors. Class names,
+  constructors, static calls, fields and the compile-time-resolved calls are
+  remembered too, and the JDK's access check is no longer repeated on every
+  call. A class the REPL may redefine is never kept alive by any of this.
+  On `graphics/Canvas` this makes changing the pen about 20 times faster and
+  drawing a line, a circle or a picture 3 to 10 times faster; a whole map
+  frame in `examples/digital_map` draws in 11 ms instead of 50.
+- **Comparing and hashing objects is faster.** Structural `=` and hashing of
+  compiled objects worked out each object's class name and the class's field
+  names on every comparison; both are now remembered, so `=` on two small
+  objects is about 5 times faster. Calls and field reads on another object
+  (`obj.method()`, `obj.field`) no longer take their helper name apart on
+  every call.
+- **`Canvas.set_title`** names the window (`title` reads it back); the default
+  is still "Nex Canvas".
+- **`Canvas` without double buffering no longer copies the whole image on
+  every drawing command.** The window shows the image being drawn on and
+  repaints soon after, once for a burst of commands. Without a display, `show`
+  no longer copies anything.
+- **`Picture.grayscale` is about a thousand times faster**, done by one
+  Java2D operation instead of a call per pixel, with exactly the same result
+  (checked against all 16,777,216 colors).
+
 ## 0.6.2 - 2026-10-22
 
 - **New example: a next-letter predictor.** `examples/neural_network/` is a

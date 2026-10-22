@@ -243,11 +243,11 @@ small arrows, but only when the map is zoomed in far enough for them to
 fit.
 
 There is one more thing to know about the canvas. Changing its pen, its
-colour or width, takes far longer than drawing a short line: each change
-goes through several calls into the Java libraries underneath. On a map of
-a few hundred road segments, setting the pen once per road, twice over,
-takes longer than all the drawing. So each pass draws all the roads of
-one kind together, and sets the pen only once per kind.
+colour or width, costs about as much as drawing a short line: each change
+makes several calls into the Java libraries underneath, which build a new
+colour, a new stroke and so on. So each pass draws all the roads of one
+kind together, and sets the pen only once per kind, a handful of times a
+frame rather than once or twice for every road.
 
 \begin{continued}{map_view.nex}
   -- Roads are drawn in two passes, the way printed maps do it: first
@@ -256,7 +256,7 @@ one kind together, and sets the pen only once per kind.
   -- over the first, so junctions join cleanly.
   --
   -- Each pass draws the roads one kind at a time. Changing the pen's
-  -- colour or width takes far longer than drawing a short line, so it
+  -- colour or width costs about as much as drawing a short line, so it
   -- pays to change it once per kind instead of once per road.
   draw_roads() do
     across [Road_Kind.Street, Road_Kind.Lane, Road_Kind.Main] as kind do

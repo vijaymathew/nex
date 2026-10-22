@@ -13,6 +13,7 @@
             [nex.types.value :as value]
             [nex.types.typeinfo :as typeinfo]
             [nex.types.bootstrap :as bootstrap]
+            [nex.types.reflect :as reflect]
             [nex.redeclare :as redeclare]
             [nex.contracts :as contracts]
             [nex.intern :as intern])
@@ -554,14 +555,7 @@
 
 (defn- reflected-field
   [^Class cls field-name]
-  (or (try
-        (.getField cls field-name)
-        (catch Exception _ nil))
-      (some (fn [^Field field]
-              (when (= (.getName field) field-name)
-                (.setAccessible field true)
-                field))
-            (.getDeclaredFields cls))))
+  (reflect/field cls field-name))
 
 (defn- composition-fields
   [^Class cls]
@@ -2255,7 +2249,7 @@
               ;; constructor invocation — so arguments need the same
               ;; Java-interface Proxy-wrapping java-create-object applies.
       (rt/java->nex
-       (clojure.lang.Reflector/invokeStaticMethod klass method (to-array (bi/java-args ctx arg-values))))
+       (reflect/invoke-static klass method (to-array (bi/java-args ctx arg-values))))
       (let [^java.lang.reflect.Field field (.getField klass method)]
         (rt/java->nex (.get field nil))))))
 

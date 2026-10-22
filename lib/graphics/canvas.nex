@@ -21,11 +21,13 @@
 -- are scaled per axis, so with unequal x and y scales a circle is drawn as an
 -- ellipse. The pen radius is in pixels, not user units.
 --
--- Buffering. Drawing always goes to an offscreen image; `show` copies it to
--- the window, opening the window the first time. With double buffering off
--- (the default), every drawing command also refreshes an already open window
--- at once. With it on, nothing reaches the window until the next `show`,
--- which is what a flicker-free animation wants:
+-- Buffering. Drawing always goes to an offscreen image, and `show` opens
+-- the window the first time. With double buffering off (the default), the
+-- window shows that image itself, so every drawing command appears at once
+-- (the window repaints soon after it; a burst of drawing costs one repaint,
+-- not one per command). With it on, the window shows a second image, which
+-- `show` brings up to date in one go: nothing reaches the window until the
+-- next `show`, which is what a flicker-free animation wants:
 --
 --   c.enable_double_buffering()
 --   from let t := 0 until t = 100 do
@@ -36,9 +38,11 @@
 --     t := t + 1
 --   end
 --
--- Without a display (java.awt.headless, no X server) `show` only updates the
--- onscreen image and `wait_until_closed` returns at once, so the same program
--- runs unchanged in a test.
+-- Without a display (java.awt.headless, no X server) `show` does nothing and
+-- `wait_until_closed` returns at once, so the same program runs unchanged in
+-- a test, and `save` still writes what was drawn.
+--
+-- The window's title is "Nex Canvas" until `set_title` changes it.
 --
 -- The window closes with the program: a script that should stay on screen
 -- ends with `wait_until_closed()`.
@@ -112,6 +116,7 @@ create
       font := Font.SANS
       is_double_buffered := false
       window_open := false
+      title := "Nex Canvas"
       input := create Canvas_Input.make()
       new_images()
     ensure
@@ -136,6 +141,9 @@ feature
 
   -- Whether drawing waits for `show` before reaching the window.
   is_double_buffered: Boolean
+
+  -- The title of the canvas's window.
+  title: String
 
   -- Mouse and keyboard state, fed by the window (or by its record_* calls).
   input: Canvas_Input
@@ -411,7 +419,7 @@ feature
       new_images()
       if window_open then
         with "java" do
-          label.setIcon(ImageIcon.new(onscreen))
+          label.setIcon(ImageIcon.new(displayed()))
           frame.pack()
         end
       end
@@ -420,28 +428,56 @@ feature
     end
 
   enable_double_buffering() do
-    is_double_buffered := true
+    if not is_double_buffered then
+      is_double_buffered := true
+      if window_open then
+        -- The window keeps showing what is there now until the next `show`.
+        with "java" do
+          offscreen.copyData(onscreen.getRaster())
+          label.setIcon(ImageIcon.new(onscreen))
+        end
+      end
+    end
   ensure
     on: is_double_buffered
   end
 
   disable_double_buffering() do
-    is_double_buffered := false
+    if is_double_buffered then
+      is_double_buffered := false
+      if window_open then
+        with "java" do
+          label.setIcon(ImageIcon.new(offscreen))
+        end
+      end
+    end
   ensure
     off: not is_double_buffered
   end
 
-  -- Copy the offscreen image to the window, opening the window if it is not
-  -- open yet (and a display exists).
-  show() do
-    with "java" do
-      offscreen.copyData(onscreen.getRaster())
-    end
+  -- Set the title of the canvas's window, now or for when it opens.
+  set_title(t: String) do
+    title := t
     if window_open then
       with "java" do
-        label.repaint()
+        frame.setTitle(t)
       end
+    end
+  ensure
+    set: title = t
+  end
+
+  -- Bring the window up to date with what has been drawn, opening it if it
+  -- is not open yet (and a display exists).
+  show() do
+    if window_open then
+      update_window()
     elseif has_display() then
+      if is_double_buffered then
+        with "java" do
+          offscreen.copyData(onscreen.getRaster())
+        end
+      end
       open_window()
     end
   end
@@ -525,7 +561,8 @@ private feature
   offscreen: Any
   -- Its Graphics2D, kept in step with pen_color, pen_radius and font.
   graphics: Any
-  -- The image the window displays; `show` copies offscreen into it.
+  -- With double buffering, the image the window displays; `show` copies
+  -- offscreen into it. Without, the window displays offscreen itself.
   onscreen: Any
   frame: Any
   label: Any
@@ -551,8 +588,8 @@ private feature
 
   open_window() do
     with "java" do
-      frame := JFrame.new("Nex Canvas")
-      label := JLabel.new(ImageIcon.new(onscreen))
+      frame := JFrame.new(title)
+      label := JLabel.new(ImageIcon.new(displayed()))
       frame.getContentPane().add(label)
       frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE)
       frame.setResizable(false)
@@ -568,11 +605,30 @@ private feature
     window_open := true
   end
 
+  -- The image the window shows.
+  displayed(): Any do
+    result := when is_double_buffered then onscreen else offscreen end
+  end
+
+  -- Repaint an open window from what has been drawn: with double
+  -- buffering, after copying the new frame to the image it shows.
+  update_window() do
+    with "java" do
+      if is_double_buffered then
+        offscreen.copyData(onscreen.getRaster())
+      end
+      label.repaint()
+    end
+  end
+
   -- After a drawing command: without double buffering, an open window shows
-  -- it at once.
+  -- it at once. Asking for a repaint is enough, since the window shows the
+  -- image drawn on; Swing merges requests that come faster than it paints.
   drawn() do
     if not is_double_buffered and window_open then
-      show()
+      with "java" do
+        label.repaint()
+      end
     end
   end
 

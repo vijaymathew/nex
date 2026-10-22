@@ -11,7 +11,8 @@
             [nex.types.regex :as regex-types]
             [nex.types.runtime :as rt]
             [nex.types.value :as value]
-            [nex.types.typeinfo :as typeinfo])
+            [nex.types.typeinfo :as typeinfo]
+            [nex.types.reflect :as reflect])
   (:import [clojure.lang DynamicClassLoader]
            [java.lang.reflect Field Method InvocationTargetException]
            [java.util HashMap]
@@ -230,12 +231,8 @@
   [state class-name]
   (let [imported (bi/resolve-imported-java-class {:imports (:imports state)} class-name)]
     (or imported
-        (try
-          (Class/forName class-name)
-          (catch Exception _ nil))
-        (try
-          (Class/forName (str "java.lang." class-name))
-          (catch Exception _ nil))
+        (reflect/class-for-name class-name)
+        (reflect/class-for-name (str "java.lang." class-name))
         (throw (ex-info (str "Undefined Java class: " class-name)
                         {:class-name class-name})))))
 
@@ -412,18 +409,35 @@
   {:nex-builtin-type :AtomicReference
    :state (AtomicReference. initial)})
 
+(def ^:private objects-class (class (object-array 0)))
+
+(defn- java-arg-array
+  "ARGS (the Object array compiled code passes, or any sequence) from index
+   OFFSET on, each put through CONVERT, as the Object array a reflective call
+   takes. Built in one pass: interop calls are made in tight loops."
+  ^objects [convert args offset]
+  (let [offset (long offset)]
+    (if (instance? objects-class args)
+      (let [^objects a args
+            n (max 0 (- (alength a) offset))
+            out (object-array n)]
+        (dotimes [i n]
+          (aset out i (convert (aget a (+ i offset)))))
+        out)
+      (to-array (map convert (drop offset args))))))
+
 (defn java-create-object
   [state class-name args]
   ;; Resolve the host class off `state` directly (like java-call-static), rather
   ;; than rebuilding an interpreter context just to read the imports. This also
   ;; resolves fully-qualified and java.lang.* names, not only imported ones.
   (let [^Class klass (resolve-java-host-class state class-name)]
-    (clojure.lang.Reflector/invokeConstructor klass (to-array (map rt/nex->java args)))))
+    (reflect/invoke-constructor klass (java-arg-array rt/nex->java args 0))))
 
 (defn java-call-static
   [state class-name method-name args]
   (let [^Class klass (resolve-java-host-class state class-name)]
-    (rt/java->nex (clojure.lang.Reflector/invokeStaticMethod klass method-name (to-array (map rt/nex->java args))))))
+    (rt/java->nex (reflect/invoke-static klass method-name (java-arg-array rt/nex->java args 0)))))
 
 (defn java-call-method
   [state method-name target args]
@@ -556,31 +570,50 @@
                                     (rt/sized->long arg)
                                     arg)))
 
+(defn- class-named
+  "The class called NAME (Class/forName's error if there is none), looked
+   up once."
+  ^Class [^String name]
+  (or (reflect/class-for-name name) (Class/forName name)))
+
+(defn- resolved-method
+  "OWNER's public method NAME with exactly the parameter types JOINED names
+   (see resolve-param-classes), looked up once."
+  ^java.lang.reflect.Method [^Class owner ^String name ^String joined]
+  (reflect/on-class owner [::resolved-method name joined]
+                    #(reflect/unchecked
+                      (.getMethod owner name (into-array Class (resolve-param-classes joined))))))
+
+(defn- resolved-constructor
+  ^java.lang.reflect.Constructor [^Class owner ^String joined]
+  (reflect/on-class owner [::resolved-constructor joined]
+                    #(reflect/unchecked
+                      (.getConstructor owner (into-array Class (resolve-param-classes joined))))))
+
+(defn- coerce-args-for
+  "ARGS coerced to PARAM-CLASSES, as an Object array."
+  ^objects [^"[Ljava.lang.Class;" param-classes args]
+  (let [out (object-array (alength param-classes))]
+    (loop [i 0 xs (seq args)]
+      (when (and xs (< i (alength param-classes)))
+        (aset out i (coerce-arg-for-resolved-param (aget param-classes i) (first xs)))
+        (recur (inc i) (next xs))))
+    out))
+
 (defn java-call-method-resolved
   [_state method-name receiver-class-name param-classes-joined target args]
-  (let [^Class owner (Class/forName ^String receiver-class-name)
-        param-classes (resolve-param-classes param-classes-joined)
-        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
-                                                (into-array Class param-classes))
-        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
-    (rt/java->nex (.invoke m target (to-array coerced)))))
+  (let [m (resolved-method (class-named receiver-class-name) method-name param-classes-joined)]
+    (rt/java->nex (.invoke m target (coerce-args-for (.getParameterTypes m) args)))))
 
 (defn java-call-static-resolved
   [_state class-name method-name param-classes-joined args]
-  (let [^Class owner (Class/forName ^String class-name)
-        param-classes (resolve-param-classes param-classes-joined)
-        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
-                                                (into-array Class param-classes))
-        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
-    (rt/java->nex (.invoke m nil (to-array coerced)))))
+  (let [m (resolved-method (class-named class-name) method-name param-classes-joined)]
+    (rt/java->nex (.invoke m nil (coerce-args-for (.getParameterTypes m) args)))))
 
 (defn java-create-object-resolved
   [_state class-name param-classes-joined args]
-  (let [^Class klass (Class/forName ^String class-name)
-        param-classes (resolve-param-classes param-classes-joined)
-        ^java.lang.reflect.Constructor c (.getConstructor klass (into-array Class param-classes))
-        coerced (mapv coerce-arg-for-resolved-param param-classes args)]
-    (.newInstance c (to-array coerced))))
+  (let [c (resolved-constructor (class-named class-name) param-classes-joined)]
+    (.newInstance c (coerce-args-for (.getParameterTypes c) args))))
 
 ;; ---------------------------------------------------------------------------
 ;; Varargs (see the "Varargs" section of nex.lower). clojure.lang.Reflector
@@ -617,44 +650,56 @@
   [fixed-classes component-class]
   (conj (vec fixed-classes) (array-class-of component-class)))
 
+(defn- varargs-signature
+  "[fixed parameter classes, component class, declared parameter classes]
+   for a varargs call, from the names nex.lower resolved."
+  [fixed-classes-joined component-class-name]
+  (let [fixed (resolve-param-classes fixed-classes-joined)
+        component (resolve-one-param-class component-class-name)]
+    [fixed component (into-array Class (resolve-declared-varargs-method fixed component))]))
+
+(defn- varargs-args
+  "The Object array for a varargs call: the fixed arguments coerced to
+   FIXED, then the trailing ones collected into one COMPONENT array."
+  ^objects [fixed ^Class component args]
+  (let [n (count fixed)]
+    (to-array (conj (mapv coerce-arg-for-resolved-param fixed (take n args))
+                    (build-varargs-array component (drop n args))))))
+
 (defn java-call-method-resolved-varargs
   [_state method-name receiver-class-name fixed-classes-joined component-class-name target args]
-  (let [^Class owner (Class/forName ^String receiver-class-name)
-        fixed-classes (resolve-param-classes fixed-classes-joined)
-        ^Class component-class (resolve-one-param-class component-class-name)
-        fixed-count (count fixed-classes)
-        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
-                                                (into-array Class (resolve-declared-varargs-method
-                                                                   fixed-classes component-class)))
-        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
-        varargs-array (build-varargs-array component-class (drop fixed-count args))]
-    (rt/java->nex (.invoke m target (to-array (conj (vec coerced-fixed) varargs-array))))))
+  (let [^Class owner (class-named receiver-class-name)
+        [fixed component ^java.lang.reflect.Method m]
+        (reflect/on-class owner [::varargs-method method-name fixed-classes-joined component-class-name]
+                          #(let [[fixed component declared] (varargs-signature fixed-classes-joined
+                                                                                component-class-name)]
+                             [fixed component (reflect/unchecked
+                                               (.getMethod owner ^String method-name
+                                                           ^"[Ljava.lang.Class;" declared))]))]
+    (rt/java->nex (.invoke m target (varargs-args fixed component args)))))
 
 (defn java-call-static-resolved-varargs
   [_state class-name method-name fixed-classes-joined component-class-name args]
-  (let [^Class owner (Class/forName ^String class-name)
-        fixed-classes (resolve-param-classes fixed-classes-joined)
-        ^Class component-class (resolve-one-param-class component-class-name)
-        fixed-count (count fixed-classes)
-        ^java.lang.reflect.Method m (.getMethod owner ^String method-name
-                                                (into-array Class (resolve-declared-varargs-method
-                                                                   fixed-classes component-class)))
-        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
-        varargs-array (build-varargs-array component-class (drop fixed-count args))]
-    (rt/java->nex (.invoke m nil (to-array (conj (vec coerced-fixed) varargs-array))))))
+  (let [^Class owner (class-named class-name)
+        [fixed component ^java.lang.reflect.Method m]
+        (reflect/on-class owner [::varargs-method method-name fixed-classes-joined component-class-name]
+                          #(let [[fixed component declared] (varargs-signature fixed-classes-joined
+                                                                                component-class-name)]
+                             [fixed component (reflect/unchecked
+                                               (.getMethod owner ^String method-name
+                                                           ^"[Ljava.lang.Class;" declared))]))]
+    (rt/java->nex (.invoke m nil (varargs-args fixed component args)))))
 
 (defn java-create-object-resolved-varargs
   [_state class-name fixed-classes-joined component-class-name args]
-  (let [^Class klass (Class/forName ^String class-name)
-        fixed-classes (resolve-param-classes fixed-classes-joined)
-        ^Class component-class (resolve-one-param-class component-class-name)
-        fixed-count (count fixed-classes)
-        ^java.lang.reflect.Constructor c (.getConstructor klass
-                                                          (into-array Class (resolve-declared-varargs-method
-                                                                             fixed-classes component-class)))
-        coerced-fixed (mapv coerce-arg-for-resolved-param fixed-classes (take fixed-count args))
-        varargs-array (build-varargs-array component-class (drop fixed-count args))]
-    (.newInstance c (to-array (conj (vec coerced-fixed) varargs-array)))))
+  (let [^Class klass (class-named class-name)
+        [fixed component ^java.lang.reflect.Constructor c]
+        (reflect/on-class klass [::varargs-constructor fixed-classes-joined component-class-name]
+                          #(let [[fixed component declared] (varargs-signature fixed-classes-joined
+                                                                                component-class-name)]
+                             [fixed component (reflect/unchecked
+                                               (.getConstructor klass ^"[Ljava.lang.Class;" declared))]))]
+    (.newInstance c (varargs-args fixed component args))))
 
 (defn spawn-function-object
   [state fn-obj]
@@ -1168,20 +1213,29 @@
   (swap! (:output state) conj line)
   nil)
 
+(def ^:private ^java.util.concurrent.ConcurrentHashMap lowered-method-names
+  "method name -> the lowered names for arities 0..15, built on first use:
+   a dynamic call asks for one every time it is made."
+  (java.util.concurrent.ConcurrentHashMap.))
+
 (defn- lowered-instance-method-name
-  [method-name arity]
-  (str "__method_" method-name "$arity" arity))
+  ^String [method-name arity]
+  (let [a (long arity)]
+    (if (and (string? method-name) (< -1 a 16))
+      (let [^objects slots (or (.get lowered-method-names method-name)
+                               (let [fresh (object-array 16)]
+                                 (or (.putIfAbsent lowered-method-names method-name fresh) fresh)))]
+        (or (aget slots a)
+            (let [n (str "__method_" method-name "$arity" arity)]
+              (aset slots a n)
+              n)))
+      (str "__method_" method-name "$arity" arity))))
 
 (defn- reflected-field
+  "The field FIELD-NAME of CLS, public or declared by CLS itself, looked up
+   once (see nex.types.reflect/field)."
   [^Class cls field-name]
-  (or (try
-        (.getField cls field-name)
-        (catch Exception _ nil))
-      (some (fn [^Field f]
-              (when (= (.getName f) field-name)
-                (.setAccessible f true)
-                f))
-            (.getDeclaredFields cls))))
+  (reflect/field cls field-name))
 
 (defn- composition-fields
   [^Class cls]
@@ -1606,16 +1660,24 @@
    its simple name matches a Nex class (Track)."
   [state value]
   (when (and value (generated-class-name? (.getName (.getClass ^Object value))))
-    (let [binary-name (.getName (.getClass ^Object value))
-          simple-name (last (str/split binary-name #"\."))]
-      (cond
-        (contains? @(:classes state) simple-name)
-        simple-name
+    ;; Asked on every structural `=`, so the answer is remembered for the
+    ;; class. Only a found name: a class is never removed from `state`, so a
+    ;; name found stays right, but one not found yet may be defined later.
+    (let [cls (.getClass ^Object value)
+          known (reflect/on-class cls ::nex-class-name (constantly (volatile! nil)))]
+      (or @known
+          (let [binary-name (.getName cls)
+                simple-name (last (str/split binary-name #"\."))
+                found (cond
+                        (contains? @(:classes state) simple-name)
+                        simple-name
 
-        :else
-        (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
-          (when (contains? @(:classes state) candidate)
-            candidate))))))
+                        :else
+                        (when-let [[_ candidate] (re-matches #"(.+)_\d{4}" simple-name)]
+                          (when (contains? @(:classes state) candidate)
+                            candidate)))]
+            (when found (vreset! known found))
+            found)))))
 
 (defn- runtime-type-name
   [state value]
@@ -1719,7 +1781,48 @@
       (= target-name "Any")
       (compiled-is-parent? state runtime-name target-name)))
 
+(declare collect-effective-field-names*)
+
+(def ^:private ^java.util.concurrent.ConcurrentHashMap effective-field-names-cache
+  "A class's lineage (see class-lineage) -> its effective field names."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- class-lineage
+  "CLASS-DEF and the definitions of all its ancestors, as a vector: the
+   fields a class has depend on exactly these. Class definitions are
+   immutable maps, whose hash Clojure computes once, so this makes a cheap
+   cache key that a redefinition (of the class or of any ancestor) changes."
+  [^java.util.Map class-map class-def]
+  (if (empty? (:parents class-def))
+    [class-def]
+    (let [todo (java.util.ArrayDeque.)
+          seen (java.util.HashSet.)]
+      (.add todo class-def)
+      (loop [acc (transient [])]
+        (if-let [c (.poll todo)]
+          (if (.add seen (:name c))
+            (do (doseq [{:keys [parent]} (:parents c)]
+                  (when-let [p (.get class-map parent)]
+                    (.add todo p)))
+                (recur (conj! acc c)))
+            (recur acc))
+          (persistent! acc))))))
+
 (defn- collect-effective-field-names
+  "The names of CLASS-DEF's fields, its parents' first, each once. Asked on
+   every structural `=` and hash of an object, so it is remembered for each
+   class lineage."
+  [state class-def]
+  (let [k (class-lineage @(:classes state) class-def)]
+    (or (.get effective-field-names-cache k)
+        (let [names (collect-effective-field-names* state class-def)]
+          ;; Each REPL redefinition makes new lineages; keep the cache small.
+          (when (> (.size effective-field-names-cache) 4096)
+            (.clear effective-field-names-cache))
+          (.put effective-field-names-cache k names)
+          names))))
+
+(defn- collect-effective-field-names*
   [state class-def]
   (let [class-map @(:classes state)]
     (letfn [(collect [cls seen]
@@ -3448,10 +3551,14 @@
    (fn [_state args] (create-atomic-reference (first args)))
 
    "java-create-object"
-   (fn [state args] (java-create-object state (first args) (vec (rest args))))
+   (fn [state args]
+     (reflect/invoke-constructor (resolve-java-host-class state (nth args 0))
+                                 (java-arg-array rt/nex->java args 1)))
 
    "java-call-method"
-   (fn [state args] (java-call-method state (first args) (second args) (vec (drop 2 args))))
+   (fn [state args]
+     (rt/java->nex (reflect/invoke-method (nth args 1) (nth args 0)
+                                          (java-arg-array #(bi/java-arg state %) args 2))))
 
    "java-get-field"
    (fn [_state args] (java-get-field (first args) (second args)))
@@ -3553,42 +3660,67 @@
    "any:clone"
    (fn [state args] (any-clone state (first args)))})
 
+(def ^:private ^java.util.concurrent.ConcurrentHashMap member-handlers
+  "helper name -> handler, for the `user-method:m`, `user-field-get:f` and
+   `user-field-set:f` names that dynamic calls and field accesses on a
+   non-`this` target lower to. These are among the hottest runtime calls, so
+   each name is taken apart once, not on every call."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(declare invoke-user-method get-user-field set-user-field!)
+
+(defn- member-handler
+  "The handler for a member-access helper NAME, or nil if it is not one."
+  [^String name]
+  (or (.get member-handlers name)
+      (when-let [h (cond
+                     (str/starts-with? name "user-method:")
+                     (let [m (subs name (count "user-method:"))]
+                       (fn [state args] (invoke-user-method state (nth args 0) m (rest args))))
+
+                     (str/starts-with? name "user-field-get:")
+                     (let [f (subs name (count "user-field-get:"))]
+                       (fn [_state args] (get-user-field (nth args 0) f)))
+
+                     (str/starts-with? name "user-field-set:")
+                     (let [f (subs name (count "user-field-set:"))]
+                       (fn [_state args] (set-user-field! (nth args 0) f (nth args 1)))))]
+        (.put member-handlers name h)
+        h)))
+
 (defn invoke-builtin
   [state name args]
-  (if-let [handler (get invoke-builtin-dispatch name)]
+  (if-let [handler (or (get invoke-builtin-dispatch name) (member-handler name))]
     (handler state args)
+    ;; User method calls and field get/set (`obj.method()`, `obj.field` on a
+    ;; non-`this` target) are handled above, by member-handler; they work off
+    ;; `state` directly and need no interpreter context. The rebuild is
+    ;; deferred into the two branches that actually use one (builtin methods
+    ;; and top-level builtins).
     (cond
-      ;; The native dispatch fallbacks — user method calls and field get/set — work
-      ;; off `state` directly (invoke-user-method/get-user-field/set-user-field!),
-      ;; so they need no interpreter context. `obj.method()` and `obj.field` on a
-      ;; non-`this` target lower to these, making them among the hottest runtime
-      ;; calls; rebuilding a context for them was pure waste. The rebuild is
-      ;; deferred into the two branches that actually use it (builtin methods and
-      ;; top-level builtins).
-      (str/starts-with? name "user-method:")
-      (invoke-user-method state (first args) (subs name (count "user-method:")) (rest args))
-
-      (str/starts-with? name "user-field-get:")
-      (get-user-field (first args) (subs name (count "user-field-get:")))
-
-      (str/starts-with? name "user-field-set:")
-      (set-user-field! (first args) (subs name (count "user-field-set:")) (second args))
-
       ;; An Any-protocol name (`get`, `length`, ...) on an `Any` inside
       ;; `with "java"`: the value may be a real Java object with a same-named
       ;; method (`map.get(k)` on a ConcurrentHashMap, `n.get()` on an
       ;; AtomicInteger) that the Nex builtin table does not cover. Try the
       ;; builtin, then reflection -- as the interpreter's eval-call does.
+      ;; Which way a class goes is remembered: finding out means raising and
+      ;; catching an exception, far dearer than the call itself.
       (str/starts-with? name "builtin-or-java:")
       (let [target (first args)
-            method (subs name (count "builtin-or-java:"))]
-        (try
-          (bi/call-builtin-method (builtin-ctx state) target target method (rest args))
-          (catch clojure.lang.ExceptionInfo e
-            (if (and (= method (:method (ex-data e)))
-                     (str/starts-with? (.getMessage e) "Method not found on type"))
-              (java-call-method state method target (vec (rest args)))
-              (throw e)))))
+            method (subs name (count "builtin-or-java:"))
+            java-only (when (some? target)
+                        (reflect/on-class (.getClass ^Object target) [::java-only method]
+                                          #(atom false)))]
+        (if (and java-only @java-only)
+          (java-call-method state method target (vec (rest args)))
+          (try
+            (bi/call-builtin-method (builtin-ctx state) target target method (rest args))
+            (catch clojure.lang.ExceptionInfo e
+              (if (and (= method (:method (ex-data e)))
+                       (str/starts-with? (.getMessage e) "Method not found on type"))
+                (do (when java-only (reset! java-only true))
+                    (java-call-method state method target (vec (rest args))))
+                (throw e))))))
 
       (str/starts-with? name "method:")
       (let [target (first args)]

@@ -49,10 +49,10 @@ until the window is closed:
 \end{shell}
 
 The whole frame is drawn every time, map and all: the canvas has no way to
-move a picture already drawn. Drawing it takes the canvas a few
-hundredths of a second, so this gives somewhere between twenty and fifty
-frames a second, depending on the computer and how much of the map is in
-view.
+move a picture already drawn. Drawing it takes the canvas around a
+hundredth of a second, less when zoomed in, since roads off the canvas are
+skipped; with the short pause each frame ends with, that makes something
+like forty frames a second.
 
 \emph{Double buffering} is what makes this look smooth. With it on,
 drawing goes to an image the window doesn't show, and \code{show} copies
@@ -127,6 +127,7 @@ create
     island := m
     view := create Map_View.make(m, 1100, 760)
     view.set_insets(64.0, 26.0)
+    view.canvas.set_title(m.name)
     driving := create Road_Graph.build(m, Mode.Driving)
     walking := create Road_Graph.build(m, Mode.Walking)
     graph := driving
@@ -191,7 +192,7 @@ feature
 
 The panels across the top and bottom of the window are 64 and 26 pixels
 high, and \code{set_insets} tells the view, so that the map is centred in
-the space between them. The search and the trip are \code{?} types,
+the space between them. The window is titled with the map's name. The search and the trip are \code{?} types,
 because there aren't any until the places have been chosen.
 
 A real trip takes minutes; nobody wants to watch one in real time. So the

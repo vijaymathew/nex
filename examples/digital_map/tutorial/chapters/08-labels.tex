@@ -191,9 +191,10 @@ eight times, nudged one pixel in each direction, and then once in its own
 colour on top.
 
 That is nine pieces of text for every label, and the pen colour changes
-twice for each. We saw in the last chapter that changing the pen is slow,
-so we draw all the halos first, in one colour, then all the text, and
-change the font or colour only when it differs from the label before.
+twice for each. We saw in the last chapter that changing the pen has a
+cost of its own, so we draw all the halos first, in one colour, then all
+the text, and change the font or colour only when it differs from the
+label before.
 
 \begin{continued}{map_view.nex}
   -- Draw the labels that found room: first a white outline around every
@@ -216,9 +217,8 @@ change the font or colour only when it differs from the label before.
     end
   end
 
-  -- Labels come in only a few fonts and colours, and the canvas is slow
-  -- to change them (see draw_roads), so they are changed only when they
-  -- differ.
+  -- Labels come in only a few fonts and colours, and changing them has a
+  -- cost (see draw_roads), so they are changed only when they differ.
   use_font(f: Font) do
     if f /= canvas.font then
       canvas.set_font(f)

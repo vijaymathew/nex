@@ -58,13 +58,16 @@ that image in a window on request.
 - **Pen.** Lines and outlines are drawn with the pen color, `2 * pen_radius`
   pixels wide. The pen radius is in pixels, not user units. Colors with an
   alpha below 255 blend with what is underneath.
-- **Window.** `show` copies the offscreen image to the window, opening the
-  window the first time. A canvas that never calls `show` never opens one.
-  Without a display, `show` only updates the onscreen image and
-  `wait_until_closed` returns at once, so the same program runs headless.
-- **Buffering.** With double buffering off (the default), every drawing command
-  also refreshes an already open window. With it on, the window changes only
-  on `show`. Turn it on for flicker-free animation.
+- **Window.** `show` brings the window up to date, opening it the first time.
+  A canvas that never calls `show` never opens one. Without a display, `show`
+  does nothing and `wait_until_closed` returns at once, so the same program
+  runs headless (and `save` still writes what was drawn). The window is titled
+  "Nex Canvas" until `set_title` changes it.
+- **Buffering.** With double buffering off (the default), the window shows the
+  image being drawn on, so every drawing command appears at once; the window
+  repaints soon after, once for a whole burst of commands. With it on, the
+  window shows a second image that only `show` updates, so it changes only on
+  `show`. Turn it on for flicker-free animation.
 - **Program exit.** The window closes when the program ends. A script that
   should stay on screen ends with `wait_until_closed()`.
 - **File names.** A relative name given to `save` or `Picture.load` is resolved
@@ -87,6 +90,7 @@ that image in a window on request.
 | `pen_color` | `Color` | Current drawing color. |
 | `font` | `Font` | Current text font. |
 | `is_double_buffered` | `Boolean` | Whether drawing waits for `show`. |
+| `title` | `String` | The window's title; `"Nex Canvas"` unless `set_title` changed it. |
 | `has_display()` | `Boolean` | Whether a window can be opened at all. |
 | `is_window_open()` | `Boolean` | Whether this canvas has a window on screen. |
 | `color_at(x, y: Real)` | `Color` | The color of the pixel at user position (x, y). Requires the point to be inside the scale. |
@@ -123,7 +127,8 @@ Radii and half-lengths must be non-negative.
 | `set_font` | `f: Font` | |
 | `set_canvas_size` | `w, h: Integer` | Resize and clear to white. Scale, pen and font are kept. |
 | `enable_double_buffering`, `disable_double_buffering` | none | See *Buffering* above. |
-| `show` | none | Copy the offscreen image to the window, opening it if needed. |
+| `set_title` | `t: String` | Title the window: an open one at once, otherwise when `show` opens it. |
+| `show` | none | Bring the window up to date with what has been drawn, opening it if needed. Does nothing without a display. |
 | `clear` | none, or `color: Color` | Fill the whole canvas with white, or with `color`. |
 | `pause` | `ms: Integer` | Sleep for `ms` milliseconds. For pacing an animation. |
 | `wait_until_closed` | none | Block until the user closes the window. Returns at once if none is open. |

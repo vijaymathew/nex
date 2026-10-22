@@ -180,7 +180,7 @@ feature
   -- over the first, so junctions join cleanly.
   --
   -- Each pass draws the roads one kind at a time. Changing the pen's
-  -- colour or width takes far longer than drawing a short line, so it
+  -- colour or width costs about as much as drawing a short line, so it
   -- pays to change it once per kind instead of once per road.
   draw_roads() do
     across [Road_Kind.Street, Road_Kind.Lane, Road_Kind.Main] as kind do
@@ -351,9 +351,8 @@ feature
     end
   end
 
-  -- Labels come in only a few fonts and colours, and the canvas is slow
-  -- to change them (see draw_roads), so they are changed only when they
-  -- differ.
+  -- Labels come in only a few fonts and colours, and changing them has a
+  -- cost (see draw_roads), so they are changed only when they differ.
   use_font(f: Font) do
     if f /= canvas.font then
       canvas.set_font(f)

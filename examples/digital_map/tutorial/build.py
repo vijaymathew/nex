@@ -6,6 +6,9 @@
     python3 build.py --sync     # also copy the tutorial's code into the project
     python3 build.py --pdf-only # only typeset, using the last build's outputs
 
+The programs run with the `nex` on PATH, or with the command in the NEX
+environment variable (NEX=../../../bin/nex for this checkout's own).
+
 The tutorial (tutorial.tex, which \\inputs the files in chapters/) is the
 source of truth for the project's code. This script:
 
@@ -114,7 +117,7 @@ def run(stage_files, directory, program, label, extra):
             shutil.copy(src, directory)
     args = shlex.split(program)
     # A line "% input: ..." just before \runoutput gives stdin; not used yet.
-    proc = subprocess.run(["nex"] + args, cwd=directory, capture_output=True,
+    proc = subprocess.run([os.environ.get("NEX", "nex")] + args, cwd=directory, capture_output=True,
                           text=True, timeout=900)
     output = proc.stdout + proc.stderr
     with open(os.path.join(OUT, label + ".txt"), "w") as f:
