@@ -65,7 +65,7 @@ for — say, that the hit sound played three times.
 `Sound` and `Music` read WAV, AIFF and AU files with uncompressed (PCM) audio;
 MP3 and OGG are not supported. `Midi_Song` reads standard MIDI files. A
 relative file name is resolved against the directory `nex` was started from
-(`NEX_USER_DIR`), as in `Picture.load`.
+(`program.working_directory`), as in `Picture.load`.
 
 ## `Audio_Device`
 

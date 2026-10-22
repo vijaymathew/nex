@@ -264,11 +264,10 @@ create Atomic_Reference.make(nil)
 ## Examples
 
 ```nex
-let con := create Console
-con.print("Enter your name: ")
-con.flush()
-let name := con.read_line()
-con.print_line("Hello, " + name)
+console.print("Enter your name: ")
+console.flush()
+let name := console.read_line()
+console.print_line("Hello, " + name)
 
 intern io/Path
 let path: Path := create Path.make("notes.txt")
@@ -277,9 +276,8 @@ path.append_text("\nline 2")
 print(path.exists())
 print(path.read_text())
 
-let p := create Process
-print(p.getenv("HOME"))
-print(p.command_line())
+print(program.env("HOME"))
+print(program.arguments)
 
 let echo := create Process.command("echo", ["hello", "world"])
 echo.start()

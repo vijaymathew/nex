@@ -71,7 +71,7 @@ that image in a window on request.
 - **Program exit.** The window closes when the program ends. A script that
   should stay on screen ends with `wait_until_closed()`.
 - **File names.** A relative name given to `save` or `Picture.load` is resolved
-  against the directory `nex` was started from (`NEX_USER_DIR`), not the Nex
+  against the directory `nex` was started from (`program.working_directory`), not the Nex
   install directory the launcher runs in.
 
 ### Construction
