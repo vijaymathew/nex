@@ -41,7 +41,7 @@ which is convenient for regular-expression patterns and paths: `'\d+'`, `'C:\dir
 | `greater_than_or_equal` | `other: String` | `Boolean` | Lexicographic `>=`. |
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
-| `cursor` | none | `StringCursor` | Create character iterator. |
+| `cursor` | none | `Cursor[Char]` | Create character iterator. A `String` is `Iterable[Char]`. |
 
 Laws:
 

@@ -682,7 +682,7 @@
    ;; A String iterates over its Chars, exactly as Array/Map/Set iterate over
    ;; their elements — see register-string-methods! for why this is declared
    ;; explicitly rather than through the universal "Any" fallback.
-   "cursor"      ^{:signatures [{:params [] :return-type "Cursor"}]}
+   "cursor"      ^{:signatures [{:params [] :return-type {:base-type "Cursor" :type-params ["Char"]}}]}
    (fn [s & _]
      {:nex-builtin-type :StringCursor
       :source s
@@ -1245,7 +1245,7 @@
    "clone"       ^{:returns :self :signatures [{:params []
                                                 :return-type {:base-type "Array" :type-params ["T"]}}]}
    (fn [arr & _] (nex-clone-value arr))
-   "cursor"      ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
+   "cursor"      ^{:returns "Cursor" :signatures [{:params [] :return-type {:base-type "Cursor" :type-params ["T"]}}]}
    (fn [arr & _]
      {:nex-builtin-type :ArrayCursor
       :source arr
@@ -1309,7 +1309,10 @@
    "clone"        ^{:returns :self :signatures [{:params []
                                                  :return-type {:base-type "Map" :type-params ["K" "V"]}}]}
    (fn [m & _] (nex-clone-value m))
-   "cursor"       ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
+   "cursor"       ^{:returns "Cursor" :signatures [{:params []
+                                                  :return-type {:base-type "Cursor"
+                                                                :type-params [{:base-type "Map_Entry"
+                                                                               :type-params ["K" "V"]}]}}]}
    (fn [m & _]
      {:nex-builtin-type :MapCursor
       :source m
@@ -1362,7 +1365,7 @@
    "clone"                ^{:returns :self :signatures [{:params []
                                                          :return-type {:base-type "Set" :type-params ["T"]}}]}
    (fn [s & _] (nex-clone-value s))
-   "cursor"               ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
+   "cursor"               ^{:returns "Cursor" :signatures [{:params [] :return-type {:base-type "Cursor" :type-params ["T"]}}]}
    (fn [s & _]
      {:nex-builtin-type :SetCursor
       :source s
@@ -1669,7 +1672,9 @@
    (fn [proc & _] (nex-process-to-string proc))})
 
 (def arraycursor-type-methods
-  {"start"   (fn [c & _] (reset! (:index c) 0) nil)
+  {;; A cursor is itself Iterable: its cursor is itself.
+   "cursor"  (fn [c & _] c)
+   "start"   (fn [c & _] (reset! (:index c) 0) nil)
    "item"    (fn [c & _]
                (let [arr (:source c)
                      idx @(:index c)]
@@ -1686,7 +1691,9 @@
                (>= @(:index c) (nex-array-size (:source c))))})
 
 (def stringcursor-type-methods
-  {"start"   (fn [c & _] (reset! (:index c) 0) nil)
+  {;; A cursor is itself Iterable: its cursor is itself.
+   "cursor"  (fn [c & _] c)
+   "start"   (fn [c & _] (reset! (:index c) 0) nil)
    "item"    (fn [c & _]
                (let [s (:source c)
                      idx @(:index c)]
@@ -1703,7 +1710,9 @@
                (>= @(:index c) (count (:source c))))})
 
 (def mapcursor-type-methods
-  {"start"   (fn [c & _]
+  {;; A cursor is itself Iterable: its cursor is itself.
+   "cursor"  (fn [c & _] c)
+   "start"   (fn [c & _]
                (reset! (:keys c) (nex-map-keys (:source c)))
                (reset! (:index c) 0)
                nil)
@@ -1725,7 +1734,9 @@
                (>= @(:index c) (count @(:keys c))))})
 
 (def setcursor-type-methods
-  {"start"   (fn [c & _]
+  {;; A cursor is itself Iterable: its cursor is itself.
+   "cursor"  (fn [c & _] c)
+   "start"   (fn [c & _]
                (reset! (:values c) (vec (nex-set-seq (:source c))))
                (reset! (:index c) 0)
                nil)

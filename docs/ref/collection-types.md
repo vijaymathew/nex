@@ -9,7 +9,9 @@ This section covers the standard collection abstractions used throughout Nex cod
 In the tables below, `T` is the element type of an `Array[T]` or `Set[T]`, and `K` and
 `V` are the key and value types of a `Map[K, V]`.
 
-All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
+All built-in collection types inherit `Any`, and `Array[T]`, `Set[T]` and
+`Map[K, V]` are also `Iterable` (so `across` walks them, and they can be passed
+where an `Iterable` is expected; see [Foundational Classes](foundational-classes.md)). Their `to_string`, `equals`, and
 `clone` methods operate recursively: `to_string` renders nested structure,
 `equals` performs deep structural equality, and `clone` performs a deep copy.
 
@@ -68,7 +70,7 @@ create Array[String].filled(2, "x")
 | `equals` | `other: Array[T]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `hash` | none | `Integer` | Hash of the elements, in order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Array[T]` | Deep-copy the array and its nested values while preserving element type. | `O(n) / O(n)`, deep* |
-| `cursor` | none | `ArrayCursor` | Create iterator. | `O(1) / O(1)` to create |
+| `cursor` | none | `Cursor[T]` | Create iterator. | `O(1) / O(1)` to create |
 
 \* "Deep" means the cost scales with the array's total nested size, not just its element count, since these recurse into any nested `Array`/`Map`/`Set`/object elements.
 
@@ -103,7 +105,7 @@ create Array[String].filled(2, "x")
 | `equals` | `other: Map[K, V]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `hash` | none | `Integer` | Hash of the entries, in any order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Map[K, V]` | Deep-copy the map and its nested keys and values while preserving key/value types. | `O(n) / O(n)`, deep* |
-| `cursor` | none | `MapCursor` | Create entry iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
+| `cursor` | none | `Cursor[Map_Entry[K, V]]` | Create entry iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
 
 \* "Deep" means the cost scales with the total nested size of keys/values, not just entry count.
 † `remove` and `cursor` are the two operations where the backends diverge: `remove` is `O(1)` average on the compiled backend but `O(n)` on the interpreter (see the note above); `cursor` creation is `O(n)` on both, since it snapshots every key up front rather than iterating lazily.
@@ -157,7 +159,7 @@ Set literals use `#{...}`. The empty map literal remains `{}`.
 | `equals` | `other: Set[T]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `hash` | none | `Integer` | Hash of the elements, in any order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Set[T]` | Deep-copy the set and its nested values while preserving element type. | `O(n) / O(n)`, deep* |
-| `cursor` | none | `SetCursor` | Create iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
+| `cursor` | none | `Cursor[T]` | Create iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
 
 \* "Deep" means the cost scales with the total nested size of elements, not just element count.
 † `remove` and `cursor` are the two operations where the backends diverge, the same way as `Map` above: `remove` is `O(1)` average on the compiled backend but `O(n)` on the interpreter; `cursor` creation is `O(n)` on both, since it snapshots every element up front. (`n` above is the size of the receiver, `m` the size of `other`.)

@@ -101,21 +101,11 @@ feature
   end
 
   list(): Array[Path] do
-      let raw_paths: Array[String] := __path_list(path)
-      let results: Array[Path] := []
-      let c: Cursor := raw_paths.cursor()
-      from
-        c.start()
-      until
-        c.at_end()
-      do
-        if convert c.item() to item_path: String then
-          results.add(create Path.make(item_path))
-        end
-        c.next()
-      end
-      result := results
+    let raw_paths: Array[String] := __path_list(path)
+    across raw_paths as item_path do
+      result.add(create Path.make(item_path))
     end
+  end
 
   to_string(): String do
     result := path

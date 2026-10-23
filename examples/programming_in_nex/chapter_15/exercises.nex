@@ -3,14 +3,15 @@
 -- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
 --
 -- Exercises 6 and 7 build on Section 15.8 "Iterating Over Your Own Types":
--- the Cursor protocol (start / item / next / at_end) that makes any class
--- usable with `across`.
+-- a class that inherits Iterable[T], with a cursor class that inherits
+-- Cursor[T] (start / item / next / at_end), is usable with `across`.
 -- ============================================================================
 
 -- 7.* The cursor that makes Stack[G] iterable from top to bottom. It is handed
 --     the array once, at creation, and walks it backwards; clients never see
 --     `items` themselves — the cursor is the only window in.
 class Stack_Cursor [G]
+  inherit Cursor[G]
   create
     make(data: Array[G]) do items := data  pos := data.length - 1 end
   feature
@@ -25,6 +26,7 @@ end
 -- 1. Stack[G] with explicit emptiness preconditions on pop and peek.
 --    (7.* adds the `cursor` method at the end of the feature list.)
 class Stack [G]
+  inherit Iterable[G]
   create
     make() do items := [] end
   feature
@@ -48,7 +50,7 @@ class Stack [G]
     is_empty(): Boolean do result := items.length = 0 end
     size(): Integer do result := items.length end
     -- 7.* One method is all it takes to make Stack[G] usable with `across`.
-    cursor(): Stack_Cursor[G]
+    cursor(): Cursor[G]
       do result := create Stack_Cursor[G].make(items) end
 end
 
@@ -121,6 +123,7 @@ end
 -- Section 15.8 "Iterating Over Your Own Types": a user-defined iterable.
 -- An Interval generates an inclusive range on demand; it stores no array.
 class Interval_Cursor
+  inherit Cursor[Integer]
   create
     make(lo, hi: Integer) do current := lo  last := hi end
   feature
@@ -133,17 +136,19 @@ class Interval_Cursor
 end
 
 class Interval
+  inherit Iterable[Integer]
   create
     make(lo, hi: Integer) do low := lo  high := hi end
   feature
     low: Integer
     high: Integer
-    cursor(): Interval_Cursor
+    cursor(): Cursor[Integer]
       do result := create Interval_Cursor.make(low, high) end
 end
 
 -- 6. Countdown yields n, n-1, ..., 1 when iterated.
 class Countdown_Cursor
+  inherit Cursor[Integer]
   create
     make(start_at: Integer) do current := start_at end
   feature
@@ -155,14 +160,22 @@ class Countdown_Cursor
 end
 
 class Countdown
+  inherit Iterable[Integer]
   create
     make(n: Integer)
       require positive: n > 0
       do top := n end
   feature
     top: Integer
-    cursor(): Countdown_Cursor
+    cursor(): Cursor[Integer]
       do result := create Countdown_Cursor.make(top) end
+end
+
+-- 7.* Sum any Iterable[Integer]: a Stack, an Array, a Set, an Interval, ...
+function sum_all(xs: Iterable[Integer]): Integer do
+  across xs as x do
+    result := result + x
+  end
 end
 
 function main() do
@@ -241,9 +254,7 @@ function main() do
 
   let total: Integer := 0
   across (create Interval.make(1, 100)) as n do
-    if convert n to value: Integer then
-      total := total + value
-    end
+    total := total + n
   end
   console.print_line("15.8 sum 1..100      = " + total.to_string)         -- 5050
   assert total = 5050
@@ -258,25 +269,21 @@ function main() do
   assert first.trim = "5 4 3 2 1"
   assert again.trim = "5 4 3 2 1"
 
-  -- 7.* Iterate a Stack[Integer] top-to-bottom and total it via `convert`.
-  --     The loop variable is Any because a user-defined cursor is free to yield
-  --     any type — the `across` driver only knows the Cursor protocol, not the
-  --     element type behind it — so the concrete type is recovered by narrowing.
+  -- 7.* Iterate a Stack[Integer] top-to-bottom. A Stack[Integer] is an
+  --     Iterable[Integer], so the loop variable is an Integer, and `sum_all`
+  --     accepts the stack and an array alike.
   let st: Stack[Integer] := create Stack[Integer].make()
   st.push(10)
   st.push(20)
   st.push(30)
   let order: String := ""
-  let sum: Integer := 0
   across st as e do
     order := order + e.to_string + " "
-    if convert e to v: Integer then
-      sum := sum + v
-    end
   end
-  console.print_line("7. Stack top->bottom  = " + order.trim + " (sum " + sum.to_string + ")")  -- 30 20 10 (sum 60)
+  console.print_line("7. Stack top->bottom  = " + order.trim + " (sum " + sum_all(st).to_string + ")")  -- 30 20 10 (sum 60)
   assert order.trim = "30 20 10"
-  assert sum = 60
+  assert sum_all(st) = 60
+  assert sum_all([1, 2, 3]) = 6
 end
 
 main()

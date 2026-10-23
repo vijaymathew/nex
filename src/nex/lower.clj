@@ -98,13 +98,18 @@
                               (map (fn [class-def] [(:name class-def) class-def]))
                               (concat [(bootstrap/build-any-base-class)
                                        (bootstrap/build-function-base-class)
+                                       (bootstrap/build-iterable-base-class)
                                        (bootstrap/build-cursor-base-class)
                                        (bootstrap/build-comparable-base-class)]
                                       (map bootstrap/build-builtin-scalar-class
                                            ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))
         env (tc/make-type-env)]
     (tc/register-builtin-methods env)
-    (vals (merge interp-builtins @(:classes env)))))
+    ;; The typechecker registers Iterable and Cursor by signature only; the
+    ;; bootstrap definitions carry the bodies (Cursor's own `cursor`) that a
+    ;; heir inherits, so those two come from the bootstrap.
+    (vals (merge interp-builtins @(:classes env)
+                 (select-keys interp-builtins ["Iterable" "Cursor"])))))
 
 (defn- class-generic-params
   "Generic parameters (`{:name .. :constraint ..}`) in scope inside CLASS-DEF:
@@ -2193,7 +2198,7 @@
   [env]
   (let [type-env (tc/make-type-env)]
     (doseq [[class-name class-def] (visible-class-map env)]
-      (tc/env-add-class type-env class-name class-def))
+      (tc/collect-class-signatures! type-env (assoc class-def :name class-name)))
     type-env))
 
 (defn- operator-alias-feature
@@ -7102,24 +7107,14 @@
 
 (defn- across-item-type
   "The element type `across` yields over TARGET-TYPE: the builtin collections'
-   own, else — for a user class with a zero-argument `cursor` method — the
-   `item` return type of the cursor class it returns (mirrors the two-argument
-   tc/cursor-item-type), else Any."
+   own, else whatever the typechecker gives `t.cursor().item()` (or `t.item()`
+   for a cursor) over the program's classes — so a generic Iterable or cursor
+   class yields its real element type — else Any."
   [env target-type]
   (let [t (tc/cursor-item-type target-type)]
     (if (not= "Any" t)
       t
-      (let [class-map (visible-class-map env)
-            class-def (get class-map (base-type-name (tc/attachable-type target-type)))
-            cursor-def (when class-def (accessible-method-def env class-def "cursor" 0))
-            cursor-type (some-> cursor-def function-return-type)
-            ;; Only a plain, non-generic cursor class qualifies (see
-            ;; tc/user-cursor-item-type).
-            cursor-class-def (when (string? cursor-type) (get class-map cursor-type))
-            item-def (when (and cursor-class-def (empty? (:generic-params cursor-class-def)))
-                       (accessible-method-def env cursor-class-def "item" 0))
-            item-type (some-> item-def function-return-type)]
-        (if (string? item-type) item-type "Any")))))
+      (tc/cursor-item-type (lowering-type-env env) target-type))))
 
 (defn- lower-stmt-let
   [env stmt]

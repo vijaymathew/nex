@@ -54,6 +54,20 @@
   `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
   same numbers on both backends. The digital map and neural network examples
   use it instead of their own generator.
+- **`Iterable[T]` and `Cursor[T]` are real deferred classes.** `Array[T]` and
+  `Set[T]` are `Iterable[T]`, `String` is `Iterable[Char]`, and `Map[K, V]` is
+  `Iterable[Map_Entry[K, V]]`, so a parameter typed `Iterable[Integer]` takes
+  an array, a set or a class of your own. `across` walks any `Iterable`, and
+  its loop variable now has the element type for generic classes too
+  (`across stack as x` over a `Stack[String]` gives Strings, not `Any`). A
+  built-in cursor is a `Cursor[T]` (`[1, 2].cursor()` is a `Cursor[Integer]`,
+  whose `item` is an `Integer`). A class that inherits `Cursor[T]` but leaves
+  out one of its features, or declares `item` with the wrong type, is now a
+  type error. Classes that only declare a `cursor()` method, and `inherit
+  Cursor` without a type argument, still work.
+- **Fixed:** `across` over a user class that inherits `Cursor` was rejected;
+  `across xs.cursor()` failed with `--interpret`; and `convert` to `Cursor` was
+  false for a built-in cursor on the compiled backend.
 - **Typed JSON reading.** `Json.read(text)` gives a `Json_Value`, read with
   `get(key)`, `at(i)`, `items`, `as_integer`, `as_real`, `as_string`,
   `as_boolean`, and whole arrays at once with `as_reals`, `as_integers`, ...,

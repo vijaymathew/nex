@@ -6,6 +6,7 @@
             [nex.fmt :as fmt]
             [nex.redeclare :as redeclare]
             [nex.contracts :as contracts]
+            [nex.types.bootstrap :as bootstrap]
             [nex.types.builtins :as bi]))
 
 ;;
@@ -617,7 +618,7 @@
   #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Program" "Function"
-    "Cursor"})
+    "Cursor" "Iterable"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
@@ -1502,29 +1503,34 @@
       "Cursor" "Any"
       "Any"))))
 
-(defn- user-cursor-item-type
-  "The element type of `across` over a user class with a zero-argument `cursor`
-   method, taken from the `item` method of the cursor class it returns; nil when
-   the class has no such pair of methods.
+(declare check-expression)
 
-   Only a plain (string-typed), non-generic cursor class qualifies. A generic
-   one (`cursor(): Stack_Cursor[G]`) would yield an item type written in its own
-   type parameters, which nothing here substitutes, so those keep yielding Any
-   and the loop variable is narrowed with `convert`, as before."
+(defn- user-cursor-item-type
+  "The element type of `across` over a value of class type TARGET-TYPE that is
+   not one of the built-in collections: a Cursor (its own `item`), an Iterable,
+   or any class with a zero-argument `cursor` method (the `item` of the cursor
+   that returns). Typed by checking `t.item()` or `t.cursor().item()` on a
+   variable of that type, so inheritance, generic substitution (`Stack[String]`
+   whose `cursor(): Stack_Cursor[G]` yields Strings) and overriding (a class
+   that inherits a bare `Cursor` but declares `item(): Integer`) are all
+   resolved by the ordinary call rules. Nil when the type is not iterable."
   [env target-type]
   (let [t (attachable-type (normalize-type target-type))
-        base (if (map? t) (:base-type t) t)
-        base-of (fn [x] (let [x (attachable-type (normalize-type x))]
-                          (if (map? x) (:base-type x) x)))]
+        base (if (map? t) (:base-type t) t)]
     (when (and (string? base) (env-lookup-class env base))
-      (when-let [cursor-class (some-> (lookup-class-method env base "cursor" 0)
-                                      :return-type base-of)]
-        (when (and (string? cursor-class)
-                   (string? (:return-type (lookup-class-method env base "cursor" 0)))
-                   (empty? (:generic-params (env-lookup-class env cursor-class))))
-          (let [item-type (:return-type (lookup-class-method env cursor-class "item" 0))]
-            (when (string? item-type)
-              item-type)))))))
+      (try
+        (let [tmp (make-type-env env)
+              call (fn [target method]
+                     (binding [*collected-errors* nil]
+                       (check-expression tmp {:type :call :target target :method method
+                                              :args [] :has-parens true})))]
+          (env-add-var tmp "__iter_target__" t)
+          (if (class-subtype? env base "Cursor")
+            (call "__iter_target__" "item")
+            (let [cursor-type (call "__iter_target__" "cursor")]
+              (env-add-var tmp "__iter_cursor__" cursor-type)
+              (call "__iter_cursor__" "item"))))
+        (catch Exception _ nil)))))
 
 (defn- collect-generic-names-from-type
   [type-expr]
@@ -3258,19 +3264,20 @@
       nil)))
 
 (defn- builtin-method-signature-cursor
-  [method argc _type-map]
+  [method argc type-map]
+  (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
   (case method
     "start" (when (= argc 0)
               {:params [] :return-type "Void"})
     "cursor" (when (= argc 0)
-               {:params [] :return-type "Cursor"})
+               {:params [] :return-type {:base-type "Cursor" :type-params [elem-type]}})
     "item" (when (= argc 0)
-             {:params [] :return-type "Any"})
+             {:params [] :return-type elem-type})
     "next" (when (= argc 0)
              {:params [] :return-type "Void"})
     "at_end" (when (= argc 0)
                {:params [] :return-type "Boolean"})
-    nil))
+    nil)))
 
 (def ^:private builtin-method-signature-dispatch
   "base-type -> `(fn [method argc type-map] -> signature-or-nil)`: the
@@ -3299,7 +3306,8 @@
    invented by the desugaring, so naming it would point at code the programmer
    never wrote."
   [base-type]
-  (str "`across` needs an Array, Map, Set, String, or Cursor; this one is "
+  (str "`across` needs an Iterable: an Array, Map, Set, String, Cursor, or a"
+       " class that inherits Iterable; this one is "
        base-type "."
        (when (= "Any" base-type)
          (str " Narrow it first, for example: if convert <expr> to"
@@ -7127,11 +7135,13 @@
     (doseq [{:keys [parent]} (:parents class-def)]
       (walk parent #{}))))
 
-(defn collect-class-info
-  "Collect class information (first pass)"
+(defn collect-class-signatures!
+  "Register CLASS-DEF and its method and constructor signatures in ENV, which
+   is all method lookup needs (the first half of collect-class-info, without
+   inferring constant types). Used by lowering to type calls on program
+   classes."
   [env {:keys [name body] :as class-def}]
   (env-add-class env name class-def)
-
   ;; Collect method and constructor signatures *before* inferring constant
   ;; types: a constant's initializer may construct the class itself
   ;; (`RED = create Color.make(255, 0, 0)`) or call one of its routines, and
@@ -7160,7 +7170,12 @@
       (doseq [ctor (:constructors section)]
         (env-add-method env name (:name ctor)
                         {:params (:params ctor)
-                         :return-type name}))))
+                         :return-type name})))))
+
+(defn collect-class-info
+  "Collect class information (first pass)"
+  [env {:keys [name body] :as class-def}]
+  (collect-class-signatures! env class-def)
 
   ;; Collect fields/constants and infer constant types.
   ;;
@@ -8091,6 +8106,22 @@
                   {:params [{:name "a" :type "Any"}]
                    :return-type "Integer"}))
 
+;; The iteration protocol: `Iterable[T]` is anything with `cursor(): Cursor[T]`,
+;; and a `Cursor[T]` walks one (`start`, `item`, `next`, `at_end`). A cursor is
+;; itself iterable: its `cursor` is the cursor. `across` accepts any Iterable.
+;; Array, Set, String and Map are registered as heirs of Iterable below.
+(declare collect-class-signatures!)
+
+(defn- register-iteration-protocol!
+  [env]
+  ;; From the same definitions the interpreter and lowering use, bodies
+  ;; included: an heir that leaves a deferred method out, or overrides `item`
+  ;; with a type that doesn't conform, is then caught as for any other
+  ;; deferred parent.
+  (doseq [class-def [(bootstrap/build-iterable-base-class)
+                     (bootstrap/build-cursor-base-class)]]
+    (collect-class-signatures! env class-def)))
+
 ;; Built-in scalar classes implement Comparable
 (defn- register-scalar-classes!
   [env]
@@ -8098,7 +8129,10 @@
     (env-add-class env scalar {:name scalar
                                :deferred? false
                                :generic-params nil
-                               :parents [{:parent "Any"} {:parent "Comparable"}]
+                               :parents (cond-> [{:parent "Any"} {:parent "Comparable"}]
+                                          ;; A String is a sequence of Chars.
+                                          (= scalar "String")
+                                          (conj {:parent "Iterable" :generic-args ["Char"]}))
                                :body []})
     (env-add-method env scalar "compare"
                     {:params [{:name "a" :type "Any"}]
@@ -8156,7 +8190,8 @@
 (defn- register-array-methods!
   [env]
   (env-add-class env "Array" {:name "Array"
-                              :generic-params [{:name "T"}]})
+                              :generic-params [{:name "T"}]
+                              :parents [{:parent "Iterable" :generic-args ["T"]}]})
   (env-add-method env "Array" "filled"
                   {:params [{:name "size" :type "Integer"}
                             {:name "value" :type "T"}]
@@ -8166,13 +8201,16 @@
 (defn- register-map-methods!
   [env]
   (env-add-class env "Map" {:name "Map"
-                            :generic-params [{:name "K"} {:name "V"}]})
+                            :generic-params [{:name "K"} {:name "V"}]
+                            :parents [{:parent "Iterable"
+                                       :generic-args [{:base-type "Map_Entry" :type-params ["K" "V"]}]}]})
   (register-builtin-type-signatures! env "Map"))
 
 (defn- register-set-methods!
   [env]
   (env-add-class env "Set" {:name "Set"
-                            :generic-params [{:name "T"}]})
+                            :generic-params [{:name "T"}]
+                            :parents [{:parent "Iterable" :generic-args ["T"]}]})
   (env-add-method env "Set" "from_array"
                   {:params [{:name "values"
                              :type {:base-type "Array" :type-params ["T"]}}]
@@ -8246,6 +8284,7 @@
   [env]
   (register-any-protocol! env)
   (register-comparable-protocol! env)
+  (register-iteration-protocol! env)
   (register-scalar-classes! env)
   (register-integer-methods! env)
   (register-byte-methods! env)

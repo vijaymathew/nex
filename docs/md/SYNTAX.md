@@ -224,7 +224,9 @@ end
 
 ## Across
 
-Iterate over any collection (Array, String, Map) using its cursor:
+Iterate over anything `Iterable`: an Array, Set, String or Map, a cursor, or
+a class of your own that inherits `Iterable[T]` (see the reference's
+Foundational Classes):
 
 ```nex
 across [10, 20, 30] as x do

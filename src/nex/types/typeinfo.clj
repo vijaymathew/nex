@@ -49,10 +49,20 @@
   (and (= runtime-type "Integer")
        (= target-type "Real")))
 
+(def ^:private builtin-cursor-runtime-types
+  #{"ArrayCursor" "StringCursor" "MapCursor" "SetCursor"})
+
 (defn cursor-subtype-runtime?
+  "Whether a built-in runtime type is an heir of the iteration protocol's
+   TARGET-TYPE: the built-in cursors are Cursors, and they and the built-in
+   collections are Iterable. (User classes reach Cursor and Iterable through
+   their own `inherit` clauses.)"
   [runtime-type target-type]
-  (and (#{"ArrayCursor" "StringCursor" "MapCursor" "SetCursor"} runtime-type)
-       (= target-type "Cursor")))
+  (case target-type
+    "Cursor" (contains? builtin-cursor-runtime-types runtime-type)
+    "Iterable" (or (contains? builtin-cursor-runtime-types runtime-type)
+                   (contains? #{"Array" "Map" "Set" "String"} runtime-type))
+    false))
 
 (defn runtime-type-is?
   [runtime-type-name-fn is-parent? ctx target-type value]
@@ -71,6 +81,7 @@
   [is-parent? ctx runtime-type target-type]
   (or (= target-type "Any")
       (= runtime-type target-type)
+      (cursor-subtype-runtime? runtime-type target-type)
       (and runtime-type (is-parent? ctx runtime-type target-type))))
 
 ;; ---------------------------------------------------------------------------
@@ -143,7 +154,7 @@
 
 (def ^:private builtin-type-names
   #{"Integer" "Integer64" "Integer32" "Integer16" "Byte" "Real" "Char" "Boolean"
-    "String" "Array" "Map" "Set" "Function" "Task" "Channel" "Cursor"
+    "String" "Array" "Map" "Set" "Function" "Task" "Channel" "Cursor" "Iterable"
     "Comparable" "Console" "Process" "Program" "Min_Heap" "Map_Entry"
     "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"})
 

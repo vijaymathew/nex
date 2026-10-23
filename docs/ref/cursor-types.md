@@ -1,6 +1,9 @@
 # Cursor Types
 
-Cursors implement the `Cursor` protocol: `start`, `item`, `next`, `at_end`.
+The built-in collections' cursors. Each is a `Cursor[T]` (see [Foundational
+Classes](foundational-classes.md)): `arr.cursor()` on an `Array[Integer]` has
+type `Cursor[Integer]`, and its `item` is an `Integer`. Like every cursor, each
+also has `cursor`, which returns the cursor itself.
 
 ## `ArrayCursor`
 
@@ -9,7 +12,7 @@ Created by: `arr.cursor()`
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `start` | none | `Void` | Reset index to `0`. |
-| `item` | none | `Any` | Return current array element; throws at end. |
+| `item` | none | `T` | Return current array element; throws at end. |
 | `next` | none | `Void` | Advance index by one if not at end. |
 | `at_end` | none | `Boolean` | True when index is beyond last element. |
 
@@ -51,7 +54,7 @@ This is what `across buf as b do ... end` uses, and `b` is a `Byte`.
 
 ```nex
 let xs := [1, 2, 3]
-let c := xs.cursor()
+let c: Cursor[Integer] := xs.cursor()
 from c.start() until c.at_end() do
   print(c.item())
   c.next()

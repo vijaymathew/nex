@@ -1716,7 +1716,10 @@
         class-lookup (fn [n] (.get ^HashMap @(:classes state) n))
         ok? (and (some? value)
                  (string? target-type-name)
-                 (runtime-compatible-with? state runtime-name target-type-name)
+                 (or (runtime-compatible-with? state runtime-name target-type-name)
+                     ;; The built-in collections are Iterable, and the
+                     ;; built-in cursors are Cursors (and Iterable).
+                     (typeinfo/cursor-subtype-runtime? runtime-name target-type-name))
                  ;; The type arguments too, when the target names them
                  ;; (Definition 4.7: Some[Integer] is not a Some[String]).
                  (or (empty? target-args)
