@@ -2,58 +2,8 @@
 
 ## Unreleased
 
-- **`console` and `program` are predeclared.** Every program can write
-  `console.print_line("hi")` (text without quotes, unlike `print`) and read
-  `program.arguments`, `program.env("HOME")`, `program.working_directory` and
-  so on, without creating anything first. They are read-only globals, usable at
-  the top level and in every function and class, on both backends and in the
-  REPL. A program that declares either name itself (a top-level `let`, a
-  function, or its own `Console` or `Program` class) keeps its own, so existing
-  programs are unaffected; a parameter, field or local of the same name shadows
-  it.
-- **New `Program` type** for the running program: `arguments`, `env`,
-  `has_env`, `pid`, `working_directory` (the folder `nex` was started from, not
-  the launcher's own) and `exit`.
+## 0.6.3 - 2026-10-23
 
-- **Java interop calls are much faster.** A call in a `with "java"` block used
-  to be resolved from scratch every time it ran: every public method of the
-  class scanned for the name, an overload picked, and, for a method of a JDK
-  class its module keeps private (the `SunGraphics2D` behind every
-  `Graphics2D`), the class's supertypes searched for an accessible declaration.
-  Now each call shape is resolved once and remembered (`nex.types.reflect`),
-  making exactly the choice it made before, with the same errors. Class names,
-  constructors, static calls, fields and the compile-time-resolved calls are
-  remembered too, and the JDK's access check is no longer repeated on every
-  call. A class the REPL may redefine is never kept alive by any of this.
-  On `graphics/Canvas` this makes changing the pen about 20 times faster and
-  drawing a line, a circle or a picture 3 to 10 times faster; a whole map
-  frame in `examples/digital_map` draws in 11 ms instead of 50.
-- **Comparing and hashing objects is faster.** Structural `=` and hashing of
-  compiled objects worked out each object's class name and the class's field
-  names on every comparison; both are now remembered, so `=` on two small
-  objects is about 5 times faster. Calls and field reads on another object
-  (`obj.method()`, `obj.field`) no longer take their helper name apart on
-  every call.
-- **`Canvas.set_title`** names the window (`title` reads it back); the default
-  is still "Nex Canvas".
-- **`Canvas` without double buffering no longer copies the whole image on
-  every drawing command.** The window shows the image being drawn on and
-  repaints soon after, once for a burst of commands. Without a display, `show`
-  no longer copies anything.
-- **`Picture.grayscale` is about a thousand times faster**, done by one
-  Java2D operation instead of a call per pixel, with exactly the same result
-  (checked against all 16,777,216 colors).
-- **New `Real.format(places)`** gives the number as text with exactly that
-  many digits after the point, never in E notation: `2.5.format(3)` is
-  `"2.500"`, `0.00012.format(5)` is `"0.00012"`. It rounds like `to_fixed`
-  (halves away from zero). The digital map and neural network examples use
-  it instead of their own `fixed` helper.
-- **New library `math/Random`** for pseudo-random numbers that can be
-  repeated from a seed: `create Random.with_seed(42)` (or `make` for
-  different numbers every run), with `uniform`, `below`, `between` and
-  `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
-  same numbers on both backends. The digital map and neural network examples
-  use it instead of their own generator.
 - **`map`, `filter`, `fold`, `reduce`, `any`, `all`, `count` and `find` on
   every built-in collection** (Array, Set, Map, and String over its Chars).
   `xs.map(fn (x) => x * 2)`, `xs.filter(fn (x) => x > 1)`,
@@ -91,17 +41,75 @@
   out one of its features, or declares `item` with the wrong type, is now a
   type error. Classes that only declare a `cursor()` method, and `inherit
   Cursor` without a type argument, still work.
-- **Fixed:** `across` over a user class that inherits `Cursor` was rejected;
-  `across xs.cursor()` failed with `--interpret`; and `convert` to `Cursor` was
-  false for a built-in cursor on the compiled backend.
+- **`console` and `program` are predeclared.** Every program can write
+  `console.print_line("hi")` (text without quotes, unlike `print`) and read
+  `program.arguments`, `program.env("HOME")`, `program.working_directory` and
+  so on, without creating anything first. They are read-only globals, usable at
+  the top level and in every function and class, on both backends and in the
+  REPL. A program that declares either name itself (a top-level `let`, a
+  function, or its own `Console` or `Program` class) keeps its own, so existing
+  programs are unaffected; a parameter, field or local of the same name shadows
+  it.
+- **New `Program` type** for the running program: `arguments`, `env`,
+  `has_env`, `pid`, `working_directory` (the folder `nex` was started from, not
+  the launcher's own) and `exit`.
+- **New library `math/Random`** for pseudo-random numbers that can be
+  repeated from a seed: `create Random.with_seed(42)` (or `make` for
+  different numbers every run), with `uniform`, `below`, `between` and
+  `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
+  same numbers on both backends. The digital map and neural network examples
+  use it instead of their own generator.
 - **Typed JSON reading.** `Json.read(text)` gives a `Json_Value`, read with
   `get(key)`, `at(i)`, `items`, `as_integer`, `as_real`, `as_string`,
   `as_boolean`, and whole arrays at once with `as_reals`, `as_integers`, ...,
   instead of narrowing every `Any` with `convert`. A mismatch raises an error
   that names the place: `Json: points[2].x is a string, expected a number`.
   The neural network example loads its model this way.
+- **New `Real.format(places)`** gives the number as text with exactly that
+  many digits after the point, never in E notation: `2.5.format(3)` is
+  `"2.500"`, `0.00012.format(5)` is `"0.00012"`. It rounds like `to_fixed`
+  (halves away from zero). The digital map and neural network examples use
+  it instead of their own `fixed` helper.
 - **New `Real` methods `sinh`, `cosh` and `tanh`.** `tanh` never overflows:
   `1000.0.tanh` is exactly `1.0`.
+- **Java interop calls are much faster.** A call in a `with "java"` block used
+  to be resolved from scratch every time it ran: every public method of the
+  class scanned for the name, an overload picked, and, for a method of a JDK
+  class its module keeps private (the `SunGraphics2D` behind every
+  `Graphics2D`), the class's supertypes searched for an accessible declaration.
+  Now each call shape is resolved once and remembered (`nex.types.reflect`),
+  making exactly the choice it made before, with the same errors. Class names,
+  constructors, static calls, fields and the compile-time-resolved calls are
+  remembered too, and the JDK's access check is no longer repeated on every
+  call. A class the REPL may redefine is never kept alive by any of this.
+  On `graphics/Canvas` this makes changing the pen about 20 times faster and
+  drawing a line, a circle or a picture 3 to 10 times faster; a whole map
+  frame in `examples/digital_map` draws in 11 ms instead of 50.
+- **Comparing and hashing objects is faster.** Structural `=` and hashing of
+  compiled objects worked out each object's class name and the class's field
+  names on every comparison; both are now remembered, so `=` on two small
+  objects is about 5 times faster. Calls and field reads on another object
+  (`obj.method()`, `obj.field`) no longer take their helper name apart on
+  every call.
+- **`Canvas.set_title`** names the window (`title` reads it back); the default
+  is still "Nex Canvas".
+- **`Canvas` without double buffering no longer copies the whole image on
+  every drawing command.** The window shows the image being drawn on and
+  repaints soon after, once for a burst of commands. Without a display, `show`
+  no longer copies anything.
+- **`Picture.grayscale` is about a thousand times faster**, done by one
+  Java2D operation instead of a call per pixel, with exactly the same result
+  (checked against all 16,777,216 colors).
+- **Examples use the new features.** They write with `console` and read
+  their arguments and folder from `program` instead of creating a `Console`
+  or reading `NEX_USER_DIR`; the digital map and neural network projects use
+  `math/Random`, `Real.format` and `Real.tanh` instead of their own
+  generator and helpers (the neural network model was retrained with it),
+  and the neural network, task tracker and HTTP calculator read their JSON
+  with `Json_Value`. Their tutorials were updated to match.
+- **Fixed:** `across` over a user class that inherits `Cursor` was rejected;
+  `across xs.cursor()` failed with `--interpret`; and `convert` to `Cursor` was
+  false for a built-in cursor on the compiled backend.
 - **Fixed: under `--interpret`, a `let` inside an `if` branch overwrote an
   outer variable of the same name** instead of hiding it until the branch
   ended. Each branch now has its own scope, as on the compiled backend.
