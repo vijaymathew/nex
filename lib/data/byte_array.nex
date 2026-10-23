@@ -13,7 +13,7 @@
 
 class Byte_Array
   note "A fixed-size, mutable sequence of Bytes backed by a Java byte[]."
-  inherit Comparable
+  inherit Comparable, Iterable[Byte]
 
 create
   -- SIZE zero-filled bytes; raises if size is negative.
@@ -151,7 +151,7 @@ end
 
 class Byte_Array_Cursor
   note "Iterates over the Bytes of a Byte_Array."
-  inherit Cursor
+  inherit Cursor[Byte]
 
 create
   make(source_bytes: Byte_Array) do

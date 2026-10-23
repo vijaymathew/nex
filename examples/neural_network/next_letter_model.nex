@@ -11,7 +11,7 @@
 
 intern Vector_Math
 intern Vocabulary
-intern Rng
+intern math/Random
 intern data/Json
 intern io/Path
 
@@ -76,39 +76,35 @@ create
     this.hidden := hidden
 
     -- Parameters: learned during training. They start out random.
-    let rng: Rng := create Rng.make(seed)
+    let random: Random := create Random.with_seed(seed)
     let n_in: Integer := context * emb_dim
 
     -- C: one embedding row per symbol.
-    c := random_matrix(rng, Vocabulary.SIZE, emb_dim, 1.0)
+    c := random_matrix(random, Vocabulary.SIZE, emb_dim, 1.0)
 
     -- W1, b1: the hidden layer. Scaling by 1/sqrt(n_in) keeps W1·x
     -- small at the start, where tanh is not yet flat.
-    w1 := random_matrix(rng, hidden, n_in, 1.0 / n_in.to_real.sqrt)
+    w1 := random_matrix(random, hidden, n_in, 1.0 / n_in.to_real.sqrt)
     b1 := zeros(hidden)
 
     -- W2, b2: the output layer. Tiny weights make every symbol start
     -- out about equally likely: an honest "I know nothing yet".
-    w2 := random_matrix(rng, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
+    w2 := random_matrix(random, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
     b2 := zeros(Vocabulary.SIZE)
   end
 
   -- A trained model, read back from a file written by save.
   from_file(path: String) do
     let json: Json := create Json.make()
-    let text: String := create Path.make(path).read_text()
-    if convert json.parse(text) to data: Map[String, Any] then
-      context := json_integer(data.get("context"))
-      emb_dim := json_integer(data.get("emb_dim"))
-      hidden := json_integer(data.get("hidden"))
-      c := json_matrix(data.get("C"))
-      w1 := json_matrix(data.get("W1"))
-      b1 := json_vector(data.get("b1"))
-      w2 := json_matrix(data.get("W2"))
-      b2 := json_vector(data.get("b2"))
-    else
-      raise "not a model file: " + path
-    end
+    let data: Json_Value := json.read(create Path.make(path).read_text())
+    context := data.get("context").as_integer
+    emb_dim := data.get("emb_dim").as_integer
+    hidden := data.get("hidden").as_integer
+    c := json_matrix(data.get("C"))
+    w1 := json_matrix(data.get("W1"))
+    b1 := data.get("b1").as_reals
+    w2 := json_matrix(data.get("W2"))
+    b2 := data.get("b2").as_reals
   end
 
 feature
@@ -154,7 +150,7 @@ feature
     -- 2. Hidden layer: h = tanh(W1·x + b1).
     let h: Array[Real] := []
     across affine(w1, x, b1) as v do
-      h.add(tanh(v))
+      h.add(v.tanh)
     end
 
     -- 3. Output layer: one score per symbol, then softmax.
@@ -301,12 +297,12 @@ invariant
 end
 
 -- A rows x cols matrix of normal random numbers, each times `scale`.
-function random_matrix(rng: Rng, rows, cols: Integer, scale: Real): Array[Array[Real]]
+function random_matrix(random: Random, rows, cols: Integer, scale: Real): Array[Array[Real]]
 do
   repeat rows do
     let row: Array[Real] := []
     repeat cols do
-      row.add(rng.gauss() * scale)
+      row.add(random.gaussian() * scale)
     end
     result.add(row)
   end
@@ -329,42 +325,9 @@ do
   end
 end
 
--- Reading numbers back out of parsed JSON, where every value is an Any.
-
-function json_integer(value: Any): Integer do
-  if convert value to n: Integer then
-    result := n
-  else
-    raise "expected an integer in the model file"
-  end
-end
-
-function json_real(value: Any): Real do
-  if convert value to r: Real then
-    result := r
-  elseif convert value to n: Integer then
-    result := n.to_real   -- a JSON number written without a decimal point
-  else
-    raise "expected a number in the model file"
-  end
-end
-
-function json_vector(value: Any): Array[Real] do
-  if convert value to items: Array[Any] then
-    across items as item do
-      result.add(json_real(item))
-    end
-  else
-    raise "expected a list of numbers in the model file"
-  end
-end
-
-function json_matrix(value: Any): Array[Array[Real]] do
-  if convert value to rows: Array[Any] then
-    across rows as row do
-      result.add(json_vector(row))
-    end
-  else
-    raise "expected a list of rows in the model file"
+-- A matrix from JSON: a list of rows, each a list of numbers.
+function json_matrix(value: Json_Value): Array[Array[Real]] do
+  across value.items as row do
+    result.add(row.as_reals)
   end
 end

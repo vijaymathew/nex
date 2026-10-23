@@ -12,9 +12,249 @@ feature
     result := json_parse(text)
   end
 
+  read(text: String): Json_Value
+    note "Parse JSON text into a Json_Value, to read with typed accessors."
+  do
+    result := create Json_Value.make(json_parse(text))
+  end
+
   stringify(value: Any): String
     note "Serialize Nex arrays, maps, strings, numbers, booleans, and nil to JSON text."
   do
     result := json_stringify(value)
   end
+end
+
+-- One value in parsed JSON, read with typed accessors:
+--
+--   let data: Json_Value := create Json.make().read(text)
+--   let name: String := data.get("name").as_string
+--   let sizes: Array[Integer] := data.get("sizes").as_integers
+--   across data.get("points").items as p do
+--     print(p.get("x").as_real)
+--   end
+--
+-- When the JSON is not what the program expects, an accessor raises an
+-- error that says where and what: "Json: points[2].x is a string, expected
+-- a number". A Json_Value remembers its place for that reason.
+class Json_Value
+  note "One value in parsed JSON, read with typed accessors."
+
+  private feature
+    value: Any
+
+create
+  -- Wrap a value from Json.parse (or any Nex value made of the same kinds).
+  make(v: Any) do
+    value := v
+    path := ""
+  end
+
+  -- Wrap a value found at `place`, as in "C[3]", for error messages.
+  at_place(v: Any, place: String) do
+    value := v
+    path := place
+  end
+
+feature
+  -- Where this value is in the whole document, as in "C[3]" or
+  -- "points[2].x"; "" for the top level.
+  path: String
+
+  -- The plain parsed value: a Map, Array, String, Integer, Real, Boolean
+  -- or nil.
+  raw(): Any do
+    result := value
+  end
+
+  is_null(): Boolean do
+    result := value = nil
+  end
+
+  is_object(): Boolean do
+    result := convert value to m: Map[String, Any]
+  end
+
+  is_array(): Boolean do
+    result := convert value to a: Array[Any]
+  end
+
+  is_string(): Boolean do
+    result := convert value to s: String
+  end
+
+  -- An integer or a number with a fraction.
+  is_number(): Boolean do
+    result := (convert value to n: Integer) or (convert value to r: Real)
+  end
+
+  is_boolean(): Boolean do
+    result := convert value to b: Boolean
+  end
+
+  -- Objects ------------------------------------------------------------
+
+  -- Whether this object has `key`. Raises if this is not an object.
+  has(key: String): Boolean do
+    result := object_map().contains_key(key)
+  end
+
+  -- The value of `key` in this object. Raises if this is not an object or
+  -- has no such key.
+  get(key: String): Json_Value do
+    let m: Map[String, Any] := object_map()
+    if not m.contains_key(key) then
+      raise "Json: " + place() + " has no key \"" + key + "\""
+    end
+    result := create Json_Value.at_place(m.get(key), when path = "" then key else path + "." + key end)
+  end
+
+  -- The keys of this object.
+  keys(): Array[String] do
+    result := object_map().keys()
+  end
+
+  -- Arrays -------------------------------------------------------------
+
+  -- The number of elements of this array.
+  length(): Integer do
+    result := array_items().length
+  end
+
+  -- Element `index` of this array, counting from 0.
+  at(index: Integer): Json_Value do
+    let a: Array[Any] := array_items()
+    if index < 0 or index >= a.length then
+      raise "Json: " + place() + " has no element " + index.to_string
+        + " (it has " + a.length.to_string + ")"
+    end
+    result := create Json_Value.at_place(a.get(index), path + "[" + index.to_string + "]")
+  end
+
+  -- The elements of this array, each as a Json_Value.
+  items(): Array[Json_Value] do
+    let a: Array[Any] := array_items()
+    from
+      let i: Integer := 0
+    until
+      i = a.length
+    do
+      result.add(create Json_Value.at_place(a.get(i), path + "[" + i.to_string + "]"))
+      i := i + 1
+    end
+  end
+
+  -- Single values ------------------------------------------------------
+
+  as_string(): String do
+    if convert value to s: String then
+      result := s
+    else
+      raise mismatch("a string")
+    end
+  end
+
+  as_integer(): Integer do
+    if convert value to n: Integer then
+      result := n
+    else
+      raise mismatch("an integer")
+    end
+  end
+
+  -- A number, with or without a fraction: JSON writes 2.0 as 2 as often
+  -- as not, so an integer is accepted here too.
+  as_real(): Real do
+    if convert value to r: Real then
+      result := r
+    elseif convert value to n: Integer then
+      result := n.to_real
+    else
+      raise mismatch("a number")
+    end
+  end
+
+  as_boolean(): Boolean do
+    if convert value to b: Boolean then
+      result := b
+    else
+      raise mismatch("true or false")
+    end
+  end
+
+  -- Whole arrays of one kind ------------------------------------------
+
+  as_strings(): Array[String] do
+    across items() as item do
+      result.add(item.as_string())
+    end
+  end
+
+  as_integers(): Array[Integer] do
+    across items() as item do
+      result.add(item.as_integer())
+    end
+  end
+
+  as_reals(): Array[Real] do
+    across items() as item do
+      result.add(item.as_real())
+    end
+  end
+
+  as_booleans(): Array[Boolean] do
+    across items() as item do
+      result.add(item.as_boolean())
+    end
+  end
+
+  -- The value as JSON text.
+  to_string(): String do
+    result := json_stringify(value)
+  end
+
+  private feature
+    place(): String do
+      result := when path = "" then "the top level" else path end
+    end
+
+    kind(): String do
+      if value = nil then
+        result := "null"
+      elseif convert value to s: String then
+        result := "a string"
+      elseif convert value to n: Integer then
+        result := "an integer"
+      elseif convert value to r: Real then
+        result := "a number"
+      elseif convert value to b: Boolean then
+        result := "a boolean"
+      elseif convert value to a: Array[Any] then
+        result := "an array"
+      elseif convert value to m: Map[String, Any] then
+        result := "an object"
+      else
+        result := "not a JSON value"
+      end
+    end
+
+    mismatch(expected: String): String do
+      result := "Json: " + place() + " is " + kind() + ", expected " + expected
+    end
+
+    object_map(): Map[String, Any] do
+      if convert value to m: Map[String, Any] then
+        result := m
+      else
+        raise mismatch("an object")
+      end
+    end
+
+    array_items(): Array[Any] do
+      if convert value to a: Array[Any] then
+        result := a
+      else
+        raise mismatch("an array")
+      end
+    end
 end

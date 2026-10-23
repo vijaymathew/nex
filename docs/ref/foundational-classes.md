@@ -77,18 +77,69 @@ declare type IntPair = Array[Integer]
 | `call0` | none | `Any` | Invocation protocol for nullary function-like values. |
 | `call1..call32` | `arg1..argN: Any` | `Any` | Invocation protocol for values that accept up to 32 arguments. |
 
-## `Cursor`
+## `Iterable[T]` (deferred)
 
-Abstract iteration interface.
+Anything whose elements can be walked. `across` traverses any `Iterable`, and a
+parameter typed `Iterable[T]` accepts every kind of one.
 
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
-| `start` | none | `Void` | Reset iteration to the first position. |
-| `item` | none | `Any` | Return current item. |
-| `next` | none | `Void` | Advance to next position. |
-| `at_end` | none | `Boolean` | Check whether iteration is complete. |
+| `cursor` | none | `Cursor[T]` | A new cursor over the elements. |
 
-Concrete runtime cursor types are documented in [Cursor Types](cursor-types.md).
+`Array[T]` and `Set[T]` are `Iterable[T]`, `String` is `Iterable[Char]`, and
+`Map[K, V]` is `Iterable[Map_Entry[K, V]]`.
+
+## `Cursor[T]` (deferred)
+
+One walk over some elements. An heir of `Iterable[T]`: a cursor's `cursor` is
+the cursor itself, so `across` can walk a cursor too.
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `start` | none | `Void` | Go to the first element. |
+| `item` | none | `T` | The current element. |
+| `next` | none | `Void` | Move to the next element. |
+| `at_end` | none | `Boolean` | Whether the walk is over. |
+| `cursor` | none | `Cursor[T]` | The cursor itself. |
+
+The built-in collections' cursors are documented in [Cursor Types](cursor-types.md).
+
+A class of your own becomes iterable by inheriting `Iterable[T]` and returning a
+cursor class that inherits `Cursor[T]`:
+
+```nex
+class Countdown_Cursor
+inherit Cursor[Integer]
+create
+  make(top: Integer) do this.top := top end
+feature
+  top: Integer
+  current: Integer
+  start() do current := top end
+  item(): Integer do result := current end
+  next() do current := current - 1 end
+  at_end(): Boolean do result := current < 0 end
+end
+
+class Countdown
+inherit Iterable[Integer]
+create
+  make(top: Integer) do this.top := top end
+feature
+  top: Integer
+  cursor(): Cursor[Integer] do result := create Countdown_Cursor.make(top) end
+end
+
+function total(xs: Iterable[Integer]): Integer do
+  across xs as x do result := result + x end
+end
+
+print(total(create Countdown.make(3)))    -- 6
+print(total([1, 2, 3]))                   -- 6
+```
+
+A class that only declares a `cursor()` method, without inheriting `Iterable`,
+still works with `across`, but cannot be passed where an `Iterable` is expected.
 
 ## `Comparable` (deferred)
 

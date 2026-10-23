@@ -43,6 +43,65 @@
 - **`Picture.grayscale` is about a thousand times faster**, done by one
   Java2D operation instead of a call per pixel, with exactly the same result
   (checked against all 16,777,216 colors).
+- **New `Real.format(places)`** gives the number as text with exactly that
+  many digits after the point, never in E notation: `2.5.format(3)` is
+  `"2.500"`, `0.00012.format(5)` is `"0.00012"`. It rounds like `to_fixed`
+  (halves away from zero). The digital map and neural network examples use
+  it instead of their own `fixed` helper.
+- **New library `math/Random`** for pseudo-random numbers that can be
+  repeated from a seed: `create Random.with_seed(42)` (or `make` for
+  different numbers every run), with `uniform`, `below`, `between` and
+  `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
+  same numbers on both backends. The digital map and neural network examples
+  use it instead of their own generator.
+- **`map`, `filter`, `fold`, `reduce`, `any`, `all`, `count` and `find` on
+  every built-in collection** (Array, Set, Map, and String over its Chars).
+  `xs.map(fn (x) => x * 2)`, `xs.filter(fn (x) => x > 1)`,
+  `xs.fold(0, fn (sum, x) => sum + x)`. The function's parameter types come
+  from the collection; `map` gives an `Array` of what the function returns,
+  `filter` the receiver's own kind (a Set stays a Set, a String a String, a
+  Map a Map, walked as its `Map_Entry` values), `find` a `?T`, and `reduce`
+  raises on an empty collection. Built-in method signatures can now declare
+  type parameters of their own (`map`'s `U`, `fold`'s `A`), inferred at
+  each call.
+- **Short anonymous functions: `fn (x) => expression`.** The same as
+  `fn (x) do result := expression end`: `nums.sort(fn (a, b) => b - a)`,
+  `let double := fn (n: Integer) => n * 2`. The result type is the
+  expression's when neither written nor given by the context, and a
+  generic routine binds a type parameter only its function argument's
+  result mentions from it (`map_all(words, fn (s) => s.length)` gives an
+  `Array[Integer]`). An expression with no value (`fn (m) => print(m)`) makes
+  a function with no result. `nex format` and the Emacs mode know `=>`.
+- **A `fn` passed as an argument takes its types from the parameter.**
+  `twice(fn (n) do result := n * 3 end, 2)`, `names.sort(fn (a, b) do ... end)`
+  and `server.post("/x", fn (req) do ... end)` no longer need the parameter
+  and result types written out, for methods, free and generic functions,
+  constructors and function values alike (until now only a typed `let` could
+  supply them). For a generic routine the other arguments bind its type
+  parameters first. The types inferred are recorded by the type checker and
+  written into the program before either backend runs.
+- **`Iterable[T]` and `Cursor[T]` are real deferred classes.** `Array[T]` and
+  `Set[T]` are `Iterable[T]`, `String` is `Iterable[Char]`, and `Map[K, V]` is
+  `Iterable[Map_Entry[K, V]]`, so a parameter typed `Iterable[Integer]` takes
+  an array, a set or a class of your own. `across` walks any `Iterable`, and
+  its loop variable now has the element type for generic classes too
+  (`across stack as x` over a `Stack[String]` gives Strings, not `Any`). A
+  built-in cursor is a `Cursor[T]` (`[1, 2].cursor()` is a `Cursor[Integer]`,
+  whose `item` is an `Integer`). A class that inherits `Cursor[T]` but leaves
+  out one of its features, or declares `item` with the wrong type, is now a
+  type error. Classes that only declare a `cursor()` method, and `inherit
+  Cursor` without a type argument, still work.
+- **Fixed:** `across` over a user class that inherits `Cursor` was rejected;
+  `across xs.cursor()` failed with `--interpret`; and `convert` to `Cursor` was
+  false for a built-in cursor on the compiled backend.
+- **Typed JSON reading.** `Json.read(text)` gives a `Json_Value`, read with
+  `get(key)`, `at(i)`, `items`, `as_integer`, `as_real`, `as_string`,
+  `as_boolean`, and whole arrays at once with `as_reals`, `as_integers`, ...,
+  instead of narrowing every `Any` with `convert`. A mismatch raises an error
+  that names the place: `Json: points[2].x is a string, expected a number`.
+  The neural network example loads its model this way.
+- **New `Real` methods `sinh`, `cosh` and `tanh`.** `tanh` never overflows:
+  `1000.0.tanh` is exactly `1.0`.
 - **Fixed: under `--interpret`, a `let` inside an `if` branch overwrote an
   outer variable of the same name** instead of hiding it until the branch
   ended. Each branch now has its own scope, as on the compiled backend.

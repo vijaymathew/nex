@@ -29,6 +29,7 @@ let json: Json := create Json.make()
 |---|---|---|---|
 | `make` | none | `Json` | Create a JSON helper object. |
 | `parse` | `text: String` | `Any` | Parse JSON text into Nex values. |
+| `read` | `text: String` | `Json_Value` | Parse JSON text into a `Json_Value`, to read with typed accessors (below). |
 | `stringify` | `value: Any` | `String` | Serialize Nex values into JSON text. |
 
 ### Value Mapping
@@ -53,9 +54,45 @@ if convert json.parse("{\"name\":\"nex\",\"count\":3,\"items\":[1,2]}") to root:
 end
 ```
 
+### Reading with `Json_Value`
+
+`read` wraps the parsed document in a `Json_Value`, which you ask for what you expect to find. Each accessor checks the kind of value and raises if it is wrong, with a message that names the place: `Json: points[2].x is a string, expected a number`.
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `make` | `v: Any` | `Json_Value` | Wrap a value from `parse` (or any Nex value made of the same kinds). |
+| `get` | `key: String` | `Json_Value` | The value of `key` in this object. Raises if this is not an object or has no such key. |
+| `has` | `key: String` | `Boolean` | Whether this object has `key`. |
+| `keys` | none | `Array[String]` | The keys of this object, in document order. |
+| `at` | `index: Integer` | `Json_Value` | Element `index` (from 0) of this array. Raises if out of range. |
+| `length` | none | `Integer` | The number of elements of this array. |
+| `items` | none | `Array[Json_Value]` | The elements of this array. |
+| `as_string`, `as_integer`, `as_boolean` | none | `String`, `Integer`, `Boolean` | This value, which must be of that kind. |
+| `as_real` | none | `Real` | This number. A number written without a decimal point (an `Integer`) is accepted too. |
+| `as_strings`, `as_integers`, `as_reals`, `as_booleans` | none | `Array[...]` | This array, every element of which must be of that kind. |
+| `is_null`, `is_object`, `is_array`, `is_string`, `is_number`, `is_boolean` | none | `Boolean` | What kind of value this is. `is_number` is true for integers and reals. |
+| `path` | none | `String` | Where this value is in the document, as in `points[2].x`; `""` at the top level. |
+| `raw` | none | `Any` | The plain parsed value. |
+| `to_string` | none | `String` | The value as JSON text. |
+
+```nex
+intern data/Json
+
+let data: Json_Value := create Json.make().read(
+  '{"name": "map", "zoom": 3, "points": [{"x": 1.5, "y": 2}, {"x": 0, "y": -1}]}')
+print(data.get("name").as_string)             -- "map"
+print(data.get("zoom").as_integer)            -- 3
+across data.get("points").items as p do
+  print(p.get("x").as_real + p.get("y").as_real)
+end
+if data.has("title") then
+  print(data.get("title").as_string)
+end
+```
+
 ### Notes
 
-- `parse` returns `Any`. Narrow the result with `convert` to the shape you expect, usually `Map[String, Any]` or `Array[Any]`; the `convert` is false if the document has another shape. Values read out of it are `Any` too, and are narrowed the same way.
+- `parse` returns `Any`. Narrow the result with `convert` to the shape you expect, usually `Map[String, Any]` or `Array[Any]`; the `convert` is false if the document has another shape. Values read out of it are `Any` too, and are narrowed the same way. `read` and `Json_Value` do this narrowing for you.
 - `stringify` supports Nex `Map`, `Array`, scalar values, and `nil`.
 - Sets are serialized as JSON arrays.
 

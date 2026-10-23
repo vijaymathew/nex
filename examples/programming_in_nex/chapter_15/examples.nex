@@ -159,6 +159,7 @@ across seen as n do
 end
 
 class Interval_Cursor
+  inherit Cursor[Integer]
   create
     make(lo, hi: Integer) do current := lo  last := hi end
   feature
@@ -171,12 +172,13 @@ class Interval_Cursor
 end
 
 class Interval
+  inherit Iterable[Integer]
   create
     make(lo, hi: Integer) do low := lo  high := hi end
   feature
     low: Integer
     high: Integer
-    cursor(): Interval_Cursor
+    cursor(): Cursor[Integer]
       do result := create Interval_Cursor.make(low, high) end
 end
 
@@ -187,9 +189,7 @@ end
 
 let total := 0
 across (create Interval.make(1, 100)) as n do
-  if convert n to value: Integer then
-    total := total + value
-  end
+  total := total + n
 end
 assert total = 5050
 

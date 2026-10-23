@@ -98,13 +98,18 @@
                               (map (fn [class-def] [(:name class-def) class-def]))
                               (concat [(bootstrap/build-any-base-class)
                                        (bootstrap/build-function-base-class)
+                                       (bootstrap/build-iterable-base-class)
                                        (bootstrap/build-cursor-base-class)
                                        (bootstrap/build-comparable-base-class)]
                                       (map bootstrap/build-builtin-scalar-class
                                            ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))
         env (tc/make-type-env)]
     (tc/register-builtin-methods env)
-    (vals (merge interp-builtins @(:classes env)))))
+    ;; The typechecker registers Iterable and Cursor by signature only; the
+    ;; bootstrap definitions carry the bodies (Cursor's own `cursor`) that a
+    ;; heir inherits, so those two come from the bootstrap.
+    (vals (merge interp-builtins @(:classes env)
+                 (select-keys interp-builtins ["Iterable" "Cursor"])))))
 
 (defn- class-generic-params
   "Generic parameters (`{:name .. :constraint ..}`) in scope inside CLASS-DEF:
@@ -339,14 +344,41 @@
   [elem-type]
   {:base-type "Set" :type-params [elem-type]})
 
+(declare infer-type)
+
+(defn- function-result-type
+  "The result type of the function value ARG of a call: a `fn` literal's
+   own (by now filled in by the type checker), else its static type's."
+  [env arg]
+  (if (and (map? arg) (= :anonymous-function (:type arg)))
+    (:return-type arg)
+    (let [t (infer-type env arg)]
+      (cond
+        (map? t) (:return-type t)
+        ;; a function passed by name: its class's callN
+        (string? t) (some->> (get (visible-class-map env) t)
+                             tc/feature-members
+                             (some #(when (and (= :method (:type %))
+                                               (re-matches #"call\d+" (str (:name %))))
+                                      (:return-type %))))))))
+
 (defn- resolve-collection-return-marker
   "Resolve a return-type marker from `bi/builtin-type-method-return-type`
-   against the receiver's actual generic arguments. Concrete type names pass
-   through unchanged."
-  [target-type marker]
+   against the receiver's actual generic arguments (and, for the functional
+   methods, the call's arguments ARGS). Concrete type names pass through
+   unchanged."
+  [env target-type marker args]
   (let [base (base-type-name target-type)
         [a b] (generic-type-args target-type)]
     (case marker
+      ;; map: an Array of what the function returns
+      :array-of-fn-result (array-type-of (or (function-result-type env (last args)) "Any"))
+      ;; fold: the type of the starting value
+      :type-of-first-arg (or (infer-type env (first args)) "Any")
+      ;; reduce and find: what across would yield
+      :iterated-element (tc/cursor-item-type target-type)
+      :detachable-iterated-element (let [t (tc/cursor-item-type target-type)]
+                                     (if (map? t) (assoc t :detachable true) {:base-type t :detachable true}))
       :element (or a "Any")
       :value (or b "Any")
       :array-of-element (array-type-of (or a "Any"))
@@ -360,10 +392,10 @@
       marker)))
 
 (defn- collection-method-return-type
-  [target-type method]
-  (some->> (bi/builtin-type-method-return-type
-            (keyword (base-type-name target-type)) method)
-           (resolve-collection-return-marker target-type)))
+  [env target-type {:keys [method args]}]
+  (some-> (bi/builtin-type-method-return-type
+           (keyword (base-type-name target-type)) method)
+          (#(resolve-collection-return-marker env target-type % args))))
 
 (defn- direct-collection-method?
   [target-type method]
@@ -1012,7 +1044,7 @@
                      function-return-type
                      (#(tc/resolve-generic-type % type-map)))))))
      (when (direct-collection-method? target-type (:method expr))
-       (collection-method-return-type target-type (:method expr)))
+       (collection-method-return-type env target-type expr))
      (when (contains? #{"Console" "Process" "Program"} base-type)
        (bi/builtin-type-method-return-type (keyword base-type) (:method expr)))
        ;; Generic type parameter with constraint - look up method on constraint type
@@ -2193,7 +2225,7 @@
   [env]
   (let [type-env (tc/make-type-env)]
     (doseq [[class-name class-def] (visible-class-map env)]
-      (tc/env-add-class type-env class-name class-def))
+      (tc/collect-class-signatures! type-env (assoc class-def :name class-name)))
     type-env))
 
 (defn- operator-alias-feature
@@ -6694,7 +6726,7 @@
 (defn- lower-direct-collection-call
   [env expr target-expr target-type arg-irs]
   (let [target-ir (lower-expression env target-expr)
-        nex-type (or (collection-method-return-type target-type (:method expr))
+        nex-type (or (collection-method-return-type env target-type expr)
                      (infer-type env expr))
         jvm-type (resolve-jvm-type env nex-type)]
     (ir/collection-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
@@ -7102,24 +7134,14 @@
 
 (defn- across-item-type
   "The element type `across` yields over TARGET-TYPE: the builtin collections'
-   own, else — for a user class with a zero-argument `cursor` method — the
-   `item` return type of the cursor class it returns (mirrors the two-argument
-   tc/cursor-item-type), else Any."
+   own, else whatever the typechecker gives `t.cursor().item()` (or `t.item()`
+   for a cursor) over the program's classes — so a generic Iterable or cursor
+   class yields its real element type — else Any."
   [env target-type]
   (let [t (tc/cursor-item-type target-type)]
     (if (not= "Any" t)
       t
-      (let [class-map (visible-class-map env)
-            class-def (get class-map (base-type-name (tc/attachable-type target-type)))
-            cursor-def (when class-def (accessible-method-def env class-def "cursor" 0))
-            cursor-type (some-> cursor-def function-return-type)
-            ;; Only a plain, non-generic cursor class qualifies (see
-            ;; tc/user-cursor-item-type).
-            cursor-class-def (when (string? cursor-type) (get class-map cursor-type))
-            item-def (when (and cursor-class-def (empty? (:generic-params cursor-class-def)))
-                       (accessible-method-def env cursor-class-def "item" 0))
-            item-type (some-> item-def function-return-type)]
-        (if (string? item-type) item-type "Any")))))
+      (tc/cursor-item-type (lowering-type-env env) target-type))))
 
 (defn- lower-stmt-let
   [env stmt]

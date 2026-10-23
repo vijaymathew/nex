@@ -9,7 +9,7 @@ follow the route while the navigator talks them through every turn.
 nex navigate.nex                          # the live map, in a window
 nex navigate.nex "beach car park" lighthouse
 nex route.nex harbour lighthouse          # the same directions, printed
-nex checks.nex                            # 56 checks of everything
+nex checks.nex                            # 55 checks of everything
 ```
 
 ```
@@ -83,7 +83,6 @@ A place can be named by any part of its name: `mill` is Old Mill.
 | `directions.nex` | Turns a route into instructions |
 | `route.nex` | Prints directions between two places |
 | `navigation.nex` | Follows a traveller along a route from GPS fixes, says what to do next, and reroutes |
-| `rng.nex` | A seedable random number generator |
 | `simulation.nex` | A simulated traveller (who can take wrong turns) and a noisy GPS |
 | `navigate.nex` | The live map |
 | `checks.nex` | Executable checks of all of the above |

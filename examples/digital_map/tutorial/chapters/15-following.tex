@@ -421,7 +421,7 @@ if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b 
     let fix: Point := line.point_at(d) + direction(line.heading_at(d) + 90.0) * side
     nav.update(fix)
     if (d / 100.0).round % 5 = 0 or nav.has_arrived() then
-      console.print_line(fixed(nav.progress, 0).pad_start(" ", 5) + " m  " + nav.prompt().pad_end(" ", 42)
+      console.print_line(nav.progress.format(0).pad_start(" ", 5) + " m  " + nav.prompt().pad_end(" ", 42)
         + distance_text(nav.remaining_distance()) + ", " + duration_text(nav.remaining_time()))
     end
     d := d + 100.0

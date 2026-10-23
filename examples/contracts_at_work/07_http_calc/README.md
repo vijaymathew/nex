@@ -36,8 +36,9 @@ code was updated to match rather than keeping the old workaround around:
    `json_response` are back to being ordinary `Calc_Service` methods,
    called as `this.handle_evaluate(req)` from the route closure, instead
    of free top-level functions threading a captured `json` local through.
-2. **`Integer` had no `to_real()` method.** Also fixed — `to_real_any` now
-   calls `n.to_real()` directly instead of promoting with `n + 0.0`.
+2. **`Integer` had no `to_real()` method.** Also fixed. (The request is
+   now read with `data/Json`'s typed reader, whose `as_real` takes a JSON
+   integer as well, so the service no longer converts numbers itself.)
 
 The third is still real, and still shapes `calc_client.nex`: **interning
 both `net/Http_Client` and `data/Json`, then calling `.get()` on a Map

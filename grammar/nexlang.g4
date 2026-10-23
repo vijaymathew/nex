@@ -511,8 +511,11 @@ whenExpression
     : WHEN expression THEN expression ELSE expression END
     ;
 
+// The second form, `fn (x) => e`, is a function whose result is the
+// expression `e`; it extends as far to the right as an expression can.
 anonymousFunction
     : FN genericParams? '(' paramList? ')' (':' type)? requireClause? DO block ensureClause? rescueClause? END
+    | FN genericParams? '(' paramList? ')' (':' type)? FAT_ARROW expression
     ;
 
 oldExpression
@@ -680,6 +683,7 @@ NIL          : 'nil';
 
 ASSIGN       : ':=';
 ARROW        : '->';
+FAT_ARROW    : '=>';
 
 PLUS         : '+';
 MINUS        : '-';

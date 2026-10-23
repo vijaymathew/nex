@@ -67,41 +67,19 @@ feature
   end
 
   directories(): Array[Directory] do
-    let results: Array[Directory] := []
-    let items: Array[Path] := path.list()
-    let c: Cursor := items.cursor()
-    from
-      c.start()
-    until
-      c.at_end()
-    do
-      if convert c.item() to item: Path then
-        if item.is_directory() then
-          results.add(create Directory.from_path(item))
-        end
+    across path.list() as item do
+      if item.is_directory() then
+        result.add(create Directory.from_path(item))
       end
-      c.next()
     end
-    result := results
   end
 
   files(): Array[Path] do
-    let results: Array[Path] := []
-    let items: Array[Path] := path.list()
-    let c: Cursor := items.cursor()
-    from
-      c.start()
-    until
-      c.at_end()
-    do
-      if convert c.item() to item: Path then
-        if item.is_file() then
-          results.add(item)
-        end
+    across path.list() as item do
+      if item.is_file() then
+        result.add(item)
       end
-      c.next()
     end
-    result := results
   end
 
   absolute(): Directory do

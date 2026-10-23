@@ -22,7 +22,7 @@ feature
   end
 
   close_to(label: String, expected, actual, tolerance: Real) do
-    check(label + " (expected " + fixed(expected, 3) + ", got " + fixed(actual, 3) + ")",
+    check(label + " (expected " + expected.format(3) + ", got " + actual.format(3) + ")",
       (expected - actual).abs <= tolerance)
   end
 
@@ -40,7 +40,6 @@ function pt(x, y: Real): Point do
 end
 
 function check_helpers(c: Checker) do
-  c.check("fixed rounds", fixed(2.345, 2) = "2.35" and fixed(-0.5, 1) = "-0.5")
   c.check("distance_text", distance_text(347.0) = "350 m" and distance_text(1234.0) = "1.2 km")
   c.check("duration_text", duration_text(20.0) = "under a minute"
     and duration_text(150.0) = "3 min" and duration_text(3900.0) = "1 h 05 min")

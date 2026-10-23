@@ -593,6 +593,124 @@
    "clone"       ^{:returns "Any" :signatures [{:params [] :return-type "Any"}]}
    (fn [v & _] (nex-clone-value v))})
 
+;; ---------------------------------------------------------------------------
+;; The functional methods every built-in Iterable has: map, filter, fold,
+;; reduce, any, all, count and find. One implementation serves both
+;; backends; each passes CALL, its own way of applying a Nex function value
+;; to a vector of arguments (the interpreter through its engine hook, the
+;; compiled backend through invoke-function-object).
+;; ---------------------------------------------------------------------------
+
+(def functional-method-names
+  #{"map" "filter" "fold" "reduce" "any" "all" "count" "find"})
+
+(defn- functional-elements
+  "The elements of an Array, Set, String (Chars) or Map (Map_Entry values),
+   in iteration order, as a vector."
+  [coll]
+  (cond
+    (rt/nex-array? coll) (vec coll)
+    (string? coll) (vec coll)
+    (rt/nex-set? coll) (vec (rt/nex-set-seq coll))
+    (rt/nex-map? coll) (mapv (fn [[k v]] (make-map-entry k v)) (rt/nex-map-entries coll))
+    :else (throw (ex-info "Not a collection" {:value coll}))))
+
+(defn- functional-rebuild
+  "A new collection of COLL's own kind and representation holding ELEMS
+   (for filter, which keeps the receiver's type)."
+  [coll elems]
+  (cond
+    (rt/nex-array? coll) (rt/nex-array-from elems)
+    (string? coll) (apply str elems)
+    (instance? java.util.LinkedHashSet coll) (rt/nex-host-set-from elems)
+    (rt/nex-set? coll) (rt/nex-set-from elems)
+    (instance? java.util.Map coll) (rt/nex-host-map-from (map (juxt :key :value) elems))
+    :else (rt/nex-map-from (map (juxt :key :value) elems))))
+
+(defn- functional-kind-name
+  [coll]
+  (cond (rt/nex-array? coll) "Array" (string? coll) "String"
+        (rt/nex-set? coll) "Set" :else "Map"))
+
+(defn functional-call
+  "Run functional method METHOD of a built-in collection COLL with ARGS (the
+   Nex arguments, the function last). CALL applies a Nex function value to
+   a vector of arguments."
+  [call coll method args]
+  (let [elems (functional-elements coll)
+        f (last args)
+        test (fn [x] (true? (call f [x])))]
+    (case method
+      "map" (rt/nex-array-from (mapv #(call f [%]) elems))
+      "filter" (functional-rebuild coll (filterv test elems))
+      "fold" (reduce (fn [acc x] (call f [acc x])) (first args) elems)
+      "reduce" (if (empty? elems)
+                 (throw (ex-info (str "reduce on an empty " (functional-kind-name coll)
+                                      ": it needs at least one element (use fold with a starting value)")
+                                 {:method "reduce"}))
+                 (reduce (fn [acc x] (call f [acc x])) elems))
+      "any" (boolean (some test elems))
+      "all" (every? test elems)
+      "count" (->nex-integer (count (filter test elems)))
+      "find" (loop [xs elems]
+               (cond (empty? xs) nil
+                     (test (first xs)) (first xs)
+                     :else (recur (rest xs)))))))
+
+(defn- interpreter-function-caller
+  [ctx]
+  (fn [f args]
+    (if (fn? f)
+      (apply f args)
+      (eval-call ctx f (str "call" (count args)) args))))
+
+(defn- functional-methods
+  "The functional methods for a collection whose elements have type ELEM,
+   with signatures, as a method table to merge into the type's own. The
+   interpreter appends its context as the last argument (see
+   call-builtin-method)."
+  [elem self-type]
+  (let [fn-type (fn [params ret] {:base-type "Function" :param-types params :return-type ret})
+        x [{:name "x" :type elem}]
+        impl (fn [method]
+               (fn [coll & args]
+                 (functional-call (interpreter-function-caller (last args))
+                                  coll method (vec (butlast args)))))]
+    {"map" (with-meta (impl "map")
+               {:returns :array-of-fn-result
+                :signatures [{:params [{:name "f" :type (fn-type x "U")}]
+                              :return-type {:base-type "Array" :type-params ["U"]}
+                              :generic-params ["U"]}]})
+     "filter" (with-meta (impl "filter")
+               {:returns :self
+                :signatures [{:params [{:name "f" :type (fn-type x "Boolean")}]
+                              :return-type self-type}]})
+     "fold" (with-meta (impl "fold")
+               {:returns :type-of-first-arg
+                :signatures [{:params [{:name "init" :type "A"}
+                                       {:name "f" :type (fn-type [{:name "acc" :type "A"} {:name "x" :type elem}] "A")}]
+                              :return-type "A"
+                              :generic-params ["A"]}]})
+     "reduce" (with-meta (impl "reduce")
+               {:returns :iterated-element
+                :signatures [{:params [{:name "f" :type (fn-type [{:name "acc" :type elem} {:name "x" :type elem}] elem)}]
+                              :return-type elem}]})
+     "any" (with-meta (impl "any")
+               {:returns "Boolean"
+                :signatures [{:params [{:name "f" :type (fn-type x "Boolean")}] :return-type "Boolean"}]})
+     "all" (with-meta (impl "all")
+               {:returns "Boolean"
+                :signatures [{:params [{:name "f" :type (fn-type x "Boolean")}] :return-type "Boolean"}]})
+     "count" (with-meta (impl "count")
+               {:returns "Integer"
+                :signatures [{:params [{:name "f" :type (fn-type x "Boolean")}] :return-type "Integer"}]})
+     "find" (with-meta (impl "find")
+               {:returns :detachable-iterated-element
+                :signatures [{:params [{:name "f" :type (fn-type x "Boolean")}]
+                              :return-type (if (map? elem)
+                                             (assoc elem :detachable true)
+                                             {:base-type elem :detachable true})}]})}))
+
 (def string-type-methods
   {"length"      ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [s & _] (->nex-integer (count s)))
@@ -682,7 +800,7 @@
    ;; A String iterates over its Chars, exactly as Array/Map/Set iterate over
    ;; their elements — see register-string-methods! for why this is declared
    ;; explicitly rather than through the universal "Any" fallback.
-   "cursor"      ^{:signatures [{:params [] :return-type "Cursor"}]}
+   "cursor"      ^{:signatures [{:params [] :return-type {:base-type "Cursor" :type-params ["Char"]}}]}
    (fn [s & _]
      {:nex-builtin-type :StringCursor
       :source s
@@ -1049,6 +1167,9 @@
    "power"             ^{:signatures [{:params [{:name "exponent" :type "Real"}] :return-type "Real"}]}
    (fn [n exponent & _] (Math/pow (double n) (double exponent)))
    "sin"               (real-fn Math/sin)
+   "sinh"              (real-fn Math/sinh)
+   "cosh"              (real-fn Math/cosh)
+   "tanh"              (real-fn Math/tanh)
    "cos"               (real-fn Math/cos)
    "tan"               (real-fn Math/tan)
    "asin"              (real-fn Math/asin)
@@ -1077,6 +1198,21 @@
    (fn [n places & _]
      (let [places (nex-int->number places)]
        (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))))
+   ;; The value as text with exactly `places` digits after the point, rounded
+   ;; half-up like to_fixed, and never in E notation: 2.5.format(3) is "2.500".
+   "format"            ^{:signatures [{:params [{:name "places" :type "Integer"}]
+                                       :return-type "String"}]}
+   (fn [n places & _]
+     (let [places (nex-int->number places)
+           d (double n)]
+       (when (neg? places)
+         (throw (ex-info (str "Real.format: places must be >= 0, got " places)
+                         {:places places})))
+       (cond
+         (Double/isNaN d) "NaN"
+         (Double/isInfinite d) (if (pos? d) "Infinity" "-Infinity")
+         :else (.toPlainString (.setScale (bigdec d) (int places)
+                                          java.math.RoundingMode/HALF_UP)))))
    ;; IEEE-754 inspection: with Real division now honestly IEEE, these let
    ;; callers detect the special values it can produce (see NUMERIC_TOWER.md).
    "is_nan"            ^{:signatures [{:params [] :return-type "Boolean"}]}
@@ -1227,7 +1363,7 @@
    "clone"       ^{:returns :self :signatures [{:params []
                                                 :return-type {:base-type "Array" :type-params ["T"]}}]}
    (fn [arr & _] (nex-clone-value arr))
-   "cursor"      ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
+   "cursor"      ^{:returns "Cursor" :signatures [{:params [] :return-type {:base-type "Cursor" :type-params ["T"]}}]}
    (fn [arr & _]
      {:nex-builtin-type :ArrayCursor
       :source arr
@@ -1291,7 +1427,10 @@
    "clone"        ^{:returns :self :signatures [{:params []
                                                  :return-type {:base-type "Map" :type-params ["K" "V"]}}]}
    (fn [m & _] (nex-clone-value m))
-   "cursor"       ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
+   "cursor"       ^{:returns "Cursor" :signatures [{:params []
+                                                  :return-type {:base-type "Cursor"
+                                                                :type-params [{:base-type "Map_Entry"
+                                                                               :type-params ["K" "V"]}]}}]}
    (fn [m & _]
      {:nex-builtin-type :MapCursor
       :source m
@@ -1344,7 +1483,7 @@
    "clone"                ^{:returns :self :signatures [{:params []
                                                          :return-type {:base-type "Set" :type-params ["T"]}}]}
    (fn [s & _] (nex-clone-value s))
-   "cursor"               ^{:returns "Cursor" :signatures [{:params [] :return-type "Cursor"}]}
+   "cursor"               ^{:returns "Cursor" :signatures [{:params [] :return-type {:base-type "Cursor" :type-params ["T"]}}]}
    (fn [s & _]
      {:nex-builtin-type :SetCursor
       :source s
@@ -1651,7 +1790,9 @@
    (fn [proc & _] (nex-process-to-string proc))})
 
 (def arraycursor-type-methods
-  {"start"   (fn [c & _] (reset! (:index c) 0) nil)
+  {;; A cursor is itself Iterable: its cursor is itself.
+   "cursor"  (fn [c & _] c)
+   "start"   (fn [c & _] (reset! (:index c) 0) nil)
    "item"    (fn [c & _]
                (let [arr (:source c)
                      idx @(:index c)]
@@ -1668,7 +1809,9 @@
                (>= @(:index c) (nex-array-size (:source c))))})
 
 (def stringcursor-type-methods
-  {"start"   (fn [c & _] (reset! (:index c) 0) nil)
+  {;; A cursor is itself Iterable: its cursor is itself.
+   "cursor"  (fn [c & _] c)
+   "start"   (fn [c & _] (reset! (:index c) 0) nil)
    "item"    (fn [c & _]
                (let [s (:source c)
                      idx @(:index c)]
@@ -1685,7 +1828,9 @@
                (>= @(:index c) (count (:source c))))})
 
 (def mapcursor-type-methods
-  {"start"   (fn [c & _]
+  {;; A cursor is itself Iterable: its cursor is itself.
+   "cursor"  (fn [c & _] c)
+   "start"   (fn [c & _]
                (reset! (:keys c) (nex-map-keys (:source c)))
                (reset! (:index c) 0)
                nil)
@@ -1707,7 +1852,9 @@
                (>= @(:index c) (count @(:keys c))))})
 
 (def setcursor-type-methods
-  {"start"   (fn [c & _]
+  {;; A cursor is itself Iterable: its cursor is itself.
+   "cursor"  (fn [c & _] c)
+   "start"   (fn [c & _]
                (reset! (:values c) (vec (nex-set-seq (:source c))))
                (reset! (:index c) 0)
                nil)
@@ -1729,7 +1876,7 @@
 (def builtin-type-methods
   "Methods available on built-in types"
   {:Any any-type-methods
-   :String string-type-methods
+   :String (merge string-type-methods (functional-methods "Char" "String"))
    :Integer integer-type-methods
    :Byte byte-type-methods
    :Integer16 integer16-type-methods
@@ -1737,9 +1884,13 @@
    :Real real-type-methods
    :Char char-type-methods
    :Boolean boolean-type-methods
-   :Array array-type-methods
-   :Map map-type-methods
-   :Set set-type-methods
+   :Array (merge array-type-methods
+                 (functional-methods "T" {:base-type "Array" :type-params ["T"]}))
+   :Map (merge map-type-methods
+               (functional-methods {:base-type "Map_Entry" :type-params ["K" "V"]}
+                                   {:base-type "Map" :type-params ["K" "V"]}))
+   :Set (merge set-type-methods
+               (functional-methods "T" {:base-type "Set" :type-params ["T"]}))
    :Min_Heap min-heap-type-methods
    :Map_Entry map-entry-type-methods
    :Atomic_Integer atomic-integer-type-methods
@@ -1787,6 +1938,9 @@
               (let [type-name (get-type-name value)]
                 (or (and (= type-name :Array)
                          (contains? #{"sort" "contains" "index_of"} method-name))
+                    ;; map, filter, ... call a function value
+                    (and (contains? #{:Array :Map :Set :String} type-name)
+                         (contains? functional-method-names method-name))
                     (and (contains? #{:Array :Map :Set} type-name)
                          (= method-name "to_string"))
                     (= type-name :Min_Heap)

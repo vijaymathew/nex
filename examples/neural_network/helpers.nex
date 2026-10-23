@@ -1,21 +1,5 @@
 -- helpers.nex: printing numbers neatly, and finding the user's files.
 
--- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
--- is "2.500".
-function fixed(r: Real, places: Integer): String
-require
-  non_negative: places >= 0
-do
-  let scale: Integer := 10 ^ places
-  let scaled: Integer := (r.abs * scale.to_real).round
-  let whole: String := (scaled / scale).to_string
-  let frac: String := (scaled % scale).to_string.pad_start("0", places)
-  result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
-  if places > 0 then
-    result := result + "." + frac
-  end
-end
-
 -- A probability as a whole percentage: percent(0.257) is "26%".
 function percent(p: Real): String do
   result := (p * 100.0).round.to_string + "%"
@@ -26,7 +10,7 @@ end
 function vector_text(v: Array[Real], places: Integer): String do
   let parts: Array[String] := []
   across v as x do
-    parts.add(fixed(x, places))
+    parts.add(x.format(places))
   end
   result := "[" + ", ".join(parts) + "]"
 end

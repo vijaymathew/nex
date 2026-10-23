@@ -2,10 +2,12 @@
   "Static type checker for Nex language"
   (:require [clojure.string :as str]
             [clojure.set :as set]
+            [clojure.walk]
             [nex.field-shadowing :as field-shadowing]
             [nex.fmt :as fmt]
             [nex.redeclare :as redeclare]
             [nex.contracts :as contracts]
+            [nex.types.bootstrap :as bootstrap]
             [nex.types.builtins :as bi]))
 
 ;;
@@ -16,6 +18,7 @@
 (declare env-lookup-type-alias-generic-params)
 (declare resolve-generic-type)
 (declare type-error)
+(declare conversion-hint)
 (declare check-no-discarded-values! check-missing-call-parens! short-source closest-spelling
          lookup-class-constructors argument-mismatch-message assignment-mismatch-message)
 
@@ -617,7 +620,7 @@
   #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
     "Task" "Channel" "Any" "Void" "Nil" "Console" "Process" "Program" "Function"
-    "Cursor"})
+    "Cursor" "Iterable"})
 
 (defn builtin-type? [type-name]
   (contains? builtin-types type-name))
@@ -1502,29 +1505,34 @@
       "Cursor" "Any"
       "Any"))))
 
-(defn- user-cursor-item-type
-  "The element type of `across` over a user class with a zero-argument `cursor`
-   method, taken from the `item` method of the cursor class it returns; nil when
-   the class has no such pair of methods.
+(declare check-expression)
 
-   Only a plain (string-typed), non-generic cursor class qualifies. A generic
-   one (`cursor(): Stack_Cursor[G]`) would yield an item type written in its own
-   type parameters, which nothing here substitutes, so those keep yielding Any
-   and the loop variable is narrowed with `convert`, as before."
+(defn- user-cursor-item-type
+  "The element type of `across` over a value of class type TARGET-TYPE that is
+   not one of the built-in collections: a Cursor (its own `item`), an Iterable,
+   or any class with a zero-argument `cursor` method (the `item` of the cursor
+   that returns). Typed by checking `t.item()` or `t.cursor().item()` on a
+   variable of that type, so inheritance, generic substitution (`Stack[String]`
+   whose `cursor(): Stack_Cursor[G]` yields Strings) and overriding (a class
+   that inherits a bare `Cursor` but declares `item(): Integer`) are all
+   resolved by the ordinary call rules. Nil when the type is not iterable."
   [env target-type]
   (let [t (attachable-type (normalize-type target-type))
-        base (if (map? t) (:base-type t) t)
-        base-of (fn [x] (let [x (attachable-type (normalize-type x))]
-                          (if (map? x) (:base-type x) x)))]
+        base (if (map? t) (:base-type t) t)]
     (when (and (string? base) (env-lookup-class env base))
-      (when-let [cursor-class (some-> (lookup-class-method env base "cursor" 0)
-                                      :return-type base-of)]
-        (when (and (string? cursor-class)
-                   (string? (:return-type (lookup-class-method env base "cursor" 0)))
-                   (empty? (:generic-params (env-lookup-class env cursor-class))))
-          (let [item-type (:return-type (lookup-class-method env cursor-class "item" 0))]
-            (when (string? item-type)
-              item-type)))))))
+      (try
+        (let [tmp (make-type-env env)
+              call (fn [target method]
+                     (binding [*collected-errors* nil]
+                       (check-expression tmp {:type :call :target target :method method
+                                              :args [] :has-parens true})))]
+          (env-add-var tmp "__iter_target__" t)
+          (if (class-subtype? env base "Cursor")
+            (call "__iter_target__" "item")
+            (let [cursor-type (call "__iter_target__" "cursor")]
+              (env-add-var tmp "__iter_cursor__" cursor-type)
+              (call "__iter_cursor__" "item"))))
+        (catch Exception _ nil)))))
 
 (defn- collect-generic-names-from-type
   [type-expr]
@@ -2282,25 +2290,97 @@
       (throw (ex-info (str "Undefined variable: " name)
                       {:error (type-error (str "Undefined variable: " name))})))))
 
+(defn- lambda-awaiting-types?
+  "Is ARG a `fn` literal with a parameter or result type left out, to be
+   taken from the type its context expects?"
+  [arg]
+  (and (map? arg)
+       (= :anonymous-function (:type arg))
+       (or (some (comp nil? :type) (:params arg))
+           (nil? (:return-type arg)))))
+
+(defn- unbound-generic-names
+  "The generic-parameter names in type T that nothing in ENV binds: not the
+   enclosing class's or routine's own (registered as placeholder classes),
+   so a parameter of some other routine's signature."
+  [env t]
+  (when t
+    (remove #(env-lookup-class env %) (generic-names-in-type env t))))
+
+(defn- contextual-function-type
+  "EXPECTED as a structural Function type a `fn` literal can take its omitted
+   types from, or nil: it must name its parameter types, and none of them may
+   be a generic parameter still unbound at this call (`U` of a method's own
+   signature). One bound in scope (the enclosing class's `G`) is fine."
+  [env expected]
+  (let [t (when expected (normalize-type (expand-type-aliases env expected)))]
+    (when (and (map? t)
+               (= "Function" (:base-type t))
+               (:param-types t)
+               (not-any? (fn [p]
+                           (some #(nil? (env-lookup-class env %))
+                                 (generic-names-in-type env (:type p))))
+                         (:param-types t)))
+      t)))
+
+(defn- check-arg-in-context
+  "The type of call argument ARG, whose parameter has type EXPECTED (nil when
+   unknown). A `fn` literal with omitted types is checked against EXPECTED,
+   which supplies them; any other argument is checked on its own."
+  [env arg expected]
+  (if-let [ft (and (lambda-awaiting-types? arg) (contextual-function-type env expected))]
+    (check-expression-with-expected env arg ft)
+    (check-expression env arg)))
+
+(def ^:private method-generic-counter (atom 0))
+
 (defn- check-call-signature
   [env method args method-sig type-map & {:keys [arg-types]}]
-  ;; Deliberately does NOT check each argument with its positional parameter's
-  ;; type as an expected-type hint (the way check-let does for a typed `let`).
-  ;; That would let an unannotated `fn(item) do ... end` call argument
-  ;; typecheck via the same inference `check-expression-with-expected`'s
-  ;; `:anonymous-function` case supports — but the compiled backend's
-  ;; anonymous-function class compilation runs as a whole-program pass before
-  ;; any individual call site is lowered, and resolving a call argument's
-  ;; expected type requires the call's *receiver* type (scope-aware: locals,
-  ;; fields, `this`), not just a literal annotation sitting right there like a
-  ;; `let`'s. Teaching lowering to do that is a much bigger, scope-tracking
-  ;; rewrite (on the order of the existing closure-capture pass) that hasn't
-  ;; been built yet. Supporting it here without lowering support would
-  ;; typecheck fine and then crash with an opaque lowering error — so for now
-  ;; the shorthand is `let`-context only; a call argument still needs an
-  ;; explicit `fn(item: T): R do ... end`.
-  (let [arg-types (or arg-types (mapv #(check-expression env %) args))
-        params (:params method-sig)]
+  ;; Each argument is checked with its parameter's type as the expected type,
+  ;; so a `fn (item) do ... end` argument takes its parameter types from the
+  ;; parameter it is passed to (check-arg-in-context). The types it gets are
+  ;; recorded and written into the AST before either backend runs (see
+  ;; *inferred-lambda-types*), so lowering never has to work them out.
+  ;;
+  ;; A signature may declare generic parameters of its own (:generic-params,
+  ;; as the built-in `map` does with U and `fold` with A). They are renamed
+  ;; apart from anything in scope, bound first from the arguments that are
+  ;; not `fn` literals awaiting their types (`fold`'s A from `init`), then
+  ;; from what those literals return (`map`'s U), and default to Any.
+  (let [own-generics (seq (:generic-params method-sig))
+        fresh (into {} (map (fn [g] [g (str g "__" (swap! method-generic-counter inc))]))
+                    own-generics)
+        method-sig (if own-generics
+                     (-> method-sig
+                         (update :params #(clojure.walk/postwalk-replace fresh %))
+                         (update :return-type #(clojure.walk/postwalk-replace fresh %)))
+                     method-sig)
+        own-names (set (vals fresh))
+        bind (fn [acc pairs]
+               (reduce (fn [acc [param-type arg-type]]
+                         (if (and arg-type param-type (seq own-names))
+                           (merge-inferred-generic-bindings
+                            env acc
+                            (infer-generic-type-map-from-arg
+                             env own-names (resolve-generic-type param-type type-map) arg-type))
+                           acc))
+                       acc pairs))
+        params (:params method-sig)
+        pre-arg-types (when-not arg-types
+                        (mapv #(when-not (lambda-awaiting-types? %) (check-expression env %)) args))
+        pre-bindings (bind {} (map vector (map :type params) pre-arg-types))
+        arg-types (or arg-types
+                      (mapv (fn [arg pre param]
+                              (or pre
+                                  (check-arg-in-context
+                                   env arg (some-> (:type param)
+                                                   (resolve-generic-type (merge type-map pre-bindings))))))
+                            args
+                            pre-arg-types
+                            (concat params (repeat nil))))
+        type-map (merge type-map
+                        (zipmap own-names (repeat "Any"))
+                        (bind pre-bindings (map vector (map :type params) arg-types)))]
     (when (not= (count args) (count params))
       (throw (ex-info (str "Method " method " expects " (count params)
                            " arguments, got " (count args))
@@ -3258,19 +3338,20 @@
       nil)))
 
 (defn- builtin-method-signature-cursor
-  [method argc _type-map]
+  [method argc type-map]
+  (let [elem-type (or (resolve-generic-type "T" type-map) "Any")]
   (case method
     "start" (when (= argc 0)
               {:params [] :return-type "Void"})
     "cursor" (when (= argc 0)
-               {:params [] :return-type "Cursor"})
+               {:params [] :return-type {:base-type "Cursor" :type-params [elem-type]}})
     "item" (when (= argc 0)
-             {:params [] :return-type "Any"})
+             {:params [] :return-type elem-type})
     "next" (when (= argc 0)
              {:params [] :return-type "Void"})
     "at_end" (when (= argc 0)
                {:params [] :return-type "Boolean"})
-    nil))
+    nil)))
 
 (def ^:private builtin-method-signature-dispatch
   "base-type -> `(fn [method argc type-map] -> signature-or-nil)`: the
@@ -3299,7 +3380,8 @@
    invented by the desugaring, so naming it would point at code the programmer
    never wrote."
   [base-type]
-  (str "`across` needs an Array, Map, Set, String, or Cursor; this one is "
+  (str "`across` needs an Iterable: an Array, Map, Set, String, Cursor, or a"
+       " class that inherits Iterable; this one is "
        base-type "."
        (when (= "Any" base-type)
          (str " Narrow it first, for example: if convert <expr> to"
@@ -3570,7 +3652,12 @@
         (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
 
       1
-      (let [compare-type (check-expression env (first args))]
+      ;; A `fn (a, b) ...` comparator takes its types from the elements.
+      (let [compare-type (check-arg-in-context
+                          env (first args)
+                          {:base-type "Function"
+                           :param-types [{:name "a" :type elem-type} {:name "b" :type elem-type}]
+                           :return-type "Integer"})]
         (when (any-into-concrete-without-convert? env "Function" compare-type)
           (throw-any-narrowing-error! "the Array.sort comparator argument" "Function"))
         (when-not (types-compatible? env compare-type "Function")
@@ -4319,7 +4406,10 @@
                                          ;; is never recognized as inferable and
                                          ;; every call reports it as unresolved.
                                      (map :name (:generic-params var-type))))
-          arg-types (mapv #(check-expression env %) args)
+          ;; A `fn` literal with omitted types is checked last, once the
+          ;; other arguments have bound the generic parameters its expected
+          ;; type may mention (see check-arg-in-context).
+          pre-arg-types (mapv #(when-not (lambda-awaiting-types? %) (check-expression env %)) args)
               ;; A Function-typed variable carries its own declared signature
               ;; (e.g. `Function(Dog): String`), which is more specific than
               ;; the generic call<N> method registered by
@@ -4334,15 +4424,18 @@
                              (:params method-sig))
           inferred-type-map (try
                               (reduce (fn [acc [arg-type param]]
-                                        (merge-inferred-generic-bindings
-                                         env
-                                         acc
-                                         (infer-generic-type-map-from-arg
-                                          env generic-names (:type param) arg-type)))
+                                        (if (nil? arg-type)
+                                          acc
+                                          (merge-inferred-generic-bindings
+                                           env
+                                           acc
+                                           (infer-generic-type-map-from-arg
+                                            env generic-names (:type param) arg-type))))
                                       {}
-                                      (map vector arg-types effective-params))
+                                      (map vector pre-arg-types effective-params))
                               (catch clojure.lang.ExceptionInfo e
-                                (throw (with-raw-generic-conflict-hint env e arg-types args))))
+                                (throw (with-raw-generic-conflict-hint
+                                        env e (mapv #(or % "Any") pre-arg-types) args))))
           ;; Type arguments written at the call (`total_area[Circle](xs)`)
           ;; fix the binding: an argument must then conform to the
           ;; instantiated parameter, not re-bind it. Without them,
@@ -4363,7 +4456,32 @@
                                              written)))))
           type-map (merge (build-generic-type-map env var-type)
                           inferred-type-map
-                          explicit-type-map)]
+                          explicit-type-map)
+          ;; Only what was inferred or written, not build-generic-type-map's
+          ;; Any defaults: a generic still unbound must stay open in a `fn`
+          ;; literal's expected type, for its result to bind it.
+          bound-type-map (merge inferred-type-map explicit-type-map)
+          arg-types (mapv (fn [arg pre param]
+                            (or pre
+                                (check-arg-in-context
+                                 env arg (some-> (:type param) (resolve-generic-type bound-type-map)))))
+                          args pre-arg-types (concat effective-params (repeat nil)))
+          ;; ... and what those `fn` literals turned out to return binds the
+          ;; generic parameters only their result types mention (`U`).
+          type-map (merge (reduce (fn [acc [pre arg-type param]]
+                                    (if (or pre (nil? param))
+                                      acc
+                                      (merge-inferred-generic-bindings
+                                       env acc
+                                       (infer-generic-type-map-from-arg
+                                        env generic-names (:type param) arg-type))))
+                                  {}
+                                  (map vector pre-arg-types arg-types effective-params))
+                          ;; above the Any defaults, below what the other
+                          ;; arguments inferred and what was written
+                          inferred-type-map
+                          explicit-type-map)
+          type-map (merge (build-generic-type-map env var-type) type-map)]
           ;; An inferred binding must itself satisfy its generic parameter's
           ;; own declared constraint (`[G -> Animal]`) -- validate-generic-args
           ;; already does this for an EXPLICIT type argument (`Box[Dog]`), but
@@ -4880,8 +4998,11 @@
                                           subst (zipmap (map :name declaring-params) inst)]
                                       (mapv #(resolve-generic-type % subst) raw))))
                                 raw)))
-            arg-types (when (and (or constructor (seq args)) ctor-sig)
-                        (mapv #(check-expression env %) args))
+            ;; A `fn` literal with omitted types is checked last, once the
+            ;; other arguments have bound the class's generic parameters its
+            ;; expected type may mention (see check-arg-in-context).
+            pre-arg-types (when (and (or constructor (seq args)) ctor-sig)
+                            (mapv #(when-not (lambda-awaiting-types? %) (check-expression env %)) args))
             ;; When type arguments are not written explicitly, infer them from
             ;; the constructor's argument types (`create Ok.make(5)` ->
             ;; Ok[Integer, Any]); parameters not mentioned by the constructor
@@ -4889,14 +5010,17 @@
             inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
                            (try
                              (reduce (fn [acc [arg-type param-type]]
-                                       (merge-inferred-generic-bindings
-                                        env acc
-                                        (infer-generic-type-map-from-arg
-                                         env (set (map :name gparams)) param-type arg-type)))
+                                       (if (nil? arg-type)
+                                         acc
+                                         (merge-inferred-generic-bindings
+                                          env acc
+                                          (infer-generic-type-map-from-arg
+                                           env (set (map :name gparams)) param-type arg-type))))
                                      {}
-                                     (map vector arg-types param-types))
+                                     (map vector pre-arg-types param-types))
                              (catch clojure.lang.ExceptionInfo e
-                               (throw (with-raw-generic-conflict-hint env e arg-types args)))))
+                               (throw (with-raw-generic-conflict-hint
+                                       env e (mapv #(or % "Any") pre-arg-types) args)))))
             target-type (cond
                           (seq generic-args)
                           (do (validate-generic-args env class-name generic-args)
@@ -4905,7 +5029,13 @@
                           {:base-type class-name
                            :type-args (mapv #(get inferred-map (:name %) unknown-type-arg) gparams)}
                           :else class-name)
-            type-map (build-generic-type-map env target-type)]
+            type-map (build-generic-type-map env target-type)
+            arg-types (when pre-arg-types
+                        (mapv (fn [arg pre declared]
+                                (or pre
+                                    (check-arg-in-context
+                                     env arg (some-> declared (resolve-generic-type type-map)))))
+                              args pre-arg-types (concat param-types (repeat nil))))]
         ;; If class defines constructors, disallow implicit default create.
         (when (and has-constructors?
                    (nil? constructor)
@@ -5004,6 +5134,39 @@
                                           (display-type first-type) " and " (display-type elem-type)))})))))
       {:base-type "Set" :type-params [first-type]})))
 
+(declare patch-anonymous-function-types set-anonymous-function-body record-inferred-lambda-types!
+         check-expression-value)
+
+(defn- void-type?
+  [t]
+  (or (nil? t) (= "Void" (normalize-type t))))
+
+(defn- finalize-expression-lambda
+  "For `fn (x) => e` (an :expression-body): when no result type is written or
+   supplied by the context, it is the type of `e`, checked with the parameters
+   in scope; and when the result is Void (written, supplied, or `e` itself has
+   no value, like a call to a procedure), `e` becomes the body as a plain
+   statement rather than `result := e`. Any other literal is returned as is."
+  [env expr]
+  (if-not (:expression-body expr)
+    expr
+    (let [e (:expression-body expr)
+          expr (if (or (some? (:return-type expr))
+                       (some (comp nil? :type) (:params expr)))
+                 expr
+                 (let [scope (make-type-env (narrowing-barrier-env env))]
+                   (doseq [{:keys [name type]} (:params expr)]
+                     (env-add-var scope name type))
+                   ;; check-expression-value: `e` may be a call with no value.
+                   (let [t (check-expression-value scope e)]
+                     (if (void-type? t)
+                       (assoc expr :void-body? true)
+                       (patch-anonymous-function-types expr (mapv :type (:params expr)) t)))))]
+      (if (or (:void-body? expr)
+              (and (some? (:return-type expr)) (void-type? (:return-type expr))))
+        (set-anonymous-function-body (dissoc expr :void-body?) [e])
+        expr))))
+
 (defn- check-expr-anonymous-function
   [env expr]
   (let [class-def (:class-def expr)
@@ -5034,7 +5197,12 @@
         ;; check-spawn already does for a spawn body, by simply not
         ;; overriding __current_class__ at all) resolves this with no new
         ;; machinery.
-        enclosing-class (env-lookup-var env "__current_class__")]
+        enclosing-class (env-lookup-var env "__current_class__")
+        settled (finalize-expression-lambda env expr)
+        _ (when-not (identical? settled expr)
+            (record-inferred-lambda-types! settled))
+        expr settled
+        class-def (:class-def expr)]
     ;; Register the dynamic class definition in the type environment
     (collect-class-info env class-def)
     ;; An error in the literal's body is the enclosing statement's: it must
@@ -5061,6 +5229,46 @@
              :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
              :return-type (or (:return-type expr) "Any")}
       (seq (:generic-params expr)) (assoc :generic-params (:generic-params expr)))))
+
+(def ^:dynamic *inferred-lambda-types*
+  "While a program is checked, an atom: anonymous-function class name ->
+   {:params .. :return-type ..}, the signature each `fn` literal with omitted
+   types got from its context (a typed `let`, or the parameter it is passed
+   to). type-check returns it as :lambda-types, and apply-inferred-lambda-types
+   writes it into the AST, so both backends see fully typed literals."
+  nil)
+
+(defn- record-inferred-lambda-types!
+  [patched]
+  (when-let [table *inferred-lambda-types*]
+    (when-let [n (get-in patched [:class-def :name])]
+      (swap! table assoc n (cond-> {:params (:params patched)
+                                    :return-type (:return-type patched)}
+                             ;; `fn (x) => e` whose `e` became a plain
+                             ;; statement (see finalize-expression-lambda).
+                             ;; A flag, not the body: the body is rebuilt
+                             ;; from the node's own `e`, whose nested `fn`s
+                             ;; are by then patched themselves.
+                             (and (:expression-body patched)
+                                  (= [(:expression-body patched)] (:body patched)))
+                             (assoc :void-body? true))))))
+
+(defn- set-anonymous-function-body
+  "EXPR (an :anonymous-function node) with BODY as its body, both on the node
+   and on the call method of its class-def."
+  [expr body]
+  (-> expr
+      (assoc :body body)
+      (update :class-def
+              (fn [class-def]
+                (update class-def :body
+                        (fn [sections]
+                          (mapv (fn [section]
+                                  (if (= :feature-section (:type section))
+                                    (update section :members
+                                            #(mapv (fn [m] (cond-> m (= :method (:type m)) (assoc :body body))) %))
+                                    section))
+                                sections)))))))
 
 (defn- patch-anonymous-function-types
   "Return EXPR (an `:anonymous-function` node) with every param whose `:type`
@@ -5388,9 +5596,16 @@
                                    (str "Expected a Function with " (count expected-params)
                                         " parameter" (if (= 1 (count expected-params)) "" "s")
                                         ", got one with " (count own-params) "."))})))
-        (let [patched (patch-anonymous-function-types expr
+        (let [;; A result type naming a generic the call has not bound yet
+              ;; (the `U` of `map_all[T, U](xs: Array[T], f: Function(x: T): U)`)
+              ;; is not imposed: the literal's own result type stands, and
+              ;; for `fn (x) => e` is inferred from `e`. The caller then binds
+              ;; `U` from the type this returns.
+              open-return? (boolean (seq (unbound-generic-names env (:return-type expected-type))))
+              patched (patch-anonymous-function-types expr
                                                       (mapv :type expected-params)
-                                                      (:return-type expected-type))
+                                                      (when-not open-return?
+                                                        (:return-type expected-type)))
               ;; A param/return already declared on the literal itself is left
               ;; untouched by patch-anonymous-function-types (only nil slots
               ;; are filled from EXPECTED-TYPE) — so a fully- or partially-
@@ -5402,14 +5617,19 @@
               actual-type {:base-type "Function"
                            :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
                                               (:params patched))
-                           :return-type (:return-type patched)}]
+                           :return-type (if open-return?
+                                          (:return-type expected-type)
+                                          (:return-type patched))}]
           (when-not (types-compatible? env actual-type expected-type)
             (throw (ex-info "Anonymous function type does not match expected Function type"
                             {:error (type-error
                                      (str "Expected " (display-type expected-type)
                                           ", got " (display-type actual-type)))})))
-          (check-expr-anonymous-function env patched))
-        expected-type)
+          ;; Recorded before checking: checking may settle an `=>` body
+          ;; further, and records that itself.
+          (record-inferred-lambda-types! patched)
+          (let [checked (check-expr-anonymous-function env patched)]
+            (if open-return? checked expected-type))))
 
       :else
       (check-expression env expr))))
@@ -5553,12 +5773,20 @@
         (throw (ex-info (str "Undefined variable: " target)
                         {:error (type-error (str "Undefined variable: " target))}))))
     (when (any-into-concrete-without-convert? env var-type val-type)
-      (throw-any-narrowing-error! (str "variable '" target "'") var-type))
+      (throw-any-narrowing-error! (if (:arrow-result stmt)
+                                    "the result of this function"
+                                    (str "variable '" target "'"))
+                                  var-type))
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
-                               (assignment-mismatch-message env (str "variable '" target "'")
-                                                            val-type var-type (:value stmt)))})))
+                               (if (:arrow-result stmt)
+                                 ;; `fn (x) => e`: no `result` in sight
+                                 (str "This function's result should be " (display-type var-type)
+                                      ", but the expression after `=>` is " (display-type val-type) "."
+                                      (or (conversion-hint val-type var-type (:value stmt)) ""))
+                                 (assignment-mismatch-message env (str "variable '" target "'")
+                                                              val-type var-type (:value stmt))))})))
     ;; Keep nil-check narrowing in step with the assignment: a value that may
     ;; be nil undoes it for every block containing this one. One that cannot
     ;; be nil leaves it standing.
@@ -6971,7 +7199,10 @@
                  (some #(references-result? (:condition %)) ensure)))
     (let [msg (str Routine " uses `result` but declares no return type, so it has"
                    " nothing to return. Declare the type it returns: `"
-                   (or routine-name "fn") "(...): <Type>`.")]
+                   (or routine-name "fn") "(...): <Type>`."
+                   ;; an anonymous function can also let its expression say
+                   (when-not routine-name
+                     " Or, if it only computes its result, write `fn (...) => <expression>`."))]
       ;; at the first statement using it, or else the routine itself
       (with-type-error-location
         (or (first (filter references-result? body)) method)
@@ -7127,11 +7358,13 @@
     (doseq [{:keys [parent]} (:parents class-def)]
       (walk parent #{}))))
 
-(defn collect-class-info
-  "Collect class information (first pass)"
+(defn collect-class-signatures!
+  "Register CLASS-DEF and its method and constructor signatures in ENV, which
+   is all method lookup needs (the first half of collect-class-info, without
+   inferring constant types). Used by lowering to type calls on program
+   classes."
   [env {:keys [name body] :as class-def}]
   (env-add-class env name class-def)
-
   ;; Collect method and constructor signatures *before* inferring constant
   ;; types: a constant's initializer may construct the class itself
   ;; (`RED = create Color.make(255, 0, 0)`) or call one of its routines, and
@@ -7160,7 +7393,12 @@
       (doseq [ctor (:constructors section)]
         (env-add-method env name (:name ctor)
                         {:params (:params ctor)
-                         :return-type name}))))
+                         :return-type name})))))
+
+(defn collect-class-info
+  "Collect class information (first pass)"
+  [env {:keys [name body] :as class-def}]
+  (collect-class-signatures! env class-def)
 
   ;; Collect fields/constants and infer constant types.
   ;;
@@ -8091,6 +8329,22 @@
                   {:params [{:name "a" :type "Any"}]
                    :return-type "Integer"}))
 
+;; The iteration protocol: `Iterable[T]` is anything with `cursor(): Cursor[T]`,
+;; and a `Cursor[T]` walks one (`start`, `item`, `next`, `at_end`). A cursor is
+;; itself iterable: its `cursor` is the cursor. `across` accepts any Iterable.
+;; Array, Set, String and Map are registered as heirs of Iterable below.
+(declare collect-class-signatures!)
+
+(defn- register-iteration-protocol!
+  [env]
+  ;; From the same definitions the interpreter and lowering use, bodies
+  ;; included: an heir that leaves a deferred method out, or overrides `item`
+  ;; with a type that doesn't conform, is then caught as for any other
+  ;; deferred parent.
+  (doseq [class-def [(bootstrap/build-iterable-base-class)
+                     (bootstrap/build-cursor-base-class)]]
+    (collect-class-signatures! env class-def)))
+
 ;; Built-in scalar classes implement Comparable
 (defn- register-scalar-classes!
   [env]
@@ -8098,7 +8352,10 @@
     (env-add-class env scalar {:name scalar
                                :deferred? false
                                :generic-params nil
-                               :parents [{:parent "Any"} {:parent "Comparable"}]
+                               :parents (cond-> [{:parent "Any"} {:parent "Comparable"}]
+                                          ;; A String is a sequence of Chars.
+                                          (= scalar "String")
+                                          (conj {:parent "Iterable" :generic-args ["Char"]}))
                                :body []})
     (env-add-method env scalar "compare"
                     {:params [{:name "a" :type "Any"}]
@@ -8156,7 +8413,8 @@
 (defn- register-array-methods!
   [env]
   (env-add-class env "Array" {:name "Array"
-                              :generic-params [{:name "T"}]})
+                              :generic-params [{:name "T"}]
+                              :parents [{:parent "Iterable" :generic-args ["T"]}]})
   (env-add-method env "Array" "filled"
                   {:params [{:name "size" :type "Integer"}
                             {:name "value" :type "T"}]
@@ -8166,13 +8424,16 @@
 (defn- register-map-methods!
   [env]
   (env-add-class env "Map" {:name "Map"
-                            :generic-params [{:name "K"} {:name "V"}]})
+                            :generic-params [{:name "K"} {:name "V"}]
+                            :parents [{:parent "Iterable"
+                                       :generic-args [{:base-type "Map_Entry" :type-params ["K" "V"]}]}]})
   (register-builtin-type-signatures! env "Map"))
 
 (defn- register-set-methods!
   [env]
   (env-add-class env "Set" {:name "Set"
-                            :generic-params [{:name "T"}]})
+                            :generic-params [{:name "T"}]
+                            :parents [{:parent "Iterable" :generic-args ["T"]}]})
   (env-add-method env "Set" "from_array"
                   {:params [{:name "values"
                              :type {:base-type "Array" :type-params ["T"]}}]
@@ -8246,6 +8507,7 @@
   [env]
   (register-any-protocol! env)
   (register-comparable-protocol! env)
+  (register-iteration-protocol! env)
   (register-scalar-classes! env)
   (register-integer-methods! env)
   (register-byte-methods! env)
@@ -9097,7 +9359,27 @@
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([ast] (type-check ast {}))
   ([ast opts]
-   (check-program ast opts)))
+   (binding [*inferred-lambda-types* (atom {})]
+     (assoc (check-program ast opts) :lambda-types @*inferred-lambda-types*))))
+
+(defn apply-inferred-lambda-types
+  "AST with every `fn` literal named in LAMBDA-TYPES (type-check's
+   :lambda-types) given the parameter and result types its context supplied.
+   Only omitted types are filled in; the AST is otherwise unchanged."
+  [ast lambda-types]
+  (if (empty? lambda-types)
+    ast
+    (clojure.walk/postwalk
+     (fn [node]
+       (if-let [{:keys [params return-type void-body?]}
+                (and (map? node)
+                     (= :anonymous-function (:type node))
+                     (get lambda-types (get-in node [:class-def :name])))]
+         (let [patched (patch-anonymous-function-types node (mapv :type params) return-type)]
+           (cond-> patched
+             void-body? (set-anonymous-function-body [(:expression-body patched)])))
+         node))
+     ast)))
 
 (defn infer-expression-type
   "Infer the type of an expression AST node.

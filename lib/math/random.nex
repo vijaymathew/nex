@@ -1,0 +1,95 @@
+-- Random: a generator of pseudo-random numbers. Import with
+-- `intern math/Random`.
+--
+-- Made with a seed, it gives the same numbers, in the same order, on every
+-- run, so a simulation or a training run can be repeated exactly:
+--
+--   let random: Random := create Random.with_seed(42)
+--   let roll: Integer := random.between(1, 6)
+--   let noise: Real := random.gaussian() * 3.0      -- spread of 3
+--   shuffle(cards, random)
+--
+-- Made with `make`, it starts somewhere different every time.
+--
+-- Built on Java's SplittableRandom; not meant for cryptography.
+
+import java.util.SplittableRandom
+
+class Random
+  note "Pseudo-random numbers, repeatable from a seed."
+
+  private feature
+    generator: Any
+
+create
+  -- A generator that gives different numbers on every run.
+  make() do
+    with "java" do
+      generator := SplittableRandom.new()
+    end
+  end
+
+  -- A generator that gives the same numbers on every run with the same
+  -- seed. Any Integer is a valid seed.
+  with_seed(seed: Integer) do
+    with "java" do
+      generator := SplittableRandom.new(seed)
+    end
+  end
+
+feature
+  -- A Real spread evenly over 0.0 up to, but not including, 1.0.
+  uniform(): Real do
+    with "java" do
+      result := generator.nextDouble()
+    end
+  ensure
+    in_range: result >= 0.0 and result < 1.0
+  end
+
+  -- A whole number from 0 to n - 1, each equally likely.
+  below(n: Integer): Integer
+  require
+    positive: n > 0
+  do
+    with "java" do
+      result := generator.nextLong(n)
+    end
+  ensure
+    in_range: result >= 0 and result < n
+  end
+
+  -- A whole number from low to high, both included, each equally likely.
+  between(low, high: Integer): Integer
+  require
+    ordered: low <= high
+  do
+    result := low + below(high - low + 1)
+  ensure
+    in_range: result >= low and result <= high
+  end
+
+  -- A Real from the standard normal distribution (the bell curve): mean 0,
+  -- standard deviation 1. For mean m and spread s, use m + s * gaussian().
+  gaussian(): Real do
+    with "java" do
+      result := generator.nextGaussian()
+    end
+  end
+end
+
+-- Put the elements of `items` in a random order, in place, every order
+-- equally likely (the Fisher-Yates shuffle).
+function shuffle[T](items: Array[T], random: Random) do
+  from
+    let i: Integer := items.length - 1
+  until
+    i <= 0
+  do
+    let j: Integer := random.below(i + 1)
+    let held: T := items.get(i)
+    items.set(i, items.get(j))
+    items.set(j, held)
+    i := i - 1
+  end
+end

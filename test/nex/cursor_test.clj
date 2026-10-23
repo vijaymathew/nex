@@ -308,7 +308,7 @@ main()")]
                                  "  print(x)\n"
                                  "end\n"))]
       (is (= 1 (count errs)))
-      (is (re-find #"`across` needs an Array, Map, Set, String, or Cursor; this one is Any"
+      (is (re-find #"`across` needs an Iterable: an Array, Map, Set, String, Cursor, or a class that inherits Iterable; this one is Any"
                    (first errs)))
       (is (re-find #"convert" (first errs)) "must point at the way out")
       (is (not (re-find #"\bcursor\b" (first errs)))

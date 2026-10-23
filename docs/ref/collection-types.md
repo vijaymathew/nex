@@ -9,13 +9,17 @@ This section covers the standard collection abstractions used throughout Nex cod
 In the tables below, `T` is the element type of an `Array[T]` or `Set[T]`, and `K` and
 `V` are the key and value types of a `Map[K, V]`.
 
-All built-in collection types inherit `Any`. Their `to_string`, `equals`, and
+All built-in collection types inherit `Any`, and `Array[T]`, `Set[T]` and
+`Map[K, V]` are also `Iterable` (so `across` walks them, and they can be passed
+where an `Iterable` is expected; see [Foundational Classes](foundational-classes.md)). Their `to_string`, `equals`, and
 `clone` methods operate recursively: `to_string` renders nested structure,
 `equals` performs deep structural equality, and `clone` performs a deep copy.
 
 `Set` membership and dedup, and `Map` key lookup, compare by Nex value equality —
 the same `equals`/`hash` used by the `=` operator — so a class that overrides
 `equals`/`hash` is matched by value as an element or key.
+
+All four built-in collections, and `String`, also have the [functional methods](#functional-methods) `map`, `filter`, `fold`, `reduce`, `any`, `all`, `count` and `find`.
 
 Each method table below includes a **Complexity** column, given as `time / space`
 (average case for `Map`/`Set`, as with any hash table). `nex file.nex` compiles
@@ -68,7 +72,7 @@ create Array[String].filled(2, "x")
 | `equals` | `other: Array[T]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `hash` | none | `Integer` | Hash of the elements, in order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Array[T]` | Deep-copy the array and its nested values while preserving element type. | `O(n) / O(n)`, deep* |
-| `cursor` | none | `ArrayCursor` | Create iterator. | `O(1) / O(1)` to create |
+| `cursor` | none | `Cursor[T]` | Create iterator. | `O(1) / O(1)` to create |
 
 \* "Deep" means the cost scales with the array's total nested size, not just its element count, since these recurse into any nested `Array`/`Map`/`Set`/object elements.
 
@@ -103,7 +107,7 @@ create Array[String].filled(2, "x")
 | `equals` | `other: Map[K, V]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `hash` | none | `Integer` | Hash of the entries, in any order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Map[K, V]` | Deep-copy the map and its nested keys and values while preserving key/value types. | `O(n) / O(n)`, deep* |
-| `cursor` | none | `MapCursor` | Create entry iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
+| `cursor` | none | `Cursor[Map_Entry[K, V]]` | Create entry iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
 
 \* "Deep" means the cost scales with the total nested size of keys/values, not just entry count.
 † `remove` and `cursor` are the two operations where the backends diverge: `remove` is `O(1)` average on the compiled backend but `O(n)` on the interpreter (see the note above); `cursor` creation is `O(n)` on both, since it snapshots every key up front rather than iterating lazily.
@@ -157,10 +161,44 @@ Set literals use `#{...}`. The empty map literal remains `{}`.
 | `equals` | `other: Set[T]` | `Boolean` | Deep structural equality. | `O(n) / O(1)`, deep* |
 | `hash` | none | `Integer` | Hash of the elements, in any order; consistent with `equals`. | `O(n) / O(1)`, deep* |
 | `clone` | none | `Set[T]` | Deep-copy the set and its nested values while preserving element type. | `O(n) / O(n)`, deep* |
-| `cursor` | none | `SetCursor` | Create iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
+| `cursor` | none | `Cursor[T]` | Create iterator. | `O(n) / O(n)` to create† , then `O(1) / O(1)` per step |
 
 \* "Deep" means the cost scales with the total nested size of elements, not just element count.
 † `remove` and `cursor` are the two operations where the backends diverge, the same way as `Map` above: `remove` is `O(1)` average on the compiled backend but `O(n)` on the interpreter; `cursor` creation is `O(n)` on both, since it snapshots every element up front. (`n` above is the size of the receiver, `m` the size of `other`.)
+
+## Functional Methods
+
+`Array[T]`, `Set[T]`, `Map[K, V]` and `String` share eight methods that take a
+function. Each walks the receiver's elements in the order `across` does: an
+`Array`'s or `Set`'s elements, a `String`'s `Char`s, a `Map`'s
+`Map_Entry[K, V]` entries. Below, `E` is that element type.
+
+| Method | Arguments | Returns | Description |
+|---|---|---|---|
+| `map` | `f: Function(x: E): U` | `Array[U]` | `f` applied to each element, in order. Always an `Array`, whatever the receiver. |
+| `filter` | `f: Function(x: E): Boolean` | the receiver's type | The elements for which `f` is true: an `Array` gives an `Array`, a `Set` a `Set`, a `String` a `String`, a `Map` a `Map`. |
+| `fold` | `init: A, f: Function(acc: A, x: E): A` | `A` | `f` applied to `init` and the first element, then to that result and the next, and so on; `init` for an empty receiver. |
+| `reduce` | `f: Function(acc: E, x: E): E` | `E` | Like `fold`, starting from the first element. Raises on an empty receiver. |
+| `any` | `f: Function(x: E): Boolean` | `Boolean` | Whether `f` is true for some element (false when empty). |
+| `all` | `f: Function(x: E): Boolean` | `Boolean` | Whether `f` is true for every element (true when empty). |
+| `count` | `f: Function(x: E): Boolean` | `Integer` | How many elements `f` is true for. |
+| `find` | `f: Function(x: E): Boolean` | `?E` | The first element `f` is true for, or `nil`. |
+
+The function's parameter types come from the receiver, so they need not be
+written, and `map`'s `U` and `fold`'s `A` come from what the function returns
+and from `init`:
+
+```nex
+let xs: Array[Integer] := [1, 2, 3, 4]
+print(xs.map(fn (x) => x * 10))                  -- [10, 20, 30, 40]
+print(xs.filter(fn (x) => x % 2 = 0))            -- [2, 4]
+print(xs.fold(0, fn (sum, x) => sum + x))        -- 10
+print(xs.find(fn (x) => x > 2))                  -- 3
+print("hello".filter(fn (c) => c /= #l))         -- "heo"
+let ages: Map[String, Integer] := {"ann": 31, "bo": 17}
+print(ages.filter(fn (e) => e.value >= 18))      -- {"ann": 31}
+print(xs.filter(fn (x) => x > 1).map(fn (x) => x * x).fold(0, fn (a, b) => a + b))   -- 29
+```
 
 ## `Min_Heap[T]`
 

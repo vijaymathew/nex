@@ -8,7 +8,7 @@
 
 intern Vector_Math
 intern Vocabulary
-intern Rng
+intern math/Random
 intern Next_Letter_Model
 intern Training_Data
 intern Helpers
@@ -77,28 +77,9 @@ let s: Array[Real] := softmax([1.0, 2.0, 3.0])
 c.close_to("softmax sums to 1", 1.0, sum(s), 1.0e-12)
 c.close_to("softmax[2]", 0.6652409557748219, s.get(2), 1.0e-12)
 c.close_to("softmax of huge scores", 0.5, softmax([1000.0, 1000.0]).get(0), 1.0e-12)
-c.close_to("tanh(0.5)", 0.46211715726000974, tanh(0.5), 1.0e-12)
-c.close_to("tanh(100)", 1.0, tanh(100.0), 0.0)
-c.close_to("tanh(-100)", -1.0, tanh(-100.0), 0.0)
 c.check("argmax", argmax([0.1, 0.7, 0.2]) = 1)
-c.check("fixed", fixed(2.5, 3) = "2.500" and fixed(-0.0499, 2) = "-0.05"
-  and fixed(3.14159, 0) = "3")
+c.check("vector_text", vector_text([0.5, -0.0499, 1.0 / 3.0], 2) = "[0.50, -0.05, 0.33]")
 c.check("percent", percent(0.257) = "26%")
-
--- Random numbers
-let rng: Rng := create Rng.make(42)
-let mean: Real := 0.0
-let square: Real := 0.0
-repeat 20000 do
-  let z: Real := rng.gauss()
-  mean := mean + z / 20000.0
-  square := square + z * z / 20000.0
-end
-c.close_to("gauss mean", 0.0, mean, 0.03)
-c.close_to("gauss variance", 1.0, square - mean * mean, 0.05)
-let r1: Rng := create Rng.make(7)
-let r2: Rng := create Rng.make(7)
-c.check("same seed, same numbers", r1.uniform() = r2.uniform())
 
 -- Vocabulary
 c.check("symbol_id", symbol_id(".") = 0 and symbol_id("a") = 1 and symbol_id("z") = 26)
@@ -153,7 +134,7 @@ repeat 300 do
   model.step(g, 0.5, tiny.length)
 end
 let after: Real := evaluate(model, tiny).loss
-c.check("training lowers the loss (" + fixed(before, 3) + " -> " + fixed(after, 3) + ")",
+c.check("training lowers the loss (" + before.format(3) + " -> " + after.format(3) + ")",
   after < before / 4.0)
 
 -- Saving and loading give back the same model.

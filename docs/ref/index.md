@@ -13,6 +13,7 @@ This reference documents the interpreter-level built-ins currently defined in `s
 - [Audio Libraries](audio.md)
 - [Graphics Libraries](graphics.md)
 - [IO Libraries](io.md)
+- [Math Libraries](math.md)
 - [Text Libraries](text.md)
 - [Time Libraries](time.md)
 - [Library Index](libraries.md)

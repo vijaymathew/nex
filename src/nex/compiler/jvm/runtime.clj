@@ -1716,7 +1716,10 @@
         class-lookup (fn [n] (.get ^HashMap @(:classes state) n))
         ok? (and (some? value)
                  (string? target-type-name)
-                 (runtime-compatible-with? state runtime-name target-type-name)
+                 (or (runtime-compatible-with? state runtime-name target-type-name)
+                     ;; The built-in collections are Iterable, and the
+                     ;; built-in cursors are Cursors (and Iterable).
+                     (typeinfo/cursor-subtype-runtime? runtime-name target-type-name))
                  ;; The type arguments too, when the target names them
                  ;; (Definition 4.7: Some[Integer] is not a Some[String]).
                  (or (empty? target-args)
@@ -2844,6 +2847,9 @@
 (def-builtin-method-wrapper builtin-method-real-log2 "log2")
 (def-builtin-method-wrapper builtin-method-real-power "power")
 (def-builtin-method-wrapper builtin-method-real-sin "sin")
+(def-builtin-method-wrapper builtin-method-real-sinh "sinh")
+(def-builtin-method-wrapper builtin-method-real-cosh "cosh")
+(def-builtin-method-wrapper builtin-method-real-tanh "tanh")
 (def-builtin-method-wrapper builtin-method-real-cos "cos")
 (def-builtin-method-wrapper builtin-method-real-tan "tan")
 (def-builtin-method-wrapper builtin-method-real-asin "asin")
@@ -2856,6 +2862,7 @@
 (def-builtin-method-wrapper builtin-method-real-clamp "clamp")
 (def-builtin-method-wrapper builtin-method-real-hypot "hypot")
 (def-builtin-method-wrapper builtin-method-real-to-fixed "to_fixed")
+(def-builtin-method-wrapper builtin-method-real-format "format")
 (def-builtin-method-wrapper builtin-method-real-is-nan "is_nan")
 (def-builtin-method-wrapper builtin-method-real-is-infinite "is_infinite")
 (def-builtin-method-wrapper builtin-method-real-is-finite "is_finite")
@@ -3417,6 +3424,23 @@
                     (throw (ex-info "Array.sort comparator must return Integer"
                                     {:left a :right b :result result})))))))
      out)))
+
+;; map, filter, fold, reduce, any, all, count, find on any built-in
+;; collection (Array, Map, Set, String): the shared implementation, calling the
+;; function argument through invoke-function-object.
+(defn- collection-functional
+  [state coll method args]
+  (bi/functional-call (fn [f call-args] (invoke-function-object state f call-args))
+                      coll method (vec args)))
+
+(defn collection-map [state coll f] (collection-functional state coll "map" [f]))
+(defn collection-filter [state coll f] (collection-functional state coll "filter" [f]))
+(defn collection-fold [state coll init f] (collection-functional state coll "fold" [init f]))
+(defn collection-reduce [state coll f] (collection-functional state coll "reduce" [f]))
+(defn collection-any [state coll f] (collection-functional state coll "any" [f]))
+(defn collection-all [state coll f] (collection-functional state coll "all" [f]))
+(defn collection-count [state coll f] (collection-functional state coll "count" [f]))
+(defn collection-find [state coll f] (collection-functional state coll "find" [f]))
 
 (defn collection-cursor
   [_state _kind value]

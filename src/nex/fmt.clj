@@ -249,12 +249,12 @@
 
             :else
             (let [two (when (< (inc i) n) (subs src i (+ i 2)))
-                  end (if (#{":=" "/=" "<=" ">=" "->" "?."} two) (+ i 2) (inc i))]
+                  end (if (#{":=" "/=" "<=" ">=" "->" "=>" "?."} two) (+ i 2) (inc i))]
               (recur end line (tok :punct end) string-lines))))))))
 
 (def ^:private continuing-ends
   "A line ending with one of these continues on the next line."
-  #{"+" "-" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=" "," "." "?." "->"
+  #{"+" "-" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=" "," "." "?." "->" "=>"
     ":" "and" "or" "not"})
 
 (def ^:private continuing-starts

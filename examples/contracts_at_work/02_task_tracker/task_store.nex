@@ -135,82 +135,49 @@ class Task_Store
 
     -- Pure deserialization, migrating schema version 1 on the way in.
     -- Schema version 1 was a single bare JSON array for the whole file
-    -- (`[{"id":1,...}, ...]`) — a *top-level* array, which parses fine on
-    -- both backends.
+    -- (`[{"id":1,...}, ...]`); version 2 is one object per line.
+    --
+    -- A row that isn't what the schema says (a missing id, a text that
+    -- isn't a string, ...) raises, naming the field, rather than being
+    -- patched up or skipped: the CLI saves after every change, so a file
+    -- read only partly would be overwritten and the rest of it lost.
     parse_json(text: String) do
       let json: Json := create Json.make()
       let trimmed: String := text.trim()
 
-      let rows: Array[Map[String, Any]] := []
+      let rows: Array[Json_Value] := []
       if trimmed.starts_with("[") then
         -- schema version 1: one JSON document, a bare top-level array.
-        if convert json.parse(trimmed) to items: Array[Any] then
-          let i: Integer := 0
-          from
-            i := 0
-          until
-            i = items.length
-          do
-            if convert items.get(i) to row: Map[String, Any] then
-              rows.add(row)
-            end
-            i := i + 1
-          end
-        end
+        rows := json.read(trimmed).items
       else
         -- schema version 2: one JSON object per line; skip the header line.
-        let lines: Array[String] := trimmed.split("\n")
-        let i: Integer := 0
-        from
-          i := 0
-        until
-          i = lines.length
-        do
-          let line: String := lines.get(i).trim()
+        across trimmed.split("\n") as raw_line do
+          let line: String := raw_line.trim()
           if line /= "" then
-            if convert json.parse(line) to m: Map[String, Any] then
-              if not m.contains_key("schema_version") then
-                rows.add(m)
-              end
+            let row: Json_Value := json.read(line)
+            if not row.has("schema_version") then
+              rows.add(row)
             end
           end
-          i := i + 1
         end
       end
 
       tasks := []
       next_id := 1
-      let i: Integer := 0
-      from
-        i := 0
-      until
-        i = rows.length
-      do
-        let m: Map[String, Any] := rows.get(i)
-        let id: Integer := 0
-        if convert m.get("id") to raw_id: Integer then
-          id := raw_id
-        end
-        let item_text: String := ""
-        if convert m.get("text") to raw_text: String then
-          item_text := raw_text
-        end
-        let priority: Integer := 3
-        if convert m.try_get("priority", 3) to raw_priority: Integer then
-          priority := raw_priority
+      across rows as row do
+        let id: Integer := row.get("id").as_integer
+        let priority: Integer := 3   -- schema version 1 has no priority
+        if row.has("priority") then
+          priority := row.get("priority").as_integer
         end
         let done: Boolean := false
-        if m.contains_key("status") then
-          if convert m.get("status") to status_text: String then
-            done := (status_text = "done")
-          end
-        elseif m.contains_key("done") then
-          if convert m.get("done") to raw_done: Boolean then
-            done := raw_done
-          end
+        if row.has("status") then
+          done := row.get("status").as_string = "done"
+        elseif row.has("done") then
+          done := row.get("done").as_boolean   -- schema version 1
         end
 
-        let t: Task := create Task.make(id, item_text, priority)
+        let t: Task := create Task.make(id, row.get("text").as_string, priority)
         if done then
           t.mark_done()
         end
@@ -218,7 +185,6 @@ class Task_Store
         if id >= next_id then
           next_id := id + 1
         end
-        i := i + 1
       end
     end
 

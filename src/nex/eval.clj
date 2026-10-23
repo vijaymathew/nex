@@ -12,32 +12,11 @@
             [nex.walker :as walker])
   (:import [clj_antlr ParseError]))
 
-(defn- augment-ast-with-interns
-  "Merge every interned file's classes/functions/imports/type-aliases, then
-   re-run walker/qualify-interned-function-class-names and
-   walker/resolve-qualified-function-calls on the merge — see
-   nex.compiler.jvm.file's own copy of this function for why (in short: two
-   interned files defining the same bare function name are left to coexist,
-   resolved by qualified name at each call site, rather than rejected
-   outright the moment both are interned — which also needs each one's
-   synthetic wrapper class renamed uniquely, or bytecode emission collides
-   regardless of qualification)."
-  [source-id ast]
-  (-> (assoc ast
-             :classes (vec (concat (intern/resolve-interned-classes source-id ast)
-                                   (:classes ast)))
-             :functions (walker/qualify-interned-function-class-names
-                         (vec (concat (intern/resolve-interned-functions source-id ast)
-                                      (:functions ast))))
-             :imports (vec (concat (intern/resolve-interned-imports source-id ast)
-                                   (:imports ast)))
-             :type-aliases (vec (concat (intern/resolve-interned-type-aliases source-id ast)
-                                        (:type-aliases ast))))
-      walker/resolve-qualified-function-calls))
-
 (defn- type-check-ast!
   [source-id ast max-errors]
-  (let [module-ast (augment-ast-with-interns source-id ast)
+  ;; The compiler's merge (which also re-runs the cross-file refinement
+  ;; passes), so that what is checked here is exactly what is compiled.
+  (let [module-ast (jvm-file/augment-ast-with-interns source-id ast)
         result (tc/type-check module-ast (cond-> {:strict-undefined-targets? true
                                                   :reject-discarded-top-level? true}
                                            max-errors (assoc :max-errors max-errors)))]
@@ -49,7 +28,11 @@
         (throw (ex-info (str "Type checking failed"
                              (when (seq lines)
                                (str "\n" (str/join "\n" lines))))
-                        {:errors lines}))))))
+                        {:errors lines}))))
+    ;; The checked program, with the interns merged in and every `fn` literal
+    ;; given the types its context supplied (tc/apply-inferred-lambda-types).
+    {:module-ast (tc/apply-inferred-lambda-types module-ast (:lambda-types result))
+     :lambda-types (:lambda-types result)}))
 
 (defn- run-interpreted
   [source-id ast program-args skip-contracts?]
@@ -146,10 +129,14 @@
    errors are caught earlier by `type-check-ast!`, so a failure here means an
    unsupported construct (or a compiler defect) — `compile-error-message` tells
    the two apart."
-  [source-id ast skip-contracts?]
+  [source-id ast module-ast skip-contracts?]
+  ;; MODULE-AST, when given, is AST with its interns already merged (by
+  ;; type-check-ast!), so the compiler must not merge them again.
   (try
-    {:compiled (jvm-file/compile-ast source-id ast {:skip-type-check true
-                                                    :skip-contracts? skip-contracts?})}
+    {:compiled (jvm-file/compile-ast source-id (or module-ast ast)
+                                     {:skip-type-check true
+                                      :interns-merged? (some? module-ast)
+                                      :skip-contracts? skip-contracts?})}
     (catch Throwable e {:compile-error e})))
 
 (defn- run-compiled
@@ -217,11 +204,12 @@
    never re-executed. The one automatic fallback left is a LinkageError — a
    backend defect, not the program's behaviour — which runs interpreted with a
    warning rather than failing a valid program."
-  [source-id ast {:keys [interpret? program-args skip-contracts?]}]
+  ([source-id ast opts] (run-ast source-id ast nil opts))
+  ([source-id ast module-ast {:keys [interpret? program-args skip-contracts?]}]
   (let [program-args (or program-args [])]
     (if interpret?
       (run-interpreted source-id ast program-args skip-contracts?)
-      (let [{:keys [compiled compile-error]} (try-compile source-id ast skip-contracts?)]
+      (let [{:keys [compiled compile-error]} (try-compile source-id ast module-ast skip-contracts?)]
         (if compile-error
           (throw (ex-info (compile-error-message compile-error)
                           {:type :not-compilable}
@@ -231,7 +219,7 @@
                                      (or (ex-message backend-defect) (str backend-defect))
                                      ")"))
                 (run-interpreted source-id ast program-args skip-contracts?))
-            nil))))))
+            nil)))))))
 
 (defn eval-file
   "Parse and evaluate a Nex file. opts: {:interpret? bool} to force the
@@ -248,9 +236,11 @@
          source (slurp source-id)
          ;; `console` and `program` (see nex.predeclared), declared before
          ;; the program's first statement.
-         ast (predeclared/add (parser/ast source))]
-     (type-check-ast! source-id ast (:max-errors opts))
-     (run-ast source-id ast opts))))
+         ast (predeclared/add (parser/ast source))
+         {:keys [module-ast lambda-types]} (type-check-ast! source-id ast (:max-errors opts))]
+     ;; The interpreter loads interned files itself, so it gets the program's
+     ;; own AST (with its lambdas' inferred types), not the merged one.
+     (run-ast source-id (tc/apply-inferred-lambda-types ast lambda-types) module-ast opts))))
 
 ;;
 ;; Where a runtime error happened

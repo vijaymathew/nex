@@ -189,6 +189,9 @@
     ;; Generic constraints (arrow operator ->)
     ("->" . font-lock-keyword-face)
 
+    ;; Expression-bodied anonymous functions: fn (x) => e
+    ("=>" . font-lock-keyword-face)
+
     ;; Assignment operator
     (":=" . font-lock-keyword-face)
 
@@ -210,7 +213,7 @@
 ;; moves by as much as the next line of code does.
 
 (defconst nex-fmt--continuing-ends
-  '("+" "-" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=" "," "." "?." "->"
+  '("+" "-" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=" "," "." "?." "->" "=>"
     ":" "and" "or" "not")
   "A line ending with one of these continues on the next line.")
 
@@ -314,7 +317,7 @@ counted from 0; STRING-LINES a hash table of line numbers."
             (setq i j)))
          (t
           (let* ((two (and (< (1+ i) n) (substring src i (+ i 2))))
-                 (end (if (member two '(":=" "/=" "<=" ">=" "->" "?.")) (+ i 2) (1+ i))))
+                 (end (if (member two '(":=" "/=" "<=" ">=" "->" "=>" "?.")) (+ i 2) (1+ i))))
             (push (vector (substring src i end) line 'punct) tokens)
             (setq i end))))))
     (cons (nreverse tokens) string-lines)))

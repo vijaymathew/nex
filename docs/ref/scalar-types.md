@@ -41,7 +41,8 @@ which is convenient for regular-expression patterns and paths: `'\d+'`, `'C:\dir
 | `greater_than_or_equal` | `other: String` | `Boolean` | Lexicographic `>=`. |
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
-| `cursor` | none | `StringCursor` | Create character iterator. |
+| `cursor` | none | `Cursor[Char]` | Create character iterator. A `String` is `Iterable[Char]`. |
+| `map`, `filter`, `fold`, `reduce`, `any`, `all`, `count`, `find` | a function | | Over the `Char`s; see [Functional Methods](collection-types.md#functional-methods). `filter` gives a `String`, `map` an `Array`. |
 
 Laws:
 
@@ -95,7 +96,7 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 | `abs` | none | `Integer` | Absolute value. |
 | `min` | `other: Integer` | `Integer` | Smaller of two values. |
 | `max` | `other: Integer` | `Integer` | Larger of two values. |
-| `pick` | none | `Integer` | Random integer in `[0, self)`. |
+| `pick` | none | `Integer` | Random integer in `[0, self)`. It cannot be seeded; for repeatable random numbers use [`math/Random`](math.md). |
 | `to_byte` | none | `Byte` | Convert to a `Byte`; raises unless the value is in `0..255`. |
 | `to_integer16` | none | `Integer16` | Convert to an `Integer16`; raises unless the value is in `-32768..32767`. |
 | `to_integer32` | none | `Integer32` | Convert to an `Integer32`; raises unless the value is in `-2147483648..2147483647`. |
@@ -309,6 +310,7 @@ by contrast, raises.)
 | `ceiling` | none | `Integer` | Smallest integer not below the value. Raises as `floor` does. |
 | `truncate` | none | `Integer` | The value with its fraction dropped (toward zero). Raises as `floor` does. |
 | `to_fixed` | `places: Integer` | `Real` | Round to `places` decimal places using half-up rounding. |
+| `format` | `places: Integer` | `String` | The value as text with exactly `places` digits after the point, never in E notation (`2.5.format(3)` is `"2.500"`). Rounds like `to_fixed`, halves away from zero. `NaN` and the infinities give `"NaN"`, `"Infinity"`, `"-Infinity"`. Raises if `places` is negative. |
 | `sqrt` | none | `Real` | Square root. |
 | `cbrt` | none | `Real` | Cube root. |
 | `exp` | none | `Real` | *e* raised to the value. |
@@ -319,6 +321,7 @@ by contrast, raises.)
 | `sin`, `cos`, `tan` | none | `Real` | Trigonometric functions of an angle in radians. |
 | `asin`, `acos`, `atan` | none | `Real` | Inverse trigonometric functions, in radians. |
 | `atan2` | `x: Real` | `Real` | `y.atan2(x)` is the angle of the point (`x`, `y`), in radians, `-PI..PI`. |
+| `sinh`, `cosh`, `tanh` | none | `Real` | Hyperbolic functions. `tanh` stays within `-1.0..1.0` and is exactly `1.0` or `-1.0` for large arguments, without overflowing. |
 | `to_radians` | none | `Real` | Degrees to radians. |
 | `to_degrees` | none | `Real` | Radians to degrees. |
 | `sign` | none | `Real` | `-1.0`, `0.0` or `1.0` by the value's sign (`-0.0` and `NaN` are returned unchanged). |

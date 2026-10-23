@@ -386,7 +386,7 @@
        (:glue-paren-line node)
        (> (:glue-paren-line node) (:glue-target-line node))))
 
-(declare split-glued-value)
+(declare split-glued-value with-arrow-expression)
 
 (defn- split-glued-statement
   "Undo a false merge detected by phantom-call-glue-point?, splitting NODE
@@ -459,8 +459,32 @@
     (let [[own & split-off] (split-glued-statement value)]
       [own (vec split-off)])
 
+    ;; `let sq := fn (n: Integer) => n * n` then `(sq)...` on the next line:
+    ;; the glue is at the end of the lambda's expression.
+    (and (map? value) (= :anonymous-function (:type value)) (:expression-body value))
+    (let [[e split-off] (split-glued-value (:expression-body value))]
+      (if (seq split-off)
+        [(with-arrow-expression value e) split-off]
+        [value []]))
+
     :else
     [value []]))
+
+(defn- with-arrow-expression
+  "LAMBDA, a `fn (x) => e`, with E as its expression: in :expression-body and
+   in the `result := e` that is its body, on the node and on its class-def."
+  [lambda e]
+  (let [body (mapv #(assoc % :value e) (:body lambda))]
+    (-> lambda
+        (assoc :expression-body e :body body)
+        (update-in [:class-def :body]
+                   (fn [sections]
+                     (mapv (fn [section]
+                             (if (= :feature-section (:type section))
+                               (update section :members
+                                       #(mapv (fn [m] (cond-> m (= :method (:type m)) (assoc :body body))) %))
+                               section))
+                           sections))))))
 
 (defn- build-function-node
   "POS ({:row :column}, 0-based, from node-pos on the raw parse node -- a bare
@@ -1712,9 +1736,13 @@
 (defn- build-anonymous-function-node
   "The :anonymous-function node for the tokens after `fn` — or, for a local
    `function`, after its name: the two share everything from the generic
-   parameters on."
+   parameters on.
+
+   `fn (x) => e` is `fn (x) do result := e end`, with the expression kept as
+   :expression-body: the type checker may take the result type from it, and
+   when the result type is Void it makes `e` the body as a plain statement."
   [rest]
-  (let [cleaned (remove #(#{"(" ")" "do" "end" ":"} %) rest)
+  (let [cleaned (remove #(#{"(" ")" "do" "end" ":" "=>"} %) rest)
         clause (fn [tag] (first (filter #(and (sequential? %)
                                               (= tag (first %)))
                                         cleaned)))
@@ -1727,7 +1755,14 @@
         rescue-clause (clause :rescueClause)
         params-v (when params (transform-node params))
         return-type-v (when return-type (transform-node return-type))
-        body (transform-node (clause :block))
+        expression-clause (clause :expression)
+        expression-body (when expression-clause (transform-node expression-clause))
+        body (if expression-clause
+               [(merge {:type :assign :target "result" :value expression-body
+                        ;; errors speak of the `=>` expression, not `result`
+                        :arrow-result true}
+                       (select-keys expression-body [:dbg/line :dbg/col]))]
+               (transform-node (clause :block)))
         class-name (generate-unique-fn-name)
         method-name (str "call" (count params-v))
         generic-params-v (when generic-params (transform-node generic-params))
@@ -1750,7 +1785,8 @@
                            :visibility {:type :public}
                            :members [method-def]}]
                    :invariant nil}]
-    {:type :anonymous-function
+    (cond->
+     {:type :anonymous-function
      :class-name class-name
      :generic-params generic-params-v
      :params params-v
@@ -1759,7 +1795,8 @@
      :body body
      :ensure (:ensure method-def)
      :rescue (:rescue method-def)
-     :class-def class-def}))
+     :class-def class-def}
+      expression-clause (assoc :expression-body expression-body))))
 
 (defn- handle-anonymous-function
   [[_ _fn-kw & rest]]

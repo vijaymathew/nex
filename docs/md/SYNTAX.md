@@ -75,6 +75,7 @@ let hyp: Real := 3.0.hypot(4.0)          -- 5.0
 let root: Real := 2.0.sqrt               -- 1.4142135623730951
 let y: Real := (Real.PI / 6.0).sin       -- 0.49999999999999994
 let n: Integer := 2.7.floor              -- 2
+let s: String := 2.5.format(3)           -- "2.500" (exactly 3 decimals)
 ```
 
 See the scalar types reference for the full list (`floor`, `ceiling`,
@@ -223,7 +224,9 @@ end
 
 ## Across
 
-Iterate over any collection (Array, String, Map) using its cursor:
+Iterate over anything `Iterable`: an Array, Set, String or Map, a cursor, or
+a class of your own that inherits `Iterable[T]` (see the reference's
+Foundational Classes):
 
 ```nex
 across [10, 20, 30] as x do
@@ -251,6 +254,27 @@ end
 ```
 
 An entry itself prints as `"name": "Alice"` (that is, `print(entry)`). For compatibility with earlier code, `entry.get(0)` and `entry.get(1)` still return the key and value, typed `Any`; prefer `key` and `value`.
+
+
+## Map, Filter, Fold
+
+Arrays, sets, maps and strings have `map`, `filter`, `fold`, `reduce`,
+`any`, `all`, `count` and `find`. The function's parameter types come from the
+collection, so a short `fn (x) => ...` is usually all that's needed:
+
+```nex
+let xs: Array[Integer] := [1, 2, 3, 4]
+print(xs.map(fn (x) => x * 10))                  -- [10, 20, 30, 40]
+print(xs.filter(fn (x) => x % 2 = 0))            -- [2, 4]
+print(xs.fold(0, fn (sum, x) => sum + x))        -- 10
+print(xs.any(fn (x) => x > 3))                   -- true
+print("hello".count(fn (c) => c = #l))           -- 2
+```
+
+`map` always gives an `Array`; `filter` gives back the receiver's own kind (a
+`Set` stays a `Set`, a `String` a `String`). A `Map` is walked as its
+`Map_Entry` values (`e.key`, `e.value`). See the collection reference for all
+eight.
 
 ## Functions
 
@@ -1470,6 +1494,24 @@ let add: Function(a: Integer, b: Integer): Integer :=
 print(add(3, 4))                -- 7
 ```
 
+A function whose body only computes its result can be written with `=>` and
+the expression. Its result type is the expression's (or the one the context
+expects), and the expression runs as far to the right as an expression can:
+
+```nex
+let double := fn (n: Integer) => n * 2
+print(double(21))                       -- 42
+names.sort(fn (a, b) => a.length - b.length)
+let say := fn (m: String) => print(m)   -- no result: the call is the body
+```
+
+`fn (x) => e` means `fn (x) do result := e end`. Use the `do ... end` form for
+anything with statements, contracts or `rescue`. Writing a user-defined
+generic function over a function argument becomes easy too: for
+`map_all[T, U](xs: Array[T], f: Function(x: T): U): Array[U]`, the call
+`map_all(["a", "bb"], fn (s) => s.length)` takes `T` from the array and `U`
+from what the function returns, so it gives an `Array[Integer]`.
+
 Bare `Function` is still valid and compatible with any typed function value:
 
 ```nex
@@ -1485,9 +1527,33 @@ let add2: Function(a: Integer, b: Integer): Integer := fn(a, b) do result := a +
 print(add2(3, 4))                -- 7
 ```
 
-Inference only works where a target type is actually available (here, the
-`let`'s own annotation). With no such context, every parameter needs its own
-explicit type, or it's a compile error.
+The same works when `fn` is passed as an argument: the parameter it is passed
+to supplies the types. That covers methods, free and generic functions,
+constructors, and built-ins such as `Array.sort`:
+
+```nex
+function twice(f: Function(n: Integer): Integer, x: Integer): Integer do
+  result := f(f(x))
+end
+print(twice(fn (n) do result := n * 3 end, 2))     -- 18
+
+let names: Array[String] := ["bo", "ann"]
+print(names.sort(fn (a, b) do result := a.length - b.length end))   -- ["bo", "ann"]
+
+server.post("/echo", fn (req) do                   -- req is an Http_Request
+  result := create Http_Server_Response.make(200, req.body(), {})
+end)
+```
+
+For a generic function, the other arguments are looked at first:
+`apply_to[T](x: T, f: Function(v: T): T)` called as `apply_to(10, fn (v) do
+result := v + 1 end)` binds `T` to `Integer` from `10`, so `v` is an
+`Integer`.
+
+Inference only works where a target type is actually available: a typed
+`let`, or a parameter of a `Function(...)` type. With no such context (`let f
+:= fn (x) do ... end`), every parameter needs its own explicit type, or it's a
+compile error.
 
 A `Function(...)` type's parameter names are for documentation only — they
 can be dropped, leaving just the types:
