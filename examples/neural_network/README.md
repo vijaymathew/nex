@@ -6,23 +6,20 @@ is complete.
 
 ```
 start of word> app
-  app[r]   (23%)      others: e 19%, l 17%, o 15%, i 9%
+  app[r]   (25%)      others: l 17%, o 14%, e 13%, i 10%
   > l                                  <- type "l" yourself to steer it
-  appl[e]   (45%)      others: i 19%, a 13%, y 11%, o 8%
+  appl[e]   (48%)      others: i 22%, a 15%, y 7%, o 5%
   >                                    <- Enter accepts "e"
-  apple[a]   (21%)      others: s 18%, r 11%, end 7%, n 7%
+  apple[s]   (24%)      others: end 13%, t 12%, a 11%, d 9%
   > n                                  <- "n" shows the next option instead
-  apple[s]   (18%)      others: a 21%, r 11%, end 7%, n 7%
-  >                                    <- Enter accepts "s"
-  apples   -> looks complete (42%)      others: s 19%, t 15%, e 4%, h 4%
+  apple   -> looks complete (13%)      others: s 24%, t 12%, a 11%, d 9%
   >                                    <- Enter accepts "end of word"
-  ==> apples
+  ==> apple
 ```
 
 No machine-learning library is used. Every step is written out in Nex:
-matrix multiplication, softmax, backpropagation, gradient descent, and even
-the random number generator. Contracts check the shapes and the math as it
-runs.
+matrix multiplication, softmax, backpropagation and gradient descent.
+Contracts check the shapes and the math as it runs.
 
 The tutorial `tutorial/neural_network_tutorial.pdf` builds this whole
 project step by step, explaining the math along the way.
@@ -31,7 +28,7 @@ project step by step, explaining the math along the way.
 
 ```bash
 cd examples/neural_network
-nex checks.nex        # 33 checks, including a gradient check of backprop
+nex checks.nex        # 27 checks, including a gradient check of backprop
 nex train.nex         # train (about 3 minutes), writes model.json
 nex play.nex          # interactive word completion
 ```
@@ -51,8 +48,7 @@ too, but it is far too slow for training.
 | File | What it does |
 |---|---|
 | `helpers.nex` | Printing numbers neatly, and resolving file names given on the command line |
-| `vector_math.nex` | `dot`, `affine` (W·x + b), `add_scaled`, `tanh`, `softmax`, `argmax` |
-| `rng.nex` | `Rng`, a seedable random number generator with normal (Gaussian) numbers, and `shuffle` |
+| `vector_math.nex` | `dot`, `affine` (W·x + b), `add_scaled`, `softmax`, `argmax` |
 | `vocabulary.nex` | The 27 symbols: `.` (padding and end of word) and `a`..`z` |
 | `next_letter_model.nex` | The network: embeddings, hidden layer, softmax, forward pass, backpropagation, gradient-descent update, save and load |
 | `training_data.nex` | Turns words into training examples; cross-entropy loss and evaluation |
@@ -83,14 +79,14 @@ One-shot mode always takes the model's top choice:
 
 ```
 $ nex play.nex app thin walk qu
-         app -> apprate         (next letter: r 23%, e 19%, l 17%)
-        thin -> thing           (next letter: g 72%, e 5%, d 5%)
-        walk -> walking         (next letter: i 26%, e 24%, s 19%)
-          qu -> quint           (next letter: i 27%, a 23%, e 19%)
+         app -> appromers       (next letter: r 25%, l 17%, o 14%)
+        thin -> thing           (next letter: g 74%, e 5%, s 3%)
+        walk -> walked          (next letter: e 32%, s 25%, i 10%)
+          qu -> quarize         (next letter: a 38%, i 33%, e 16%)
 ```
 
 Always taking the top choice often produces word-like non-words
-("apprate"). Interactive mode, where you steer, works better.
+("appromers"). Interactive mode, where you steer, works better.
 
 ## Using `train.nex`
 
@@ -116,16 +112,16 @@ with Ctrl-C, you keep the model as of the last report.
 A default run on a 104,000-line system dictionary:
 
 ```
-57465 training words -> 533799 examples; 6384 validation words
+57465 training words -> 533432 examples; 6384 validation words
 model has 4083 parameters (context=4, emb=8, hidden=64)
-before training: val loss 3.297 (guessing uniformly would give 3.296)
+before training: val loss 3.305 (guessing uniformly would give 3.296)
 
-step   1000/20000  lr 0.300  train loss 2.526  val loss 2.392  val accuracy 27.5%  [   10s]
+step   1000/20000  lr 0.300  train loss 2.549  val loss 2.414  val accuracy 27.2%  [    9s]
 ...
-step  15000/20000  lr 0.300  train loss 2.255  val loss 2.212  val accuracy 31.2%  [  127s]
-step  16000/20000  lr 0.030  train loss 2.153  val loss 2.132  val accuracy 32.3%  [  138s]
+step  15000/20000  lr 0.300  train loss 2.242  val loss 2.216  val accuracy 32.2%  [  125s]
+step  16000/20000  lr 0.030  train loss 2.141  val loss 2.121  val accuracy 34.6%  [  133s]
 ...
-step  20000/20000  lr 0.030  train loss 2.130  val loss 2.118  val accuracy 33.1%  [  174s]
+step  20000/20000  lr 0.030  train loss 2.130  val loss 2.104  val accuracy 34.8%  [  166s]
 ```
 
 - **loss** is the average cross-entropy, `-ln(probability given to the right
@@ -197,8 +193,8 @@ Each step:
 - **It knows spelling patterns, not word frequency.** A dictionary lists
   "apple" once and "appraise" once, so the model doesn't know that "apple"
   is the more common word. Many more dictionary words start with "appr..."
-  and "appe..." than with "appl...", so `r` and `e` really are reasonable
-  guesses after "app".
+  and "appe..." than with "appl...", so `r` really is a reasonable guess
+  after "app".
 - **It can invent plausible non-words.** It learns what English words look
   like rather than memorizing a list. This is the same kind of behavior that
   makes large language models "hallucinate".

@@ -1751,6 +1751,7 @@
      (into {} (map (fn [[nex m]] [(str "builtin-method:Real:" nex) (d->d m)]))
            {"sqrt" "sqrt" "cbrt" "cbrt" "exp" "exp" "log" "log" "log10" "log10"
             "sin" "sin" "cos" "cos" "tan" "tan" "asin" "asin" "acos" "acos" "atan" "atan"
+            "sinh" "sinh" "cosh" "cosh" "tanh" "tanh"
             "to_radians" "toRadians" "to_degrees" "toDegrees" "sign" "signum"})
      (into {} (map (fn [[nex m]] [(str "builtin-method:Real:" nex) (dd->d m)]))
            {"power" "pow" "atan2" "atan2" "hypot" "hypot"})

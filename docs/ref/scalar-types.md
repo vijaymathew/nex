@@ -95,7 +95,7 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 | `abs` | none | `Integer` | Absolute value. |
 | `min` | `other: Integer` | `Integer` | Smaller of two values. |
 | `max` | `other: Integer` | `Integer` | Larger of two values. |
-| `pick` | none | `Integer` | Random integer in `[0, self)`. |
+| `pick` | none | `Integer` | Random integer in `[0, self)`. It cannot be seeded; for repeatable random numbers use [`math/Random`](math.md). |
 | `to_byte` | none | `Byte` | Convert to a `Byte`; raises unless the value is in `0..255`. |
 | `to_integer16` | none | `Integer16` | Convert to an `Integer16`; raises unless the value is in `-32768..32767`. |
 | `to_integer32` | none | `Integer32` | Convert to an `Integer32`; raises unless the value is in `-2147483648..2147483647`. |
@@ -320,6 +320,7 @@ by contrast, raises.)
 | `sin`, `cos`, `tan` | none | `Real` | Trigonometric functions of an angle in radians. |
 | `asin`, `acos`, `atan` | none | `Real` | Inverse trigonometric functions, in radians. |
 | `atan2` | `x: Real` | `Real` | `y.atan2(x)` is the angle of the point (`x`, `y`), in radians, `-PI..PI`. |
+| `sinh`, `cosh`, `tanh` | none | `Real` | Hyperbolic functions. `tanh` stays within `-1.0..1.0` and is exactly `1.0` or `-1.0` for large arguments, without overflowing. |
 | `to_radians` | none | `Real` | Degrees to radians. |
 | `to_degrees` | none | `Real` | Radians to degrees. |
 | `sign` | none | `Real` | `-1.0`, `0.0` or `1.0` by the value's sign (`-0.0` and `NaN` are returned unchanged). |

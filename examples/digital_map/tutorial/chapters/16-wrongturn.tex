@@ -107,7 +107,7 @@ second. The traveller knows where it really is: on the edge from
 -- navigator has someone to guide.
 
 intern Navigation
-intern Rng
+intern math/Random
 
 -- The traveller, moving along a path of nodes at the speed of each road.
 -- Usually the path is the navigator's route, but a traveller can take a
@@ -317,57 +317,11 @@ numbers, and to be able to repeat a run exactly (so that the pictures in
 this tutorial come out the same every time), the random numbers must come
 from a generator we can \emph{seed}: start from a chosen number, and get
 the same sequence every time.
-
-\begin{newfile}{rng.nex}
--- rng.nex: a small random number generator that can be seeded, for the
--- simulated GPS. With a seed, the "random" numbers are the same on every
--- run, so a simulated trip can be repeated exactly.
---
--- This is the Park-Miller "minimal standard" generator:
---     state := state * 48271 mod (2^31 - 1)
-
-class Rng
-create
-  make(seed: Integer) do
-    state := 1 + seed.abs % (MODULUS - 1)
-  end
-feature
-  MODULUS = 2147483647
-  MULTIPLIER = 48271
-
-  state: Integer
-
-  -- A real number spread evenly over the open interval (0, 1).
-  uniform(): Real
-  do
-    state := (state * MULTIPLIER) % MODULUS
-    result := state.to_real / MODULUS.to_real
-  ensure
-    open_interval: result > 0.0 and result < 1.0
-  end
-
-  -- A number from the standard normal ("bell curve") distribution, with
-  -- mean 0 and standard deviation 1, by the Box-Muller transform.
-  gauss(): Real do
-    let radius: Real := (-2.0 * uniform().log).sqrt
-    let angle: Real := 2.0 * Real.PI * uniform()
-    result := radius * angle.cos
-  end
-invariant
-  state_in_range: state >= 1 and state < MODULUS
-end
-\end{newfile}
-
-The generator multiplies its state by 48,271 and keeps the remainder after
-dividing by $2^{31} - 1$, a prime number. The result jumps about so
-thoroughly that it looks random, and dividing by the modulus gives a number
-between 0 and 1.
-
-The \emph{Box--Muller transform} turns two such evenly spread numbers,
-$u_1$ and $u_2$, into one from the bell curve: $\sqrt{-2\ln u_1}
-\cos(2\pi u_2)$. It is a neat piece of mathematics: picking a random angle,
-$2\pi u_2$, and a random distance, $\sqrt{-2\ln u_1}$, gives a point whose
-$x$ and $y$ both follow the bell curve. We use just the $x$.
+Nex's library has one: \code{Random}, which we load with
+\code{intern math/Random}. \code{create Random.with_seed(7)} makes a
+generator that starts from seed 7, and its \code{gaussian} method gives a
+number from the bell curve with mean 0 and standard deviation 1: most of
+the time between $-1$ and $1$, now and then further out.
 
 A fix is then the true position plus a normal error in each direction,
 four metres on average:
@@ -378,16 +332,16 @@ four metres on average:
 class Gps
 create
   make(seed: Integer, metres: Real) do
-    rng := create Rng.make(seed)
+    random := create Random.with_seed(seed)
     error := metres
   end
 feature
-  rng: Rng
+  random: Random
   -- The typical size of the error, in metres (its standard deviation).
   error: Real
 
   fix(truth: Point): Point do
-    result := truth + create Point.make(rng.gauss() * error, rng.gauss() * error)
+    result := truth + create Point.make(random.gaussian() * error, random.gaussian() * error)
   end
 end
 \end{append}

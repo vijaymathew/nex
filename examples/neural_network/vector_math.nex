@@ -89,18 +89,6 @@ do
   end
 end
 
--- The hyperbolic tangent, squashing any real number into (-1, 1).
--- Real has no tanh method, so we build it from exp:
---     tanh(v) = (e^2v - 1) / (e^2v + 1) = 1 - 2 / (e^2v + 1)
--- The second form is safe for large v: e^2v overflows to Infinity,
--- 2 / Infinity is 0, and the answer is exactly 1.
-function tanh(v: Real): Real
-do
-  result := 1.0 - 2.0 / ((2.0 * v).exp + 1.0)
-ensure
-  bounded: result >= -1.0 and result <= 1.0
-end
-
 -- Turn raw scores ("logits") into probabilities that sum to 1.
 -- Subtracting the largest score first changes nothing in the answer
 -- (it cancels between top and bottom), but it keeps exp from

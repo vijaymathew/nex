@@ -225,25 +225,23 @@ to continue it, one letter at a time:
 
 \begin{textout}
 start of word> app
-  app[r]   (23%)      others: e 19%, l 17%, o 15%, i 9%
+  app[r]   (25%)      others: l 17%, o 14%, e 13%, i 10%
   > l
-  appl[e]   (45%)      others: i 19%, a 13%, y 11%, o 8%
+  appl[e]   (48%)      others: i 22%, a 15%, y 7%, o 5%
   >
-  apple[a]   (21%)      others: s 18%, r 11%, end 7%, n 7%
+  apple[s]   (24%)      others: end 13%, t 12%, a 11%, d 9%
   > n
-  apple[s]   (18%)      others: a 21%, r 11%, end 7%, n 7%
+  apple   -> looks complete (13%)      others: s 24%, t 12%, a 11%, d 9%
   >
-  apples   -> looks complete (42%)      others: s 19%, t 15%, e 4%, h 4%
-  >
-  ==> apples
+  ==> apple
 \end{textout}
 
 After \code{app}, the program thinks \code{r} is the most likely next letter
-(23\%), with \code{e} and \code{l} close behind. We typed \code{l}
+(25\%), with \code{l} and \code{o} close behind. We typed \code{l}
 ourselves to steer it. After \code{appl} it is fairly sure about \code{e}
-(45\%), and we pressed Enter to accept. Then we asked for its second choice
-with \code{n}, and accepted \code{s}. Finally the model judged
-\code{apples} complete, and we agreed.
+(48\%), and we pressed Enter to accept. It then suggested \code{s}, for
+\code{apples}; we asked for its second choice with \code{n}, which was
+to end the word there, and accepted that.
 
 The thing making the suggestions is a \emph{neural network}: a few thousand
 numbers, arranged in a particular way, that started out random and were
@@ -325,9 +323,9 @@ numbers, of course.)
         long time.
 \end{itemize}
 
-No machine-learning library is used. Every multiplication, every
-derivative and even the random number generator is written out in Nex,
-in about 1,400 lines including comments and checks.
+No machine-learning library is used. Every multiplication and every
+derivative is written out in Nex, in about 1,200 lines including comments
+and checks.
 
 \section{The plan}
 
@@ -378,8 +376,7 @@ File & What it holds \\
 \midrule
 \code{helpers.nex} & Printing numbers neatly, and finding files \\
 \code{vocabulary.nex} & The 27 symbols the model knows \\
-\code{vector_math.nex} & Dot products, layers, tanh, softmax \\
-\code{rng.nex} & A random number generator \\
+\code{vector_math.nex} & Dot products, layers, softmax \\
 \code{next_letter_model.nex} & The neural network: forward pass, backpropagation, update \\
 \code{training_data.nex} & Training examples, the loss, and evaluation \\
 \code{checks.nex} & Automatic checks of everything, including the gradients \\
@@ -937,20 +934,6 @@ it responds smoothly.
 
 \subsection{A form that is safe to compute}
 
-The formula above has a practical problem. For $v = 1000$, $e^{1000}$ is
-far too big for a computer's floating-point numbers: it becomes
-\code{Infinity}, and $\infty/\infty$ is not a number at all. Let's rewrite
-the formula. Multiply the top and the bottom by $e^{v}$:
-\[
-  \tanh(v) = \frac{e^{2v} - 1}{e^{2v} + 1}
-           = \frac{(e^{2v} + 1) - 2}{e^{2v} + 1}
-           = 1 - \frac{2}{e^{2v} + 1}.
-\]
-The last form is safe. For large $v$, $e^{2v}$ becomes \code{Infinity},
-$2/\infty = 0$, and the answer is exactly $1$, which is correct. For very
-negative $v$, $e^{2v}$ becomes 0, and the answer is $1 - 2 = -1$, also
-correct.
-
 \subsection{The derivative}
 
 Training will need to know how fast $\tanh$ changes, which is its
@@ -979,35 +962,20 @@ $h = \tanh(v)$, the derivative costs one multiplication: $1 - h^2$.
 
 \section{The code}
 
-\code{Real} in Nex has \code{exp}, but no \code{tanh}, so we write it
-ourselves, using the safe form:
-
-\begin{append}{vector_math.nex}
--- The hyperbolic tangent, squashing any real number into (-1, 1).
--- Real has no tanh method, so we build it from exp:
---     tanh(v) = (e^2v - 1) / (e^2v + 1) = 1 - 2 / (e^2v + 1)
--- The second form is safe for large v: e^2v overflows to Infinity,
--- 2 / Infinity is 0, and the answer is exactly 1.
-function tanh(v: Real): Real
-do
-  result := 1.0 - 2.0 / ((2.0 * v).exp + 1.0)
-ensure
-  bounded: result >= -1.0 and result <= 1.0
-end
-\end{append}
+Nex's \code{Real} has \code{tanh} built in: \code{v.tanh}. It is careful
+at the extremes, where the formula above is not: for $v = 1000$, $e^{1000}$
+is far too big for a floating-point number, but \code{1000.0.tanh} is
+exactly 1.
 
 \begin{tryit}{try_tanh.nex}
-intern Vector_Math
-intern Helpers
-
 console.print_line("     v    tanh(v)   1 - tanh(v)^2")
 across [-3.0, -1.0, -0.1, 0.0, 0.1, 1.0, 3.0] as v do
-  let h: Real := tanh(v)
+  let h: Real := v.tanh
   console.print_line(v.format(1).pad_start(" ", 6) + h.format(4).pad_start(" ", 11)
     + (1.0 - h * h).format(4).pad_start(" ", 16))
 end
-console.print_line("tanh(1000)  = " + tanh(1000.0).to_string)
-console.print_line("tanh(-1000) = " + tanh(-1000.0).to_string)
+console.print_line("tanh(1000)  = " + 1000.0.tanh.to_string)
+console.print_line("tanh(-1000) = " + (-1000.0).tanh.to_string)
 \end{tryit}
 \tryoutput{try_tanh}
 
@@ -1077,8 +1045,9 @@ exactly the same:
   = \frac{e^{z_i}}{\sum_j e^{z_j}} ,
 \]
 because $e^{c}$ appears on the top and on every term of the bottom, and
-cancels. This matters for the same reason as with $\tanh$: $e^{z}$
-overflows to infinity once $z$ is bigger than about 709. So before taking
+cancels. This matters because $e^{z}$ is too big for a floating-point
+number once $z$ is bigger than about 709: it overflows to infinity, and
+infinity divided by infinity is not a number at all. So before taking
 exponentials, we subtract the largest score, $m = \max_j z_j$, from every
 score. Then the largest exponent is $e^0 = 1$, nothing can overflow, and
 the answer is unchanged.
@@ -1170,195 +1139,56 @@ updates, and stay identical forever. Randomness breaks the tie.) Training
 also picks examples at random. We want this randomness to be
 \emph{repeatable}: two runs with the same \emph{seed} should produce
 exactly the same ``random'' numbers, so that a result can be reproduced
-and a bug can be chased. So we write our own small random number
-generator.
+and a bug can be chased.
 
-\section{Uniform numbers: Park--Miller}
+Nex's library has such a generator, \code{Random}. A computer can't
+roll dice, so it keeps a hidden number, the \emph{state}, and updates it
+with a fixed formula every time we ask for a new number. The formula is
+chosen so that the numbers it produces look random. The seed is the
+state it starts from: the same seed gives the same numbers in the same
+order. These are called \emph{pseudo-random} numbers. After
+\code{intern math/Random}, \code{create Random.with_seed(42)} makes a
+generator with seed 42. It gives us the three kinds of numbers we need.
 
-The idea of a \emph{pseudo-random} generator is to keep a hidden number,
-the \emph{state}, and to update it with a fixed formula every time we want
-a new number. The formula is chosen so that the sequence of states looks
-random. One of the simplest good formulas is the Park--Miller ``minimal
-standard'' generator:
+\section{Uniform numbers}
 
-\begin{mathbox}[Park--Miller generator]
-\[
-  \text{state} \leftarrow (\text{state} \times 48271) \bmod M,
-  \qquad M = 2^{31} - 1 = 2147483647 .
-\]
-\end{mathbox}
-
-``$a \bmod M$'' is the remainder after dividing $a$ by $M$, written
-\texttt{a \% M} in Nex. Because $M$ is a prime number, and $48271$ is
-carefully chosen, the state runs through every number from 1 to $M-1$, in
-a scrambled order, before it repeats. It must never be 0, since 0 would
-stay 0 forever.
-
-There is one more thing to check. Nex's \code{Integer} has 64 bits, and
-arithmetic that goes past $2^{63}$ is an error, not a silent wrap-around.
-The state is always less than $M < 2^{31}$, and $48271 < 2^{16}$, so the
-product is less than $2^{47}$. It always fits.
-
-To get a real number between 0 and 1, divide the state by $M$. Since the
-state is between 1 and $M-1$, the result is strictly between 0 and 1,
-never exactly 0 or 1. (We will take its logarithm in a moment, and
-$\ln 0$ is $-\infty$, so this matters.)
-
-\begin{newfile}{rng.nex}
--- rng.nex: a small random number generator that can be seeded.
---
--- Neural networks start from random weights and learn from randomly
--- chosen examples. With a seed, the "random" numbers are the same on every
--- run, so a training run can be repeated exactly.
---
--- This is the Park-Miller "minimal standard" generator:
---     state := state * 48271 mod (2^31 - 1)
--- 2^31 - 1 is prime, and every state stays below it, so state * 48271 is
--- less than 2^47 and never overflows a 64-bit Integer.
-
-class Rng
-create
-  make(seed: Integer) do
-    -- Map any seed into the valid range 1 .. MODULUS - 1 (0 would stick).
-    state := 1 + seed.abs % (MODULUS - 1)
-  end
-feature
-  MODULUS = 2147483647
-  MULTIPLIER = 48271
-
-  state: Integer
-
-  -- A real number spread evenly over the open interval (0, 1).
-  uniform(): Real
-  do
-    state := (state * MULTIPLIER) % MODULUS
-    result := state.to_real / MODULUS.to_real
-  ensure
-    open_interval: result > 0.0 and result < 1.0
-  end
-
-invariant
-  state_in_range: state >= 1 and state < MODULUS
-end
-\end{newfile}
-
-The class invariant \code{state_in_range} is checked after the object is
-created and around every call to it, so a state of 0 could never sneak in.
+\code{random.uniform()} is a \code{Real} from 0 up to, but not including,
+1, every value equally likely. It is the raw material for everything else.
 
 \section{Whole numbers}
 
 To pick a random example out of $n$, we need a whole number from $0$ to
-$n-1$. Multiply a uniform number $u \in (0,1)$ by $n$ and round down:
-$\lfloor u\,n \rfloor$. Since $0 < u\,n < n$, the result is one of
-$0, 1, \dots, n-1$, each about equally likely.
+$n-1$: \code{random.below(n)}, each equally likely.
 
-\begin{addbefore}{rng.nex}{before the invariant}{invariant}
-  -- A whole number in 0 .. n - 1, each equally likely.
-  below(n: Integer): Integer
-  require
-    positive: n > 0
-  do
-    result := (uniform() * n.to_real).floor
-  ensure
-    in_range: result >= 0 and result < n
-  end
-\end{addbefore}
-
-\section{Bell-curve numbers: Box--Muller}
+\section{Bell-curve numbers}
 
 Starting weights are usually drawn from the \emph{normal distribution},
 the familiar bell curve: most values near 0, fewer and fewer further out.
 A \emph{standard} normal number has mean (average) 0 and standard
 deviation 1, which means that about 68\% of the values are between $-1$
 and $1$, and about 95\% are between $-2$ and $2$.
-
-The Box--Muller transform makes two standard normal numbers out of two
-uniform numbers $u_1, u_2 \in (0, 1)$:
-
-\begin{mathbox}[Box--Muller transform]
-\[
-  r = \sqrt{-2\ln u_1}, \qquad \theta = 2\pi u_2, \qquad
-  z_1 = r\cos\theta, \qquad z_2 = r\sin\theta .
-\]
-\end{mathbox}
-
-Why does this work? Picture a point $(z_1, z_2)$ whose two coordinates
-are independent standard normal numbers: a cloud of points, densest at the
-origin. The cloud is perfectly round, so the direction $\theta$ of a point
-is equally likely to be any angle: that is $2\pi u_2$. Its distance $r$
-from the origin is not uniform; a calculation in polar coordinates shows
-that $r^2$ follows the \emph{exponential} distribution with mean 2, and
-$-2\ln u_1$ is exactly how to make such a number from a uniform one. Then
-$r\cos\theta$ and $r\sin\theta$ turn the polar coordinates back into
-$z_1$ and $z_2$.
-
-The transform gives two numbers at a time. We return the first and keep
-the second, the \emph{spare}, for the next call:
-
-\begin{addbefore}{rng.nex}{before the invariant}{invariant}
-  -- Box-Muller (below) makes normal numbers in pairs; this holds the
-  -- second one until it is asked for.
-  has_spare: Boolean
-  spare: Real
-
-  -- A number from the standard normal ("bell curve") distribution, with
-  -- mean 0 and standard deviation 1, by the Box-Muller transform: two
-  -- uniform numbers u1, u2 give two independent normal numbers
-  --     sqrt(-2 ln u1) * cos(2 pi u2)   and   sqrt(-2 ln u1) * sin(2 pi u2)
-  gauss(): Real do
-    if has_spare then
-      has_spare := false
-      result := spare
-    else
-      let radius: Real := (-2.0 * uniform().log).sqrt
-      let angle: Real := 2.0 * Real.PI * uniform()
-      spare := radius * angle.sin
-      has_spare := true
-      result := radius * angle.cos
-    end
-  end
-\end{addbefore}
+\code{random.gaussian()} gives one. (The normal distribution is also
+called the Gaussian, after Carl Friedrich Gauss.) For a spread other than
+1, multiply: \code{random.gaussian() * 0.1} has standard deviation 0.1.
 
 \section{Shuffling}
 
-Finally, we need to shuffle a list: to split words fairly into a training
-set and a test set. The \emph{Fisher--Yates} shuffle walks from the last
-position to the first, and swaps the element at each position $i$ with a
-randomly chosen element at a position $j$ from $0$ to $i$ (possibly $i$
-itself). The last position gets each of the $n$ elements with equal
-chance, the one before it gets each of the remaining $n-1$, and so on, so
-each of the $n!$ possible orders is equally likely.
+Finally, we need to shuffle a list, to split words fairly into a training
+set and a test set. \code{shuffle(items, random)}, which comes with
+\code{Random}, puts the elements of an array in a random order, every
+order equally likely. It works on an array of anything, words or training
+examples.
 
-The function is \emph{generic}: \code{[T]} means it works on an array of
-anything, words or training examples. (Nex allows generic functions but
-not generic methods, so it is a function that takes the generator as an
-argument.)
+Let's try them all, and check that the bell curve has the shape it
+should:
 
-\begin{append}{rng.nex}
--- Shuffle an array in place (Fisher-Yates): walk from the end, swapping
--- each element with a randomly chosen one at or before it.
-function shuffle[T](rng: Rng, items: Array[T]) do
-  from
-    let i: Integer := items.length - 1
-  until
-    i <= 0
-  do
-    let j: Integer := rng.below(i + 1)
-    let tmp: T := items.get(i)
-    items.set(i, items.get(j))
-    items.set(j, tmp)
-    i := i - 1
-  end
-end
-\end{append}
-
-\begin{tryit}{try_rng.nex}
-intern Rng
+\begin{tryit}{try_random.nex}
+intern math/Random
 intern Helpers
 
-let rng: Rng := create Rng.make(42)
-console.print_line("uniform: " + rng.uniform().format(4) + " " + rng.uniform().format(4))
-console.print_line("below(10): " + rng.below(10).to_string + " " + rng.below(10).to_string)
+let random: Random := create Random.with_seed(42)
+console.print_line("uniform: " + random.uniform().format(4) + " " + random.uniform().format(4))
+console.print_line("below(10): " + random.below(10).to_string + " " + random.below(10).to_string)
 
 -- Draw many normal numbers and measure their mean and spread.
 let n: Integer := 100000
@@ -1366,7 +1196,7 @@ let total: Real := 0.0
 let squares: Real := 0.0
 let within_one: Integer := 0
 repeat n do
-  let z: Real := rng.gauss()
+  let z: Real := random.gaussian()
   total := total + z
   squares := squares + z * z
   if z.abs < 1.0 then
@@ -1379,12 +1209,12 @@ console.print_line("mean " + mean.format(3) + ", standard deviation "
   + ", within 1 of the mean: " + percent(within_one.to_real / n.to_real))
 
 let words: Array[String] := ["one", "two", "three", "four", "five"]
-shuffle(rng, words)
+shuffle(words, random)
 console.print_line("shuffled: " + words.to_string)
-let again: Rng := create Rng.make(42)
+let again: Random := create Random.with_seed(42)
 console.print_line("same seed again: " + again.uniform().format(4))
 \end{tryit}
-\tryoutput{try_rng}
+\tryoutput{try_random}
 
 The normal numbers have mean close to 0, standard deviation close to 1,
 and about 68\% of them fall within 1 of the mean, as the bell curve
@@ -1508,7 +1338,7 @@ wrong number of rows is caught immediately.
 
 intern Vector_Math
 intern Vocabulary
-intern Rng
+intern math/Random
 intern data/Json
 intern io/Path
 
@@ -1525,20 +1355,20 @@ create
     this.hidden := hidden
 
     -- Parameters: learned during training. They start out random.
-    let rng: Rng := create Rng.make(seed)
+    let random: Random := create Random.with_seed(seed)
     let n_in: Integer := context * emb_dim
 
     -- C: one embedding row per symbol.
-    c := random_matrix(rng, Vocabulary.SIZE, emb_dim, 1.0)
+    c := random_matrix(random, Vocabulary.SIZE, emb_dim, 1.0)
 
     -- W1, b1: the hidden layer. Scaling by 1/sqrt(n_in) keeps W1·x
     -- small at the start, where tanh is not yet flat.
-    w1 := random_matrix(rng, hidden, n_in, 1.0 / n_in.to_real.sqrt)
+    w1 := random_matrix(random, hidden, n_in, 1.0 / n_in.to_real.sqrt)
     b1 := zeros(hidden)
 
     -- W2, b2: the output layer. Tiny weights make every symbol start
     -- out about equally likely: an honest "I know nothing yet".
-    w2 := random_matrix(rng, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
+    w2 := random_matrix(random, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
     b2 := zeros(Vocabulary.SIZE)
   end
 
@@ -1569,12 +1399,12 @@ a scale:
 
 \begin{append}{next_letter_model.nex}
 -- A rows x cols matrix of normal random numbers, each times `scale`.
-function random_matrix(rng: Rng, rows, cols: Integer, scale: Real): Array[Array[Real]]
+function random_matrix(random: Random, rows, cols: Integer, scale: Real): Array[Array[Real]]
 do
   repeat rows do
     let row: Array[Real] := []
     repeat cols do
-      row.add(rng.gauss() * scale)
+      row.add(random.gaussian() * scale)
     end
     result.add(row)
   end
@@ -1681,7 +1511,7 @@ output layer and softmax.
     -- 2. Hidden layer: h = tanh(W1·x + b1).
     let h: Array[Real] := []
     across affine(w1, x, b1) as v do
-      h.add(tanh(v))
+      h.add(v.tanh)
     end
 
     -- 3. Output layer: one score per symbol, then softmax.
@@ -2476,7 +2306,7 @@ passes and failures:
 
 intern Vector_Math
 intern Vocabulary
-intern Rng
+intern math/Random
 intern Next_Letter_Model
 intern Training_Data
 intern Helpers
@@ -2537,30 +2367,12 @@ let s: Array[Real] := softmax([1.0, 2.0, 3.0])
 c.close_to("softmax sums to 1", 1.0, sum(s), 1.0e-12)
 c.close_to("softmax[2]", 0.6652409557748219, s.get(2), 1.0e-12)
 c.close_to("softmax of huge scores", 0.5, softmax([1000.0, 1000.0]).get(0), 1.0e-12)
-c.close_to("tanh(0.5)", 0.46211715726000974, tanh(0.5), 1.0e-12)
-c.close_to("tanh(100)", 1.0, tanh(100.0), 0.0)
-c.close_to("tanh(-100)", -1.0, tanh(-100.0), 0.0)
 c.check("argmax", argmax([0.1, 0.7, 0.2]) = 1)
 c.check("vector_text", vector_text([0.5, -0.0499, 1.0 / 3.0], 2) = "[0.50, -0.05, 0.33]")
 c.check("percent", percent(0.257) = "26%")
 \end{addbefore}
 
 \begin{addbefore}{checks.nex}{before the summary}{c.summary()}
--- Random numbers
-let rng: Rng := create Rng.make(42)
-let mean: Real := 0.0
-let square: Real := 0.0
-repeat 20000 do
-  let z: Real := rng.gauss()
-  mean := mean + z / 20000.0
-  square := square + z * z / 20000.0
-end
-c.close_to("gauss mean", 0.0, mean, 0.03)
-c.close_to("gauss variance", 1.0, square - mean * mean, 0.05)
-let r1: Rng := create Rng.make(7)
-let r2: Rng := create Rng.make(7)
-c.check("same seed, same numbers", r1.uniform() = r2.uniform())
-
 -- Vocabulary
 c.check("symbol_id", symbol_id(".") = 0 and symbol_id("a") = 1 and symbol_id("z") = 26)
 c.check("symbol_at", symbol_at(16) = "p")
@@ -2958,7 +2770,7 @@ with the interns, and a class that holds the settings:
 
 intern Vector_Math
 intern Vocabulary
-intern Rng
+intern math/Random
 intern Next_Letter_Model
 intern Training_Data
 intern Helpers
@@ -3045,7 +2857,7 @@ array, and \code{drop(n)} all the others.
 \begin{append}{train.nex}
 function main() do
   let opts: Options := create Options.from_command_line(program.arguments)
-  let rng: Rng := create Rng.make(opts.seed)
+  let random: Random := create Random.with_seed(opts.seed)
 
   let words_path: Path := create Path.make(user_path(opts.words))
   if not words_path.exists() then
@@ -3061,7 +2873,7 @@ function main() do
 
   -- Hold back 10% of the WORDS for validation. Then we measure how well
   -- the model does on words it has never seen.
-  shuffle(rng, words)
+  shuffle(words, random)
   let n_val: Integer := words.length / 10
   let val_words: Array[String] := words.take(n_val)
   let train_words: Array[String] := words.drop(n_val)
@@ -3076,7 +2888,7 @@ which is close enough.
   let train: Array[Example] := make_examples(train_words, opts.context)
   let val: Array[Example] := make_examples(val_words, opts.context)
   -- Evaluating on 3000 random validation examples is quick and close enough.
-  shuffle(rng, val)
+  shuffle(val, random)
   let val_sample: Array[Example] := val.take(3000)
 
   let model: Next_Letter_Model :=
@@ -3127,7 +2939,7 @@ end}, an \code{if} that gives a value.
     -- stochastic gradient descent.
     let grads: Gradients := create Gradients.make(model)
     repeat opts.batch do
-      let ex: Example := train.get(rng.below(train.length))
+      let ex: Example := train.get(random.below(train.length))
       let fp: Forward_Pass := model.forward(ex.ids)                     -- forward
       running_loss := running_loss + cross_entropy(fp.probs, ex.target) -- loss
       model.backward(fp, ex.target, grads)                              -- backprop
@@ -3184,21 +2996,21 @@ nex train.nex
 \end{shell}
 
 \begin{textout}
-57465 training words -> 533799 examples; 6384 validation words
+57465 training words -> 533432 examples; 6384 validation words
 model has 4083 parameters (context=4, emb=8, hidden=64)
-before training: val loss 3.297 (guessing uniformly would give 3.296)
+before training: val loss 3.305 (guessing uniformly would give 3.296)
 
-step   1000/20000  lr 0.300  train loss 2.526  val loss 2.392  val accuracy 27.5%  [   10s]
-step   2000/20000  lr 0.300  train loss 2.371  val loss 2.328  val accuracy 28.8%  [   17s]
-step   3000/20000  lr 0.300  train loss 2.345  val loss 2.280  val accuracy 29.0%  [   25s]
+step   1000/20000  lr 0.300  train loss 2.549  val loss 2.414  val accuracy 27.2%  [    9s]
+step   2000/20000  lr 0.300  train loss 2.380  val loss 2.374  val accuracy 26.2%  [   17s]
+step   3000/20000  lr 0.300  train loss 2.336  val loss 2.311  val accuracy 29.2%  [   25s]
 ...
-step  14000/20000  lr 0.300  train loss 2.233  val loss 2.218  val accuracy 29.8%  [  118s]
-step  15000/20000  lr 0.300  train loss 2.255  val loss 2.212  val accuracy 31.2%  [  127s]
-step  16000/20000  lr 0.030  train loss 2.153  val loss 2.132  val accuracy 32.3%  [  138s]
-step  17000/20000  lr 0.030  train loss 2.134  val loss 2.128  val accuracy 32.7%  [  148s]
-step  18000/20000  lr 0.030  train loss 2.126  val loss 2.121  val accuracy 32.9%  [  157s]
-step  19000/20000  lr 0.030  train loss 2.143  val loss 2.123  val accuracy 32.9%  [  166s]
-step  20000/20000  lr 0.030  train loss 2.130  val loss 2.118  val accuracy 33.1%  [  174s]
+step  14000/20000  lr 0.300  train loss 2.232  val loss 2.223  val accuracy 31.8%  [  117s]
+step  15000/20000  lr 0.300  train loss 2.242  val loss 2.216  val accuracy 32.2%  [  125s]
+step  16000/20000  lr 0.030  train loss 2.141  val loss 2.121  val accuracy 34.6%  [  133s]
+step  17000/20000  lr 0.030  train loss 2.140  val loss 2.116  val accuracy 34.1%  [  141s]
+step  18000/20000  lr 0.030  train loss 2.143  val loss 2.111  val accuracy 34.3%  [  150s]
+step  19000/20000  lr 0.030  train loss 2.125  val loss 2.113  val accuracy 34.6%  [  158s]
+step  20000/20000  lr 0.030  train loss 2.130  val loss 2.104  val accuracy 34.8%  [  166s]
 
 saved to model.json. Try:  nex play.nex
 \end{textout}
@@ -3212,16 +3024,16 @@ saved to model.json. Try:  nex play.nex
   legend style={draw=none, font=\small, at={(0.97,0.97)}, anchor=north east},
   tick label style={font=\footnotesize}, label style={font=\small}]
   \addplot[thick, accent, mark=*, mark size=1.3pt] coordinates {
-    (1000,2.392) (2000,2.328) (3000,2.280) (4000,2.254) (5000,2.277)
-    (6000,2.296) (7000,2.261) (8000,2.255) (9000,2.236) (10000,2.267)
-    (11000,2.221) (12000,2.234) (13000,2.251) (14000,2.218) (15000,2.212)
-    (16000,2.132) (17000,2.128) (18000,2.121) (19000,2.123) (20000,2.118)};
+    (1000,2.414) (2000,2.374) (3000,2.311) (4000,2.301) (5000,2.279)
+    (6000,2.269) (7000,2.263) (8000,2.270) (9000,2.228) (10000,2.245)
+    (11000,2.222) (12000,2.242) (13000,2.237) (14000,2.223) (15000,2.216)
+    (16000,2.121) (17000,2.116) (18000,2.111) (19000,2.113) (20000,2.104)};
   \addlegendentry{validation loss}
   \addplot[thick, st!70!black, dashed, mark=o, mark size=1.3pt] coordinates {
-    (1000,2.526) (2000,2.371) (3000,2.345) (4000,2.317) (5000,2.293)
-    (6000,2.292) (7000,2.270) (8000,2.263) (9000,2.264) (10000,2.250)
-    (11000,2.254) (12000,2.243) (13000,2.242) (14000,2.233) (15000,2.255)
-    (16000,2.153) (17000,2.134) (18000,2.126) (19000,2.143) (20000,2.130)};
+    (1000,2.549) (2000,2.380) (3000,2.336) (4000,2.310) (5000,2.294)
+    (6000,2.289) (7000,2.269) (8000,2.261) (9000,2.261) (10000,2.244)
+    (11000,2.265) (12000,2.236) (13000,2.253) (14000,2.232) (15000,2.242)
+    (16000,2.141) (17000,2.140) (18000,2.143) (19000,2.125) (20000,2.130)};
   \addlegendentry{training loss}
   \draw[gray, dotted, thick] (axis cs:15000,2.0) -- (axis cs:15000,2.6);
   \node[font=\footnotesize, anchor=south west, text=cm] at (axis cs:15200,2.42) {learning rate $\div 10$};
@@ -3232,11 +3044,11 @@ saved to model.json. Try:  nex play.nex
 How to read this:
 \begin{itemize}
   \item \textbf{The loss falls fast, then slowly.} From 3.30 (knowing
-    nothing) to 2.39 within the first thousand steps, and then only slowly
-    to 2.21 by step 15000, bouncing up and down because every minibatch is
+    nothing) to 2.41 within the first thousand steps, and then only slowly
+    to 2.22 by step 15000, bouncing up and down because every minibatch is
     different.
   \item \textbf{The learning-rate drop helps at once.} At step 16000, just
-    after the drop, the loss falls from about 2.21 to 2.13: the smaller
+    after the drop, the loss falls from about 2.22 to 2.12: the smaller
     steps settle into the valley instead of bouncing around in it.
   \item \textbf{No overfitting.} The training and validation losses stay
     close together all the way. With 4083 parameters and over half a
@@ -3244,10 +3056,10 @@ How to read this:
     learn general spelling patterns. In fact a model this small is more
     likely \emph{underfitting}: too small to capture everything there is
     to learn. Try \code{--hidden 128}.
-  \item \textbf{What the numbers mean.} The final loss of 2.12 is a
-    perplexity of $e^{2.12}\approx 8.3$: on average, the model is about as
+  \item \textbf{What the numbers mean.} The final loss of 2.10 is a
+    perplexity of $e^{2.10}\approx 8.2$: on average, the model is about as
     unsure as if it were choosing among 8 equally likely symbols, instead
-    of 27. Its top guess is right 33\% of the time, against 3.7\% for
+    of 27. Its top guess is right 35\% of the time, against 3.7\% for
     guessing. That might sound low, but even a perfect model would be far
     from 100\%: after \code{app}, both \code{l} (apple) and \code{r}
     (approve) are right for some words.
@@ -3571,9 +3383,9 @@ With the model trained in the previous chapter:
 
 \runoutput{play.nex app thin walk qu}{play_oneshot}
 
-After \code{thin}, the model is 72\% sure of \code{g}, and then sure that
-\code{thing} is complete. After \code{walk}, it suggests \code{walking}.
-But \code{app} became \code{apprate} and \code{qu} became \code{quint}:
+After \code{thin}, the model is 74\% sure of \code{g}, and then sure that
+\code{thing} is complete. After \code{walk}, it suggests \code{walked}.
+But \code{app} became \code{appromers} and \code{qu} became \code{quarize}:
 always taking the top choice tends to produce plausible-looking words
 that are not quite real, or are not the ones you meant. The interactive
 mode, where you steer, works much better:
@@ -3584,17 +3396,15 @@ nex play.nex
 
 \begin{textout}
 start of word> app
-  app[r]   (23%)      others: e 19%, l 17%, o 15%, i 9%
+  app[r]   (25%)      others: l 17%, o 14%, e 13%, i 10%
   > l
-  appl[e]   (45%)      others: i 19%, a 13%, y 11%, o 8%
+  appl[e]   (48%)      others: i 22%, a 15%, y 7%, o 5%
   >
-  apple[a]   (21%)      others: s 18%, r 11%, end 7%, n 7%
+  apple[s]   (24%)      others: end 13%, t 12%, a 11%, d 9%
   > n
-  apple[s]   (18%)      others: a 21%, r 11%, end 7%, n 7%
+  apple   -> looks complete (13%)      others: s 24%, t 12%, a 11%, d 9%
   >
-  apples   -> looks complete (42%)      others: s 19%, t 15%, e 4%, h 4%
-  >
-  ==> apples
+  ==> apple
 \end{textout}
 
 Why does the model prefer \code{r} after \code{app}, when \code{apple} is
@@ -3713,14 +3523,12 @@ $[i = t]$ is 1 if $i = t$ and 0 otherwise.
 
 \begin{mathbox}[Useful facts]
 \begin{align*}
-  \tanh(v) &= 1 - \frac{2}{e^{2v}+1}, \quad \tanh'(v) = 1 - \tanh^2(v) \\
+  \tanh(v) &= \frac{e^{v} - e^{-v}}{e^{v} + e^{-v}}, \quad \tanh'(v) = 1 - \tanh^2(v) \\
   \operatorname{softmax}(\vect{z} + c) &= \operatorname{softmax}(\vect{z}) \\
   \operatorname{Var}\Bigl(\sum_{j=1}^{n} w_j x_j\Bigr) &= n\,\sigma_w^2\,\sigma_x^2
      \quad\text{(independent, mean 0), so use } \sigma_w = 1/\sqrt{n} \\
   \text{know-nothing loss} &= \ln 27 \approx 3.296, \quad
-  \text{perplexity} = e^{L} \\
-  \text{Box--Muller:}\quad z &= \sqrt{-2\ln u_1}\,\cos(2\pi u_2) \\
-  \text{Park--Miller:}\quad \text{state} &\leftarrow 48271\cdot\text{state} \bmod (2^{31}-1)
+  \text{perplexity} = e^{L}
 \end{align*}
 \end{mathbox}
 
@@ -3742,7 +3550,6 @@ Class invariants & \code{invariant state_in_range: ...} \\
 \code{rescue} and \code{exception} & catching a contract violation in a try-it script \\
 \code{when ... then ... else ... end} & an \code{if} that gives a value \\
 Loops & \code{from ... until ... do ... end}, \code{repeat n do}, \code{across xs as x do} \\
-Generic functions & \code{shuffle[T](rng: Rng, items: Array[T])} \\
 Several constructors & \code{make} and \code{from_file} \\
 Anonymous functions & \code{fn(a, b: Prediction): Integer do ... end} for \code{sort} \\
 \code{convert} & narrowing an \code{Any} from JSON to \code{Integer}, \code{Real}, \code{Array[Any]} \\
@@ -3750,7 +3557,7 @@ Detachable types, object test & \code{?String}, \code{if ?line as text then} \\
 \code{case ... of} & matching option names in \code{train.nex} \\
 Built-in \code{Real} methods & \code{format} for printing, \code{round}, \code{log}, \code{sqrt} \\
 Built-in \code{String} methods & \code{pad_start}, \code{pad_end}, \code{replicate}, \code{join}, \code{substring}, \code{trim} \\
-Libraries & \code{data/Json}, \code{text/Regex}, \code{io/Path}, \code{time/Date_Time}, \code{console}, \code{program} \\
+Libraries & \code{data/Json}, \code{math/Random}, \code{text/Regex}, \code{io/Path}, \code{time/Date_Time}, \code{console}, \code{program} \\
 \bottomrule
 \end{tabular}
 \end{center}

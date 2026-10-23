@@ -36,9 +36,6 @@
     Priority $f(n) = g(n) + h(n)$; the route is the cheapest when $h$
     never overestimates. $h = $ straight-line distance (for distance), or
     straight-line distance / top speed (for time).
-  \item[Box--Muller]
-    $z = \sqrt{-2\ln u_1}\,\cos(2\pi u_2)$ is normal when $u_1, u_2$ are
-    uniform on $(0, 1)$.
 \end{description}
 
 % ===========================================================================
@@ -85,4 +82,6 @@ fully in the Nex documentation.
   \item[\code{graphics/Canvas}] draws in our own coordinates, saves PNG
     files, and runs a window with double buffering, the mouse and the
     keyboard.
+  \item[\code{math/Random}] makes repeatable random numbers from a seed;
+    \code{gaussian} gives them the bell-curve shape of GPS errors.
 \end{description}

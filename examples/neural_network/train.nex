@@ -14,7 +14,7 @@
 
 intern Vector_Math
 intern Vocabulary
-intern Rng
+intern math/Random
 intern Next_Letter_Model
 intern Training_Data
 intern Helpers
@@ -81,7 +81,7 @@ end
 
 function main() do
   let opts: Options := create Options.from_command_line(program.arguments)
-  let rng: Rng := create Rng.make(opts.seed)
+  let random: Random := create Random.with_seed(opts.seed)
 
   let words_path: Path := create Path.make(user_path(opts.words))
   if not words_path.exists() then
@@ -97,7 +97,7 @@ function main() do
 
   -- Hold back 10% of the WORDS for validation. Then we measure how well
   -- the model does on words it has never seen.
-  shuffle(rng, words)
+  shuffle(words, random)
   let n_val: Integer := words.length / 10
   let val_words: Array[String] := words.take(n_val)
   let train_words: Array[String] := words.drop(n_val)
@@ -105,7 +105,7 @@ function main() do
   let train: Array[Example] := make_examples(train_words, opts.context)
   let val: Array[Example] := make_examples(val_words, opts.context)
   -- Evaluating on 3000 random validation examples is quick and close enough.
-  shuffle(rng, val)
+  shuffle(val, random)
   let val_sample: Array[Example] := val.take(3000)
 
   let model: Next_Letter_Model :=
@@ -139,7 +139,7 @@ function main() do
     -- stochastic gradient descent.
     let grads: Gradients := create Gradients.make(model)
     repeat opts.batch do
-      let ex: Example := train.get(rng.below(train.length))
+      let ex: Example := train.get(random.below(train.length))
       let fp: Forward_Pass := model.forward(ex.ids)                     -- forward
       running_loss := running_loss + cross_entropy(fp.probs, ex.target) -- loss
       model.backward(fp, ex.target, grads)                              -- backprop

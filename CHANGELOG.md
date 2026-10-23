@@ -48,6 +48,14 @@
   `"2.500"`, `0.00012.format(5)` is `"0.00012"`. It rounds like `to_fixed`
   (halves away from zero). The digital map and neural network examples use
   it instead of their own `fixed` helper.
+- **New library `math/Random`** for pseudo-random numbers that can be
+  repeated from a seed: `create Random.with_seed(42)` (or `make` for
+  different numbers every run), with `uniform`, `below`, `between` and
+  `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
+  same numbers on both backends. The digital map and neural network examples
+  use it instead of their own generator.
+- **New `Real` methods `sinh`, `cosh` and `tanh`.** `tanh` never overflows:
+  `1000.0.tanh` is exactly `1.0`.
 - **Fixed: under `--interpret`, a `let` inside an `if` branch overwrote an
   outer variable of the same name** instead of hiding it until the branch
   ended. Each branch now has its own scope, as on the compiled backend.

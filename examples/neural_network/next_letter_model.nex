@@ -11,7 +11,7 @@
 
 intern Vector_Math
 intern Vocabulary
-intern Rng
+intern math/Random
 intern data/Json
 intern io/Path
 
@@ -76,20 +76,20 @@ create
     this.hidden := hidden
 
     -- Parameters: learned during training. They start out random.
-    let rng: Rng := create Rng.make(seed)
+    let random: Random := create Random.with_seed(seed)
     let n_in: Integer := context * emb_dim
 
     -- C: one embedding row per symbol.
-    c := random_matrix(rng, Vocabulary.SIZE, emb_dim, 1.0)
+    c := random_matrix(random, Vocabulary.SIZE, emb_dim, 1.0)
 
     -- W1, b1: the hidden layer. Scaling by 1/sqrt(n_in) keeps W1·x
     -- small at the start, where tanh is not yet flat.
-    w1 := random_matrix(rng, hidden, n_in, 1.0 / n_in.to_real.sqrt)
+    w1 := random_matrix(random, hidden, n_in, 1.0 / n_in.to_real.sqrt)
     b1 := zeros(hidden)
 
     -- W2, b2: the output layer. Tiny weights make every symbol start
     -- out about equally likely: an honest "I know nothing yet".
-    w2 := random_matrix(rng, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
+    w2 := random_matrix(random, Vocabulary.SIZE, hidden, 0.1 / hidden.to_real.sqrt)
     b2 := zeros(Vocabulary.SIZE)
   end
 
@@ -154,7 +154,7 @@ feature
     -- 2. Hidden layer: h = tanh(W1·x + b1).
     let h: Array[Real] := []
     across affine(w1, x, b1) as v do
-      h.add(tanh(v))
+      h.add(v.tanh)
     end
 
     -- 3. Output layer: one score per symbol, then softmax.
@@ -301,12 +301,12 @@ invariant
 end
 
 -- A rows x cols matrix of normal random numbers, each times `scale`.
-function random_matrix(rng: Rng, rows, cols: Integer, scale: Real): Array[Array[Real]]
+function random_matrix(random: Random, rows, cols: Integer, scale: Real): Array[Array[Real]]
 do
   repeat rows do
     let row: Array[Real] := []
     repeat cols do
-      row.add(rng.gauss() * scale)
+      row.add(random.gaussian() * scale)
     end
     result.add(row)
   end

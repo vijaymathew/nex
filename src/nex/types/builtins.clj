@@ -1049,6 +1049,9 @@
    "power"             ^{:signatures [{:params [{:name "exponent" :type "Real"}] :return-type "Real"}]}
    (fn [n exponent & _] (Math/pow (double n) (double exponent)))
    "sin"               (real-fn Math/sin)
+   "sinh"              (real-fn Math/sinh)
+   "cosh"              (real-fn Math/cosh)
+   "tanh"              (real-fn Math/tanh)
    "cos"               (real-fn Math/cos)
    "tan"               (real-fn Math/tan)
    "asin"              (real-fn Math/asin)

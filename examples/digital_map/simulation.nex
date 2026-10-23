@@ -2,7 +2,7 @@
 -- navigator has someone to guide.
 
 intern Navigation
-intern Rng
+intern math/Random
 
 -- The traveller, moving along a path of nodes at the speed of each road.
 -- Usually the path is the navigator's route, but a traveller can take a
@@ -179,16 +179,16 @@ end
 class Gps
 create
   make(seed: Integer, metres: Real) do
-    rng := create Rng.make(seed)
+    random := create Random.with_seed(seed)
     error := metres
   end
 feature
-  rng: Rng
+  random: Random
   -- The typical size of the error, in metres (its standard deviation).
   error: Real
 
   fix(truth: Point): Point do
-    result := truth + create Point.make(rng.gauss() * error, rng.gauss() * error)
+    result := truth + create Point.make(random.gaussian() * error, random.gaussian() * error)
   end
 end
 

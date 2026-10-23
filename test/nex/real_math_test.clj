@@ -149,3 +149,12 @@
            (both "let s: String := \"x = \" + 1.25.format(1)"
                  "console.print_line(s)"))))
   (is (raises-on-both? "print(1.5.format(-1))" "Real.format: places must be >= 0, got -1")))
+
+(deftest hyperbolic
+  (is (= ["0.46211715726000974" "1.0" "-1.0" "0.0" "1.0" "true"]
+         (both "print(0.5.tanh)"
+               "print(100.0.tanh)"
+               "print((-100.0).tanh)"
+               "print(0.0.sinh)"
+               "print(0.0.cosh)"
+               "print((1.0.cosh * 1.0.cosh - 1.0.sinh * 1.0.sinh - 1.0).abs < 1.0e-12)"))))
