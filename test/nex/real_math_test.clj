@@ -129,3 +129,23 @@
                  "print(n)"
                  "let r: Real := 2.0.sqrt * 2.0.sqrt"
                  "print((r - 2.0).abs < 1.0e-12)")))))
+
+(deftest format-as-text
+  (testing "exactly `places` digits, never E notation, halves away from zero"
+    (is (= ["\"2.500\"" "\"4\"" "\"-4\"" "\"0.00012\"" "\"12345678.9\""
+            "\"0.00\"" "\"2.68\"" "\"NaN\"" "\"Infinity\"" "\"-Infinity\""]
+           (both "print(2.5.format(3))"
+                 "print(3.5.format(0))"
+                 "print((-3.5).format(0))"
+                 "print(0.00012.format(5))"
+                 "print(12345678.9.format(1))"
+                 "print((-0.004).format(2))"
+                 "print(2.675.format(2))"
+                 "print((0.0 / 0.0).format(2))"
+                 "print((1.0 / 0.0).format(2))"
+                 "print((-1.0 / 0.0).format(2))"))))
+  (testing "the result is a String"
+    (is (= ["x = 1.3"]
+           (both "let s: String := \"x = \" + 1.25.format(1)"
+                 "console.print_line(s)"))))
+  (is (raises-on-both? "print(1.5.format(-1))" "Real.format: places must be >= 0, got -1")))

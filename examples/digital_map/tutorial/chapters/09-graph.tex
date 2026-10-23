@@ -297,7 +297,7 @@ across [driving, walking] as g do
   across g.edges_from(crossing) as e do
     console.print_line("  to node " + e.target.to_string.pad_end(" ", 4) + " along " + e.road.name
       + ", " + bearing(island.point(e.source), island.point(e.target)).round.to_string
-      + " degrees, " + fixed(e.length, 0) + " m, " + fixed(e.seconds, 1) + " s")
+      + " degrees, " + e.length.format(0) + " m, " + e.seconds.format(1) + " s")
   end
 end
 \end{tryit}

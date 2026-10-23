@@ -43,6 +43,11 @@
 - **`Picture.grayscale` is about a thousand times faster**, done by one
   Java2D operation instead of a call per pixel, with exactly the same result
   (checked against all 16,777,216 colors).
+- **New `Real.format(places)`** gives the number as text with exactly that
+  many digits after the point, never in E notation: `2.5.format(3)` is
+  `"2.500"`, `0.00012.format(5)` is `"0.00012"`. It rounds like `to_fixed`
+  (halves away from zero). The digital map and neural network examples use
+  it instead of their own `fixed` helper.
 - **Fixed: under `--interpret`, a `let` inside an `if` branch overwrote an
   outer variable of the same name** instead of hiding it until the branch
   ended. Each branch now has its own scope, as on the compiled backend.

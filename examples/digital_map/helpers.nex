@@ -1,21 +1,5 @@
--- helpers.nex: printing numbers, distances and times neatly, and finding
--- the user's files.
-
--- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
--- is "2.500".
-function fixed(r: Real, places: Integer): String
-require
-  non_negative: places >= 0
-do
-  let scale: Integer := 10 ^ places
-  let scaled: Integer := (r.abs * scale.to_real).round
-  let whole: String := (scaled / scale).to_string
-  let frac: String := (scaled % scale).to_string.pad_start("0", places)
-  result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
-  if places > 0 then
-    result := result + "." + frac
-  end
-end
+-- helpers.nex: printing distances and times neatly, and finding the
+-- user's files.
 
 -- A distance the way a navigator says it: "40 m", "350 m", "1.2 km".
 -- Under a kilometre it is rounded to 10 m, which is as precise as a
@@ -27,7 +11,7 @@ do
   if metres < 995.0 then
     result := ((metres / 10.0).round * 10).to_string + " m"
   else
-    result := fixed(metres / 1000.0, 1) + " km"
+    result := (metres / 1000.0).format(1) + " km"
   end
 end
 

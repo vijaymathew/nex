@@ -652,7 +652,7 @@ The bottom panel shows the settings on the left and the keys on the right.
       status := status + " explored " + s.explored.length.to_string + " nodes"
     end
     if stage = Stage.Travelling then
-      status := status + ", " + fixed(speedup, 0) + "x speed"
+      status := status + ", " + speedup.format(0) + "x speed"
       if paused then
         status := status + " (paused)"
       end

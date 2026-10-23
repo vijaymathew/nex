@@ -9,7 +9,7 @@ follow the route while the navigator talks them through every turn.
 nex navigate.nex                          # the live map, in a window
 nex navigate.nex "beach car park" lighthouse
 nex route.nex harbour lighthouse          # the same directions, printed
-nex checks.nex                            # 56 checks of everything
+nex checks.nex                            # 55 checks of everything
 ```
 
 ```

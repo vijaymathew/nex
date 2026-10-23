@@ -492,7 +492,7 @@ if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b 
     end
     let before: Integer := trip.navigator.reroutes
     trip.advance(1.0)
-    let time: String := fixed(trip.clock, 0).pad_start(" ", 4) + " s  "
+    let time: String := trip.clock.format(0).pad_start(" ", 4) + " s  "
     if trip.navigator.reroutes > before then
       console.print_line(time + "Off the route: planning a new one")
     end
@@ -503,9 +503,9 @@ if ?island.find_place("harbour") as a and ?island.find_place("lighthouse") as b 
       step := next
     end
   end
-  console.print_line(fixed(trip.clock, 0).pad_start(" ", 4) + " s  " + trip.navigator.prompt())
-  console.print_line("The trip took " + fixed(trip.clock, 0) + " seconds; the route planned at the start takes "
-    + fixed(create Route_Line.make(g, found.path).duration(), 0) + ".")
+  console.print_line(trip.clock.format(0).pad_start(" ", 4) + " s  " + trip.navigator.prompt())
+  console.print_line("The trip took " + trip.clock.format(0) + " seconds; the route planned at the start takes "
+    + (create Route_Line.make(g, found.path).duration()).format(0) + ".")
 end
 \end{tryit}
 \tryoutput{try_trip}

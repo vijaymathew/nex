@@ -118,8 +118,8 @@ function main() do
     + ", hidden=" + opts.hidden.to_string + ")")
 
   let before: Evaluation := evaluate(model, val_sample)
-  console.print_line("before training: val loss " + fixed(before.loss, 3)
-    + " (guessing uniformly would give " + fixed(Vocabulary.SIZE.to_real.log, 3) + ")")
+  console.print_line("before training: val loss " + before.loss.format(3)
+    + " (guessing uniformly would give " + Vocabulary.SIZE.to_real.log.format(3) + ")")
   console.print_line("")
 
   let report_every: Integer := (opts.steps / 20).max(1)
@@ -151,11 +151,11 @@ function main() do
       running_loss := 0.0
       let val_now: Evaluation := evaluate(model, val_sample)
       console.print_line("step " + step.to_string.pad_start(" ", 6) + "/" + opts.steps.to_string
-        + "  lr " + fixed(lr, 3)
-        + "  train loss " + fixed(train_loss, 3)
-        + "  val loss " + fixed(val_now.loss, 3)
-        + "  val accuracy " + fixed(val_now.accuracy * 100.0, 1).pad_start(" ", 4) + "%"
-        + "  [" + fixed(seconds_since(start), 0).pad_start(" ", 5) + "s]")
+        + "  lr " + lr.format(3)
+        + "  train loss " + train_loss.format(3)
+        + "  val loss " + val_now.loss.format(3)
+        + "  val accuracy " + (val_now.accuracy * 100.0).format(1).pad_start(" ", 4) + "%"
+        + "  [" + seconds_since(start).format(0).pad_start(" ", 5) + "s]")
       model.save(user_path(opts.out))
     end
     step := step + 1

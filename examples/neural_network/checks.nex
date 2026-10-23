@@ -81,8 +81,7 @@ c.close_to("tanh(0.5)", 0.46211715726000974, tanh(0.5), 1.0e-12)
 c.close_to("tanh(100)", 1.0, tanh(100.0), 0.0)
 c.close_to("tanh(-100)", -1.0, tanh(-100.0), 0.0)
 c.check("argmax", argmax([0.1, 0.7, 0.2]) = 1)
-c.check("fixed", fixed(2.5, 3) = "2.500" and fixed(-0.0499, 2) = "-0.05"
-  and fixed(3.14159, 0) = "3")
+c.check("vector_text", vector_text([0.5, -0.0499, 1.0 / 3.0], 2) = "[0.50, -0.05, 0.33]")
 c.check("percent", percent(0.257) = "26%")
 
 -- Random numbers
@@ -153,7 +152,7 @@ repeat 300 do
   model.step(g, 0.5, tiny.length)
 end
 let after: Real := evaluate(model, tiny).loss
-c.check("training lowers the loss (" + fixed(before, 3) + " -> " + fixed(after, 3) + ")",
+c.check("training lowers the loss (" + before.format(3) + " -> " + after.format(3) + ")",
   after < before / 4.0)
 
 -- Saving and loading give back the same model.

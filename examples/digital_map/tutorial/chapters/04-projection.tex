@@ -156,7 +156,7 @@ between two points is the length of the arrow from one to the other.
 
   -- "(123.4, -56.7)"
   to_string(): String do
-    result := "(" + fixed(x, 1) + ", " + fixed(y, 1) + ")"
+    result := "(" + x.format(1) + ", " + y.format(1) + ")"
   end
 end
 \end{continued}
@@ -223,15 +223,15 @@ let h: Point := flat.to_point(harbour)
 let l: Point := flat.to_point(lighthouse)
 console.print_line("harbour    " + h.to_string())
 console.print_line("lighthouse " + l.to_string())
-console.print_line("on the sphere:   " + fixed(harbour.distance_to(lighthouse), 2) + " m")
-console.print_line("on the flat map: " + fixed(h.distance_to(l), 2) + " m")
+console.print_line("on the sphere:   " + harbour.distance_to(lighthouse).format(2) + " m")
+console.print_line("on the flat map: " + h.distance_to(l).format(2) + " m")
 console.print_line("back again: " + flat.to_lat_lon(l).to_string())
 
 -- Pretending a degree is the same length both ways:
 let k: Real := flat.metres_per_degree_lat
 let naive: Point := create Point.make((lighthouse.longitude - harbour.longitude) * k,
   (lighthouse.latitude - harbour.latitude) * k)
-console.print_line("degrees as if they were squares: " + fixed(naive.length(), 2) + " m")
+console.print_line("degrees as if they were squares: " + naive.length().format(2) + " m")
 \end{tryit}
 \tryoutput{try_projection}
 

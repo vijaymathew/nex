@@ -1077,6 +1077,21 @@
    (fn [n places & _]
      (let [places (nex-int->number places)]
        (double (.setScale (bigdec n) (int places) java.math.RoundingMode/HALF_UP))))
+   ;; The value as text with exactly `places` digits after the point, rounded
+   ;; half-up like to_fixed, and never in E notation: 2.5.format(3) is "2.500".
+   "format"            ^{:signatures [{:params [{:name "places" :type "Integer"}]
+                                       :return-type "String"}]}
+   (fn [n places & _]
+     (let [places (nex-int->number places)
+           d (double n)]
+       (when (neg? places)
+         (throw (ex-info (str "Real.format: places must be >= 0, got " places)
+                         {:places places})))
+       (cond
+         (Double/isNaN d) "NaN"
+         (Double/isInfinite d) (if (pos? d) "Infinity" "-Infinity")
+         :else (.toPlainString (.setScale (bigdec d) (int places)
+                                          java.math.RoundingMode/HALF_UP)))))
    ;; IEEE-754 inspection: with Real division now honestly IEEE, these let
    ;; callers detect the special values it can produce (see NUMERIC_TOWER.md).
    "is_nan"            ^{:signatures [{:params [] :return-type "Boolean"}]}

@@ -309,6 +309,7 @@ by contrast, raises.)
 | `ceiling` | none | `Integer` | Smallest integer not below the value. Raises as `floor` does. |
 | `truncate` | none | `Integer` | The value with its fraction dropped (toward zero). Raises as `floor` does. |
 | `to_fixed` | `places: Integer` | `Real` | Round to `places` decimal places using half-up rounding. |
+| `format` | `places: Integer` | `String` | The value as text with exactly `places` digits after the point, never in E notation (`2.5.format(3)` is `"2.500"`). Rounds like `to_fixed`, halves away from zero. `NaN` and the infinities give `"NaN"`, `"Infinity"`, `"-Infinity"`. Raises if `places` is negative. |
 | `sqrt` | none | `Real` | Square root. |
 | `cbrt` | none | `Real` | Cube root. |
 | `exp` | none | `Real` | *e* raised to the value. |

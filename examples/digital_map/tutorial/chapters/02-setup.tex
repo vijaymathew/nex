@@ -27,41 +27,10 @@ its own. We use it for all our output.
 
 Now numbers. Nex prints a \code{Real} with all its digits, like
 \code{1879.3774630534463}, which is far more than anyone wants to read. The
-helper \code{fixed} writes a number with a fixed number of decimal places.
-It multiplies by $10^{\text{places}}$, rounds to a whole number, and then
-splits that whole number back into the part before the point and the part
-after it. For \code{fixed(2.5, 3)}: $2.5 \times 1000 = 2500$, so the whole
-part is $2500 / 1000 = 2$, the fraction is $2500 \bmod 1000 = 500$, and the
-answer is \code{"2.500"}. The fraction may need leading zeros put back:
-with 3 places, a fraction of \code{5} must be written \code{005}. The
-built-in \code{pad_start} does that: \code{s.pad_start("0", 3)} adds
-\code{"0"}s on the left of \code{s} until it is 3 characters long.
-
-\begin{newfile}{helpers.nex}
--- helpers.nex: printing numbers, distances and times neatly, and finding
--- the user's files.
-
--- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
--- is "2.500".
-function fixed(r: Real, places: Integer): String
-require
-  non_negative: places >= 0
-do
-  let scale: Integer := 10 ^ places
-  let scaled: Integer := (r.abs * scale.to_real).round
-  let whole: String := (scaled / scale).to_string
-  let frac: String := (scaled % scale).to_string.pad_start("0", places)
-  result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
-  if places > 0 then
-    result := result + "." + frac
-  end
-end
-\end{newfile}
-
-\code{when ... then ... else ... end} is an \code{if} that gives a value. We
-work on the absolute value \code{r.abs} and put the minus sign back at the
-end, but only if the rounded number isn't zero, so that \code{-0.0001}
-prints as \code{0.000} rather than \code{-0.000}.
+built-in \code{format} writes a number with a fixed number of decimal
+places, as text: \code{2.5.format(3)} is \code{"2.500"}, and
+\code{(-3.14159).format(2)} is \code{"-3.14"}. It rounds to the nearest,
+and a number exactly halfway rounds away from zero.
 
 A navigator doesn't say ``in 347.2 metres''. It rounds, and the less
 precise the better, as long as it is precise enough: ``in 350 m'',
@@ -69,7 +38,10 @@ precise the better, as long as it is precise enough: ``in 350 m'',
 is what \code{(metres / 10.0).round * 10} does; from a kilometre up we
 give kilometres with one decimal. Times are given in whole minutes.
 
-\begin{append}{helpers.nex}
+\begin{newfile}{helpers.nex}
+-- helpers.nex: printing distances and times neatly, and finding the
+-- user's files.
+
 -- A distance the way a navigator says it: "40 m", "350 m", "1.2 km".
 -- Under a kilometre it is rounded to 10 m, which is as precise as a
 -- driver needs.
@@ -80,7 +52,7 @@ do
   if metres < 995.0 then
     result := ((metres / 10.0).round * 10).to_string + " m"
   else
-    result := fixed(metres / 1000.0, 1) + " km"
+    result := (metres / 1000.0).format(1) + " km"
   end
 end
 
@@ -99,7 +71,7 @@ do
       + (minutes % 60).to_string.pad_start("0", 2) + " min"
   end
 end
-\end{append}
+\end{newfile}
 
 Why does \code{distance_text} switch to kilometres at 995 metres rather
 than 1,000? Because 997 metres rounds to ``1000 m'', which looks odd; from
@@ -107,7 +79,10 @@ than 1,000? Because 997 metres rounds to ``1000 m'', which looks odd; from
 
 \code{minutes / 60} divides two \code{Integer}s, so it gives an
 \code{Integer}, dropping the remainder: 65 minutes is 1 hour, and
-\texttt{65~\%~60}, the remainder, is the 5 minutes left over.
+\texttt{65~\%~60}, the remainder, is the 5 minutes left over. The minutes
+always get two digits, \code{05} rather than \code{5}: the built-in
+\code{pad_start} does that, as \code{s.pad_start("0", 2)} adds \code{"0"}s
+on the left of \code{s} until it is 2 characters long.
 
 The last helper finds a file the user names on the command line. The
 \code{nex} launcher runs programs from its own installation folder, so a
@@ -137,8 +112,8 @@ Let's check that it works. Make this file and run it:
 \begin{tryit}{try_helpers.nex}
 intern Helpers
 
-console.print_line(fixed(2.5, 3))
-console.print_line(fixed(-3.14159, 2))
+console.print_line(2.5.format(3))
+console.print_line((-3.14159).format(2))
 console.print_line(distance_text(347.2) + ", " + distance_text(997.0) + ", "
   + distance_text(1234.0))
 console.print_line(duration_text(25.0) + ", " + duration_text(150.0) + ", "

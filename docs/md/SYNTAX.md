@@ -75,6 +75,7 @@ let hyp: Real := 3.0.hypot(4.0)          -- 5.0
 let root: Real := 2.0.sqrt               -- 1.4142135623730951
 let y: Real := (Real.PI / 6.0).sin       -- 0.49999999999999994
 let n: Integer := 2.7.floor              -- 2
+let s: String := 2.5.format(3)           -- "2.500" (exactly 3 decimals)
 ```
 
 See the scalar types reference for the full list (`floor`, `ceiling`,

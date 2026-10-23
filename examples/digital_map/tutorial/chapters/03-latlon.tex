@@ -224,13 +224,14 @@ it a hair above, and $\arcsin$ of a number above 1 is undefined. Clamping
 it costs nothing.
 
 Last, a readable form for printing: the size of each angle, followed by its
-direction.
+direction. \code{when ... then ... else ... end} is an \code{if} that gives
+a value, here the letter for the direction.
 
 \begin{continued}{geo.nex}
   -- "47.05123 N, 34.59877 W"
   to_string(): String do
-    result := fixed(latitude.abs, 5) + when latitude >= 0.0 then " N, " else " S, " end
-      + fixed(longitude.abs, 5) + when longitude >= 0.0 then " E" else " W" end
+    result := latitude.abs.format(5) + when latitude >= 0.0 then " N, " else " S, " end
+      + longitude.abs.format(5) + when longitude >= 0.0 then " E" else " W" end
   end
 end
 \end{continued}
@@ -242,11 +243,11 @@ let harbour: Lat_Lon := create Lat_Lon.make(47.052428, -34.569106)
 let lighthouse: Lat_Lon := create Lat_Lon.make(47.079318, -34.565277)
 console.print_line("The harbour is at " + harbour.to_string())
 console.print_line("The lighthouse is at " + lighthouse.to_string())
-console.print_line("As the crow flies: " + fixed(harbour.distance_to(lighthouse), 1) + " m")
+console.print_line("As the crow flies: " + harbour.distance_to(lighthouse).format(1) + " m")
 
 let london: Lat_Lon := create Lat_Lon.make(51.5074, -0.1278)
 let new_york: Lat_Lon := create Lat_Lon.make(40.7128, -74.0060)
-console.print_line("London to New York: " + fixed(london.distance_to(new_york) / 1000.0, 0) + " km")
+console.print_line("London to New York: " + (london.distance_to(new_york) / 1000.0).format(0) + " km")
 \end{tryit}
 \tryoutput{try_geo}
 

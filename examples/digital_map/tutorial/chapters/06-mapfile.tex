@@ -464,11 +464,11 @@ let island: Island_Map := create Island_Map.load(user_path("kestrel_island.map")
 console.print_line(island.name + ": " + island.positions.size.to_string + " nodes, "
   + island.roads.length.to_string + " roads, " + island.places.length.to_string + " places")
 console.print_line("centred on " + island.projection.centre.to_string())
-console.print_line(fixed(island.max_x() - island.min_x(), 0) + " m from west to east, "
-  + fixed(island.max_y() - island.min_y(), 0) + " m from south to north")
+console.print_line((island.max_x() - island.min_x()).format(0) + " m from west to east, "
+  + (island.max_y() - island.min_y()).format(0) + " m from south to north")
 console.print_line("")
 across island.areas as a do
-  console.print_line(a.name.pad_end(" ", 16) + fixed(polygon_area(island.points_of(a.node_ids)) / 10000.0, 1)
+  console.print_line(a.name.pad_end(" ", 16) + (polygon_area(island.points_of(a.node_ids)) / 10000.0).format(1)
     .pad_start(" ", 7) + " hectares of " + a.kind)
 end
 console.print_line("")

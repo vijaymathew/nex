@@ -2856,6 +2856,7 @@
 (def-builtin-method-wrapper builtin-method-real-clamp "clamp")
 (def-builtin-method-wrapper builtin-method-real-hypot "hypot")
 (def-builtin-method-wrapper builtin-method-real-to-fixed "to_fixed")
+(def-builtin-method-wrapper builtin-method-real-format "format")
 (def-builtin-method-wrapper builtin-method-real-is-nan "is_nan")
 (def-builtin-method-wrapper builtin-method-real-is-infinite "is_infinite")
 (def-builtin-method-wrapper builtin-method-real-is-finite "is_finite")

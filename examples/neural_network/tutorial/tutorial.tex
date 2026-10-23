@@ -411,53 +411,23 @@ A Nex program uses another file with \code{intern}. \code{intern Helpers}
 finds \code{helpers.nex} in the same folder and loads everything in it. The file does not need a class called \code{Helpers}:
 ours holds only plain functions.
 
-The first helper writes a number with a fixed number of decimal places.
-We multiply by $10^{\text{places}}$, round to a whole number, and then
-split that whole number back into the part before the point and the part
-after it. For \code{fixed(2.5, 3)}: $2.5 \times 1000 = 2500$, so the whole
-part is $2500 / 1000 = 2$, the fraction is $2500 \bmod 1000 = 500$, and
-the answer is \code{"2.500"}. The fraction may need leading zeros put
-back: with 3 places, a fraction of \code{5} must be written \code{005}.
-The built-in \code{pad_start} does that: \code{s.pad_start("0", 3)} adds
-\code{"0"}s on the left of \code{s} until it is 3 characters long.
+For a number with a fixed number of decimal places, Nex has the built-in
+\code{format}, which gives text: \code{2.5.format(3)} is \code{"2.500"},
+and \code{0.6652409557748218.format(3)} is \code{"0.665"}. It rounds to the
+nearest, and a number exactly halfway rounds away from zero. (There is
+also \code{to_fixed}, which rounds but gives back a \code{Real}, so
+\code{2.5.to_fixed(3)} still prints as \code{2.5}.)
+
+A small helper writes a probability as a percentage.
 
 \begin{newfile}{helpers.nex}
 -- helpers.nex: printing numbers neatly, and finding the user's files.
 
--- r with exactly `places` digits after the decimal point: fixed(2.5, 3)
--- is "2.500".
-function fixed(r: Real, places: Integer): String
-require
-  non_negative: places >= 0
-do
-  let scale: Integer := 10 ^ places
-  let scaled: Integer := (r.abs * scale.to_real).round
-  let whole: String := (scaled / scale).to_string
-  let frac: String := (scaled % scale).to_string.pad_start("0", places)
-  result := when r < 0.0 and scaled > 0 then "-" else "" end + whole
-  if places > 0 then
-    result := result + "." + frac
-  end
-end
-\end{newfile}
-
-Notice \code{when ... then ... else ... end}: it is an \code{if} that gives
-a value. We work on the absolute value \code{r.abs} and put the minus sign
-back at the end, but only if the rounded number isn't zero, so that
-\code{-0.0001} prints as \code{0.000} rather than \code{-0.000}.
-
-Nex's \code{Real} does have a \code{to_fixed} method, but it rounds the
-number and gives back a \code{Real}, so \code{2.5.to_fixed(3)} still prints
-as \code{2.5}. We want text with the trailing zeros, so we write our own.
-
-One more small helper writes a probability as a percentage.
-
-\begin{append}{helpers.nex}
 -- A probability as a whole percentage: percent(0.257) is "26%".
 function percent(p: Real): String do
   result := (p * 100.0).round.to_string + "%"
 end
-\end{append}
+\end{newfile}
 
 To line up columns we will pad text to a fixed width with the built-in
 \code{pad_start} (spaces on the left) and \code{pad_end} (spaces on the
@@ -475,7 +445,7 @@ text in an array, and the built-in \code{join} glues them together with
 function vector_text(v: Array[Real], places: Integer): String do
   let parts: Array[String] := []
   across v as x do
-    parts.add(fixed(x, places))
+    parts.add(x.format(places))
   end
   result := "[" + ", ".join(parts) + "]"
 end
@@ -488,8 +458,8 @@ Let's check that it works. Make this file and run it:
 \begin{tryit}{try_helpers.nex}
 intern Helpers
 
-console.print_line(fixed(2.5, 3))
-console.print_line(fixed(-3.14159, 2))
+console.print_line(2.5.format(3))
+console.print_line((-3.14159).format(2))
 console.print_line(percent(0.257))
 console.print_line("[" + "42".pad_start(" ", 6) + "]")
 console.print_line(vector_text([0.5, 0.25, 1.0 / 3.0], 3))
@@ -1033,8 +1003,8 @@ intern Helpers
 console.print_line("     v    tanh(v)   1 - tanh(v)^2")
 across [-3.0, -1.0, -0.1, 0.0, 0.1, 1.0, 3.0] as v do
   let h: Real := tanh(v)
-  console.print_line(fixed(v, 1).pad_start(" ", 6) + fixed(h, 4).pad_start(" ", 11)
-    + fixed(1.0 - h * h, 4).pad_start(" ", 16))
+  console.print_line(v.format(1).pad_start(" ", 6) + h.format(4).pad_start(" ", 11)
+    + (1.0 - h * h).format(4).pad_start(" ", 16))
 end
 console.print_line("tanh(1000)  = " + tanh(1000.0).to_string)
 console.print_line("tanh(-1000) = " + tanh(-1000.0).to_string)
@@ -1387,7 +1357,7 @@ intern Rng
 intern Helpers
 
 let rng: Rng := create Rng.make(42)
-console.print_line("uniform: " + fixed(rng.uniform(), 4) + " " + fixed(rng.uniform(), 4))
+console.print_line("uniform: " + rng.uniform().format(4) + " " + rng.uniform().format(4))
 console.print_line("below(10): " + rng.below(10).to_string + " " + rng.below(10).to_string)
 
 -- Draw many normal numbers and measure their mean and spread.
@@ -1404,15 +1374,15 @@ repeat n do
   end
 end
 let mean: Real := total / n.to_real
-console.print_line("mean " + fixed(mean, 3) + ", standard deviation "
-  + fixed((squares / n.to_real - mean * mean).sqrt, 3)
+console.print_line("mean " + mean.format(3) + ", standard deviation "
+  + (squares / n.to_real - mean * mean).sqrt.format(3)
   + ", within 1 of the mean: " + percent(within_one.to_real / n.to_real))
 
 let words: Array[String] := ["one", "two", "three", "four", "five"]
 shuffle(rng, words)
 console.print_line("shuffled: " + words.to_string)
 let again: Rng := create Rng.make(42)
-console.print_line("same seed again: " + fixed(again.uniform(), 4))
+console.print_line("same seed again: " + again.uniform().format(4))
 \end{tryit}
 \tryoutput{try_rng}
 
@@ -1744,7 +1714,7 @@ do
   end
   i := i + 1
 end
-console.print_line("they add up to " + fixed(sum(fp.probs), 6))
+console.print_line("they add up to " + sum(fp.probs).format(6))
 \end{tryit}
 \tryoutput{try_forward}
 
@@ -1994,8 +1964,8 @@ let examples: Array[Example] := make_examples(words.take(2000), 4)
 let model: Next_Letter_Model := create Next_Letter_Model.make(4, 8, 64, 42)
 let e: Evaluation := evaluate(model, examples)
 console.print_line("untrained model on " + examples.length.to_string + " examples: loss "
-  + fixed(e.loss, 3) + ", accuracy " + percent(e.accuracy))
-console.print_line("knowing nothing would give: loss " + fixed(27.0.log, 3)
+  + e.loss.format(3) + ", accuracy " + percent(e.accuracy))
+console.print_line("knowing nothing would give: loss " + 27.0.log.format(3)
   + ", accuracy about " + percent(1.0 / 27.0))
 \end{tryit}
 \tryoutput{try_examples}
@@ -2055,7 +2025,7 @@ intern Helpers
 
 -- Minimize L(w) = (w - 3)^2, starting from w = 0.
 function descend(lr: Real) do
-  console.print_line("learning rate " + fixed(lr, 2) + ":")
+  console.print_line("learning rate " + lr.format(2) + ":")
   let w: Real := 0.0
   from
     let step: Integer := 0
@@ -2066,7 +2036,7 @@ function descend(lr: Real) do
     let slope: Real := 2.0 * (w - 3.0)
     if step % 3 = 0 then
       console.print_line("  step " + step.to_string.pad_start(" ", 2) + ": w = "
-        + fixed(w, 4).pad_start(" ", 9) + "   loss = " + fixed(loss, 4))
+        + w.format(4).pad_start(" ", 9) + "   loss = " + loss.format(4))
     end
     w := w - lr * slope
     step := step + 1
@@ -2571,8 +2541,7 @@ c.close_to("tanh(0.5)", 0.46211715726000974, tanh(0.5), 1.0e-12)
 c.close_to("tanh(100)", 1.0, tanh(100.0), 0.0)
 c.close_to("tanh(-100)", -1.0, tanh(-100.0), 0.0)
 c.check("argmax", argmax([0.1, 0.7, 0.2]) = 1)
-c.check("fixed", fixed(2.5, 3) = "2.500" and fixed(-0.0499, 2) = "-0.05"
-  and fixed(3.14159, 0) = "3")
+c.check("vector_text", vector_text([0.5, -0.0499, 1.0 / 3.0], 2) = "[0.50, -0.05, 0.33]")
 c.check("percent", percent(0.257) = "26%")
 \end{addbefore}
 
@@ -2759,7 +2728,7 @@ until
 do
   if step % 50 = 0 then
     console.print_line("step " + step.to_string.pad_start(" ", 3) + ": loss "
-      + fixed(evaluate(model, examples).loss, 4))
+      + evaluate(model, examples).loss.format(4))
   end
   let g: Gradients := create Gradients.make(model)
   across examples as ex do
@@ -2795,7 +2764,7 @@ repeat 300 do
   model.step(g, 0.5, tiny.length)
 end
 let after: Real := evaluate(model, tiny).loss
-c.check("training lowers the loss (" + fixed(before, 3) + " -> " + fixed(after, 3) + ")",
+c.check("training lowers the loss (" + before.format(3) + " -> " + after.format(3) + ")",
   after < before / 4.0)
 \end{addbefore}
 
@@ -3120,8 +3089,8 @@ which is close enough.
     + ", hidden=" + opts.hidden.to_string + ")")
 
   let before: Evaluation := evaluate(model, val_sample)
-  console.print_line("before training: val loss " + fixed(before.loss, 3)
-    + " (guessing uniformly would give " + fixed(Vocabulary.SIZE.to_real.log, 3) + ")")
+  console.print_line("before training: val loss " + before.loss.format(3)
+    + " (guessing uniformly would give " + Vocabulary.SIZE.to_real.log.format(3) + ")")
   console.print_line("")
 \end{continued}
 
@@ -3136,6 +3105,9 @@ rate for the first 75\% of the steps, then a tenth of it. Big steps make
 fast progress early on, but near the bottom of the valley they bounce from
 side to side, like the $\eta = 1.1$ example of Chapter~12 but milder.
 Smaller steps let the model settle.
+
+The rate for each step is chosen with \code{when ... then ... else ...
+end}, an \code{if} that gives a value.
 
 \begin{continued}{train.nex}
   let report_every: Integer := (opts.steps / 20).max(1)
@@ -3175,11 +3147,11 @@ worth of training.
       running_loss := 0.0
       let val_now: Evaluation := evaluate(model, val_sample)
       console.print_line("step " + step.to_string.pad_start(" ", 6) + "/" + opts.steps.to_string
-        + "  lr " + fixed(lr, 3)
-        + "  train loss " + fixed(train_loss, 3)
-        + "  val loss " + fixed(val_now.loss, 3)
-        + "  val accuracy " + fixed(val_now.accuracy * 100.0, 1).pad_start(" ", 4) + "%"
-        + "  [" + fixed(seconds_since(start), 0).pad_start(" ", 5) + "s]")
+        + "  lr " + lr.format(3)
+        + "  train loss " + train_loss.format(3)
+        + "  val loss " + val_now.loss.format(3)
+        + "  val accuracy " + (val_now.accuracy * 100.0).format(1).pad_start(" ", 4) + "%"
+        + "  [" + seconds_since(start).format(0).pad_start(" ", 5) + "s]")
       model.save(user_path(opts.out))
     end
     step := step + 1
@@ -3776,6 +3748,7 @@ Anonymous functions & \code{fn(a, b: Prediction): Integer do ... end} for \code{
 \code{convert} & narrowing an \code{Any} from JSON to \code{Integer}, \code{Real}, \code{Array[Any]} \\
 Detachable types, object test & \code{?String}, \code{if ?line as text then} \\
 \code{case ... of} & matching option names in \code{train.nex} \\
+Built-in \code{Real} methods & \code{format} for printing, \code{round}, \code{log}, \code{sqrt} \\
 Built-in \code{String} methods & \code{pad_start}, \code{pad_end}, \code{replicate}, \code{join}, \code{substring}, \code{trim} \\
 Libraries & \code{data/Json}, \code{text/Regex}, \code{io/Path}, \code{time/Date_Time}, \code{console}, \code{program} \\
 \bottomrule
