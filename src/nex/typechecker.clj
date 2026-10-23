@@ -2332,6 +2332,8 @@
     (check-expression-with-expected env arg ft)
     (check-expression env arg)))
 
+(def ^:private method-generic-counter (atom 0))
+
 (defn- check-call-signature
   [env method args method-sig type-map & {:keys [arg-types]}]
   ;; Each argument is checked with its parameter's type as the expected type,
@@ -2339,13 +2341,46 @@
   ;; parameter it is passed to (check-arg-in-context). The types it gets are
   ;; recorded and written into the AST before either backend runs (see
   ;; *inferred-lambda-types*), so lowering never has to work them out.
-  (let [arg-types (or arg-types
-                      (mapv (fn [arg param]
-                              (check-arg-in-context
-                               env arg (some-> (:type param) (resolve-generic-type type-map))))
+  ;;
+  ;; A signature may declare generic parameters of its own (:generic-params,
+  ;; as the built-in `map` does with U and `fold` with A). They are renamed
+  ;; apart from anything in scope, bound first from the arguments that are
+  ;; not `fn` literals awaiting their types (`fold`'s A from `init`), then
+  ;; from what those literals return (`map`'s U), and default to Any.
+  (let [own-generics (seq (:generic-params method-sig))
+        fresh (into {} (map (fn [g] [g (str g "__" (swap! method-generic-counter inc))]))
+                    own-generics)
+        method-sig (if own-generics
+                     (-> method-sig
+                         (update :params #(clojure.walk/postwalk-replace fresh %))
+                         (update :return-type #(clojure.walk/postwalk-replace fresh %)))
+                     method-sig)
+        own-names (set (vals fresh))
+        bind (fn [acc pairs]
+               (reduce (fn [acc [param-type arg-type]]
+                         (if (and arg-type param-type (seq own-names))
+                           (merge-inferred-generic-bindings
+                            env acc
+                            (infer-generic-type-map-from-arg
+                             env own-names (resolve-generic-type param-type type-map) arg-type))
+                           acc))
+                       acc pairs))
+        params (:params method-sig)
+        pre-arg-types (when-not arg-types
+                        (mapv #(when-not (lambda-awaiting-types? %) (check-expression env %)) args))
+        pre-bindings (bind {} (map vector (map :type params) pre-arg-types))
+        arg-types (or arg-types
+                      (mapv (fn [arg pre param]
+                              (or pre
+                                  (check-arg-in-context
+                                   env arg (some-> (:type param)
+                                                   (resolve-generic-type (merge type-map pre-bindings))))))
                             args
-                            (concat (:params method-sig) (repeat nil))))
-        params (:params method-sig)]
+                            pre-arg-types
+                            (concat params (repeat nil))))
+        type-map (merge type-map
+                        (zipmap own-names (repeat "Any"))
+                        (bind pre-bindings (map vector (map :type params) arg-types)))]
     (when (not= (count args) (count params))
       (throw (ex-info (str "Method " method " expects " (count params)
                            " arguments, got " (count args))
@@ -7164,7 +7199,10 @@
                  (some #(references-result? (:condition %)) ensure)))
     (let [msg (str Routine " uses `result` but declares no return type, so it has"
                    " nothing to return. Declare the type it returns: `"
-                   (or routine-name "fn") "(...): <Type>`.")]
+                   (or routine-name "fn") "(...): <Type>`."
+                   ;; an anonymous function can also let its expression say
+                   (when-not routine-name
+                     " Or, if it only computes its result, write `fn (...) => <expression>`."))]
       ;; at the first statement using it, or else the routine itself
       (with-type-error-location
         (or (first (filter references-result? body)) method)

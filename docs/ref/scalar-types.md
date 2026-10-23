@@ -42,6 +42,7 @@ which is convenient for regular-expression patterns and paths: `'\d+'`, `'C:\dir
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
 | `cursor` | none | `Cursor[Char]` | Create character iterator. A `String` is `Iterable[Char]`. |
+| `map`, `filter`, `fold`, `reduce`, `any`, `all`, `count`, `find` | a function | | Over the `Char`s; see [Functional Methods](collection-types.md#functional-methods). `filter` gives a `String`, `map` an `Array`. |
 
 Laws:
 

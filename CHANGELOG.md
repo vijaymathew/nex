@@ -54,6 +54,16 @@
   `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
   same numbers on both backends. The digital map and neural network examples
   use it instead of their own generator.
+- **`map`, `filter`, `fold`, `reduce`, `any`, `all`, `count` and `find` on
+  every built-in collection** (Array, Set, Map, and String over its Chars).
+  `xs.map(fn (x) => x * 2)`, `xs.filter(fn (x) => x > 1)`,
+  `xs.fold(0, fn (sum, x) => sum + x)`. The function's parameter types come
+  from the collection; `map` gives an `Array` of what the function returns,
+  `filter` the receiver's own kind (a Set stays a Set, a String a String, a
+  Map a Map, walked as its `Map_Entry` values), `find` a `?T`, and `reduce`
+  raises on an empty collection. Built-in method signatures can now declare
+  type parameters of their own (`map`'s `U`, `fold`'s `A`), inferred at
+  each call.
 - **Short anonymous functions: `fn (x) => expression`.** The same as
   `fn (x) do result := expression end`: `nums.sort(fn (a, b) => b - a)`,
   `let double := fn (n: Integer) => n * 2`. The result type is the

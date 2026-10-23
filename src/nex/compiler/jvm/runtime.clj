@@ -3425,6 +3425,23 @@
                                     {:left a :right b :result result})))))))
      out)))
 
+;; map, filter, fold, reduce, any, all, count, find on any built-in
+;; collection (Array, Map, Set, String): the shared implementation, calling the
+;; function argument through invoke-function-object.
+(defn- collection-functional
+  [state coll method args]
+  (bi/functional-call (fn [f call-args] (invoke-function-object state f call-args))
+                      coll method (vec args)))
+
+(defn collection-map [state coll f] (collection-functional state coll "map" [f]))
+(defn collection-filter [state coll f] (collection-functional state coll "filter" [f]))
+(defn collection-fold [state coll init f] (collection-functional state coll "fold" [init f]))
+(defn collection-reduce [state coll f] (collection-functional state coll "reduce" [f]))
+(defn collection-any [state coll f] (collection-functional state coll "any" [f]))
+(defn collection-all [state coll f] (collection-functional state coll "all" [f]))
+(defn collection-count [state coll f] (collection-functional state coll "count" [f]))
+(defn collection-find [state coll f] (collection-functional state coll "find" [f]))
+
 (defn collection-cursor
   [_state _kind value]
   ;; The `cursor` builtin just wraps the collection with an index atom and

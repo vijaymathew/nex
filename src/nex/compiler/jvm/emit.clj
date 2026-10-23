@@ -1233,6 +1233,15 @@
    "builtin-method:Cursor:item"              ["builtin-cursor-item" [:state :e0]]
    "builtin-method:Cursor:next"              ["builtin-cursor-next" [:state :e0]]
    "builtin-method:Cursor:at_end"            ["builtin-cursor-at-end" [:state :e0]]
+   ;; String's map, filter, ...: the same runtime functions as an Array's
+   "builtin-method:String:map"               ["collection-map" [:state :b0 :b1]]
+   "builtin-method:String:filter"            ["collection-filter" [:state :b0 :b1]]
+   "builtin-method:String:fold"              ["collection-fold" [:state :b0 :b1 :b2]]
+   "builtin-method:String:reduce"            ["collection-reduce" [:state :b0 :b1]]
+   "builtin-method:String:any"               ["collection-any" [:state :b0 :b1]]
+   "builtin-method:String:all"               ["collection-all" [:state :b0 :b1]]
+   "builtin-method:String:count"             ["collection-count" [:state :b0 :b1]]
+   "builtin-method:String:find"              ["collection-find" [:state :b0 :b1]]
    "builtin-method:Min_Heap:insert"          ["min-heap-insert-method" [:state :b0 :b1]]
    "builtin-method:Min_Heap:extract_min"     ["min-heap-extract-min-method" [:state :b0]]
    "builtin-method:Min_Heap:try_extract_min" ["min-heap-try-extract-min-method" [:state :b0]]
@@ -2422,6 +2431,21 @@
   (emit-unbox-or-cast! mv jvm-type)
   jvm-type)
 
+(defn- emit-collection-functional-method!
+  "map, filter, fold, reduce, any, all, count and find on an Array, Map or
+   Set: runtime collection-<method>, which is given the repl state so it can
+   call the function argument (nex.types.builtins/functional-call)."
+  [^MethodVisitor mv {:keys [target args method jvm-type]} state-slot]
+  (emit-runtime-call! mv (str "collection-" method)
+                      (into [(fn [] (.visitVarInsn mv Opcodes/ALOAD state-slot))
+                             (fn [] (emit-boxed-expr! mv target state-slot))]
+                            (map (fn [arg] (fn [] (emit-boxed-expr! mv arg state-slot))) args)))
+  (emit-unbox-or-cast! mv jvm-type)
+  jvm-type)
+
+(def ^:private emit-functional-method-dispatch
+  (into {} (map (fn [m] [m emit-collection-functional-method!])) bi/functional-method-names))
+
 (defn- assert-direct-methods-in-sync!
   "Fails fast at namespace load if `dispatch-methods` — the method names a
    \"direct\" JVM bytecode-emission dispatch table implements — drifts from
@@ -2446,6 +2470,7 @@
 (def ^:private emit-array-method-dispatch
   "Array method name -> `(fn [mv expr state-slot] -> jvm-type)`: the primary
    dispatch table for `emit-array-method!`."
+  (merge
   {"get"       emit-array-method-get!
    "add"       emit-array-method-add!
    "add_at"    emit-array-method-add-at!
@@ -2468,7 +2493,9 @@
    "equals"    emit-array-method-equals!
    "hash"      emit-collection-method-hash!
    "clone"     emit-array-method-clone!
-   "cursor"    emit-array-method-cursor!})
+   "cursor"    emit-array-method-cursor!}
+   ;; map, filter, fold, ... (nex.types.builtins/functional-methods)
+   emit-functional-method-dispatch))
 
 (assert-direct-methods-in-sync!
  "emit-array-method-dispatch" :Array (keys emit-array-method-dispatch))
@@ -2600,6 +2627,7 @@
   "Map method name -> `(fn [mv expr state-slot] -> jvm-type)`. \"set\" is a
    pure alias for \"put\", so it's an inline lambda rather than a named
    function of its own — same convention as `emit-array-method-dispatch`."
+  (merge
   {"get"          emit-map-method-get!
    "try_get"      emit-map-method-try-get!
    "put"          emit-map-method-put!
@@ -2614,7 +2642,9 @@
    "equals"       emit-map-method-equals!
    "hash"         emit-collection-method-hash!
    "clone"        emit-map-method-clone!
-   "cursor"       emit-map-method-cursor!})
+   "cursor"       emit-map-method-cursor!}
+   ;; map, filter, fold, ... (nex.types.builtins/functional-methods)
+   emit-functional-method-dispatch))
 
 (assert-direct-methods-in-sync!
  "emit-map-method-dispatch" :Map (keys emit-map-method-dispatch))
@@ -2725,6 +2755,7 @@
 
 (def ^:private emit-set-method-dispatch
   "Set method name -> `(fn [mv expr state-slot] -> jvm-type)`."
+  (merge
   {"contains"             emit-set-method-contains!
    "add"                  emit-set-method-add!
    "remove"               emit-set-method-remove!
@@ -2739,7 +2770,9 @@
    "equals"               emit-set-method-equals!
    "hash"                 emit-collection-method-hash!
    "clone"                emit-set-method-clone!
-   "cursor"               emit-set-method-cursor!})
+   "cursor"               emit-set-method-cursor!}
+   ;; map, filter, fold, ... (nex.types.builtins/functional-methods)
+   emit-functional-method-dispatch))
 
 (assert-direct-methods-in-sync!
  "emit-set-method-dispatch" :Set (keys emit-set-method-dispatch))

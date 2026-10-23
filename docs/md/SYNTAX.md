@@ -255,6 +255,27 @@ end
 
 An entry itself prints as `"name": "Alice"` (that is, `print(entry)`). For compatibility with earlier code, `entry.get(0)` and `entry.get(1)` still return the key and value, typed `Any`; prefer `key` and `value`.
 
+
+## Map, Filter, Fold
+
+Arrays, sets, maps and strings have `map`, `filter`, `fold`, `reduce`,
+`any`, `all`, `count` and `find`. The function's parameter types come from the
+collection, so a short `fn (x) => ...` is usually all that's needed:
+
+```nex
+let xs: Array[Integer] := [1, 2, 3, 4]
+print(xs.map(fn (x) => x * 10))                  -- [10, 20, 30, 40]
+print(xs.filter(fn (x) => x % 2 = 0))            -- [2, 4]
+print(xs.fold(0, fn (sum, x) => sum + x))        -- 10
+print(xs.any(fn (x) => x > 3))                   -- true
+print("hello".count(fn (c) => c = #l))           -- 2
+```
+
+`map` always gives an `Array`; `filter` gives back the receiver's own kind (a
+`Set` stays a `Set`, a `String` a `String`). A `Map` is walked as its
+`Map_Entry` values (`e.key`, `e.value`). See the collection reference for all
+eight.
+
 ## Functions
 
 ```nex

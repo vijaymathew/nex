@@ -344,14 +344,41 @@
   [elem-type]
   {:base-type "Set" :type-params [elem-type]})
 
+(declare infer-type)
+
+(defn- function-result-type
+  "The result type of the function value ARG of a call: a `fn` literal's
+   own (by now filled in by the type checker), else its static type's."
+  [env arg]
+  (if (and (map? arg) (= :anonymous-function (:type arg)))
+    (:return-type arg)
+    (let [t (infer-type env arg)]
+      (cond
+        (map? t) (:return-type t)
+        ;; a function passed by name: its class's callN
+        (string? t) (some->> (get (visible-class-map env) t)
+                             tc/feature-members
+                             (some #(when (and (= :method (:type %))
+                                               (re-matches #"call\d+" (str (:name %))))
+                                      (:return-type %))))))))
+
 (defn- resolve-collection-return-marker
   "Resolve a return-type marker from `bi/builtin-type-method-return-type`
-   against the receiver's actual generic arguments. Concrete type names pass
-   through unchanged."
-  [target-type marker]
+   against the receiver's actual generic arguments (and, for the functional
+   methods, the call's arguments ARGS). Concrete type names pass through
+   unchanged."
+  [env target-type marker args]
   (let [base (base-type-name target-type)
         [a b] (generic-type-args target-type)]
     (case marker
+      ;; map: an Array of what the function returns
+      :array-of-fn-result (array-type-of (or (function-result-type env (last args)) "Any"))
+      ;; fold: the type of the starting value
+      :type-of-first-arg (or (infer-type env (first args)) "Any")
+      ;; reduce and find: what across would yield
+      :iterated-element (tc/cursor-item-type target-type)
+      :detachable-iterated-element (let [t (tc/cursor-item-type target-type)]
+                                     (if (map? t) (assoc t :detachable true) {:base-type t :detachable true}))
       :element (or a "Any")
       :value (or b "Any")
       :array-of-element (array-type-of (or a "Any"))
@@ -365,10 +392,10 @@
       marker)))
 
 (defn- collection-method-return-type
-  [target-type method]
-  (some->> (bi/builtin-type-method-return-type
-            (keyword (base-type-name target-type)) method)
-           (resolve-collection-return-marker target-type)))
+  [env target-type {:keys [method args]}]
+  (some-> (bi/builtin-type-method-return-type
+           (keyword (base-type-name target-type)) method)
+          (#(resolve-collection-return-marker env target-type % args))))
 
 (defn- direct-collection-method?
   [target-type method]
@@ -1017,7 +1044,7 @@
                      function-return-type
                      (#(tc/resolve-generic-type % type-map)))))))
      (when (direct-collection-method? target-type (:method expr))
-       (collection-method-return-type target-type (:method expr)))
+       (collection-method-return-type env target-type expr))
      (when (contains? #{"Console" "Process" "Program"} base-type)
        (bi/builtin-type-method-return-type (keyword base-type) (:method expr)))
        ;; Generic type parameter with constraint - look up method on constraint type
@@ -6699,7 +6726,7 @@
 (defn- lower-direct-collection-call
   [env expr target-expr target-type arg-irs]
   (let [target-ir (lower-expression env target-expr)
-        nex-type (or (collection-method-return-type target-type (:method expr))
+        nex-type (or (collection-method-return-type env target-type expr)
                      (infer-type env expr))
         jvm-type (resolve-jvm-type env nex-type)]
     (ir/collection-method-node (keyword (.toLowerCase ^String (base-type-name target-type)))
