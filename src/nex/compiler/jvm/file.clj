@@ -79,7 +79,7 @@
             (vec existing)
             incoming)))
 
-(defn- augment-ast-with-interns
+(defn augment-ast-with-interns
   "Merge every interned file's classes/functions/imports/type-aliases into
    AST. Also re-runs, on the merged result, passes that each ran once per
    file at parse time — before intern-resolution had merged anything — so
@@ -271,14 +271,22 @@
   ([source-id ast] (compile-ast source-id ast {}))
   ([source-id ast opts]
    (try
-     (let [module-ast (augment-ast-with-interns source-id ast)
-           _ (when-not (:skip-type-check opts)
-               (let [result (tc/type-check module-ast (cond-> {:strict-undefined-targets? true
-                                                               :reject-discarded-top-level? true}
-                                                        (:max-errors opts) (assoc :max-errors (:max-errors opts))))]
-                 (when-not (:success result)
-                   (throw (ex-info "Type checking failed"
-                                   {:errors (tc/format-type-errors result)})))))
+     (let [;; :interns-merged? — AST already has its interned files merged in
+           ;; (and checked): nex.eval passes the very AST it type-checked, so
+           ;; the `fn` literals in interned files keep the names their
+           ;; inferred types were recorded under.
+           module-ast (if (:interns-merged? opts)
+                        ast
+                        (augment-ast-with-interns source-id ast))
+           module-ast (if (:skip-type-check opts)
+                        module-ast
+                        (let [result (tc/type-check module-ast (cond-> {:strict-undefined-targets? true
+                                                                        :reject-discarded-top-level? true}
+                                                                 (:max-errors opts) (assoc :max-errors (:max-errors opts))))]
+                          (when-not (:success result)
+                            (throw (ex-info "Type checking failed"
+                                            {:errors (tc/format-type-errors result)})))
+                          (tc/apply-inferred-lambda-types module-ast (:lambda-types result))))
            prepared-ast (lower/prepare-program-for-closures
                          module-ast
                          {:classes (:classes module-ast)

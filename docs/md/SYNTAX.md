@@ -1488,9 +1488,33 @@ let add2: Function(a: Integer, b: Integer): Integer := fn(a, b) do result := a +
 print(add2(3, 4))                -- 7
 ```
 
-Inference only works where a target type is actually available (here, the
-`let`'s own annotation). With no such context, every parameter needs its own
-explicit type, or it's a compile error.
+The same works when `fn` is passed as an argument: the parameter it is passed
+to supplies the types. That covers methods, free and generic functions,
+constructors, and built-ins such as `Array.sort`:
+
+```nex
+function twice(f: Function(n: Integer): Integer, x: Integer): Integer do
+  result := f(f(x))
+end
+print(twice(fn (n) do result := n * 3 end, 2))     -- 18
+
+let names: Array[String] := ["bo", "ann"]
+print(names.sort(fn (a, b) do result := a.length - b.length end))   -- ["bo", "ann"]
+
+server.post("/echo", fn (req) do                   -- req is an Http_Request
+  result := create Http_Server_Response.make(200, req.body(), {})
+end)
+```
+
+For a generic function, the other arguments are looked at first:
+`apply_to[T](x: T, f: Function(v: T): T)` called as `apply_to(10, fn (v) do
+result := v + 1 end)` binds `T` to `Integer` from `10`, so `v` is an
+`Integer`.
+
+Inference only works where a target type is actually available: a typed
+`let`, or a parameter of a `Function(...)` type. With no such context (`let f
+:= fn (x) do ... end`), every parameter needs its own explicit type, or it's a
+compile error.
 
 A `Function(...)` type's parameter names are for documentation only — they
 can be dropped, leaving just the types:

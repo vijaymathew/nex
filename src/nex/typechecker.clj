@@ -2,6 +2,7 @@
   "Static type checker for Nex language"
   (:require [clojure.string :as str]
             [clojure.set :as set]
+            [clojure.walk]
             [nex.field-shadowing :as field-shadowing]
             [nex.fmt :as fmt]
             [nex.redeclare :as redeclare]
@@ -2288,24 +2289,53 @@
       (throw (ex-info (str "Undefined variable: " name)
                       {:error (type-error (str "Undefined variable: " name))})))))
 
+(defn- lambda-awaiting-types?
+  "Is ARG a `fn` literal with a parameter or result type left out, to be
+   taken from the type its context expects?"
+  [arg]
+  (and (map? arg)
+       (= :anonymous-function (:type arg))
+       (or (some (comp nil? :type) (:params arg))
+           (nil? (:return-type arg)))))
+
+(defn- contextual-function-type
+  "EXPECTED as a structural Function type a `fn` literal can take its omitted
+   types from, or nil: it must name its parameter types, and none of them may
+   be a generic parameter still unbound at this call (`U` of a method's own
+   signature). One bound in scope (the enclosing class's `G`) is fine."
+  [env expected]
+  (let [t (when expected (normalize-type (expand-type-aliases env expected)))]
+    (when (and (map? t)
+               (= "Function" (:base-type t))
+               (:param-types t)
+               (not-any? (fn [p]
+                           (some #(nil? (env-lookup-class env %))
+                                 (generic-names-in-type env (:type p))))
+                         (:param-types t)))
+      t)))
+
+(defn- check-arg-in-context
+  "The type of call argument ARG, whose parameter has type EXPECTED (nil when
+   unknown). A `fn` literal with omitted types is checked against EXPECTED,
+   which supplies them; any other argument is checked on its own."
+  [env arg expected]
+  (if-let [ft (and (lambda-awaiting-types? arg) (contextual-function-type env expected))]
+    (check-expression-with-expected env arg ft)
+    (check-expression env arg)))
+
 (defn- check-call-signature
   [env method args method-sig type-map & {:keys [arg-types]}]
-  ;; Deliberately does NOT check each argument with its positional parameter's
-  ;; type as an expected-type hint (the way check-let does for a typed `let`).
-  ;; That would let an unannotated `fn(item) do ... end` call argument
-  ;; typecheck via the same inference `check-expression-with-expected`'s
-  ;; `:anonymous-function` case supports — but the compiled backend's
-  ;; anonymous-function class compilation runs as a whole-program pass before
-  ;; any individual call site is lowered, and resolving a call argument's
-  ;; expected type requires the call's *receiver* type (scope-aware: locals,
-  ;; fields, `this`), not just a literal annotation sitting right there like a
-  ;; `let`'s. Teaching lowering to do that is a much bigger, scope-tracking
-  ;; rewrite (on the order of the existing closure-capture pass) that hasn't
-  ;; been built yet. Supporting it here without lowering support would
-  ;; typecheck fine and then crash with an opaque lowering error — so for now
-  ;; the shorthand is `let`-context only; a call argument still needs an
-  ;; explicit `fn(item: T): R do ... end`.
-  (let [arg-types (or arg-types (mapv #(check-expression env %) args))
+  ;; Each argument is checked with its parameter's type as the expected type,
+  ;; so a `fn (item) do ... end` argument takes its parameter types from the
+  ;; parameter it is passed to (check-arg-in-context). The types it gets are
+  ;; recorded and written into the AST before either backend runs (see
+  ;; *inferred-lambda-types*), so lowering never has to work them out.
+  (let [arg-types (or arg-types
+                      (mapv (fn [arg param]
+                              (check-arg-in-context
+                               env arg (some-> (:type param) (resolve-generic-type type-map))))
+                            args
+                            (concat (:params method-sig) (repeat nil))))
         params (:params method-sig)]
     (when (not= (count args) (count params))
       (throw (ex-info (str "Method " method " expects " (count params)
@@ -3578,7 +3608,12 @@
         (resolve-generic-type {:base-type "Array" :type-params ["T"]} type-map))
 
       1
-      (let [compare-type (check-expression env (first args))]
+      ;; A `fn (a, b) ...` comparator takes its types from the elements.
+      (let [compare-type (check-arg-in-context
+                          env (first args)
+                          {:base-type "Function"
+                           :param-types [{:name "a" :type elem-type} {:name "b" :type elem-type}]
+                           :return-type "Integer"})]
         (when (any-into-concrete-without-convert? env "Function" compare-type)
           (throw-any-narrowing-error! "the Array.sort comparator argument" "Function"))
         (when-not (types-compatible? env compare-type "Function")
@@ -4327,7 +4362,10 @@
                                          ;; is never recognized as inferable and
                                          ;; every call reports it as unresolved.
                                      (map :name (:generic-params var-type))))
-          arg-types (mapv #(check-expression env %) args)
+          ;; A `fn` literal with omitted types is checked last, once the
+          ;; other arguments have bound the generic parameters its expected
+          ;; type may mention (see check-arg-in-context).
+          pre-arg-types (mapv #(when-not (lambda-awaiting-types? %) (check-expression env %)) args)
               ;; A Function-typed variable carries its own declared signature
               ;; (e.g. `Function(Dog): String`), which is more specific than
               ;; the generic call<N> method registered by
@@ -4342,15 +4380,18 @@
                              (:params method-sig))
           inferred-type-map (try
                               (reduce (fn [acc [arg-type param]]
-                                        (merge-inferred-generic-bindings
-                                         env
-                                         acc
-                                         (infer-generic-type-map-from-arg
-                                          env generic-names (:type param) arg-type)))
+                                        (if (nil? arg-type)
+                                          acc
+                                          (merge-inferred-generic-bindings
+                                           env
+                                           acc
+                                           (infer-generic-type-map-from-arg
+                                            env generic-names (:type param) arg-type))))
                                       {}
-                                      (map vector arg-types effective-params))
+                                      (map vector pre-arg-types effective-params))
                               (catch clojure.lang.ExceptionInfo e
-                                (throw (with-raw-generic-conflict-hint env e arg-types args))))
+                                (throw (with-raw-generic-conflict-hint
+                                        env e (mapv #(or % "Any") pre-arg-types) args))))
           ;; Type arguments written at the call (`total_area[Circle](xs)`)
           ;; fix the binding: an argument must then conform to the
           ;; instantiated parameter, not re-bind it. Without them,
@@ -4371,7 +4412,12 @@
                                              written)))))
           type-map (merge (build-generic-type-map env var-type)
                           inferred-type-map
-                          explicit-type-map)]
+                          explicit-type-map)
+          arg-types (mapv (fn [arg pre param]
+                            (or pre
+                                (check-arg-in-context
+                                 env arg (some-> (:type param) (resolve-generic-type type-map)))))
+                          args pre-arg-types (concat effective-params (repeat nil)))]
           ;; An inferred binding must itself satisfy its generic parameter's
           ;; own declared constraint (`[G -> Animal]`) -- validate-generic-args
           ;; already does this for an EXPLICIT type argument (`Box[Dog]`), but
@@ -4888,8 +4934,11 @@
                                           subst (zipmap (map :name declaring-params) inst)]
                                       (mapv #(resolve-generic-type % subst) raw))))
                                 raw)))
-            arg-types (when (and (or constructor (seq args)) ctor-sig)
-                        (mapv #(check-expression env %) args))
+            ;; A `fn` literal with omitted types is checked last, once the
+            ;; other arguments have bound the class's generic parameters its
+            ;; expected type may mention (see check-arg-in-context).
+            pre-arg-types (when (and (or constructor (seq args)) ctor-sig)
+                            (mapv #(when-not (lambda-awaiting-types? %) (check-expression env %)) args))
             ;; When type arguments are not written explicitly, infer them from
             ;; the constructor's argument types (`create Ok.make(5)` ->
             ;; Ok[Integer, Any]); parameters not mentioned by the constructor
@@ -4897,14 +4946,17 @@
             inferred-map (when (and (empty? generic-args) (seq gparams) ctor-sig (seq args))
                            (try
                              (reduce (fn [acc [arg-type param-type]]
-                                       (merge-inferred-generic-bindings
-                                        env acc
-                                        (infer-generic-type-map-from-arg
-                                         env (set (map :name gparams)) param-type arg-type)))
+                                       (if (nil? arg-type)
+                                         acc
+                                         (merge-inferred-generic-bindings
+                                          env acc
+                                          (infer-generic-type-map-from-arg
+                                           env (set (map :name gparams)) param-type arg-type))))
                                      {}
-                                     (map vector arg-types param-types))
+                                     (map vector pre-arg-types param-types))
                              (catch clojure.lang.ExceptionInfo e
-                               (throw (with-raw-generic-conflict-hint env e arg-types args)))))
+                               (throw (with-raw-generic-conflict-hint
+                                       env e (mapv #(or % "Any") pre-arg-types) args)))))
             target-type (cond
                           (seq generic-args)
                           (do (validate-generic-args env class-name generic-args)
@@ -4913,7 +4965,13 @@
                           {:base-type class-name
                            :type-args (mapv #(get inferred-map (:name %) unknown-type-arg) gparams)}
                           :else class-name)
-            type-map (build-generic-type-map env target-type)]
+            type-map (build-generic-type-map env target-type)
+            arg-types (when pre-arg-types
+                        (mapv (fn [arg pre declared]
+                                (or pre
+                                    (check-arg-in-context
+                                     env arg (some-> declared (resolve-generic-type type-map)))))
+                              args pre-arg-types (concat param-types (repeat nil))))]
         ;; If class defines constructors, disallow implicit default create.
         (when (and has-constructors?
                    (nil? constructor)
@@ -5069,6 +5127,21 @@
              :param-types (mapv (fn [p] {:name (:name p) :type (or (:type p) "Any")}) (:params expr))
              :return-type (or (:return-type expr) "Any")}
       (seq (:generic-params expr)) (assoc :generic-params (:generic-params expr)))))
+
+(def ^:dynamic *inferred-lambda-types*
+  "While a program is checked, an atom: anonymous-function class name ->
+   {:params .. :return-type ..}, the signature each `fn` literal with omitted
+   types got from its context (a typed `let`, or the parameter it is passed
+   to). type-check returns it as :lambda-types, and apply-inferred-lambda-types
+   writes it into the AST, so both backends see fully typed literals."
+  nil)
+
+(defn- record-inferred-lambda-types!
+  [patched]
+  (when-let [table *inferred-lambda-types*]
+    (when-let [n (get-in patched [:class-def :name])]
+      (swap! table assoc n {:params (:params patched)
+                            :return-type (:return-type patched)}))))
 
 (defn- patch-anonymous-function-types
   "Return EXPR (an `:anonymous-function` node) with every param whose `:type`
@@ -5416,7 +5489,8 @@
                             {:error (type-error
                                      (str "Expected " (display-type expected-type)
                                           ", got " (display-type actual-type)))})))
-          (check-expr-anonymous-function env patched))
+          (check-expr-anonymous-function env patched)
+          (record-inferred-lambda-types! patched))
         expected-type)
 
       :else
@@ -9136,7 +9210,25 @@
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([ast] (type-check ast {}))
   ([ast opts]
-   (check-program ast opts)))
+   (binding [*inferred-lambda-types* (atom {})]
+     (assoc (check-program ast opts) :lambda-types @*inferred-lambda-types*))))
+
+(defn apply-inferred-lambda-types
+  "AST with every `fn` literal named in LAMBDA-TYPES (type-check's
+   :lambda-types) given the parameter and result types its context supplied.
+   Only omitted types are filled in; the AST is otherwise unchanged."
+  [ast lambda-types]
+  (if (empty? lambda-types)
+    ast
+    (clojure.walk/postwalk
+     (fn [node]
+       (if-let [{:keys [params return-type]}
+                (and (map? node)
+                     (= :anonymous-function (:type node))
+                     (get lambda-types (get-in node [:class-def :name])))]
+         (patch-anonymous-function-types node (mapv :type params) return-type)
+         node))
+     ast)))
 
 (defn infer-expression-type
   "Infer the type of an expression AST node.

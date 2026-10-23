@@ -54,6 +54,14 @@
   `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
   same numbers on both backends. The digital map and neural network examples
   use it instead of their own generator.
+- **A `fn` passed as an argument takes its types from the parameter.**
+  `twice(fn (n) do result := n * 3 end, 2)`, `names.sort(fn (a, b) do ... end)`
+  and `server.post("/x", fn (req) do ... end)` no longer need the parameter
+  and result types written out, for methods, free and generic functions,
+  constructors and function values alike (until now only a typed `let` could
+  supply them). For a generic routine the other arguments bind its type
+  parameters first. The types inferred are recorded by the type checker and
+  written into the program before either backend runs.
 - **`Iterable[T]` and `Cursor[T]` are real deferred classes.** `Array[T]` and
   `Set[T]` are `Iterable[T]`, `String` is `Iterable[Char]`, and `Map[K, V]` is
   `Iterable[Map_Entry[K, V]]`, so a parameter typed `Iterable[Integer]` takes

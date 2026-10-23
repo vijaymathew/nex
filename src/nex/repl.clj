@@ -1552,7 +1552,9 @@
   "Type-check `ast` against the session so far (`ctx`'s previously defined
    classes/functions/imports plus everything interned), when type checking
    is on and there's actually something in `ast` worth checking. Throws
-   `ex-info` (after printing each error) on failure; otherwise returns nil."
+   `ex-info` (after printing each error) on failure; otherwise returns the
+   types inferred for `fn` literals (tc/type-check's :lambda-types), or nil
+   when nothing was checked."
   [ctx ast source-id]
   (when (and @*type-checking-enabled*
              (= (:type ast) :program)
@@ -1631,7 +1633,8 @@
       (when-not (:success result)
         (doseq [line (tc/format-type-errors result)]
           (println line))
-        (throw (ex-info "Type checking failed" {:errors (:errors result)}))))))
+        (throw (ex-info "Type checking failed" {:errors (:errors result)})))
+      (:lambda-types result))))
 
 (defn- repl-log-path
   []
@@ -1911,7 +1914,8 @@
                ;; aliases; the current cell's are recorded further below.
                ast (inject-session-refinements ast @*repl-type-aliases*)]
            (sync-and-remember-type-aliases! exec-ctx source-id ast)
-           (type-check-repl-input! ctx ast source-id)
+           (let [ast (tc/apply-inferred-lambda-types
+                      ast (type-check-repl-input! ctx ast source-id))]
            (cond
              ;; Experimental compiled path for narrow expression-shaped program inputs.
              (and (= (:type ast) :program)
@@ -1932,7 +1936,7 @@
 
              ;; Single expression or statement
              :else
-             (eval-single-node! exec-ctx ast source-id))))
+             (eval-single-node! exec-ctx ast source-id)))))
 
        (catch ParseError e
          (println "Syntax error:")
