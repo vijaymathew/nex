@@ -37,47 +37,29 @@ class Calc_Service
       result := create Http_Server_Response.make(status_code, json.stringify(payload), headers)
     end
 
-    -- JSON integers parse as Integer, JSON decimals as Real; evaluate wants
-    -- Real either way.
-    to_real_any(v: Any): Real do
-      if convert v to n: Integer then
-        result := n.to_real()
-      elseif convert v to r: Real then
-        result := r
-      end
-    end
-
-    parse_vars(body: Map[String, Any]): Map[String, Real] do
+    -- The request's variables, as numbers: {"x": 2, "y": 0.5}. `as_real`
+    -- accepts a JSON integer too, since evaluate wants Real either way.
+    parse_vars(body: Json_Value): Map[String, Real] do
       result := {}
-      if body.contains_key("vars") and convert body.get("vars") to raw_vars: Map[String, Any] then
-        let names: Array[String] := raw_vars.keys()
-        let i: Integer := 0
-        from
-          i := 0
-        until
-          i = names.length
-        do
-          let name: String := names.get(i)
-          result.set(name, to_real_any(raw_vars.get(name)))
-          i := i + 1
+      if body.has("vars") then
+        let vars: Json_Value := body.get("vars")
+        across vars.keys as name do
+          result.set(name, vars.get(name).as_real)
         end
       end
     end
 
+    -- Any problem with the request (not JSON, no "expr", a variable that
+    -- isn't a number) or with the expression itself raises, and becomes a
+    -- 400 with the error's own message, such as
+    -- {"error": "Json: vars.x is a string, expected a number"}.
     handle_evaluate(req: Http_Request): Http_Server_Response do
       do
-        if convert json.parse(req.body()) to body: Map[String, Any]
-            and convert body.get("expr") to expr_text: String then
-          let vars: Map[String, Real] := parse_vars(body)
-          let value: Real := evaluate(expr_text, vars)
-          let payload: Map[String, Any] := {}
-          payload.set("result", value)
-          result := json_response(200, payload)
-        else
-          let payload: Map[String, Any] := {}
-          payload.set("error", "missing or invalid 'expr'")
-          result := json_response(400, payload)
-        end
+        let body: Json_Value := json.read(req.body())
+        let value: Real := evaluate(body.get("expr").as_string, parse_vars(body))
+        let payload: Map[String, Any] := {}
+        payload.set("result", value)
+        result := json_response(200, payload)
       rescue
         let payload: Map[String, Any] := {}
         payload.set("error", "" + exception)

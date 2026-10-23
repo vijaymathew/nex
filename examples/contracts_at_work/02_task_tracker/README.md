@@ -40,15 +40,17 @@ that no longer exist:
   `mark_done` goes back through `find` and mutates the returned optional
   directly, rather than indexing into the array to avoid it.
 
-One JSON issue is fixed only *partly*, and still shapes this project's
-code: a `Map` returned by `data/Json.parse(...)` works fine as a plain
-local or inside `Array[Any]`, but **storing one into a specifically
-`Array[Map[String, Any]]`-typed array still breaks a method call on
-retrieval** on the JVM backend. `Task_Store.parse_json`'s intermediate
-`rows` collection is `Array[Any]`, with each element cast back to `Map[String,
-Any]` via an ordinary `let` the moment it's read out — which works. The
-one-JSON-object-per-line file format (rather than a single
-`{"tasks":[...]}` document) started as a workaround for a *different*,
-now-fully-fixed nested-array bug; it's kept regardless, since a flat,
-append-friendly, diffable format is arguably the better choice for a
-save-on-every-change task store either way.
+`Task_Store.parse_json` reads the file through `data/Json`'s typed
+reader: `json.read(line)` gives a `Json_Value`, and each field is asked
+for as the type the schema says it is (`row.get("id").as_integer`,
+`row.get("text").as_string`, ...). A row that doesn't match the schema
+raises an error naming the field, such as `Json: id is a string, expected
+an integer`, instead of being patched up with defaults or skipped: the CLI
+saves after every change, so a file read only partly would be overwritten
+and the rest of it lost.
+
+The one-JSON-object-per-line file format (rather than a single
+`{"tasks":[...]}` document) started as a workaround for a now-fixed
+nested-array bug; it's kept regardless, since a flat, append-friendly,
+diffable format is arguably the better choice for a save-on-every-change
+task store either way.

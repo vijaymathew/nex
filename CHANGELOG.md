@@ -54,6 +54,12 @@
   `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
   same numbers on both backends. The digital map and neural network examples
   use it instead of their own generator.
+- **Typed JSON reading.** `Json.read(text)` gives a `Json_Value`, read with
+  `get(key)`, `at(i)`, `items`, `as_integer`, `as_real`, `as_string`,
+  `as_boolean`, and whole arrays at once with `as_reals`, `as_integers`, ...,
+  instead of narrowing every `Any` with `convert`. A mismatch raises an error
+  that names the place: `Json: points[2].x is a string, expected a number`.
+  The neural network example loads its model this way.
 - **New `Real` methods `sinh`, `cosh` and `tanh`.** `tanh` never overflows:
   `1000.0.tanh` is exactly `1.0`.
 - **Fixed: under `--interpret`, a `let` inside an `if` branch overwrote an

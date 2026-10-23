@@ -2612,54 +2612,23 @@ is \code{write_text} on a \code{Path}.
   end
 \end{addbefore}
 
-Loading is the reverse, with one complication. \code{parse} can return
-any kind of JSON value, so its result has type \code{Any}, and so does
-everything inside it. To use a value as a number or an array, we must
-narrow it to that type with \code{convert}, which checks the actual type
-at run time:
-\code{if convert value to n: Integer then ... end} runs the \code{then}
-branch, with \code{n} as an \code{Integer}, only if the value really is
-one. Four small functions do this for each shape of value we expect, and
-raise an error for anything else:
+Loading is the reverse. \code{read} parses the text into a
+\code{Json_Value}, and we ask it for what we expect to find:
+\code{data.get("hidden").as_integer} is the whole number stored under
+\code{"hidden"}, and \code{data.get("b1").as_reals} is the list of numbers
+under \code{"b1"}. (\code{as_reals} also accepts a number written without
+a decimal point, as JSON often has them.) If the file is not what we
+expect, these raise an error that says what is wrong and where, such as
+\code{Json: W1[3] is a string, expected an array}.
+
+A matrix is a list of lists of numbers, so it takes one small function:
+each item of the outer list, read as a list of numbers.
 
 \begin{append}{next_letter_model.nex}
--- Reading numbers back out of parsed JSON, where every value is an Any.
-
-function json_integer(value: Any): Integer do
-  if convert value to n: Integer then
-    result := n
-  else
-    raise "expected an integer in the model file"
-  end
-end
-
-function json_real(value: Any): Real do
-  if convert value to r: Real then
-    result := r
-  elseif convert value to n: Integer then
-    result := n.to_real   -- a JSON number written without a decimal point
-  else
-    raise "expected a number in the model file"
-  end
-end
-
-function json_vector(value: Any): Array[Real] do
-  if convert value to items: Array[Any] then
-    across items as item do
-      result.add(json_real(item))
-    end
-  else
-    raise "expected a list of numbers in the model file"
-  end
-end
-
-function json_matrix(value: Any): Array[Array[Real]] do
-  if convert value to rows: Array[Any] then
-    across rows as row do
-      result.add(json_vector(row))
-    end
-  else
-    raise "expected a list of rows in the model file"
+-- A matrix from JSON: a list of rows, each a list of numbers.
+function json_matrix(value: Json_Value): Array[Array[Real]] do
+  across value.items as row do
+    result.add(row.as_reals)
   end
 end
 \end{append}
@@ -2673,19 +2642,15 @@ wrong shapes is rejected right away.
   -- A trained model, read back from a file written by save.
   from_file(path: String) do
     let json: Json := create Json.make()
-    let text: String := create Path.make(path).read_text()
-    if convert json.parse(text) to data: Map[String, Any] then
-      context := json_integer(data.get("context"))
-      emb_dim := json_integer(data.get("emb_dim"))
-      hidden := json_integer(data.get("hidden"))
-      c := json_matrix(data.get("C"))
-      w1 := json_matrix(data.get("W1"))
-      b1 := json_vector(data.get("b1"))
-      w2 := json_matrix(data.get("W2"))
-      b2 := json_vector(data.get("b2"))
-    else
-      raise "not a model file: " + path
-    end
+    let data: Json_Value := json.read(create Path.make(path).read_text())
+    context := data.get("context").as_integer
+    emb_dim := data.get("emb_dim").as_integer
+    hidden := data.get("hidden").as_integer
+    c := json_matrix(data.get("C"))
+    w1 := json_matrix(data.get("W1"))
+    b1 := data.get("b1").as_reals
+    w2 := json_matrix(data.get("W2"))
+    b2 := data.get("b2").as_reals
   end
 \end{addbefore}
 
@@ -3552,7 +3517,6 @@ Class invariants & \code{invariant state_in_range: ...} \\
 Loops & \code{from ... until ... do ... end}, \code{repeat n do}, \code{across xs as x do} \\
 Several constructors & \code{make} and \code{from_file} \\
 Anonymous functions & \code{fn(a, b: Prediction): Integer do ... end} for \code{sort} \\
-\code{convert} & narrowing an \code{Any} from JSON to \code{Integer}, \code{Real}, \code{Array[Any]} \\
 Detachable types, object test & \code{?String}, \code{if ?line as text then} \\
 \code{case ... of} & matching option names in \code{train.nex} \\
 Built-in \code{Real} methods & \code{format} for printing, \code{round}, \code{log}, \code{sqrt} \\
