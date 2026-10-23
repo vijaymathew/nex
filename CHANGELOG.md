@@ -54,6 +54,14 @@
   `gaussian`, plus a generic `shuffle(items, random)`. The same seed gives the
   same numbers on both backends. The digital map and neural network examples
   use it instead of their own generator.
+- **Short anonymous functions: `fn (x) => expression`.** The same as
+  `fn (x) do result := expression end`: `nums.sort(fn (a, b) => b - a)`,
+  `let double := fn (n: Integer) => n * 2`. The result type is the
+  expression's when neither written nor given by the context, and a
+  generic routine binds a type parameter only its function argument's
+  result mentions from it (`map_all(words, fn (s) => s.length)` gives an
+  `Array[Integer]`). An expression with no value (`fn (m) => print(m)`) makes
+  a function with no result. `nex format` and the Emacs mode know `=>`.
 - **A `fn` passed as an argument takes its types from the parameter.**
   `twice(fn (n) do result := n * 3 end, 2)`, `names.sort(fn (a, b) do ... end)`
   and `server.post("/x", fn (req) do ... end)` no longer need the parameter

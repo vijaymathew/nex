@@ -1473,6 +1473,24 @@ let add: Function(a: Integer, b: Integer): Integer :=
 print(add(3, 4))                -- 7
 ```
 
+A function whose body only computes its result can be written with `=>` and
+the expression. Its result type is the expression's (or the one the context
+expects), and the expression runs as far to the right as an expression can:
+
+```nex
+let double := fn (n: Integer) => n * 2
+print(double(21))                       -- 42
+names.sort(fn (a, b) => a.length - b.length)
+let say := fn (m: String) => print(m)   -- no result: the call is the body
+```
+
+`fn (x) => e` means `fn (x) do result := e end`. Use the `do ... end` form for
+anything with statements, contracts or `rescue`. Writing a user-defined
+generic function over a function argument becomes easy too: for
+`map_all[T, U](xs: Array[T], f: Function(x: T): U): Array[U]`, the call
+`map_all(["a", "bb"], fn (s) => s.length)` takes `T` from the array and `U`
+from what the function returns, so it gives an `Array[Integer]`.
+
 Bare `Function` is still valid and compatible with any typed function value:
 
 ```nex

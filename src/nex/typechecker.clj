@@ -18,6 +18,7 @@
 (declare env-lookup-type-alias-generic-params)
 (declare resolve-generic-type)
 (declare type-error)
+(declare conversion-hint)
 (declare check-no-discarded-values! check-missing-call-parens! short-source closest-spelling
          lookup-class-constructors argument-mismatch-message assignment-mismatch-message)
 
@@ -2298,6 +2299,14 @@
        (or (some (comp nil? :type) (:params arg))
            (nil? (:return-type arg)))))
 
+(defn- unbound-generic-names
+  "The generic-parameter names in type T that nothing in ENV binds: not the
+   enclosing class's or routine's own (registered as placeholder classes),
+   so a parameter of some other routine's signature."
+  [env t]
+  (when t
+    (remove #(env-lookup-class env %) (generic-names-in-type env t))))
+
 (defn- contextual-function-type
   "EXPECTED as a structural Function type a `fn` literal can take its omitted
    types from, or nil: it must name its parameter types, and none of them may
@@ -4413,11 +4422,31 @@
           type-map (merge (build-generic-type-map env var-type)
                           inferred-type-map
                           explicit-type-map)
+          ;; Only what was inferred or written, not build-generic-type-map's
+          ;; Any defaults: a generic still unbound must stay open in a `fn`
+          ;; literal's expected type, for its result to bind it.
+          bound-type-map (merge inferred-type-map explicit-type-map)
           arg-types (mapv (fn [arg pre param]
                             (or pre
                                 (check-arg-in-context
-                                 env arg (some-> (:type param) (resolve-generic-type type-map)))))
-                          args pre-arg-types (concat effective-params (repeat nil)))]
+                                 env arg (some-> (:type param) (resolve-generic-type bound-type-map)))))
+                          args pre-arg-types (concat effective-params (repeat nil)))
+          ;; ... and what those `fn` literals turned out to return binds the
+          ;; generic parameters only their result types mention (`U`).
+          type-map (merge (reduce (fn [acc [pre arg-type param]]
+                                    (if (or pre (nil? param))
+                                      acc
+                                      (merge-inferred-generic-bindings
+                                       env acc
+                                       (infer-generic-type-map-from-arg
+                                        env generic-names (:type param) arg-type))))
+                                  {}
+                                  (map vector pre-arg-types arg-types effective-params))
+                          ;; above the Any defaults, below what the other
+                          ;; arguments inferred and what was written
+                          inferred-type-map
+                          explicit-type-map)
+          type-map (merge (build-generic-type-map env var-type) type-map)]
           ;; An inferred binding must itself satisfy its generic parameter's
           ;; own declared constraint (`[G -> Animal]`) -- validate-generic-args
           ;; already does this for an EXPLICIT type argument (`Box[Dog]`), but
@@ -5070,6 +5099,39 @@
                                           (display-type first-type) " and " (display-type elem-type)))})))))
       {:base-type "Set" :type-params [first-type]})))
 
+(declare patch-anonymous-function-types set-anonymous-function-body record-inferred-lambda-types!
+         check-expression-value)
+
+(defn- void-type?
+  [t]
+  (or (nil? t) (= "Void" (normalize-type t))))
+
+(defn- finalize-expression-lambda
+  "For `fn (x) => e` (an :expression-body): when no result type is written or
+   supplied by the context, it is the type of `e`, checked with the parameters
+   in scope; and when the result is Void (written, supplied, or `e` itself has
+   no value, like a call to a procedure), `e` becomes the body as a plain
+   statement rather than `result := e`. Any other literal is returned as is."
+  [env expr]
+  (if-not (:expression-body expr)
+    expr
+    (let [e (:expression-body expr)
+          expr (if (or (some? (:return-type expr))
+                       (some (comp nil? :type) (:params expr)))
+                 expr
+                 (let [scope (make-type-env (narrowing-barrier-env env))]
+                   (doseq [{:keys [name type]} (:params expr)]
+                     (env-add-var scope name type))
+                   ;; check-expression-value: `e` may be a call with no value.
+                   (let [t (check-expression-value scope e)]
+                     (if (void-type? t)
+                       (assoc expr :void-body? true)
+                       (patch-anonymous-function-types expr (mapv :type (:params expr)) t)))))]
+      (if (or (:void-body? expr)
+              (and (some? (:return-type expr)) (void-type? (:return-type expr))))
+        (set-anonymous-function-body (dissoc expr :void-body?) [e])
+        expr))))
+
 (defn- check-expr-anonymous-function
   [env expr]
   (let [class-def (:class-def expr)
@@ -5100,7 +5162,12 @@
         ;; check-spawn already does for a spawn body, by simply not
         ;; overriding __current_class__ at all) resolves this with no new
         ;; machinery.
-        enclosing-class (env-lookup-var env "__current_class__")]
+        enclosing-class (env-lookup-var env "__current_class__")
+        settled (finalize-expression-lambda env expr)
+        _ (when-not (identical? settled expr)
+            (record-inferred-lambda-types! settled))
+        expr settled
+        class-def (:class-def expr)]
     ;; Register the dynamic class definition in the type environment
     (collect-class-info env class-def)
     ;; An error in the literal's body is the enclosing statement's: it must
@@ -5140,8 +5207,33 @@
   [patched]
   (when-let [table *inferred-lambda-types*]
     (when-let [n (get-in patched [:class-def :name])]
-      (swap! table assoc n {:params (:params patched)
-                            :return-type (:return-type patched)}))))
+      (swap! table assoc n (cond-> {:params (:params patched)
+                                    :return-type (:return-type patched)}
+                             ;; `fn (x) => e` whose `e` became a plain
+                             ;; statement (see finalize-expression-lambda).
+                             ;; A flag, not the body: the body is rebuilt
+                             ;; from the node's own `e`, whose nested `fn`s
+                             ;; are by then patched themselves.
+                             (and (:expression-body patched)
+                                  (= [(:expression-body patched)] (:body patched)))
+                             (assoc :void-body? true))))))
+
+(defn- set-anonymous-function-body
+  "EXPR (an :anonymous-function node) with BODY as its body, both on the node
+   and on the call method of its class-def."
+  [expr body]
+  (-> expr
+      (assoc :body body)
+      (update :class-def
+              (fn [class-def]
+                (update class-def :body
+                        (fn [sections]
+                          (mapv (fn [section]
+                                  (if (= :feature-section (:type section))
+                                    (update section :members
+                                            #(mapv (fn [m] (cond-> m (= :method (:type m)) (assoc :body body))) %))
+                                    section))
+                                sections)))))))
 
 (defn- patch-anonymous-function-types
   "Return EXPR (an `:anonymous-function` node) with every param whose `:type`
@@ -5469,9 +5561,16 @@
                                    (str "Expected a Function with " (count expected-params)
                                         " parameter" (if (= 1 (count expected-params)) "" "s")
                                         ", got one with " (count own-params) "."))})))
-        (let [patched (patch-anonymous-function-types expr
+        (let [;; A result type naming a generic the call has not bound yet
+              ;; (the `U` of `map_all[T, U](xs: Array[T], f: Function(x: T): U)`)
+              ;; is not imposed: the literal's own result type stands, and
+              ;; for `fn (x) => e` is inferred from `e`. The caller then binds
+              ;; `U` from the type this returns.
+              open-return? (boolean (seq (unbound-generic-names env (:return-type expected-type))))
+              patched (patch-anonymous-function-types expr
                                                       (mapv :type expected-params)
-                                                      (:return-type expected-type))
+                                                      (when-not open-return?
+                                                        (:return-type expected-type)))
               ;; A param/return already declared on the literal itself is left
               ;; untouched by patch-anonymous-function-types (only nil slots
               ;; are filled from EXPECTED-TYPE) — so a fully- or partially-
@@ -5483,15 +5582,19 @@
               actual-type {:base-type "Function"
                            :param-types (mapv (fn [p] {:name (:name p) :type (:type p)})
                                               (:params patched))
-                           :return-type (:return-type patched)}]
+                           :return-type (if open-return?
+                                          (:return-type expected-type)
+                                          (:return-type patched))}]
           (when-not (types-compatible? env actual-type expected-type)
             (throw (ex-info "Anonymous function type does not match expected Function type"
                             {:error (type-error
                                      (str "Expected " (display-type expected-type)
                                           ", got " (display-type actual-type)))})))
-          (check-expr-anonymous-function env patched)
-          (record-inferred-lambda-types! patched))
-        expected-type)
+          ;; Recorded before checking: checking may settle an `=>` body
+          ;; further, and records that itself.
+          (record-inferred-lambda-types! patched)
+          (let [checked (check-expr-anonymous-function env patched)]
+            (if open-return? checked expected-type))))
 
       :else
       (check-expression env expr))))
@@ -5635,12 +5738,20 @@
         (throw (ex-info (str "Undefined variable: " target)
                         {:error (type-error (str "Undefined variable: " target))}))))
     (when (any-into-concrete-without-convert? env var-type val-type)
-      (throw-any-narrowing-error! (str "variable '" target "'") var-type))
+      (throw-any-narrowing-error! (if (:arrow-result stmt)
+                                    "the result of this function"
+                                    (str "variable '" target "'"))
+                                  var-type))
     (when-not (types-compatible? env val-type var-type)
       (throw (ex-info (str "Type mismatch in assignment to " target)
                       {:error (type-error
-                               (assignment-mismatch-message env (str "variable '" target "'")
-                                                            val-type var-type (:value stmt)))})))
+                               (if (:arrow-result stmt)
+                                 ;; `fn (x) => e`: no `result` in sight
+                                 (str "This function's result should be " (display-type var-type)
+                                      ", but the expression after `=>` is " (display-type val-type) "."
+                                      (or (conversion-hint val-type var-type (:value stmt)) ""))
+                                 (assignment-mismatch-message env (str "variable '" target "'")
+                                                              val-type var-type (:value stmt))))})))
     ;; Keep nil-check narrowing in step with the assignment: a value that may
     ;; be nil undoes it for every block containing this one. One that cannot
     ;; be nil leaves it standing.
@@ -9222,11 +9333,13 @@
     ast
     (clojure.walk/postwalk
      (fn [node]
-       (if-let [{:keys [params return-type]}
+       (if-let [{:keys [params return-type void-body?]}
                 (and (map? node)
                      (= :anonymous-function (:type node))
                      (get lambda-types (get-in node [:class-def :name])))]
-         (patch-anonymous-function-types node (mapv :type params) return-type)
+         (let [patched (patch-anonymous-function-types node (mapv :type params) return-type)]
+           (cond-> patched
+             void-body? (set-anonymous-function-body [(:expression-body patched)])))
          node))
      ast)))
 
