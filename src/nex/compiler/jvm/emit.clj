@@ -2893,6 +2893,20 @@
   (mark-local-debug-after! mv (:slot expr))
   (:jvm-type expr))
 
+(defn- emit-old-value!
+  "An `old` value (see emit-old-capture!): raise the exception its operand
+   raised on entry, if any, else load the value recorded then."
+  [^MethodVisitor mv {:keys [slot err-slot jvm-type]} _state-slot]
+  (let [ok (Label.)]
+    (.visitVarInsn mv Opcodes/ALOAD err-slot)
+    (.visitJumpInsn mv Opcodes/IFNULL ok)
+    (.visitVarInsn mv Opcodes/ALOAD err-slot)
+    (.visitTypeInsn mv Opcodes/CHECKCAST throwable-internal-name)
+    (.visitInsn mv Opcodes/ATHROW)
+    (.visitLabel mv ok)
+    (.visitVarInsn mv (local-load-op jvm-type) slot)
+    jvm-type))
+
 (defn- emit-expr-this!
   [^MethodVisitor mv expr _state-slot]
   (.visitVarInsn mv Opcodes/ALOAD 0)
@@ -3222,7 +3236,8 @@
    :unary              emit-expr-unary!
    :binary             (fn [mv expr state-slot] (emit-binary! mv expr state-slot))
    :compare            (fn [mv expr state-slot] (emit-compare! mv expr state-slot))
-   :if                 emit-expr-if!})
+   :if                 emit-expr-if!
+   :old-value          emit-old-value!})
 
 (defn- emit-expr!
   [^MethodVisitor mv expr state-slot]
@@ -3578,6 +3593,28 @@
     (mark-local-debug-after! mv (:slot stmt))
     expr-jvm-type))
 
+(defn- emit-old-capture!
+  "Evaluate an `old` operand on entry and hold back any exception it raises,
+   as Eiffel does: the value goes to :slot, or the exception to :err-slot,
+   which stays null on success. The postcondition raises it only if it reads
+   this `old` value (emit-old-value!)."
+  [^MethodVisitor mv {:keys [err-slot] :as stmt} state-slot]
+  (let [start (Label.)
+        end (Label.)
+        handler (Label.)
+        done (Label.)]
+    (.visitInsn mv Opcodes/ACONST_NULL)
+    (.visitVarInsn mv Opcodes/ASTORE err-slot)
+    (.visitLabel mv start)
+    (emit-stmt-set-local! mv stmt state-slot)
+    (.visitLabel mv end)
+    (.visitJumpInsn mv Opcodes/GOTO done)
+    (.visitLabel mv handler)
+    (.visitVarInsn mv Opcodes/ASTORE err-slot)
+    (.visitLabel mv done)
+    ;; Registered last, so any handler nested in the operand comes first.
+    (.visitTryCatchBlock mv start end handler throwable-internal-name)))
+
 (defn- emit-stmt-top-set!
   [^MethodVisitor mv stmt state-slot]
   (emit-load-values-map! mv state-slot)
@@ -3692,6 +3729,7 @@
    :retry        (fn [mv _stmt _state-slot] (emit-retry! mv))
    :assert       (fn [mv stmt state-slot] (emit-assert! mv stmt state-slot))
    :try          (fn [mv stmt state-slot] (emit-try! mv stmt state-slot))
+   :old-capture  (fn [mv stmt state-slot] (emit-old-capture! mv stmt state-slot))
    :block        emit-stmt-block!
    :if-stmt      emit-stmt-if!
    :loop         emit-stmt-loop!})

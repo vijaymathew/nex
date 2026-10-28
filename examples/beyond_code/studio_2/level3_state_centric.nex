@@ -45,7 +45,7 @@ invariant
   id_present: task_id /= ""
   valid_status:
     status = "PENDING" or status = "IN_TRANSIT" or status = "FAILED" or status = "DELIVERED"
-  transit_has_robot: status /= "IN_TRANSIT" or robot_id /= ""
+  transit_has_robot: status = "IN_TRANSIT" implies robot_id /= ""
 end
 
 function main() do

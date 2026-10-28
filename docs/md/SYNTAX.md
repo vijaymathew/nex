@@ -136,7 +136,20 @@ x < y    x <= y                  -- less than? less or equal?
 x > y    x >= y                  -- greater than? greater or equal?
 x and y                          -- both true?
 x or y                           -- at least one true?
+x implies y                      -- if x, then y? (true whenever x is false)
 not x                            -- flip true/false
+```
+
+`and`, `or` and `implies` stop early: the right side runs only when it can
+still change the answer, so `x implies y` skips `y` when `x` is false.
+`implies` binds loosest of all, so `a and b implies c or d` means
+`(a and b) implies (c or d)`, and it groups to the right:
+`a implies b implies c` means `a implies (b implies c)`. It reads well in
+contracts:
+
+```nex
+ensure
+  first_kept: old items.length > 0 implies items.get(0) = old items.get(0)
 ```
 
 ## Comparison
@@ -946,6 +959,18 @@ class Wallet
 end
 ```
 
+`old e` is the value `e` had on entry. Nex evaluates `e` once, right after
+the precondition and before the body, so it may be any expression over fields,
+parameters and queries: `old count()`, `old items.length`,
+`old other.balance`. `old` covers the whole call chain after it (`old a.b.c`
+is `old (a.b.c)`) and stops at the first operator (`old money - amount` is
+`(old money) - amount`). An object value is the same object, not a copy, so
+write `old other.balance`, not `(old other).balance`; an array or map value
+keeps the membership it had on entry. If evaluating `e` on entry raises, the
+exception is held back, as in Eiffel, and raised only if the postcondition
+reads `old e`: `old items.length = 0 or items.get(0) = old items.get(0)` is
+fine on an empty array.
+
 The invariant is checked when an object is created, and on entry to and exit
 from every *qualified* call: `w.spend(1.0)`, or `this.spend(1.0)`. An unqualified call
 (`spend(1.0)`), `super.spend(1.0)` or `Parent.spend(1.0)` is part of the
@@ -1461,7 +1486,10 @@ f(b: ?Box): Integer
 ```
 
 The narrowing ends with the `and`: after `let ok := b /= nil and b.n > 10`, `b`
-is still `?Box`. An `or` narrows nothing.
+is still `?Box`. The right side of an `implies` sees the left side's narrowing
+in the same way (`b /= nil implies b.n > 10`), since it too runs only when the
+left side held. An `or` narrows nothing, and an `if` whose condition is an
+`implies` narrows nothing in either branch.
 
 `x /= nil` narrows a local or a parameter, and only while nothing can have made
 it `nil` again:

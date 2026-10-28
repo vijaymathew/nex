@@ -148,9 +148,9 @@ do
   result := create Search_Result.make("A*", path,
     best.try_get(target, 0.0), explored, parents)
 ensure
-  valid_path: not result.found() or is_route(g, result.path)
-  cost_adds_up: not result.found()
-    or (route_cost(g, result.path, cost) - result.cost).abs < 0.001
+  valid_path: result.found() implies is_route(g, result.path)
+  cost_adds_up: result.found()
+    implies (route_cost(g, result.path, cost) - result.cost).abs < 0.001
 end
 \end{append}
 

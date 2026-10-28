@@ -2463,10 +2463,11 @@
 (defn check-binary-op
   "Check the type of a binary operation"
   [env {:keys [operator left right] :as expr}]
-  (if (= "and" operator)
-    ;; Wherever it appears, the right operand of an `and` is checked with the
-    ;; left's narrowings in effect (`b /= nil and b.n > 10`): `and`
-    ;; short-circuits, so the right side runs only when the left held.
+  (if (#{"and" "implies"} operator)
+    ;; Wherever it appears, the right operand of an `and` or `implies` is
+    ;; checked with the left's narrowings in effect (`b /= nil and b.n > 10`,
+    ;; `b /= nil implies b.n > 10`): both short-circuit, so the right side
+    ;; runs only when the left held.
     (check-condition env expr)
     (check-binary-op* env expr)))
 
@@ -2531,7 +2532,7 @@
                                  (str "Comparison requires compatible types, got "
                                       (display-type left-type) " and " (display-type right-type)))})))
 
-      ("and" "or")
+      ("and" "or" "implies")
       (if (and (= left-type "Boolean") (= right-type "Boolean"))
         "Boolean"
         (throw (ex-info (str "Operator " operator " requires Boolean operands")
@@ -2937,16 +2938,18 @@
    `and` node still recurses into its own two sides here, so a 3+-conjunct
    left-associated chain threads all the way through)."
   [env condition]
-  (if (and (map? condition) (= :binary (:type condition)) (= "and" (:operator condition)))
-    (let [scratch (make-type-env env)
+  (if (and (map? condition) (= :binary (:type condition))
+           (#{"and" "implies"} (:operator condition)))
+    (let [operator (:operator condition)
+          scratch (make-type-env env)
           left-type (check-condition scratch (:left condition))]
       (apply-condition-branch-refinement! scratch (:left condition) :then)
       (let [right-type (check-condition scratch (:right condition))]
         (if (and (= left-type "Boolean") (= right-type "Boolean"))
           "Boolean"
-          (throw (ex-info "Operator and requires Boolean operands"
+          (throw (ex-info (str "Operator " operator " requires Boolean operands")
                           {:error (type-error
-                                   (str "Operator and requires Boolean operands, got "
+                                   (str "Operator " operator " requires Boolean operands, got "
                                         (display-type left-type) " and " (display-type right-type)))})))))
     (check-expression env condition)))
 
@@ -7075,6 +7078,33 @@
                   (collect-old-nodes (vals (dissoc node :type))))
     :else nil))
 
+(defn- names-read-in
+  "The plain names NODE reads: identifiers and named call targets. A closure
+   has a scope of its own, so it is not searched."
+  [node]
+  (cond
+    (sequential? node) (mapcat names-read-in node)
+    (map? node) (case (:type node)
+                  :anonymous-function nil
+                  :identifier [(:name node)]
+                  (concat (when (and (= :call (:type node)) (string? (:target node)))
+                            [(:target node)])
+                          (mapcat names-read-in (vals (dissoc node :type)))))
+    :else nil))
+
+(defn- clause-bindings-outside-old
+  "The names a `convert` or object test binds in an assertion's condition,
+   outside any `old` operand."
+  [node]
+  (cond
+    (sequential? node) (mapcat clause-bindings-outside-old node)
+    (map? node) (case (:type node)
+                  (:old :anonymous-function) nil
+                  (concat (when (#{:convert :attached-test} (:type node))
+                            [(:var-name node)])
+                          (mapcat clause-bindings-outside-old (vals (dissoc node :type)))))
+    :else nil))
+
 (defn- collect-illegal-retry
   "`retry` nodes that are not enclosed in a rescue block."
   [node in-rescue?]
@@ -7092,8 +7122,9 @@
     :else nil))
 
 (defn- check-old-and-retry!
-  "`old` may appear only in an `ensure` clause and must denote a field, not a
-   parameter; `retry` may appear only inside a `rescue` block."
+  "`old` may appear only in an `ensure` clause, and its operand must be
+   something that has a value on entry; `retry` may appear only inside a
+   `rescue` block."
   [kind routine-name params require body ensure & {:keys [closure?]}]
   (when (some #(seq (collect-old-nodes %)) (cons body (map :condition require)))
     (restriction-error!
@@ -7109,13 +7140,28 @@
          (str "'old' is not available in the ensure clause of "
               (if routine-name (str "the local function '" routine-name "'") "an anonymous function")
               "; it may appear only in the ensure clause of a method or constructor.")))
-      (let [e (:expr o)]
+      ;; `old e` is evaluated on entry, before the body, so E may read only
+      ;; what exists then: fields, parameters, and the routines it can call.
+      (let [e (:expr o)
+            where (str kind (when routine-name (str " '" routine-name "'")))
+            read (set (names-read-in e))]
         (when (and (map? e) (= :identifier (:type e))
                    (contains? param-names (:name e)))
           (restriction-error!
            (str "'old' may not be applied to the parameter '" (:name e) "' in "
-                kind (when routine-name (str " '" routine-name "'"))
-                "; it must denote a field of the current object."))))))
+                where "; a parameter cannot change, so 'old " (:name e)
+                "' would always equal '" (:name e) "'.")))
+        (when (seq (collect-old-nodes e))
+          (restriction-error!
+           (str "'old' may not be nested inside another 'old' in " where ".")))
+        (when (contains? read "result")
+          (restriction-error!
+           (str "'old' may not be applied to an expression that reads 'result' in "
+                where "; 'result' has no value on entry.")))
+        (when-let [n (some read (clause-bindings-outside-old (:condition assertion)))]
+          (restriction-error!
+           (str "'old' may not read '" n "' in " where
+                "; it is bound in the postcondition, so it has no value on entry."))))))
   (when (seq (concat (mapcat #(collect-illegal-retry (:condition %) false) require)
                      (collect-illegal-retry body false)
                      (mapcat #(collect-illegal-retry (:condition %) false) ensure)))

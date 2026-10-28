@@ -3277,6 +3277,7 @@
    :equality (make-binary-op-handler nil)
    :logicalAnd (make-binary-op-handler "and")
    :logicalOr (make-binary-op-handler "or")
+   :implication (make-binary-op-handler "implies")
    ;; Unary operators
    :unary handle-unary
    :unaryMinus handle-unary-minus

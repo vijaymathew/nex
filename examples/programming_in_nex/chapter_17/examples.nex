@@ -38,6 +38,28 @@ ensure
 end
 assert max(3, 7) = 7
 
+function position(xs: Array[Integer], target: Integer): Integer
+do
+  result := -1
+  from
+    let i := 0
+  until
+    i = xs.length or result /= -1
+  do
+    if xs.get(i) = target then
+      result := i
+    end
+    i := i + 1
+  end
+ensure
+  in_range: result >= -1 and result < xs.length
+  found_means_here: result >= 0 implies xs.get(result) = target
+  missing_means_absent: result = -1 implies not xs.contains(target)
+end
+
+assert position([4, 8, 15, 16], 15) = 2
+assert position([4, 8, 15, 16], 23) = -1
+
 class Account
   create
     make(initial: Real) do
@@ -72,6 +94,7 @@ class Account
         other.deposit(amount)
       ensure
         sender_lost_amount: balance = old balance - amount
+        receiver_gained_amount: other.balance = old other.balance + amount
       end
 end
 

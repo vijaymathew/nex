@@ -416,7 +416,14 @@ argumentList
  */
 
 expression
-    : logicalOr
+    : implication
+    ;
+
+// `implies` binds loosest of all and groups to the right:
+// `a and b implies c or d` is `(a and b) implies (c or d)`, and
+// `a implies b implies c` is `a implies (b implies c)`.
+implication
+    : logicalOr (IMPLIES implication)?
     ;
 
 logicalOr
@@ -518,8 +525,11 @@ anonymousFunction
     | FN genericParams? '(' paramList? ')' (':' type)? FAT_ARROW expression
     ;
 
+// `old` covers a whole call chain, as in Eiffel: `old box.n` is `old (box.n)`
+// and `old twice()` is `old (twice())`. It stops at the first operator, so
+// `old count + 1` is `(old count) + 1`.
 oldExpression
-    : OLD primary
+    : OLD postfix
     ;
 
 // `String` is a keyword token (STRING_TYPE), not an IDENTIFIER, so it is named
@@ -665,6 +675,7 @@ SELECT       : 'select';
 TIMEOUT      : 'timeout';
 AND          : 'and';
 OR           : 'or';
+IMPLIES      : 'implies';
 NOT          : 'not';
 
 TYPE_KW        : 'type';

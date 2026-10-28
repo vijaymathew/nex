@@ -255,11 +255,11 @@
 (def ^:private continuing-ends
   "A line ending with one of these continues on the next line."
   #{"+" "-" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=" "," "." "?." "->" "=>"
-    ":" "and" "or" "not"})
+    ":" "and" "or" "implies" "not"})
 
 (def ^:private continuing-starts
   "A line starting with one of these continues the line before."
-  #{"and" "or" "." "?." "+" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":="})
+  #{"and" "or" "implies" "." "?." "+" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":="})
 
 (def ^:private clause-words
   "For each kind of block, the words that start one of its clauses. A clause

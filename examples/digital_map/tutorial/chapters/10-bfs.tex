@@ -212,7 +212,7 @@ do
   result := create Search_Result.make("breadth-first", path,
     (path.length - 1).max(0).to_real, explored, parents)
 ensure
-  valid_path: not result.found() or is_route(g, result.path)
+  valid_path: result.found() implies is_route(g, result.path)
 end
 \end{append}
 
@@ -221,7 +221,7 @@ reached, and the path is empty. The cost of a breadth-first path is its
 number of steps.
 
 The postcondition says that whatever the search finds is a real route:
-``either nothing was found, or the path is a route''. It is checked every
+``if something was found, the path is a route''. It is checked every
 time the search runs.
 
 \section{Watching a search}

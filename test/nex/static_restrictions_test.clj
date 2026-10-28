@@ -77,6 +77,21 @@
          "class C feature f(p: Integer): Integer do result := p ensure k: result = old p end end"
          "may not be applied to the parameter 'p'"))))
 
+(deftest old-operand-must-have-an-entry-value
+  (testing "`old` may not read `result`, nest, or read a name the postcondition binds"
+    (is (rejected-with
+         "class C feature f(): Integer do result := 1 ensure k: old result = 0 end end"
+         "reads 'result'"))
+    (is (rejected-with
+         "class C feature x: Integer f() do ensure k: old (old x) = x end end"
+         "may not be nested"))
+    (is (rejected-with
+         "class C feature x: Integer f() do ensure k: convert this to y: C and old y.x = x end end"
+         "may not read 'y'")))
+  (testing "`old` may read parameters and call queries inside a larger expression"
+    (is (accepted?
+         "class C feature x: Integer g(): Integer do result := x end f(o: C) do ensure k: o.x = old o.x and g() = old g() end end"))))
+
 (deftest duplicate-locals-in-same-block-rejected
   (testing "two `let` declarations of the same name in one block are a compile error"
     (is (rejected-with "class C feature f() do let x := 1 let x := 2 print(x) end end"
