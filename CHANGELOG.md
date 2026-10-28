@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.4 - 2026-10-28
+
 - **`implies`.** `a implies b` is true when `a` is false, and otherwise `b`,
   which then runs only when `a` holds. It binds loosest of all, below `or`,
   so `a and b implies c or d` is `(a and b) implies (c or d)`, and groups to
