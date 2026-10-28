@@ -7,6 +7,7 @@ assert 2 ^ 10 = 1024
 assert -5 + 3 = -2
 assert 10 - 2 - 3 = 5
 assert 2 ^ 3 ^ 2 = 64
+assert 2 * 3 ^ 2 = 36
 
 assert 10 = 10
 assert not (10 = 11)
@@ -32,6 +33,12 @@ let age := 17
 assert age >= 13 and age <= 17
 assert not (age < 13 or age > 17)
 assert true or false and false
+
+assert true implies true
+assert not (true implies false)
+assert false implies true
+assert false implies false
+assert age >= 13 and age <= 17 implies age < 18
 
 let first := "Hello"
 let second := "Nex"
