@@ -2284,16 +2284,27 @@
                   (catch Exception _ ::not-found))]
         (when (not= res ::not-found) res)))))
 
+(defrecord OldFailure [exception])
+
 (defn- record-old-values
   "Evaluate the operand of every `old` expression in ENSURE-ASSERTIONS in CTX,
    the routine's entry state (after the precondition, so a precondition can
    guard them, and before the body), as Eiffel does: `old twice()` and
    `old other.balance` mean their values on entry, not merely the fields'.
-   Returns a map from operand node to its value, or nil when there are none."
+   An exception an operand raises is held back, also as in Eiffel: it is
+   recorded as an OldFailure, raised only if the postcondition reads that
+   `old` value. Returns a map from operand node to its value, or nil when
+   there are none."
   [ctx ensure-assertions]
   (when-let [exprs (seq (collect-old-exprs ensure-assertions))]
     (let [entry-ctx (dissoc ctx :old-values)]
-      (into {} (map (fn [e] [e (freeze-old-value (eval-node entry-ctx e))])) exprs))))
+      (into {}
+            (map (fn [e]
+                   [e (try
+                        (freeze-old-value (eval-node entry-ctx e))
+                        (catch Throwable t
+                          (->OldFailure t)))]))
+            exprs))))
 
 (defn- invoke-found-nex-method
   "Invoke a method that resolved via `lookup-method-with-inheritance` on an
@@ -3751,14 +3762,16 @@
     (map? node) (:value node)
     :else node))
 
-;; `old e` is the value E had on entry, recorded by record-old-values.
+;; `old e` is the value E had on entry, recorded by record-old-values, or
+;; the exception evaluating it raised then.
 (defmethod eval-node :old
   [ctx {:keys [expr]}]
   (let [v (get (:old-values ctx) expr ::missing)]
-    (if (= ::missing v)
-      (throw (ex-info "'old' can only be used in postconditions"
-                      {:expr expr}))
-      v)))
+    (cond
+      (= ::missing v) (throw (ex-info "'old' can only be used in postconditions"
+                                      {:expr expr}))
+      (instance? OldFailure v) (throw (:exception v))
+      :else v)))
 
 (defmethod eval-node :with
   [ctx {:keys [target body]}]

@@ -557,16 +557,18 @@ end")
           locals (mapv :name (:locals method-ir))]
       (is (= :set-local (first ops)))
       (is (= :assert (second ops)))
+      ;; `old value`: a default first, then the guarded evaluation.
       (is (= :set-local (nth ops 2)))
-      (is (= :field-set (nth ops 3)))
-      (is (= :set-local (nth ops 4)))
-      (is (= :assert (nth ops 5)))
+      (is (= :old-capture (nth ops 3)))
+      (is (= :field-set (nth ops 4)))
+      (is (= :set-local (nth ops 5)))
       (is (= :assert (nth ops 6)))
+      (is (= :assert (nth ops 7)))
       (is (some #{"__old_0"} locals))
       (is (= :return (last ops)))
       (is (= :require (-> method-ir :body (nth 1) :kind)))
-      (is (= :ensure (-> method-ir :body (nth 5) :kind)))
-      (is (= :ensure (-> method-ir :body (nth 6) :kind))))))
+      (is (= :ensure (-> method-ir :body (nth 6) :kind)))
+      (is (= :ensure (-> method-ir :body (nth 7) :kind))))))
 
 (deftest lower-loop-contracts-test
   (testing "compiled lowering lowers loop invariants and variants through block/assert IR"

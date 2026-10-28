@@ -777,6 +777,77 @@ end")
       (is (re-find #"Postcondition violation: moved" (str bad-post-ex)))
       (is (re-find #"Precondition violation: has_first" (str bad-pre-ex))))))
 
+(def ^:private old-held-back-program
+  "class Meter
+create
+  make() do
+    level := 0
+    tries := 0
+    items := []
+  end
+feature
+  level: Integer
+  tries: Integer
+  items: Array[Integer]
+  checked_level(): Integer do
+    if level = 0 then
+      raise \"no reading yet\"
+    end
+    result := level
+  end
+  bump() do
+    level := level + 1
+  ensure
+    up: old level = 0 or level = old checked_level() + 1
+  end
+  bump_strict() do
+    level := level + 1
+  ensure
+    up: level = old checked_level() + 1
+  end
+  push(x: Integer) do
+    items.add(x)
+  ensure
+    first_kept: old items.length = 0 or items.get(0) = old items.get(0)
+  end
+  flaky_bump() do
+    tries := tries + 1
+    if tries < 3 then
+      raise \"flaky\"
+    end
+    level := level + 1
+  ensure
+    up: level = old level + 1
+    retried: tries = old tries + 3
+  rescue
+    retry
+  end
+end")
+
+(deftest compiled-old-exception-is-held-back-test
+  (testing "an exception raised evaluating `old e` on entry is raised only if the postcondition reads `old e`, as in Eiffel"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str old-held-back-program
+                                                                     "\n\n"
+                                                                     "let m: Meter := create Meter.make()\n"
+                                                                     "m.bump()\n"
+                                                                     "m.bump()\n"
+                                                                     "m.push(7)\n"
+                                                                     "m.push(8)\n"
+                                                                     "m.flaky_bump()\n"
+                                                                     "m.level * 10 + m.tries")))
+          read-ex (try
+                    (compiled-repl/compile-and-eval! session
+                                                     (p/ast "let z: Meter := create Meter.make()\nz.bump_strict()"))
+                    nil
+                    (catch Throwable t
+                      (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 33 (:result define-result)))
+      (is (re-find #"no reading yet" (str read-ex)))
+      (is (not (re-find #"Postcondition violation" (str read-ex)))))))
+
 (deftest compiled-class-invariants-smoke-test
   (testing "compiled helper enforces class invariants on creation and method exit"
     (let [session (compiled-repl/make-session)

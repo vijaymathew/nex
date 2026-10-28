@@ -233,3 +233,68 @@ end")
                                      "let c := create Counter.make()\n"
                                      "c.keep_first()")
                                 p/ast interp/interpret))))))
+
+(def ^:private old-held-back-program
+  "class Meter
+create
+  make() do
+    level := 0
+    tries := 0
+    items := []
+  end
+feature
+  level: Integer
+  tries: Integer
+  items: Array[Integer]
+  checked_level(): Integer do
+    if level = 0 then
+      raise \"no reading yet\"
+    end
+    result := level
+  end
+  bump() do
+    level := level + 1
+  ensure
+    up: old level = 0 or level = old checked_level() + 1
+  end
+  bump_strict() do
+    level := level + 1
+  ensure
+    up: level = old checked_level() + 1
+  end
+  push(x: Integer) do
+    items.add(x)
+  ensure
+    first_kept: old items.length = 0 or items.get(0) = old items.get(0)
+  end
+  flaky_bump() do
+    tries := tries + 1
+    if tries < 3 then
+      raise \"flaky\"
+    end
+    level := level + 1
+  ensure
+    up: level = old level + 1
+    retried: tries = old tries + 3
+  rescue
+    retry
+  end
+end")
+
+(deftest old-keyword-exception-is-held-back-test
+  (testing "an exception raised evaluating `old e` on entry is raised only if the postcondition reads `old e`, as in Eiffel"
+    (let [ctx (-> (str old-held-back-program "\n\n"
+                       "let m := create Meter.make()\n"
+                       "m.bump()\n"
+                       "m.bump()\n"
+                       "m.push(7)\n"
+                       "m.push(8)\n"
+                       "m.flaky_bump()\n"
+                       "let total := m.level * 10 + m.tries")
+                  p/ast interp/interpret)]
+      (is (= 33 (interp/env-lookup (:current-env ctx) "total"))))
+    (is (thrown-with-msg? Exception #"no reading yet"
+                          (-> (str old-held-back-program "\n\n"
+                                   "let z := create Meter.make()\n"
+                                   "z.bump_strict()")
+                              p/ast interp/interpret)))))

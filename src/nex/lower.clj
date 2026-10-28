@@ -5230,12 +5230,12 @@
         jvm-type (resolve-jvm-type env nex-type)]
     (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type)))
 
-;; `old e` reads the local its value was recorded in on entry (see
-;; old-snapshot-stmts).
+;; `old e` reads the local its value was recorded in on entry, or raises
+;; what evaluating it raised then (see old-snapshot-stmts).
 (defn- lower-expr-old
   [env expr]
-  (if-let [{:keys [slot nex-type jvm-type]} (get-in env [:old-locals (:old-id expr)])]
-    (ir/local-node (str "__old_" (:old-id expr)) slot nex-type jvm-type)
+  (if-let [{:keys [slot err-slot nex-type jvm-type]} (get-in env [:old-locals (:old-id expr)])]
+    (ir/old-value-node slot err-slot nex-type jvm-type)
     (throw (ex-info "'old' can only be used in postconditions" {:expr expr}))))
 
 (defn- lower-expr-convert
@@ -7972,24 +7972,28 @@
     [tagged (mapv key (sort-by val @ids))]))
 
 (defn- add-old-locals
-  "ENV with a local for each `old` operand, and {id local}. They are added
-   before the body is lowered, so the body never reuses their slots."
+  "ENV with a local for each `old` operand, plus a slot (:err-slot) for the
+   exception its evaluation may raise, and {id local}. They are added before
+   the body is lowered, so the body never reuses their slots."
   [env operands]
-  (reduce (fn [[env' locals] [id e]]
-            (let [[env'' local] (env-add-local env' (str "__old_" id) (infer-type-or-any env e))]
-              [env'' (assoc locals id local)]))
+  (reduce (fn [[env1 locals] [id e]]
+            (let [[env2 local] (env-add-local env1 (str "__old_" id) (infer-type-or-any env e))
+                  [env3 err-slot] (alloc-temp-slot env2)]
+              [env3 (assoc locals id (assoc local :err-slot err-slot))]))
           [env {}]
           (map-indexed vector operands)))
 
 (defn- old-snapshot-stmts
   "[env' stmts] storing each `old` operand's value in its local. ENV's
    :next-slot must be past every local live where they run. An Array or Map
-   is copied, so the body's in-place changes do not show through it."
+   is copied, so the body's in-place changes do not show through it. An
+   exception the operand raises is held back, as in Eiffel: it is raised
+   only if the postcondition reads that `old` value (ir/old-value-node)."
   [env operands old-locals]
   (if (:skip-contracts? env)
     [env []]
     (reduce (fn [[env' stmts] [id e]]
-              (let [{:keys [slot nex-type jvm-type]} (get old-locals id)
+              (let [{:keys [slot err-slot nex-type jvm-type]} (get old-locals id)
                     clause-env (ensure-statement-bindings (scoped-child-env env') e)
                     value-ir (lower-expression clause-env e)
                     value-ir (if (#{"Array" "Map"} (base-type-name nex-type))
@@ -7997,7 +8001,11 @@
                                                      [value-ir] nex-type jvm-type)
                                value-ir)]
                 [(scoped-env env' clause-env)
-                 (conj stmts (ir/set-local-node slot value-ir nex-type jvm-type))]))
+                 (conj stmts
+                       ;; Assigned on every path, for the verifier: the
+                       ;; capture may end in its handler instead.
+                       (ir/set-local-node slot (default-const-node nex-type jvm-type) nex-type jvm-type)
+                       (ir/old-capture-node slot err-slot value-ir nex-type jvm-type))]))
             [env []]
             (map-indexed vector operands))))
 

@@ -387,6 +387,27 @@
    :nex-type "Void"
    :jvm-type :void})
 
+(defn old-capture-node
+  "Evaluate an `old` operand on entry: its value goes to SLOT, or, if it
+   raises, the exception goes to ERR-SLOT instead (see old-value-node)."
+  [slot err-slot expr nex-type jvm-type]
+  {:op :old-capture
+   :slot slot
+   :err-slot err-slot
+   :expr expr
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
+(defn old-value-node
+  "Read an `old` value recorded by old-capture-node, raising the exception
+   its evaluation raised on entry, if it did."
+  [slot err-slot nex-type jvm-type]
+  {:op :old-value
+   :slot slot
+   :err-slot err-slot
+   :nex-type nex-type
+   :jvm-type jvm-type})
+
 (defn pop-node [expr]
   {:op :pop
    :expr expr})

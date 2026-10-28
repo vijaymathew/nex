@@ -12,7 +12,11 @@
   was `(old a).b()`), which also fixes `old twice()` failing with
   `` `` is not a feature of Integer``. Because the precondition runs first, it
   can guard an `old` expression (`require items.length > 0` makes
-  `old items.get(0)` safe). New compile errors: `old` over `result`, nested
+  `old items.get(0)` safe). An exception raised evaluating `old e` on entry is
+  held back, as in Eiffel, and raised (as itself, not as a contract
+  violation) only if the postcondition reads `old e`, so
+  `old items.length = 0 or items.get(0) = old items.get(0)` holds on an empty
+  array. New compile errors: `old` over `result`, nested
   `old`, and `old` over a name the postcondition binds itself.
 
 ## 0.6.3 - 2026-10-23

@@ -953,7 +953,10 @@ parameters and queries: `old count()`, `old items.length`,
 is `old (a.b.c)`) and stops at the first operator (`old money - amount` is
 `(old money) - amount`). An object value is the same object, not a copy, so
 write `old other.balance`, not `(old other).balance`; an array or map value
-keeps the membership it had on entry.
+keeps the membership it had on entry. If evaluating `e` on entry raises, the
+exception is held back, as in Eiffel, and raised only if the postcondition
+reads `old e`: `old items.length = 0 or items.get(0) = old items.get(0)` is
+fine on an empty array.
 
 The invariant is checked when an object is created, and on entry to and exit
 from every *qualified* call: `w.spend(1.0)`, or `this.spend(1.0)`. An unqualified call
