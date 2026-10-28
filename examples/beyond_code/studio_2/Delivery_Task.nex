@@ -128,8 +128,8 @@ invariant
   valid_status:
     status = "PENDING" or status = "IN_TRANSIT" or status = "DELIVERED" or status = "FAILED"
   -- cross-field rules that make whole classes of invalid state unrepresentable:
-  transit_has_robot: status /= "IN_TRANSIT" or robot_id /= ""
-  pending_at_origin: status /= "PENDING" or current = route.origin()
-  delivered_at_destination: status /= "DELIVERED" or current = route.destination()
+  transit_has_robot: status = "IN_TRANSIT" implies robot_id /= ""
+  pending_at_origin: status = "PENDING" implies current = route.origin()
+  delivered_at_destination: status = "DELIVERED" implies current = route.destination()
   on_route: route.contains(current)   -- the package is always at a real stop
 end

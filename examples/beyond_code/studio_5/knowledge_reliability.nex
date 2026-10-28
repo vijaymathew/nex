@@ -93,6 +93,6 @@ feature
     ensure
       known_status: result.status = "OK" or result.status = "DEGRADED"
       -- A degraded answer must be the labelled cache, never a fabricated fresh hit.
-      degraded_is_cache: result.status /= "DEGRADED" or result.value = "DOC:CACHED-001"
+      degraded_is_cache: result.status = "DEGRADED" implies result.value = "DOC:CACHED-001"
     end
 end

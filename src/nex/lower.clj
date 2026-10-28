@@ -759,7 +759,7 @@
                        left-type)))
       (= "^" op) (tc/power-result-type (infer-type env (:left expr))
                                        (infer-type env (:right expr)))
-      (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} op) "Boolean"
+      (#{"and" "or" "implies" "=" "/=" "==" "!=" "<" "<=" ">" ">="} op) "Boolean"
       :else nil)))
 
 (defn- infer-type-unary
@@ -2851,6 +2851,11 @@
           [env []]
           (tc/attached-test-guards condition)))
 
+;; `a implies b` is `when a then b else true`: b runs only when a holds.
+(defn- implies-ir
+  [left-ir right-ir]
+  (ir/if-node left-ir [right-ir] [(ir/const-node true "Boolean" :boolean)] "Boolean" :boolean))
+
 (defn- lower-boolean-condition
   [env expr]
   (if (and (map? expr)
@@ -2868,6 +2873,12 @@
             [right-env right-ir] (lower-boolean-condition left-env (:right expr))]
         [right-env
          (ir/binary-node :or left-ir right-ir "Boolean" :boolean)])
+
+      "implies"
+      (let [[left-env left-ir] (lower-boolean-condition env (:left expr))
+            right-input-env (refine-condition-branch-env left-env (:left expr) :then)
+            [right-env right-ir] (lower-boolean-condition right-input-env (:right expr))]
+        [right-env (implies-ir left-ir right-ir)])
 
       (let [[env' _] (ensure-convert-bindings (scoped-child-env env) expr)
             [env'' _] (ensure-attached-test-bindings env' expr)]
@@ -3438,10 +3449,10 @@
     (= :binary (:type expr))
     (assoc expr
            :left (rewrite-expression-for-closures ctx local-types captures (:left expr))
-           ;; The right of an `and` runs only once the left held.
+           ;; The right of an `and` or `implies` runs only once the left held.
            :right (rewrite-expression-for-closures
                    ctx
-                   (if (= "and" (:operator expr))
+                   (if (#{"and" "implies"} (:operator expr))
                      (narrow-local-types-by-condition ctx local-types (:left expr))
                      local-types)
                    captures
@@ -5115,6 +5126,12 @@
                   [_right-env right-ir] (lower-boolean-condition env (:right expr))]
               [left-ir right-ir])
 
+            "implies"
+            (let [[left-env left-ir] (lower-boolean-condition env (:left expr))
+                  right-input-env (refine-condition-branch-env left-env (:left expr) :then)
+                  [_right-env right-ir] (lower-boolean-condition right-input-env (:right expr))]
+              [left-ir right-ir])
+
             [(unwrap-sized-ir (lower-expression env (:left expr)))
              (unwrap-sized-ir (lower-expression env (:right expr)))])
           inferred-type (infer-type env expr)
@@ -5132,13 +5149,16 @@
                            (tc/numeric-result-type left-num right-num)
                            (:nex-type left-ir)))
 
-                       (#{"and" "or" "=" "/=" "==" "!=" "<" "<=" ">" ">="} (:operator expr))
+                       (#{"and" "or" "implies" "=" "/=" "==" "!=" "<" "<=" ">" ">="} (:operator expr))
                        "Boolean"
 
                        :else inferred-type)
                      inferred-type)
           jvm-type (resolve-jvm-type env nex-type)]
       (cond
+        (= "implies" op)
+        (implies-ir left-ir right-ir)
+
         (and (= "+" op) (= "String" nex-type))
         (ir/call-runtime-node "op:string-concat" [left-ir right-ir] nex-type jvm-type)
 

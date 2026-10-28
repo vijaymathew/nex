@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`implies`.** `a implies b` is true when `a` is false, and otherwise `b`,
+  which then runs only when `a` holds. It binds loosest of all, below `or`,
+  so `a and b implies c or d` is `(a and b) implies (c or d)`, and groups to
+  the right (`a implies b implies c` is `a implies (b implies c)`), the one
+  binary operator that does. Its right side sees the left's narrowings and
+  object-test bindings, as an `and`'s does: `x /= nil implies x.valid()`,
+  `?x as y implies y.valid()`. `implies` is now a keyword. `nex format`,
+  the Emacs mode and the docs-site highlighter know it.
+
 - **`old e` now means `e`'s value on entry, as in Eiffel.** The whole
   expression is evaluated once, after the precondition and before the body,
   so `old count()`, `old box.n` and `old other.balance` (with `other` a

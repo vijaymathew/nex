@@ -416,7 +416,14 @@ argumentList
  */
 
 expression
-    : logicalOr
+    : implication
+    ;
+
+// `implies` binds loosest of all and groups to the right:
+// `a and b implies c or d` is `(a and b) implies (c or d)`, and
+// `a implies b implies c` is `a implies (b implies c)`.
+implication
+    : logicalOr (IMPLIES implication)?
     ;
 
 logicalOr
@@ -668,6 +675,7 @@ SELECT       : 'select';
 TIMEOUT      : 'timeout';
 AND          : 'and';
 OR           : 'or';
+IMPLIES      : 'implies';
 NOT          : 'not';
 
 TYPE_KW        : 'type';

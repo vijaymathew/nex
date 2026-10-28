@@ -54,7 +54,7 @@
 (def nex-keywords
   ["class" "enum" "deferred" "declare" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
    "when" "from" "until" "invariant" "variant" "require" "ensure"
-   "let" "create" "convert" "to" "fn" "function" "and" "or" "old" "this" "note"
+   "let" "create" "convert" "to" "fn" "function" "and" "or" "implies" "old" "this" "note"
    "with" "import" "intern" "private" "raise" "rescue" "retry" "assert" "spawn"
    "select" "timeout" "repeat" "across" "case" "of"
    "true" "false" "nil"

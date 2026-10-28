@@ -249,7 +249,7 @@ feature
         result.status = "FOUND" or
         result.status = "UNREACHABLE" or
         result.status = "DEPTH_CAPPED"
-      found_has_path: result.status /= "FOUND" or result.hops >= 1
+      found_has_path: result.status = "FOUND" implies result.hops >= 1
     end
 end
 
@@ -315,6 +315,6 @@ feature
     ensure
       known_status:
         result.status = "FOUND" or result.status = "UNREACHABLE"
-      found_has_path: result.status /= "FOUND" or result.hops >= 1
+      found_has_path: result.status = "FOUND" implies result.hops >= 1
     end
 end

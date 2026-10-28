@@ -1546,6 +1546,7 @@
            (not (neg? (nex-ordering-compare left right))))
     "and" (and left right)
     "or" (or left right)
+    "implies" (or (not left) right)
     (throw (ex-info (str "Unknown binary operator: " op)
                     {:operator op})))))
 
@@ -3253,6 +3254,10 @@
     (= operator "or")
     (let [left-val (eval-node ctx left)]
       (if left-val left-val (eval-node ctx right)))
+
+    ;; `a implies b` is true when a is false, without evaluating b.
+    (= operator "implies")
+    (if (eval-node ctx left) (eval-node ctx right) true)
 
     :else
     (let [left-val (eval-node ctx left)

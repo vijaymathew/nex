@@ -52,9 +52,9 @@ feature
     ensure
       known_result: result = "MIGRATION_CONTINUE" or result = "ROLLBACK"
       -- After a rollback the live count is exactly the last committed checkpoint.
-      reverts_on_rollback: result /= "ROLLBACK" or migrated_count = checkpoint
+      reverts_on_rollback: result = "ROLLBACK" implies migrated_count = checkpoint
       -- A commit never sits below its checkpoint.
-      committed_consistent: result /= "MIGRATION_CONTINUE" or migrated_count = checkpoint
+      committed_consistent: result = "MIGRATION_CONTINUE" implies migrated_count = checkpoint
     end
 
   -- Explicit manual rollback trigger (e.g. an operator pulls the cord).

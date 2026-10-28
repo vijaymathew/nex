@@ -2463,10 +2463,11 @@
 (defn check-binary-op
   "Check the type of a binary operation"
   [env {:keys [operator left right] :as expr}]
-  (if (= "and" operator)
-    ;; Wherever it appears, the right operand of an `and` is checked with the
-    ;; left's narrowings in effect (`b /= nil and b.n > 10`): `and`
-    ;; short-circuits, so the right side runs only when the left held.
+  (if (#{"and" "implies"} operator)
+    ;; Wherever it appears, the right operand of an `and` or `implies` is
+    ;; checked with the left's narrowings in effect (`b /= nil and b.n > 10`,
+    ;; `b /= nil implies b.n > 10`): both short-circuit, so the right side
+    ;; runs only when the left held.
     (check-condition env expr)
     (check-binary-op* env expr)))
 
@@ -2531,7 +2532,7 @@
                                  (str "Comparison requires compatible types, got "
                                       (display-type left-type) " and " (display-type right-type)))})))
 
-      ("and" "or")
+      ("and" "or" "implies")
       (if (and (= left-type "Boolean") (= right-type "Boolean"))
         "Boolean"
         (throw (ex-info (str "Operator " operator " requires Boolean operands")
@@ -2937,16 +2938,18 @@
    `and` node still recurses into its own two sides here, so a 3+-conjunct
    left-associated chain threads all the way through)."
   [env condition]
-  (if (and (map? condition) (= :binary (:type condition)) (= "and" (:operator condition)))
-    (let [scratch (make-type-env env)
+  (if (and (map? condition) (= :binary (:type condition))
+           (#{"and" "implies"} (:operator condition)))
+    (let [operator (:operator condition)
+          scratch (make-type-env env)
           left-type (check-condition scratch (:left condition))]
       (apply-condition-branch-refinement! scratch (:left condition) :then)
       (let [right-type (check-condition scratch (:right condition))]
         (if (and (= left-type "Boolean") (= right-type "Boolean"))
           "Boolean"
-          (throw (ex-info "Operator and requires Boolean operands"
+          (throw (ex-info (str "Operator " operator " requires Boolean operands")
                           {:error (type-error
-                                   (str "Operator and requires Boolean operands, got "
+                                   (str "Operator " operator " requires Boolean operands, got "
                                         (display-type left-type) " and " (display-type right-type)))})))))
     (check-expression env condition)))
 

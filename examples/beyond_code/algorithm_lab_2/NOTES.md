@@ -153,8 +153,7 @@ DFS is never shorter. `PASS`.
 `Path_Run_Result`'s invariants keep every run self-describing (non-empty
 strategy/status, non-negative hops/steps/frontier). Each competitor's
 postcondition pins the result to a known status set (`known_status`) and ties
-`FOUND` to a real path (`found_has_path: status ≠ FOUND or hops ≥ 1`) — both
-guards are safe under Nex's eager `or` because neither side touches a collection.
+`FOUND` to a real path (`found_has_path: status = FOUND implies hops ≥ 1`).
 The DFS depth cap is surfaced as a *distinct contracted status* (`DEPTH_CAPPED`)
 rather than folded into `UNREACHABLE`, so "bound too small" can never be mistaken
 for "no path." BFS's global guarantee (shortest by hops) can't be expressed as a

@@ -125,7 +125,7 @@
 (defconst nex-keywords
   '("class" "feature" "inherit" "end" "do" "if" "then" "else" "elseif"
     "when" "from" "until" "invariant" "variant" "require" "ensure"
-    "let" "as" "and" "or" "not" "fn" "deferred" "convert" "to"
+    "let" "as" "and" "or" "implies" "not" "fn" "deferred" "convert" "to"
     "old" "create" "private" "note" "with" "import" "intern" "function"
     "raise" "rescue" "retry" "assert" "repeat" "across" "case" "of"
     "spawn" "select" "timeout" "declare" "sealed" "once" "match" "type"
@@ -214,11 +214,11 @@
 
 (defconst nex-fmt--continuing-ends
   '("+" "-" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=" "," "." "?." "->" "=>"
-    ":" "and" "or" "not")
+    ":" "and" "or" "implies" "not")
   "A line ending with one of these continues on the next line.")
 
 (defconst nex-fmt--continuing-starts
-  '("and" "or" "." "?." "+" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=")
+  '("and" "or" "implies" "." "?." "+" "*" "/" "%" "^" "=" "/=" "<" ">" "<=" ">=" ":=")
   "A line starting with one of these continues the line before.")
 
 (defconst nex-fmt--clause-words

@@ -606,7 +606,7 @@
                   (builtin-target-call-in-ctx? ctx expr)
                   (user-target-call-in-ctx? ctx expr)
                   (imported-java-target-call-in-ctx? ctx expr)))
-      :binary (and (contains? (into #{"+" "-" "*" "/" "%" "^" "and" "or"} relational-ops) (:operator expr))
+      :binary (and (contains? (into #{"+" "-" "*" "/" "%" "^" "and" "or" "implies"} relational-ops) (:operator expr))
                    (supported-expr-in-ctx? ctx (:left expr))
                    (supported-expr-in-ctx? ctx (:right expr)))
       :unary (supported-expr-in-ctx? ctx (:expr expr))
