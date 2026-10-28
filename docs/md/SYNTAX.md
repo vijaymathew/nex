@@ -946,6 +946,15 @@ class Wallet
 end
 ```
 
+`old e` is the value `e` had on entry. Nex evaluates `e` once, right after
+the precondition and before the body, so it may be any expression over fields,
+parameters and queries: `old count()`, `old items.length`,
+`old other.balance`. `old` covers the whole call chain after it (`old a.b.c`
+is `old (a.b.c)`) and stops at the first operator (`old money - amount` is
+`(old money) - amount`). An object value is the same object, not a copy, so
+write `old other.balance`, not `(old other).balance`; an array or map value
+keeps the membership it had on entry.
+
 The invariant is checked when an object is created, and on entry to and exit
 from every *qualified* call: `w.spend(1.0)`, or `this.spend(1.0)`. An unqualified call
 (`spend(1.0)`), `super.spend(1.0)` or `Parent.spend(1.0)` is part of the

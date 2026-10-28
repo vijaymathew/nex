@@ -449,7 +449,7 @@
   - `:this-type` current receiver type when lowering instance methods
   - `:scoped-locals?` force `let` bindings to lower to JVM locals even in top-level code
   - `:retry-allowed?` whether `retry` is legal in the current lowering scope
-  - `:old-field-locals` snapshot locals for `old` in postconditions
+  - `:old-locals` map of `old` id -> the local holding its value recorded on entry
   - `:generic-param-names` visible generic parameter identifiers lowered as JVM Object
   - `:generic-runtime-values` map of generic parameter name -> IR expression that yields
     the runtime type token string for that parameter
@@ -457,7 +457,7 @@
   - `:skip-contracts?` whether require/ensure/invariant checks lower to no-ops"
   ([] (make-lowering-env {}))
   ([{:keys [locals top-level? repl? state-slot next-slot classes functions imports var-types
-            compiled-classes current-class fields this-type old-field-locals
+            compiled-classes current-class fields this-type old-locals
             generic-param-names generic-param-constraints generic-runtime-values
             with-java? across-cursors globals skip-contracts?] :as opts}]
    {:locals (or locals {})
@@ -480,7 +480,7 @@
     :this-type this-type
     :scoped-locals? false
     :retry-allowed? false
-    :old-field-locals (or old-field-locals {})
+    :old-locals (or old-locals {})
     :generic-param-names (set generic-param-names)
     :generic-param-constraints (or generic-param-constraints {})
     :generic-runtime-values (or generic-runtime-values {})
@@ -777,7 +777,8 @@
 ;; into it as a global.
 (defn- infer-type-old
   [env expr]
-  (infer-type env (:expr expr)))
+  (or (get-in env [:old-locals (:old-id expr) :nex-type])
+      (infer-type env (:expr expr))))
 
 (defn- infer-type-array-literal
   [env expr]
@@ -1650,25 +1651,6 @@
                                  :jvm-type jvm-type})
       (assoc-in [:var-types alias] nex-type)))
 
-(defn- references-old?
-  [node]
-  (cond
-    (nil? node) false
-    (sequential? node) (boolean (some references-old? node))
-    (map? node) (or (= :old (:type node))
-                    (boolean (some references-old? (vals node))))
-    :else false))
-
-(defn- snapshot-source-ir
-  [env {:keys [owner field carrier-path nex-type jvm-type]}]
-  (ir/field-get-node (:internal-name (class-jvm-meta env owner))
-                     field
-                     (carrier-path-target-ir env carrier-path
-                                             (ir/this-node (:this-type env)
-                                                           (exact-class-jvm-type env (:this-type env))))
-                     nex-type
-                     jvm-type))
-
 (defn- assertion-ir
   "Lower a require/ensure/invariant/class-invariant clause to an assert IR
    node, or to a no-op when :skip-contracts? is set. Bare `assert` (kind
@@ -1726,51 +1708,6 @@
     :char (ir/const-node (char 0) "Char" :char)
     (ir/const-node nil "Any" (ir/object-jvm-type "java/lang/Object"))))
 
-(defn- add-old-field-snapshots
-  [env assertions]
-  (if (some #(references-old? (:condition %)) assertions)
-    (do
-      (when-not (and (:this-type env) (seq (:fields env)))
-        (throw (ex-info "'old' is only supported for compiled instance-field postconditions"
-                        {:assertions assertions
-                         :current-class (:current-class env)})))
-      (reduce (fn [[env' stmts snapshots] field-name]
-                (let [field-info (get (:fields env') field-name)
-                      snapshot-name (str "__old_" field-name)
-                      [env'' local] (env-add-local env' snapshot-name (:nex-type field-info))
-                      field-read-ir (snapshot-source-ir env' field-info)
-                      ;; An Array (a real java.util.ArrayList) or Map (a real
-                      ;; java.util.HashMap on this backend) is a genuinely
-                      ;; mutable container: storing the field's current
-                      ;; reference straight into the new snapshot local just
-                      ;; copies the *reference*, and a later in-place
-                      ;; `.add`/`.put` in the same method body is then visible
-                      ;; through the "old" snapshot too, the same reference-
-                      ;; vs-value bug env-replace-object-aliases! exists to
-                      ;; work around on the interpreter side (`old
-                      ;; items.length = items.length - 1` failed because both
-                      ;; sides read the SAME, already-mutated ArrayList).
-                      ;; shallow-copy-collection freezes the container's own
-                      ;; membership at snapshot time without deep-copying
-                      ;; elements (unlike Nex-level `.clone()`), so an
-                      ;; object-valued element's identity is unaffected.
-                      snapshot-ir (if (#{"Array" "Map"} (base-type-name (:nex-type field-info)))
-                                    (ir/call-runtime-node "shallow-copy-collection"
-                                                          [field-read-ir]
-                                                          (:nex-type local)
-                                                          (:jvm-type local))
-                                    field-read-ir)
-                      stmt (ir/set-local-node (:slot local)
-                                              snapshot-ir
-                                              (:nex-type local)
-                                              (:jvm-type local))]
-                  [env''
-                   (conj stmts stmt)
-                   (assoc snapshots field-name local)]))
-              [env [] {}]
-              (sort (keys (:fields env)))))
-    [env [] (:old-field-locals env)]))
-
 (defn- init-new-locals-stmts
   [outer-env inner-env]
   (let [outer-locals (:locals outer-env)
@@ -1784,25 +1721,6 @@
                                     (default-const-node nex-type jvm-type)
                                     nex-type
                                     jvm-type))))))
-
-(defn- old-env
-  [env]
-  (if (seq (:old-field-locals env))
-    (let [shadowed (into {}
-                         (map (fn [[field-name {:keys [slot nex-type jvm-type]}]]
-                                [field-name {:name field-name
-                                             :slot slot
-                                             :nex-type nex-type
-                                             :jvm-type jvm-type}]))
-                         (:old-field-locals env))]
-      (-> env
-          (update :locals merge shadowed)
-          (update :var-types merge (into {}
-                                         (map (fn [[field-name {:keys [nex-type]}]]
-                                                [field-name nex-type]))
-                                         (:old-field-locals env)))))
-    (throw (ex-info "'old' can only be used in compiled postconditions with field snapshots"
-                    {:env-keys (keys env)}))))
 
 (defn- lower-body-with-rescue
   [pre-body-env body-env body rescue]
@@ -5312,9 +5230,13 @@
         jvm-type (resolve-jvm-type env nex-type)]
     (ir/if-node test-ir [then-ir] [else-ir] nex-type jvm-type)))
 
+;; `old e` reads the local its value was recorded in on entry (see
+;; old-snapshot-stmts).
 (defn- lower-expr-old
   [env expr]
-  (lower-expression (old-env env) (:expr expr)))
+  (if-let [{:keys [slot nex-type jvm-type]} (get-in env [:old-locals (:old-id expr)])]
+    (ir/local-node (str "__old_" (:old-id expr)) slot nex-type jvm-type)
+    (throw (ex-info "'old' can only be used in postconditions" {:expr expr}))))
 
 (defn- lower-expr-convert
   [env expr]
@@ -8022,6 +7944,63 @@
     (:class-name fn-def) (lowered-top-level-function-emitted-name fn-def)
     :else (lowered-function-method-name fn-def)))
 
+;; `old e` means E's value on entry, as in Eiffel: E is evaluated once, after
+;; the precondition and before the body, into a local the postcondition then
+;; reads. So `old twice()` and `old other.balance` see the entry state, not
+;; just the fields'.
+(defn- tag-old-nodes
+  "[assertions' operands]: ASSERTIONS with each `old` node numbered by
+   :old-id (equal operands share a number), and the operands in id order. A
+   closure is a routine of its own, so it is not searched."
+  [assertions]
+  (let [ids (atom {})
+        tag (fn tag [node]
+              (cond
+                (vector? node) (mapv tag node)
+                (seq? node) (doall (map tag node))
+                (map? node) (case (:type node)
+                              :old (let [e (:expr node)
+                                         id (or (get @ids e)
+                                                (let [n (count @ids)]
+                                                  (swap! ids assoc e n)
+                                                  n))]
+                                     (assoc node :old-id id))
+                              :anonymous-function node
+                              (reduce-kv (fn [m k v] (assoc m k (tag v))) node node))
+                :else node))
+        tagged (tag assertions)]
+    [tagged (mapv key (sort-by val @ids))]))
+
+(defn- add-old-locals
+  "ENV with a local for each `old` operand, and {id local}. They are added
+   before the body is lowered, so the body never reuses their slots."
+  [env operands]
+  (reduce (fn [[env' locals] [id e]]
+            (let [[env'' local] (env-add-local env' (str "__old_" id) (infer-type-or-any env e))]
+              [env'' (assoc locals id local)]))
+          [env {}]
+          (map-indexed vector operands)))
+
+(defn- old-snapshot-stmts
+  "[env' stmts] storing each `old` operand's value in its local. ENV's
+   :next-slot must be past every local live where they run. An Array or Map
+   is copied, so the body's in-place changes do not show through it."
+  [env operands old-locals]
+  (if (:skip-contracts? env)
+    [env []]
+    (reduce (fn [[env' stmts] [id e]]
+              (let [{:keys [slot nex-type jvm-type]} (get old-locals id)
+                    clause-env (ensure-statement-bindings (scoped-child-env env') e)
+                    value-ir (lower-expression clause-env e)
+                    value-ir (if (#{"Array" "Map"} (base-type-name nex-type))
+                               (ir/call-runtime-node "shallow-copy-collection"
+                                                     [value-ir] nex-type jvm-type)
+                               value-ir)]
+                [(scoped-env env' clause-env)
+                 (conj stmts (ir/set-local-node slot value-ir nex-type jvm-type))]))
+            [env []]
+            (map-indexed vector operands))))
+
 (defn lower-function
   [unit-name visible-functions visible-imports fn-def]
   (let [fn-def (normalized-function-def fn-def)
@@ -8059,12 +8038,11 @@
         effective-require (if (contains? fn-def :effective-require)
                             (:effective-require fn-def)
                             (:require fn-def))
-        effective-ensure (if (contains? fn-def :effective-ensure)
-                           (:effective-ensure fn-def)
-                           (:ensure fn-def))
-        [env-with-old old-snapshot-stmts old-field-locals]
-        (add-old-field-snapshots env-with-result effective-ensure)
-        env-with-old (assoc env-with-old :old-field-locals old-field-locals)
+        [effective-ensure old-operands] (tag-old-nodes
+                                         (if (contains? fn-def :effective-ensure)
+                                           (:effective-ensure fn-def)
+                                           (:ensure fn-def)))
+        [env-with-old old-locals] (add-old-locals env-with-result old-operands)
         body (vec (:body fn-def))]
     (if (or (:declaration-only? fn-def)
             (:deferred? fn-def))
@@ -8087,9 +8065,10 @@
             ;; Lowered after the body, so its slots must start past the body's.
             [require-env require-stmts] (contract-assertions-ir (scoped-env env-with-old env-after-rescue)
                                                                 :require effective-require)
+            [snapshot-env old-stmts] (old-snapshot-stmts require-env old-operands old-locals)
             [ensure-env ensure-stmts] (contract-assertions-ir
-                                       (assoc (scoped-env env-after-rescue require-env)
-                                              :old-field-locals old-field-locals)
+                                       (assoc (scoped-env env-after-rescue snapshot-env)
+                                              :old-locals old-locals)
                                        :ensure effective-ensure)
             ;; A class with no invariant anywhere in its hierarchy has
             ;; nothing to check, so emits no calls to the checker.
@@ -8138,9 +8117,9 @@
                      :locals (vec (vals (:locals env-after-rescue)))
                      :body (cond-> (into []
                                          (concat (when result-init-stmt [result-init-stmt])
-                                                 old-snapshot-stmts
                                                  entry-validation-stmts
                                                  require-stmts
+                                                 old-stmts
                                                  lowered-body
                                                  ensure-stmts
                                                  class-validation-stmts))
@@ -8287,16 +8266,18 @@
                           (resolve-jvm-type cc shim-parent))))
 
 (defn- constructor-fn-node
-  "Assemble a lowered constructor method: runtime-type field sets, `old`
-   snapshots and `require` checks, then CORE-BODY (the lowered ctor statements,
-   or a shim's super-call), then `ensure` checks and the class-invariant
-   validation `return`."
+  "Assemble a lowered constructor method: runtime-type field sets, `require`
+   checks and the `old` values recorded on entry, then CORE-BODY (the lowered
+   ctor statements, or a shim's super-call), then `ensure` checks and the
+   `return`."
   [{:keys [unit-name class-name ctor-def params compiled-classes locals
-           runtime-field-set-stmts old-snapshot-stmts require-env ensure-env core-body]}]
+           runtime-field-set-stmts old-operands old-locals require-env ensure-env core-body]}]
   ;; The body is lowered already, so the clauses' slots start past its own.
   (let [[require-env require-stmts] (contract-assertions-ir (scoped-env require-env ensure-env)
                                                             :require (:require ctor-def))
-        [_ ensure-stmts] (contract-assertions-ir (scoped-env ensure-env require-env)
+        [snapshot-env old-stmts] (old-snapshot-stmts require-env old-operands old-locals)
+        [_ ensure-stmts] (contract-assertions-ir (assoc (scoped-env ensure-env snapshot-env)
+                                                        :old-locals old-locals)
                                                  :ensure (:ensure ctor-def))]
     (ir/fn-node {:name (:name ctor-def)
                  :owner unit-name
@@ -8306,8 +8287,8 @@
                  :return-jvm-type (ir/object-jvm-type "java/lang/Object")
                  :locals locals
                  :body (vec (concat runtime-field-set-stmts
-                                    old-snapshot-stmts
                                     require-stmts
+                                    old-stmts
                                     core-body
                                     ensure-stmts
                                     ;; No invariant check here: a constructor is
@@ -8365,16 +8346,16 @@
                                                                  class-name
                                                                  (:generic-params class-def)
                                                                  runtime-params)
-        [env-with-old old-snapshot-stmts old-field-locals]
-        (add-old-field-snapshots env-with-runtime (:ensure ctor-def))
-        env-with-old (assoc env-with-old :old-field-locals old-field-locals)]
+        [ctor-ensure old-operands] (tag-old-nodes (:ensure ctor-def))
+        ctor-def (assoc ctor-def :ensure ctor-ensure)
+        [env-with-old old-locals] (add-old-locals env-with-runtime old-operands)]
     (if-let [shim-parent (:shim-parent ctor-def)]
       (constructor-fn-node
        {:unit-name unit-name :class-name class-name :ctor-def ctor-def :params params
         :compiled-classes compiled-classes
         :locals (vec (vals (:locals env-with-old)))
         :runtime-field-set-stmts runtime-field-set-stmts
-        :old-snapshot-stmts old-snapshot-stmts
+        :old-operands old-operands :old-locals old-locals
         :require-env env-with-old :ensure-env env-with-old
         :core-body [(ir/pop-node (shim-parent-super-call-ir
                                   env-with-runtime class-def ctor-def compiled-classes
@@ -8386,9 +8367,9 @@
           :compiled-classes compiled-classes
           :locals (vec (vals (:locals env-after-rescue)))
           :runtime-field-set-stmts runtime-field-set-stmts
-          :old-snapshot-stmts old-snapshot-stmts
+          :old-operands old-operands :old-locals old-locals
           :require-env env-with-old
-          :ensure-env (assoc env-after-rescue :old-field-locals old-field-locals)
+          :ensure-env env-after-rescue
           :core-body lowered-body})))))
 
 (defn- lower-generic-init-method

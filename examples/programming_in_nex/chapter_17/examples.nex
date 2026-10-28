@@ -72,6 +72,7 @@ class Account
         other.deposit(amount)
       ensure
         sender_lost_amount: balance = old balance - amount
+        receiver_gained_amount: other.balance = old other.balance + amount
       end
 end
 

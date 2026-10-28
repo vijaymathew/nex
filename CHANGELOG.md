@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **`old e` now means `e`'s value on entry, as in Eiffel.** The whole
+  expression is evaluated once, after the precondition and before the body,
+  so `old count()`, `old box.n` and `old other.balance` (with `other` a
+  parameter) report the entry state. Before, only the fields were recorded
+  and the expression was evaluated at exit against them, so a query or
+  another object's field silently gave its current value. `old` now covers
+  the whole call chain after it (`old a.b()` is `old (a.b())`; before, it
+  was `(old a).b()`), which also fixes `old twice()` failing with
+  `` `` is not a feature of Integer``. Because the precondition runs first, it
+  can guard an `old` expression (`require items.length > 0` makes
+  `old items.get(0)` safe). New compile errors: `old` over `result`, nested
+  `old`, and `old` over a name the postcondition binds itself.
+
 ## 0.6.3 - 2026-10-23
 
 - **`map`, `filter`, `fold`, `reduce`, `any`, `all`, `count` and `find` on

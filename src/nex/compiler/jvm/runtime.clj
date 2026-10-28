@@ -3269,19 +3269,12 @@
 (defn shallow-copy-collection
   "A new, independent Array/Map container holding the SAME elements/entries —
    unlike clone-value, does not recurse into them. Used only for `old`
-   postcondition snapshots (see add-old-field-snapshots in nex.lower): an
-   Array (a real java.util.ArrayList) or Map (a real java.util.HashMap on
-   this backend) is a genuinely mutable container, so a snapshot IR node that
-   just re-reads the field's current reference into a new local slot copies
-   the *reference*, not a value — an in-place `.add`/`.put` later in the same
-   method body was then visible through the \"old\" snapshot too (`old
-   items.length = items.length - 1` failed because both sides read the SAME,
-   already-mutated ArrayList). `old`, semantically, should freeze the
-   container's own membership at snapshot time, not deep-copy every element
-   the way clone-value's Nex-level `.clone()` does — that would silently
-   change identity for any object-valued element (`old items.get(0) = obj`
-   would start comparing a freshly-cloned copy against the original,
-   unrelated to the actual bug)."
+   values recorded on entry (see old-snapshot-stmts in nex.lower): an Array
+   (a real java.util.ArrayList) or Map (a real java.util.HashMap on this
+   backend) is mutable, so recording just the reference would let an
+   in-place `.add`/`.put` in the body show through `old items` too. Copying
+   the container freezes its membership; the elements keep their identity
+   (`old items.get(0) = obj` still compares the original object)."
   [value]
   (cond
     (instance? java.util.Map value)

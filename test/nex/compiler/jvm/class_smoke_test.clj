@@ -693,6 +693,90 @@ end")
       (is (:compiled? define-result))
       (is (= 2 (:result define-result))))))
 
+(def ^:private old-entry-value-program
+  "class Box
+create
+  make() do
+    n := 0
+  end
+feature
+  n: Integer
+  inc() do
+    n := n + 1
+  end
+  doubled(): Integer do
+    result := n * 2
+  end
+end
+
+class Counter
+create
+  make() do
+    count := 0
+    box := create Box.make
+    items := []
+  end
+feature
+  count: Integer
+  box: Box
+  items: Array[Integer]
+  twice(): Integer do
+    result := count * 2
+  end
+  bump() do
+    count := count + 1
+    box.inc
+  ensure
+    via_query: twice() = old twice() + 2
+    via_nested: box.n = old box.n + 1
+    via_nested_query: box.doubled() = old box.doubled() + 2
+  end
+  bump_other(other: Box) do
+    other.inc
+  ensure
+    moved: other.n = old other.n + 1
+  end
+  forget_other(other: Box) do
+  ensure
+    moved: other.n = old other.n + 1
+  end
+  keep_first()
+  require
+    has_first: items.length > 0
+  do
+  ensure
+    same_first: items.get(0) = old items.get(0)
+  end
+end")
+
+(deftest compiled-old-evaluates-whole-expression-on-entry-test
+  (testing "`old e` is E evaluated on entry, as in Eiffel: queries, nested objects and parameters all report their entry state"
+    (let [session (compiled-repl/make-session)
+          define-result (compiled-repl/compile-and-eval! session
+                                                         (p/ast (str old-entry-value-program
+                                                                     "\n\n"
+                                                                     "let c: Counter := create Counter.make()\n"
+                                                                     "let b: Box := create Box.make()\n"
+                                                                     "c.bump()\n"
+                                                                     "c.bump()\n"
+                                                                     "c.bump_other(b)\n"
+                                                                     "c.box.n + b.n")))
+          bad-post-ex (try
+                        (compiled-repl/compile-and-eval! session (p/ast "c.forget_other(b)"))
+                        nil
+                        (catch Throwable t
+                          (root-cause t)))
+          ;; The precondition runs first, so it guards `old items.get(0)`.
+          bad-pre-ex (try
+                       (compiled-repl/compile-and-eval! session (p/ast "c.keep_first()"))
+                       nil
+                       (catch Throwable t
+                         (root-cause t)))]
+      (is (:compiled? define-result))
+      (is (= 3 (:result define-result)))
+      (is (re-find #"Postcondition violation: moved" (str bad-post-ex)))
+      (is (re-find #"Precondition violation: has_first" (str bad-pre-ex))))))
+
 (deftest compiled-class-invariants-smoke-test
   (testing "compiled helper enforces class invariants on creation and method exit"
     (let [session (compiled-repl/make-session)

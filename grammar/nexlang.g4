@@ -518,8 +518,11 @@ anonymousFunction
     | FN genericParams? '(' paramList? ')' (':' type)? FAT_ARROW expression
     ;
 
+// `old` covers a whole call chain, as in Eiffel: `old box.n` is `old (box.n)`
+// and `old twice()` is `old (twice())`. It stops at the first operator, so
+// `old count + 1` is `(old count) + 1`.
 oldExpression
-    : OLD primary
+    : OLD postfix
     ;
 
 // `String` is a keyword token (STRING_TYPE), not an IDENTIFIER, so it is named

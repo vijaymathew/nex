@@ -527,7 +527,7 @@ end")
       (is (= :if (-> block-ir :body second :test :op))))))
 
 (deftest lower-method-require-ensure-old-test
-  (testing "instance-method lowering snapshots old fields and lowers require/ensure to asserts"
+  (testing "instance-method lowering records old values after the precondition and lowers require/ensure to asserts"
     (let [program (p/ast "class Counter
 feature
   value: Integer
@@ -556,15 +556,15 @@ end")
           ops (mapv :op (:body method-ir))
           locals (mapv :name (:locals method-ir))]
       (is (= :set-local (first ops)))
-      (is (= :set-local (second ops)))
-      (is (= :assert (nth ops 2)))
+      (is (= :assert (second ops)))
+      (is (= :set-local (nth ops 2)))
       (is (= :field-set (nth ops 3)))
       (is (= :set-local (nth ops 4)))
       (is (= :assert (nth ops 5)))
       (is (= :assert (nth ops 6)))
-      (is (some #{"__old_value"} locals))
+      (is (some #{"__old_0"} locals))
       (is (= :return (last ops)))
-      (is (= :require (-> method-ir :body (nth 2) :kind)))
+      (is (= :require (-> method-ir :body (nth 1) :kind)))
       (is (= :ensure (-> method-ir :body (nth 5) :kind)))
       (is (= :ensure (-> method-ir :body (nth 6) :kind))))))
 

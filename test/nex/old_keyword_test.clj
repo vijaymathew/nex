@@ -154,3 +154,82 @@
       ;; Should throw error about 'old' only being valid in postconditions
       (is (thrown-with-msg? Exception #"'old' can only be used in postconditions"
                             (eval-node ctx call-node))))))
+
+(def ^:private old-entry-value-program
+  "class Box
+create
+  make() do
+    n := 0
+  end
+feature
+  n: Integer
+  inc() do
+    n := n + 1
+  end
+  doubled(): Integer do
+    result := n * 2
+  end
+end
+
+class Counter
+create
+  make() do
+    count := 0
+    box := create Box.make
+    items := []
+  end
+feature
+  count: Integer
+  box: Box
+  items: Array[Integer]
+  twice(): Integer do
+    result := count * 2
+  end
+  bump() do
+    count := count + 1
+    box.inc
+  ensure
+    via_query: twice() = old twice() + 2
+    via_nested: box.n = old box.n + 1
+    via_nested_query: box.doubled() = old box.doubled() + 2
+  end
+  bump_other(other: Box) do
+    other.inc
+  ensure
+    moved: other.n = old other.n + 1
+  end
+  forget_other(other: Box) do
+  ensure
+    moved: other.n = old other.n + 1
+  end
+  keep_first()
+  require
+    has_first: items.length > 0
+  do
+  ensure
+    same_first: items.get(0) = old items.get(0)
+  end
+end")
+
+(deftest old-keyword-evaluates-whole-expression-on-entry-test
+  (testing "`old e` is E evaluated on entry, as in Eiffel: queries, nested objects and parameters all report their entry state"
+    (let [run (fn [stmts]
+                (let [ctx (-> (str old-entry-value-program "\n\n" stmts) p/ast interp/interpret)]
+                  (interp/env-lookup (:current-env ctx) "total")))]
+      (is (= 3 (run (str "let c := create Counter.make()\n"
+                         "let b := create Box.make()\n"
+                         "c.bump()\n"
+                         "c.bump()\n"
+                         "c.bump_other(b)\n"
+                         "let total := c.box.n + b.n")))))
+    (is (thrown-with-msg? Exception #"Postcondition violation: moved"
+                          (-> (str old-entry-value-program "\n\n"
+                                   "let c := create Counter.make()\n"
+                                   "c.forget_other(create Box.make())")
+                              p/ast interp/interpret)))
+    (testing "the precondition runs first, so it guards `old items.get(0)`"
+      (is (thrown-with-msg? Exception #"Precondition violation: has_first"
+                            (-> (str old-entry-value-program "\n\n"
+                                     "let c := create Counter.make()\n"
+                                     "c.keep_first()")
+                                p/ast interp/interpret))))))

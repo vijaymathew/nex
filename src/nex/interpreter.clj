@@ -79,31 +79,32 @@
 (def nex-map-remove rt/nex-map-remove)
 (defn nex-map-str [m] (rt/nex-map-str nex-format-value m))
 
-(defn- snapshot-old-field-value
-  "A field's stored VALUE, as `old` should see it. An Array (a real
+(defn- freeze-old-value
+  "An `old e` value as recorded on entry. An Array (a real
    java.util.ArrayList) or Map (an atom-backed nex-map, see
-   nex.types.runtime/nex-map) is a genuinely mutable container — capturing
-   the field map's entry for it just copies the *reference*, not a value, so
-   an in-place `.add`/`.put` later in the same method body (matching Nex's
-   own reference semantics for these types, see [[env-replace-object-aliases!]])
-   was visible through the \"old\" snapshot too: `old items.length = items.length
-   - 1` failed because both sides read the SAME, already-mutated ArrayList.
-   Shallow-copying the container here is what actually freezes it at snapshot
-   time; elements themselves are not deep-copied (matching `old` on a plain
-   object field, which likewise reflects a later mutation of that object's
-   own fields — only the container's own membership is what a `.length`/
-   `.get`/`.contains_key` query needs frozen). Sets need no such copy: nex-set
-   is an immutable value replaced wholesale on every op, so the field's
-   existing entry is already a stable, past snapshot."
+   nex.types.runtime/nex-map) is a mutable container, so recording the
+   reference alone would let an in-place `.add`/`.put` in the body show
+   through `old items` too. A shallow copy freezes its membership; the
+   elements themselves are not copied. Sets are immutable values already."
   [v]
   (cond
     (nex-array? v) (nex-array-from v)
     (nex-map? v) (nex-map-from (nex-map-entries v))
     :else v))
 
-(defn- snapshot-old-field-values
-  [fields]
-  (into {} (map (fn [[k v]] [k (snapshot-old-field-value v)])) fields))
+(defn- collect-old-exprs
+  "The operands of the `old` expressions in ASSERTIONS, distinct. A closure is
+   a routine of its own, and `old` cannot nest, so neither is searched."
+  [assertions]
+  (letfn [(walk [node]
+            (cond
+              (sequential? node) (mapcat walk node)
+              (map? node) (case (:type node)
+                            :old [(:expr node)]
+                            :anonymous-function nil
+                            (mapcat walk (vals node)))
+              :else nil))]
+    (distinct (mapcat #(walk (:condition %)) assertions))))
 
 (def nex-set rt/nex-set)
 (def nex-set-from rt/nex-set-from)
@@ -1065,11 +1066,6 @@
           :when (or (nil? before) (not= v (get before k)))]
     (try (env-set! env (env-name-for-key view k) v)
          (catch Exception _))))
-
-(defn- fields-as-seen
-  "FIELDS keyed by the names a frame with VIEW reads them under."
-  [fields view]
-  (into {} (map (fn [[k v]] [(keyword (env-name-for-key view k)) v])) fields))
 
 (defn- self-call-base
   "Where an unqualified or `this.` call of METHOD/ARITY, made by code running
@@ -2288,6 +2284,17 @@
                   (catch Exception _ ::not-found))]
         (when (not= res ::not-found) res)))))
 
+(defn- record-old-values
+  "Evaluate the operand of every `old` expression in ENSURE-ASSERTIONS in CTX,
+   the routine's entry state (after the precondition, so a precondition can
+   guard them, and before the body), as Eiffel does: `old twice()` and
+   `old other.balance` mean their values on entry, not merely the fields'.
+   Returns a map from operand node to its value, or nil when there are none."
+  [ctx ensure-assertions]
+  (when-let [exprs (seq (collect-old-exprs ensure-assertions))]
+    (let [entry-ctx (dissoc ctx :old-values)]
+      (into {} (map (fn [e] [e (freeze-old-value (eval-node entry-ctx e))])) exprs))))
+
 (defn- invoke-found-nex-method
   "Invoke a method that resolved via `lookup-method-with-inheritance` on an
    interpreter object: validate the call shape, run the method body in its
@@ -2309,9 +2316,6 @@
           view (frame-view ctx class-def path)
           effective-require (:effective-require method-lookup)
           effective-ensure (:effective-ensure method-lookup)
-          has-postconditions? (seq effective-ensure)
-          old-values (when has-postconditions?
-                       (snapshot-old-field-values (fields-as-seen (:fields obj) view)))
           source-obj (or (-> obj meta write-back-source-key) obj)]
       (let [method-env (make-env (or (:closure-env obj) (:current-env ctx)))
             param-names (set (map :name params))
@@ -2338,7 +2342,7 @@
                         (assoc :current-path path)
                         (assoc :current-view view)
                         (assoc :current-method-name method)
-                        (assoc :old-values old-values)
+                        (dissoc :old-values)
                         (assoc :modified-fields modified-fields)
                         (update :debug-stack (fnil conj [])
                                 {:class (:name source-class)
@@ -2360,6 +2364,8 @@
                                         (str (:name class-def) "." method)))
             _ (when-let [require-assertions effective-require]
                 (check-assertions new-ctx require-assertions Precondition))
+            old-values (when-not (:skip-contracts? ctx)
+                         (record-old-values new-ctx effective-ensure))
             _ (if-let [rescue (:rescue method-def)]
                 (eval-body-with-rescue new-ctx (:body method-def) rescue)
                 (doseq [stmt (:body method-def)]
@@ -2370,7 +2376,8 @@
             result (method-result-value method-env)]
         (try
           (when-let [ensure-assertions effective-ensure]
-            (check-assertions new-ctx ensure-assertions Postcondition))
+            (check-assertions (assoc new-ctx :old-values old-values)
+                              ensure-assertions Postcondition))
           ;; As in Eiffel, only a qualified call (`x.f`, `this.f`) checks the
           ;; invariant on exit; an unqualified one (`f`) runs mid-routine,
           ;; where the invariant may be broken for a moment.
@@ -3652,6 +3659,8 @@
                       (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
           _ (when-let [require-assertions (:require ctor-def)]
               (check-assertions new-ctx require-assertions Precondition))
+          old-values (when-not (:skip-contracts? ctx)
+                       (record-old-values new-ctx (:ensure ctor-def)))
           _ (if-let [rescue (:rescue ctor-def)]
               (eval-body-with-rescue new-ctx (:body ctor-def) rescue)
               (doseq [stmt (:body ctor-def)]
@@ -3659,7 +3668,8 @@
           ;; Read the (possibly mutated) field values back out of the env.
           updated-fields (read-fields ctor-env initial-field-map view)
           _ (when-let [ensure-assertions (:ensure ctor-def)]
-              (check-assertions new-ctx ensure-assertions Postcondition))]
+              (check-assertions (assoc new-ctx :old-values old-values)
+                                ensure-assertions Postcondition))]
       updated-fields)))
 
 (defn- create-user-object
@@ -3741,25 +3751,14 @@
     (map? node) (:value node)
     :else node))
 
+;; `old e` is the value E had on entry, recorded by record-old-values.
 (defmethod eval-node :old
   [ctx {:keys [expr]}]
-  ;; Look up the value from the old-values snapshot
-  (if-let [old-values (:old-values ctx)]
-    (if (and (map? expr) (= (:type expr) :identifier))
-      ;; Simple identifier: look up in old values
-      (let [var-name (:name expr)]
-        (if (contains? old-values (keyword var-name))
-          (get old-values (keyword var-name))
-          (throw (ex-info (str "'old' can only be used on object fields in postconditions")
-                          {:variable var-name}))))
-      ;; More complex expression: evaluate it in an environment with old values
-      (let [old-env (make-env (:current-env ctx))
-            _ (doseq [[field-name field-val] old-values]
-                (env-define old-env (name field-name) field-val))
-            old-ctx (assoc ctx :current-env old-env)]
-        (eval-node old-ctx expr)))
-    (throw (ex-info "'old' can only be used in postconditions"
-                    {:expr expr}))))
+  (let [v (get (:old-values ctx) expr ::missing)]
+    (if (= ::missing v)
+      (throw (ex-info "'old' can only be used in postconditions"
+                      {:expr expr}))
+      v)))
 
 (defmethod eval-node :with
   [ctx {:keys [target body]}]
