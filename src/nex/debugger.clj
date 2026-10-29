@@ -337,6 +337,33 @@
           (catch Exception _
             false))))))
 
+(def ^:dynamic *same-line-as-last?*
+  "Whether the node the debug hook is looking at is on the same line, in the
+   same file and call, as the one before it: the `let` of
+   `let p := s.substring(0, n)` and the call inside it are one line, and a
+   line breakpoint or `:next` stops there once."
+  false)
+
+(defn- same-line? [last-ctx last-node ctx node]
+  (boolean
+   (and last-node
+        (:dbg/line node)
+        (= (:dbg/line last-node) (:dbg/line node))
+        (= (:debug-source last-ctx) (:debug-source ctx))
+        (= (or (:debug-depth last-ctx) 0) (or (:debug-depth ctx) 0)))))
+
+(defn- same-source?
+  "Whether a breakpoint's file, as the user wrote it, names SOURCE: the same
+   path, or its trailing part on a directory boundary (`text_buffer.nex`
+   and `tut/text_buffer.nex` both name /home/me/tut/text_buffer.nex)."
+  [bp-source source]
+  (when (and bp-source source)
+    (let [norm #(str/replace (str %) "\\" "/")
+          b (norm bp-source)
+          s (norm source)]
+      (or (= b s)
+          (str/ends-with? s (str "/" (str/replace b #"^\./" "")))))))
+
 (defn breakpoint-hit?
   [bp hit ctx node]
   (let [line (:dbg/line node)
@@ -347,8 +374,10 @@
         (case (:kind bp)
           :hit (= (:n bp) hit)
           :cm (and (= (:class bp) cn) (= (:method bp) mn))
-          :cm-line (and (= (:class bp) cn) (= (:method bp) mn) (= (:line bp) line))
-          :file-line (and (= (:source bp) source) (= (:line bp) line))
+          :cm-line (and (= (:class bp) cn) (= (:method bp) mn) (= (:line bp) line)
+                        (not *same-line-as-last?*))
+          :file-line (and (same-source? (:source bp) source) (= (:line bp) line)
+                          (not *same-line-as-last?*))
           :field-write (and (= :member-assign (:type node))
                             (= (:field bp) (:field node)))
           :class-field-write (and (= :member-assign (:type node))
@@ -423,10 +452,16 @@
 (defn debug-should-pause?
   ([state hit depth ctx node]
    (debug-should-pause? state hit depth ctx node nil))
-  ([{:keys [breakpoints mode next-depth finish-depth]} hit depth ctx node _opts]
-   (or (boolean (seq (matching-breakpoint-entries breakpoints hit ctx node)))
+  ([{:keys [breakpoints mode next-depth finish-depth] :as state} hit depth ctx node _opts]
+   ;; :matched? is the debug hook's own match: matching again would count
+   ;; each breakpoint's hit twice (see breakpoint-modifier-hit?), and
+   ;; `:ignore`/`:every` would be off by that.
+   (or (if (contains? state :matched?)
+         (:matched? state)
+         (boolean (seq (matching-breakpoint-entries breakpoints hit ctx node))))
        (= mode :step)
-       (and (= mode :next) (some? next-depth) (<= depth next-depth))
+       (and (= mode :next) (some? next-depth) (<= depth next-depth)
+            (not *same-line-as-last?*))
        (and (= mode :finish) (some? finish-depth) (< depth finish-depth)))))
 
 (defn- print-debug-pause [ctx hit depth node]
@@ -699,18 +734,21 @@
     (let [depth (or (:debug-depth ctx) 0)
           state-before @*debug-state*]
       (when-not (:suspend? state-before)
+        (binding [*same-line-as-last?* (let [{last-ctx :ctx last-node :node} (:last state-before)]
+                                         (same-line? last-ctx last-node ctx node))]
         (let [hit (inc (:counter state-before))
               matched-breakpoints (matching-breakpoint-entries (:breakpoints state-before) hit ctx node)
               watch-hits (watchpoint-hits! ctx {:wrap-expression-fn wrap-expression-fn})]
           (swap! *debug-state* assoc :counter hit :last {:ctx ctx :node node :hit hit})
-          (when (debug-should-pause? state-before hit depth ctx node opts)
+          (when (debug-should-pause? (assoc state-before :matched? (boolean (seq matched-breakpoints)))
+                                     hit depth ctx node opts)
             (debugger-loop! ctx node hit opts))
           (when (seq matched-breakpoints)
             (doseq [[id bp] matched-breakpoints
                     :when (:temporary bp)]
               (swap! *debug-state* update :breakpoints dissoc id)))
           (when (seq watch-hits)
-            (pause-for-watch-hits! ctx node hit watch-hits opts)))))))
+            (pause-for-watch-hits! ctx node hit watch-hits opts))))))))
 
 (defn maybe-break-on-error!
   "Enter debugger loop on error if corresponding break-on toggle is enabled."

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Debugger: line breakpoints work.** `:break file.nex:17` and
+  `:break Class.method:17` never stopped: the interpreter handed the debugger
+  a copy of each statement without its line number (only `assert` kept
+  one). A file can now be named as written (`text_buffer.nex:17`, or
+  `tut/text_buffer.nex:17`), not only by its full path. A line breakpoint
+  stops once each time the line runs, and `:next` moves to the next line,
+  rather than stopping again at each call on the same line. `:ignore` and
+  `:every` counted every hit twice, so `:ignore 1 1` skipped nothing; they
+  count each hit once now.
+
 - **Editor support: `nex lsp` and a VS Code extension.** `nex lsp` is a
   language server: in any LSP editor it underlines the syntax and type errors
   `nex <file>` would report while you type (an error inside an interned file
