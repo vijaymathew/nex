@@ -40,7 +40,7 @@ invariants and explicit guarantees are the ordinary way code is written.
 
 ## Requirements
 
-A Nex that has the `nex lsp` command (any release after 0.6.4), with `nex`
+A Nex that has the `nex lsp` command (0.6.5 or later), with `nex`
 on your `PATH` (see the
 [install guide](https://github.com/vijaymathew/nex/blob/main/INSTALL.md)).
 If it is somewhere else, set `nex.path` to its full path.

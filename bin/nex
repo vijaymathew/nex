@@ -12,7 +12,7 @@
 #     through the Clojure CLI, which is several times slower to start.
 # NEX_HOME, when set, names the folder to use instead.
 
-VERSION="0.6.4"
+VERSION="0.6.5"
 MIN_JAVA=17
 
 # This script's real folder, following symlinks such as one from

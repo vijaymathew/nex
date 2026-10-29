@@ -102,7 +102,7 @@ To build and install from source instead (which also needs the Clojure CLI):
 
 ```bash
 bash bootstrap-install.sh --from-source                 # the main branch
-bash bootstrap-install.sh --from-source --ref v0.6.4    # a tag, branch or commit
+bash bootstrap-install.sh --from-source --ref v0.6.5    # a tag, branch or commit
 ```
 
 A release that has no prebuilt archive (0.6.4 and earlier) is built from
@@ -214,7 +214,7 @@ If Java is not installed:
 ```bash
 $ ./install.sh jvm
 
-Nex Language Installer v0.6.4
+Nex Language Installer v0.6.5
 
 Installation target: jvm
 Install prefix: /usr/local
@@ -241,7 +241,7 @@ Nex Language Installed Successfully!
 ```bash
 $ ./install.sh jvm --install-deps
 
-Nex Language Installer v0.6.4
+Nex Language Installer v0.6.5
 
 Installation target: jvm
 Install prefix: /usr/local

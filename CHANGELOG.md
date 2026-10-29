@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.5 - 2026-10-29
+
 - **Prebuilt releases for Linux, macOS and Windows.** Each GitHub release
   now carries `nex-<version>.tar.gz` and `nex-<version>.zip`, which need only
   Java 17 or later: unpack, put `bin` on `PATH`, run `nex`. Windows gets its

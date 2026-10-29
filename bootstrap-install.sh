@@ -28,7 +28,7 @@ Options:
   --version <version>  Release to install, e.g. 0.6.5 (default: the latest)
   --from-source        Build and install from source instead of the prebuilt
                        release: the main branch, or --ref
-  --ref <git-ref>      Branch, tag, or commit to build, e.g. v0.6.4
+  --ref <git-ref>      Branch, tag, or commit to build, e.g. v0.6.5
                        (implies --from-source)
   --install-deps       Install missing prerequisites without asking
   --prefix <dir>       Install under <dir> (default: /usr/local)
@@ -39,7 +39,7 @@ Examples:
   ./bootstrap-install.sh --prefix "$HOME/.local"
   ./bootstrap-install.sh --version 0.6.5
   ./bootstrap-install.sh --from-source
-  ./bootstrap-install.sh --from-source --ref v0.6.4
+  ./bootstrap-install.sh --from-source --ref v0.6.5
 
 A release without a prebuilt archive (0.6.4 and earlier) is built from
 source instead, after saying so.

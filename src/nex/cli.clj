@@ -16,7 +16,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(def version "0.6.4")
+(def version "0.6.5")
 
 (def ^:private help-text
   (str "Nex Language v" version " - A high-level language for design and implementation
