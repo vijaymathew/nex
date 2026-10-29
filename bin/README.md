@@ -4,8 +4,14 @@ This directory contains the command-line interface for the Nex language.
 
 ## Files
 
-### `nex` (JVM version)
-Bash script that provides the full Nex CLI using the JVM/Clojure runtime.
+### `nex` (Linux, macOS) and `nex.cmd` (Windows)
+Launchers for the Nex CLI. Each finds Java and the Nex installation, puts
+Nex's jars (and any `--classpath` entries) on the JVM classpath, and starts
+`nex.cli` (`src/nex/cli.clj`), which handles the commands below for both.
+
+`nex` runs either a prebuilt release (`nex.jar` in its parent folder, built by
+`scripts/package-release.sh`) or a source checkout (through the Clojure CLI).
+`nex.cmd` runs a prebuilt release only. Keep `nex.cmd`'s line endings CRLF.
 
 **Features:**
 - REPL

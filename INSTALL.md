@@ -13,6 +13,35 @@ installs or upgrades whichever is missing or too old.
 
 ## Quick Install
 
+### Prebuilt Release (Linux, macOS, Windows)
+
+Each GitHub release has a prebuilt Nex that needs only **Java 17 or later**:
+no Clojure CLI and no build step. The same files run on every platform.
+
+1. Download `nex-<version>.zip` (Windows) or `nex-<version>.tar.gz` (Linux,
+   macOS) from the [Releases page](https://github.com/vijaymathew/nex/releases).
+2. Unpack it anywhere, for example `C:\Tools\nex-<version>` or
+   `~/.local/share/nex-<version>`.
+3. Put its `bin` folder on your `PATH`, or link the launcher into a folder
+   already on it:
+
+```bash
+# Linux, macOS
+tar -xzf nex-<version>.tar.gz -C ~/.local/share
+ln -s ~/.local/share/nex-<version>/bin/nex ~/.local/bin/nex
+nex version
+```
+
+```bat
+:: Windows (cmd); or add the bin folder to PATH in System Settings
+set "PATH=C:\Tools\nex-<version>\bin;%PATH%"
+nex version
+```
+
+`nex` uses the Java in `JAVA_HOME` when that is set, and `java` on `PATH`
+otherwise. On Windows, quote a `--classpath` list, since `;` separates its
+entries: `nex app.nex --classpath "a.jar;b.jar"`.
+
 ### Downloadable Bootstrap Script
 
 Users can install Nex without cloning the repository by downloading the
@@ -85,8 +114,9 @@ The installation script will:
    installed `nex` runs these with plain `java`, so the Clojure CLI is needed
    only to install, and every run skips compiling Nex's own source.
 4. **Install files** to:
-   - Executable: `/usr/local/bin/nex`
-   - Library: `/usr/local/lib/nex`
+   - Library: `/usr/local/lib/nex`, laid out exactly like a prebuilt release
+     (`scripts/package-release.sh` builds both)
+   - Executable: `/usr/local/bin/nex`, a link to `/usr/local/lib/nex/bin/nex`
 5. **Verify** - Run a test program with the installed `nex`.
 
 `sudo` is used only when the install directories are not writable by you, so a
@@ -99,7 +129,8 @@ background, in `~/.cache/nex` (or `$XDG_CACHE_HOME/nex`), which roughly halves
 startup again: an AOT cache on Java 25 or later, an AppCDS archive on Java
 17-24. Nothing waits for it and nothing is printed about it. A new Nex or Java
 version gets a new cache automatically; old ones can be deleted at any time.
-To run without it, set `NEX_JVM_CACHE=off`.
+To run without it, set `NEX_JVM_CACHE=off`. The Windows launcher does not
+build this cache yet.
 
 ## Custom Installation Prefix
 

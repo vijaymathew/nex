@@ -1,0 +1,134 @@
+name: Release
+
+# Builds the prebuilt Nex release (scripts/package-release.sh), checks it on
+# Linux, macOS and Windows with only Java installed, and attaches the
+# archives to the GitHub release when one is published.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - bin/**
+      - scripts/package-release.sh
+      - scripts/build-dist.clj
+      - src/nex/cli.clj
+      - test/release/**
+      - .github/workflows/release.yml
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: DeLaGuardo/setup-clojure@13.2
+        with:
+          cli: latest
+
+      - name: Build release archives
+        run: bash scripts/package-release.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nex-release
+          path: |
+            target/release/*.tar.gz
+            target/release/*.zip
+          if-no-files-found: error
+
+  smoke:
+    name: Smoke test (${{ matrix.os }}, Java ${{ matrix.java }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        java: ["17", "25"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: test/release
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nex-release
+          path: artifacts
+
+      - name: Unpack (Linux, macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir dist
+          tar -xzf artifacts/*.tar.gz -C dist
+          mv dist/nex-* dist/nex
+
+      - name: Unpack (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Expand-Archive -Path (Get-Item artifacts/*.zip).FullName -DestinationPath dist
+          Move-Item (Get-Item dist/nex-*).FullName dist/nex
+
+      - name: Run, compile and run the compiled jar (Linux, macOS)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          nex="$PWD/dist/nex/bin/nex"
+          "$nex" version
+          cd test/release
+          "$nex" smoke.nex | tee out.txt
+          grep -q 'release smoke ok' out.txt
+          "$nex" eval 'print(6 * 7)' | grep -qx 42
+          "$nex" compile jvm smoke.nex build
+          java -jar build/smoke.jar | grep -q 'release smoke ok'
+          # Through a symlink, as install.sh installs it.
+          mkdir -p ../bin-link && ln -s "$nex" ../bin-link/nex
+          ../bin-link/nex smoke.nex | grep -q 'release smoke ok'
+
+      - name: Run, compile and run the compiled jar (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          set "PATH=%CD%\dist\nex\bin;%PATH%"
+          call nex version || exit /b 1
+          cd test\release
+          call nex smoke.nex > out.txt || exit /b 1
+          type out.txt
+          findstr /c:"release smoke ok" out.txt || exit /b 1
+          call nex compile jvm smoke.nex build || exit /b 1
+          java -jar build\smoke.jar | findstr /c:"release smoke ok" || exit /b 1
+
+  publish:
+    name: Attach to release
+    if: github.event_name == 'release'
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nex-release
+          path: artifacts
+
+      - name: Upload archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" artifacts/* --clobber --repo "${{ github.repository }}"

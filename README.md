@@ -269,11 +269,13 @@ bash bootstrap-install.sh jvm --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The installer also copies the shipped Nex libraries from `lib/` into `~/.nex/deps`,
-so `intern` can resolve standard library namespaces such as `io/Path`, `time/Date_Time`,
-and `net/Http_Client` from an installed Nex command.
+The shipped Nex libraries from `lib/` are installed with Nex, so `intern` can
+resolve standard library namespaces such as `io/Path`, `time/Date_Time`, and
+`net/Http_Client` from an installed Nex command.
 
-Supported platforms: Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro, macOS.
+The installer supports Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro and
+macOS. On any platform, Windows included, you can instead download a prebuilt
+release that needs only Java 17+ (see [INSTALL.md](INSTALL.md#prebuilt-release-linux-macos-windows)).
 
 For manual installation and platform-specific instructions, see [INSTALL.md](INSTALL.md).
 
