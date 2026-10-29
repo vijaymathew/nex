@@ -17,10 +17,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The fake web cmdlets below run while install.ps1 is the running script, so
+# they find what to serve in a global: $script: there would be install.ps1's.
 $Artifacts = (Resolve-Path $Artifacts).Path
 $Installer = (Resolve-Path $Installer).Path
 $ReleaseDir = (Resolve-Path $ReleaseDir).Path
-$script:Served = $Artifacts
+$global:NexTestServed = $Artifacts
 $failures = 0
 
 # What install.ps1 sees when a release has no such file.
@@ -33,13 +35,13 @@ class FakeHttpNotFound : System.Exception {
 
 function Invoke-RestMethod {
     param([string]$Uri, [switch]$UseBasicParsing)
-    $zip = Get-ChildItem -Path $script:Served -Filter 'nex-*.zip' | Select-Object -First 1
+    $zip = Get-ChildItem -Path $global:NexTestServed -Filter 'nex-*.zip' | Select-Object -First 1
     return [pscustomobject]@{ tag_name = 'v' + $zip.BaseName.Substring(4) }
 }
 
 function Invoke-WebRequest {
     param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
-    $file = Join-Path $script:Served ($Uri.Substring($Uri.LastIndexOf('/') + 1))
+    $file = Join-Path $global:NexTestServed ($Uri.Substring($Uri.LastIndexOf('/') + 1))
     if (-not (Test-Path $file)) { throw [FakeHttpNotFound]::new("404 Not Found: $Uri") }
     Copy-Item -Path $file -Destination $OutFile
 }
@@ -82,7 +84,11 @@ try {
     Check (Test-Path (Join-Path $dir 'nex.jar')) 'nex.jar is installed'
     Check (-not (Test-Path (Join-Path $dir 'install.sh'))) 'the Linux install.sh is left out'
     Check (Test-OnUserPath (Join-Path $dir 'bin')) 'bin is on the user PATH'
-    $out = @(& nex.cmd eval 'print(5 * 5)' 2>&1 | ForEach-Object { "$_".Trim() })
+    try {
+        $out = @(& nex.cmd eval 'print(5 * 5)' 2>&1 | ForEach-Object { "$_".Trim() })
+    } catch {
+        $out = @("$($_.Exception.Message)")
+    }
     Check ($out -contains '25') "nex runs from PATH in this session (got: $($out -join ' | '))"
 
     Write-Host "== install again over it (an upgrade)"
@@ -96,12 +102,12 @@ try {
     Copy-Item -Path $Artifacts -Destination $bad -Recurse
     $zip = Get-ChildItem -Path $bad -Filter 'nex-*.zip' | Select-Object -First 1
     [IO.File]::AppendAllText($zip.FullName, 'junk')
-    $script:Served = $bad
+    $global:NexTestServed = $bad
     $dir2 = Join-Path $root 'damaged'
     $status = Invoke-Installer $Installer @{ InstallDir = $dir2; NoModifyPath = $true }
     Check ($status -ne 0) 'install.ps1 fails'
     Check (-not (Test-Path (Join-Path $dir2 'nex.jar'))) 'nothing is installed'
-    $script:Served = $Artifacts
+    $global:NexTestServed = $Artifacts
 
     Write-Host "== a release without a Windows archive"
     $status = Invoke-Installer $Installer @{ InstallDir = (Join-Path $root 'old'); Version = '0.0.1'; NoModifyPath = $true }
