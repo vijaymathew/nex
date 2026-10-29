@@ -5,8 +5,9 @@ This guide explains how to install the Nex language implementation on your syste
 ## Prerequisites
 
 - **Java 17 or later** - [Download](https://adoptium.net/)
-- **Clojure CLI 1.11.1.1420 or later** - [Installation Guide](https://clojure.org/guides/install_clojure).
-  Older CLIs cannot run Nex from a read-only install directory such as `/usr/local/lib/nex`.
+- To build from source only: **Clojure CLI 1.11.1.1420 or later** -
+  [Installation Guide](https://clojure.org/guides/install_clojure). The
+  prebuilt release and the bootstrap script's default install need no Clojure.
 
 The installer checks both versions and, with `--install-deps` (or after asking),
 installs or upgrades whichever is missing or too old.
@@ -42,7 +43,7 @@ nex version
 otherwise. On Windows, quote a `--classpath` list, since `;` separates its
 entries: `nex app.nex --classpath "a.jar;b.jar"`.
 
-### Downloadable Bootstrap Script
+### Downloadable Bootstrap Script (Linux, macOS)
 
 Users can install Nex without cloning the repository by downloading the
 bootstrap installer:
@@ -52,8 +53,20 @@ curl -fsSL -o bootstrap-install.sh https://raw.githubusercontent.com/vijaymathew
 bash bootstrap-install.sh jvm --install-deps
 ```
 
-The bootstrap script downloads a source archive from GitHub and then runs the
-project's `install.sh`.
+By default the bootstrap script downloads the latest prebuilt release, checks
+it against the release's `SHA256SUMS`, and runs the `install.sh` inside it,
+which installs it under `/usr/local` (or `--prefix`). Only Java 17+ is
+needed. `--version 0.6.5` picks a release other than the latest.
+
+To build and install from source instead (which also needs the Clojure CLI):
+
+```bash
+bash bootstrap-install.sh --from-source                 # the main branch
+bash bootstrap-install.sh --from-source --ref v0.6.4    # a tag, branch or commit
+```
+
+A release that has no prebuilt archive (0.6.4 and earlier) is built from
+source automatically, after saying so.
 
 ### JVM Installation (Default)
 

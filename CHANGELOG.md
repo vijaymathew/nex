@@ -11,7 +11,13 @@
   itself is now handled in one place, `nex.cli`, which both launchers start,
   so they behave the same. `install.sh` installs this same folder layout,
   with the shipped libraries inside it rather than copied to `~/.nex/deps`,
-  and links `nex` to its launcher. Fixed along the way: a relative
+  and links `nex` to its launcher. `bootstrap-install.sh` now installs the
+  latest prebuilt release (`--version` picks another), checked against the
+  release's `SHA256SUMS`, so the one-line install needs only Java;
+  `--from-source [--ref REF]` builds from source as before (default
+  `main`), and a release without a prebuilt archive is built from source
+  automatically. The release archive includes `install.sh`, which installs
+  a prebuilt folder as it is, without the Clojure CLI. Fixed along the way: a relative
   `--classpath` entry (`--classpath lib.jar`) was looked up in the Nex
   installation folder rather than the folder `nex` was run from;
   `nex doc file.nex out.md` likewise wrote `out.md` into the installation

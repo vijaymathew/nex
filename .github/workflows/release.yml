@@ -46,6 +46,7 @@ jobs:
           path: |
             target/release/*.tar.gz
             target/release/*.zip
+            target/release/SHA256SUMS
           if-no-files-found: error
 
   smoke:

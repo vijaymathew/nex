@@ -3,6 +3,12 @@ set -e
 
 # Nex Language Installation Script
 # Usage: ./install.sh [--install-deps] [--prefix DIR]
+#
+# Run from either of:
+#   - a prebuilt release folder (nex-<version>/, unpacked from the release
+#     archive): installs it as it is; only Java 17+ is needed.
+#   - a source checkout: builds that folder first (scripts/package-release.sh),
+#     which also needs the Clojure CLI.
 
 VERSION="0.6.4"
 TARGET="jvm"
@@ -19,6 +25,18 @@ MIN_JAVA=17
 # read-only install such as /usr/local/lib/nex.
 MIN_CLOJURE_CLI="1.11.1.1420"
 CLOJURE_LINUX_INSTALLER="https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh"
+
+# Work from this script's folder, wherever it was run from.
+cd "$(dirname "$0")"
+
+# A prebuilt release has nex.jar next to this script and no source.
+if [[ -f nex.jar && -f classpath && ! -f deps.edn ]]; then
+    PREBUILT=true
+    RELEASE_DIR="$(pwd)"
+else
+    PREBUILT=false
+    RELEASE_DIR="target/release/nex-$VERSION"
+fi
 
 # Command prefix for writing into the install directories: empty when the
 # current user can write there, "sudo" otherwise (set by choose_sudo).
@@ -69,6 +87,11 @@ if [[ "$TARGET" != "jvm" ]]; then
 fi
 
 echo "Installation target: $TARGET"
+if [[ "$PREBUILT" == true ]]; then
+    echo "Installing from: prebuilt release ($RELEASE_DIR)"
+else
+    echo "Installing from: source (built here)"
+fi
 echo "Install prefix: $INSTALL_PREFIX"
 echo "Auto-install dependencies: $INSTALL_DEPS"
 echo ""
@@ -330,7 +353,8 @@ check_prerequisites() {
 
     detect_os
     ensure_java
-    ensure_clojure
+    # Only a build from source needs the Clojure CLI.
+    [[ "$PREBUILT" == true ]] || ensure_clojure
     echo ""
 }
 
@@ -338,7 +362,6 @@ check_prerequisites() {
 # Nex AOT-compiled into nex.jar, its dependency jars, the launchers and the
 # shipped libraries. The installed command then starts with plain `java`
 # instead of loading the Clojure source on every run.
-RELEASE_DIR="target/release/nex-$VERSION"
 build() {
     echo "Building Nex (compiling ahead of time; this takes a minute)..."
 
@@ -372,12 +395,21 @@ setup_directories() {
 install_files() {
     echo "Installing Nex files..."
 
+    # Re-running the installed copy's own install.sh into the same prefix
+    # has nothing to copy (and must not delete what it is about to copy).
+    if [[ "$(cd "$RELEASE_DIR" && pwd -P)" == "$(cd "$LIB_DIR" && pwd -P)" ]]; then
+        echo "  ✓ Nex is already in $LIB_DIR"
+        echo ""
+        return
+    fi
+
     # Remove what earlier installers put here first, so deleted or renamed
     # files do not linger: older ones copied the Clojure source as well.
     $SUDO rm -rf "$LIB_DIR/src" "$LIB_DIR/grammar" "$LIB_DIR/deps" \
         "$LIB_DIR/bin" "$LIB_DIR/lib"
     $SUDO rm -f "$LIB_DIR/deps.edn" "$LIB_DIR/nex.jar" "$LIB_DIR/classpath" \
-        "$LIB_DIR/aot-training.nex" "$LIB_DIR/LICENSE" "$LIB_DIR/README.md"
+        "$LIB_DIR/aot-training.nex" "$LIB_DIR/LICENSE" "$LIB_DIR/README.md" \
+        "$LIB_DIR/install.sh"
 
     $SUDO cp -R "$RELEASE_DIR/." "$LIB_DIR/"
 
@@ -427,7 +459,7 @@ verify_installation() {
 main() {
     choose_sudo
     check_prerequisites
-    build
+    [[ "$PREBUILT" == true ]] || build
     setup_directories
     install_files
     install_executable

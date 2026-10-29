@@ -12,6 +12,10 @@
 #   deps/*.jar, classpath  its dependency jars, and the list of all jars
 #   lib/                   the Nex libraries that ship with Nex
 #   aot-training.nex       the program the launcher trains its JVM cache on
+#   install.sh             installs this folder under a prefix (Linux, macOS)
+#
+# and target/release/SHA256SUMS lists the archives' checksums, which
+# bootstrap-install.sh checks.
 #
 # The same files run on every platform: the jars are plain JVM bytecode, and
 # JLine carries its own native terminal support for each OS.
@@ -46,7 +50,7 @@ sed 's/\r*$/\r/' bin/nex.cmd > "$OUT/bin/nex.cmd"
 cp target/dist/nex.jar target/dist/classpath "$OUT/"
 cp -R target/dist/deps "$OUT/deps"
 cp -R lib "$OUT/lib"
-cp scripts/aot-training.nex LICENSE README.md "$OUT/"
+cp scripts/aot-training.nex LICENSE README.md install.sh "$OUT/"
 
 if [[ "$ARCHIVES" == true ]]; then
     (
@@ -54,8 +58,13 @@ if [[ "$ARCHIVES" == true ]]; then
         tar -czf "$NAME.tar.gz" "$NAME"
         rm -f "$NAME.zip"
         zip -qr "$NAME.zip" "$NAME"
+        if command -v sha256sum > /dev/null; then
+            sha256sum "$NAME.tar.gz" "$NAME.zip" > SHA256SUMS
+        else
+            shasum -a 256 "$NAME.tar.gz" "$NAME.zip" > SHA256SUMS
+        fi
     )
-    echo "Built target/release/$NAME.tar.gz and target/release/$NAME.zip"
+    echo "Built target/release/$NAME.tar.gz, $NAME.zip and SHA256SUMS"
 else
     echo "Built $OUT"
 fi

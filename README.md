@@ -238,7 +238,8 @@ From Clojure, use the JVM backend directly:
 ### Prerequisites
 
 - Java 17 or higher
-- [Clojure CLI tools](https://clojure.org/guides/install_clojure) (version 1.11.1.1420+)
+- [Clojure CLI tools](https://clojure.org/guides/install_clojure) (version 1.11.1.1420+),
+  only to build from source (as `./install.sh` in a clone does)
 
 The installer checks both, and `--install-deps` installs or upgrades them.
 
@@ -255,7 +256,9 @@ cd nex
 nex help
 ```
 
-If you want a single downloadable installer instead of cloning the repo:
+If you want a single downloadable installer instead of cloning the repo (it
+installs the latest prebuilt release, which needs only Java 17+; add
+`--from-source` to build from source instead):
 
 ```bash
 curl -fsSL -o bootstrap-install.sh https://raw.githubusercontent.com/vijaymathew/nex/main/bootstrap-install.sh
