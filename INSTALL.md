@@ -5,15 +5,85 @@ This guide explains how to install the Nex language implementation on your syste
 ## Prerequisites
 
 - **Java 17 or later** - [Download](https://adoptium.net/)
-- **Clojure CLI 1.11.1.1420 or later** - [Installation Guide](https://clojure.org/guides/install_clojure).
-  Older CLIs cannot run Nex from a read-only install directory such as `/usr/local/lib/nex`.
+- To build from source only: **Clojure CLI 1.11.1.1420 or later** -
+  [Installation Guide](https://clojure.org/guides/install_clojure). The
+  prebuilt release and the bootstrap script's default install need no Clojure.
 
 The installer checks both versions and, with `--install-deps` (or after asking),
 installs or upgrades whichever is missing or too old.
 
 ## Quick Install
 
-### Downloadable Bootstrap Script
+### Windows
+
+In PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1 | iex
+```
+
+or from `cmd`:
+
+```bat
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1 | iex"
+```
+
+This downloads the latest prebuilt release, checks it against the release's
+`SHA256SUMS`, installs it for your user in `%LOCALAPPDATA%\Programs\nex` (no
+administrator rights needed), adds its `bin` folder to your user `PATH`, and
+runs a test program. When there is no Java 17 or later, it offers to install
+one with `winget`. Open a new terminal afterwards so it sees the new `PATH`.
+
+Options go to the script block form:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1))) -Version 0.6.5 -InstallDir C:\Tools\nex
+```
+
+| Option | Meaning |
+|---|---|
+| `-Version 0.6.5` | install that release instead of the latest |
+| `-InstallDir DIR` | install somewhere else |
+| `-InstallDeps` | install Java with `winget` without asking |
+| `-NoModifyPath` | leave your `PATH` alone |
+| `-Uninstall` | remove Nex and its `PATH` entry |
+
+With the one-line form, set `$env:NEX_VERSION`, `$env:NEX_INSTALL_DIR` or
+`$env:NEX_INSTALL_DEPS = '1'` first instead. The release zip contains
+`install.ps1` too: run it from the unpacked folder to install that folder
+without downloading anything. The Windows installer installs prebuilt
+releases only; to build from source on Windows, use WSL.
+
+### Prebuilt Release (Linux, macOS, Windows)
+
+Each GitHub release has a prebuilt Nex that needs only **Java 17 or later**:
+no Clojure CLI and no build step. The same files run on every platform.
+
+1. Download `nex-<version>.zip` (Windows) or `nex-<version>.tar.gz` (Linux,
+   macOS) from the [Releases page](https://github.com/vijaymathew/nex/releases).
+2. Unpack it anywhere, for example `C:\Tools\nex-<version>` or
+   `~/.local/share/nex-<version>`.
+3. Put its `bin` folder on your `PATH`, or link the launcher into a folder
+   already on it (on Windows, `install.ps1` above does all of this):
+
+```bash
+# Linux, macOS
+tar -xzf nex-<version>.tar.gz -C ~/.local/share
+ln -s ~/.local/share/nex-<version>/bin/nex ~/.local/bin/nex
+nex version
+```
+
+```bat
+:: Windows (cmd); or add the bin folder to PATH in System Settings
+set "PATH=C:\Tools\nex-<version>\bin;%PATH%"
+nex version
+```
+
+`nex` uses the Java in `JAVA_HOME` when that is set, and `java` on `PATH`
+otherwise. On Windows, quote a `--classpath` list, since `;` separates its
+entries: `nex app.nex --classpath "a.jar;b.jar"`.
+
+### Downloadable Bootstrap Script (Linux, macOS)
 
 Users can install Nex without cloning the repository by downloading the
 bootstrap installer:
@@ -23,8 +93,20 @@ curl -fsSL -o bootstrap-install.sh https://raw.githubusercontent.com/vijaymathew
 bash bootstrap-install.sh jvm --install-deps
 ```
 
-The bootstrap script downloads a source archive from GitHub and then runs the
-project's `install.sh`.
+By default the bootstrap script downloads the latest prebuilt release, checks
+it against the release's `SHA256SUMS`, and runs the `install.sh` inside it,
+which installs it under `/usr/local` (or `--prefix`). Only Java 17+ is
+needed. `--version 0.6.5` picks a release other than the latest.
+
+To build and install from source instead (which also needs the Clojure CLI):
+
+```bash
+bash bootstrap-install.sh --from-source                 # the main branch
+bash bootstrap-install.sh --from-source --ref v0.6.5    # a tag, branch or commit
+```
+
+A release that has no prebuilt archive (0.6.4 and earlier) is built from
+source automatically, after saying so.
 
 ### JVM Installation (Default)
 
@@ -85,8 +167,9 @@ The installation script will:
    installed `nex` runs these with plain `java`, so the Clojure CLI is needed
    only to install, and every run skips compiling Nex's own source.
 4. **Install files** to:
-   - Executable: `/usr/local/bin/nex`
-   - Library: `/usr/local/lib/nex`
+   - Library: `/usr/local/lib/nex`, laid out exactly like a prebuilt release
+     (`scripts/package-release.sh` builds both)
+   - Executable: `/usr/local/bin/nex`, a link to `/usr/local/lib/nex/bin/nex`
 5. **Verify** - Run a test program with the installed `nex`.
 
 `sudo` is used only when the install directories are not writable by you, so a
@@ -99,7 +182,8 @@ background, in `~/.cache/nex` (or `$XDG_CACHE_HOME/nex`), which roughly halves
 startup again: an AOT cache on Java 25 or later, an AppCDS archive on Java
 17-24. Nothing waits for it and nothing is printed about it. A new Nex or Java
 version gets a new cache automatically; old ones can be deleted at any time.
-To run without it, set `NEX_JVM_CACHE=off`.
+To run without it, set `NEX_JVM_CACHE=off`. The Windows launcher does not
+build this cache yet.
 
 ## Custom Installation Prefix
 
@@ -130,7 +214,7 @@ If Java is not installed:
 ```bash
 $ ./install.sh jvm
 
-Nex Language Installer v0.6.4
+Nex Language Installer v0.6.5
 
 Installation target: jvm
 Install prefix: /usr/local
@@ -157,7 +241,7 @@ Nex Language Installed Successfully!
 ```bash
 $ ./install.sh jvm --install-deps
 
-Nex Language Installer v0.6.4
+Nex Language Installer v0.6.5
 
 Installation target: jvm
 Install prefix: /usr/local

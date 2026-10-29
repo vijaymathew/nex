@@ -37,10 +37,10 @@
       appeared to work when an interned lib happened to sit in the very
       same directory as the module it, in turn, interned.
 
-      The `nex.user.dir` system property is set by the REPL; a plain
-      `nex script.nex` run instead exports the project root via the
-      NEX_USER_DIR env var (see bin/nex) and never sets the property, so
-      both are checked here."
+      The launchers (bin/nex, bin/nex.cmd) set both the `nex.user.dir`
+      system property and the NEX_USER_DIR env var; a JVM started some
+      other way (tests, a hand-written `java` command) may have only one of
+      them, so both are checked here."
   [ctx]
   (let [source-dir (when-let [source (:debug-source ctx)]
                      (let [f (clojure.java.io/file source)]
@@ -71,6 +71,12 @@
                                (map #(str (clojure.java.io/file root "lib" path %)) filenames)
                                (map #(str (clojure.java.io/file root "lib" path "src" %)) filenames)))
                             local-roots))
+        ;; The libraries that ship with Nex, in the installation's lib/
+        ;; folder (the launchers set nex.home). They come before
+        ;; ~/.nex/deps, where older installers copied them, so a stale
+        ;; copy left there by an earlier version never wins.
+        shipped-lib (when-let [home (and (seq path) (System/getProperty "nex.home"))]
+                      (map #(str (clojure.java.io/file home "lib" path %)) filenames))
         home-deps (if (seq path)
                     (concat
                      (map #(str (System/getProperty "user.home") "/.nex/deps/" path "/" %) filenames)
@@ -85,7 +91,7 @@
            ;; the module's bare filename (e.g. examples/http_server.nex) would
            ;; shadow the real library module.
         locations (vec (if (seq path)
-                         (concat local-lib home-deps current-dir local-direct)
+                         (concat local-lib shipped-lib home-deps current-dir local-direct)
                          (concat current-dir local-direct home-deps)))
         found (first (filter #(-> % clojure.java.io/file .exists) locations))]
     (if found

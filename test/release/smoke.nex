@@ -1,0 +1,12 @@
+-- Smoke test for a packaged Nex release (.github/workflows/release.yml):
+-- run through the release's own launcher on each OS, it must print
+-- "release smoke ok". The intern checks that the libraries shipped inside
+-- the release are found.
+
+intern math/Random
+
+let r: Random := create Random.with_seed(7)
+let n: Integer := r.below(10)
+if n >= 0 and n < 10 then
+  print("release smoke ok")
+end

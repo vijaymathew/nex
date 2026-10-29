@@ -1,100 +1,61 @@
 #!/bin/bash
-# Nex Language Command-Line Interface (JVM)
+# Nex command-line launcher for Linux and macOS (bin/nex.cmd is the Windows
+# one). It finds Nex and Java, puts Nex's jars and any `--classpath` entries
+# on the JVM classpath, and starts nex.cli, which handles the command line
+# itself (see src/nex/cli.clj).
+#
+# Nex runs from one of:
+#   - a prebuilt release (scripts/package-release.sh): this script's parent
+#     folder holds nex.jar, its dependency jars in deps/, and a `classpath`
+#     file listing them. Only Java 17 or later is needed.
+#   - a source checkout (deps.edn and src/): the Clojure source is loaded
+#     through the Clojure CLI, which is several times slower to start.
+# NEX_HOME, when set, names the folder to use instead.
 
-VERSION="0.6.4"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_NEX_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+VERSION="0.6.5"
+MIN_JAVA=17
 
-if [[ -n "${NEX_HOME:-}" ]]; then
-    NEX_HOME="$NEX_HOME"
-elif [[ -f "$REPO_NEX_HOME/deps.edn" && -d "$REPO_NEX_HOME/src" ]]; then
-    NEX_HOME="$REPO_NEX_HOME"
-else
-    NEX_HOME="/usr/local/lib/nex"
+# This script's real folder, following symlinks such as one from
+# ~/.local/bin/nex (macOS before 12.3 has no `readlink -f`).
+script_dir() {
+    local src="${BASH_SOURCE[0]}" dir
+    while [[ -L "$src" ]]; do
+        dir="$(cd -P "$(dirname "$src")" && pwd)"
+        src="$(readlink "$src")"
+        [[ "$src" != /* ]] && src="$dir/$src"
+    done
+    cd -P "$(dirname "$src")" && pwd
+}
+SCRIPT_DIR="$(script_dir)"
+BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ -z "${NEX_HOME:-}" ]]; then
+    NEX_HOME="$BASE_DIR"
+fi
+if [[ ! -f "$NEX_HOME/nex.jar" && ! -f "$NEX_HOME/deps.edn" ]]; then
+    echo "Error: no Nex installation found in $NEX_HOME" >&2
+    echo "(expected nex.jar from a Nex release, or deps.edn from a source checkout)." >&2
+    exit 1
 fi
 
-# install.sh may put a Clojure CLI next to this script (for example under
+# Older installers put a Clojure CLI next to this script (for example under
 # ~/.local/bin); prefer it over any older one elsewhere on PATH.
 PATH="$SCRIPT_DIR:$PATH"
 
-# Helper functions
-show_help() {
-    cat <<'EOF'
-Nex Language v0.6.4 - A high-level language for design and implementation
-
-USAGE:
-    nex [NEX_SCRIPT | COMMAND] [OPTIONS]
-
-COMMANDS:
-    (no command)              Start the Nex REPL
-    compile jvm <file> [output-dir] [--classpath entries] [--skip-contracts] [--max-errors N]
-                              Compile a Nex file to a standalone JVM JAR
-    format <file|dir>         Format Nex source files
-    doc <file|dir> [output]   Generate documentation from Nex files
-    eval <code>               Evaluate a Nex code snippet
-    lsp                       Start the language server (for editors; speaks
-                              LSP on stdin/stdout)
-    help                      Show this help message
-
-OPTIONS:
-    --classpath entries       Extra jar/dir paths for Java interop, colon-
-                              separated (same convention as `java -cp` on
-                              this platform). Available on both running
-                              (nex <file>.nex) and compiling
-                              (nex compile jvm). On compile, the entries are
-                              also shaded into the output jar.
-    --skip-contracts          Lower require/ensure/invariant checks to no-ops
-                              (both class and loop invariants). Bare `assert`
-                              always runs regardless — there is no mode that
-                              strips it. Meant for a trusted, perf-critical
-                              release build; risky wherever untrusted input
-                              or latent bugs remain. Available on both
-                              running (nex <file>.nex) and compiling
-                              (nex compile jvm).
-    --max-errors N            Report at most N type errors (default 10).
-                              Available on both running (nex <file>.nex)
-                              and compiling (nex compile jvm).
-
-EXAMPLES:
-    nex                                      # Start REPL
-    nex app.nex                              # Run app.nex (compiled JVM backend)
-    nex app.nex --interpret                  # Run on the tree-walking interpreter
-    ./app                                    # Run a file whose first line is #!/usr/bin/env nex
-    nex app.nex --classpath a.jar:b.jar      # Run with extra jars on the classpath
-    nex app.nex --skip-contracts             # Run with require/ensure/invariant checks off
-    nex compile jvm app.nex                  # Compile to a standalone app.jar in current dir
-    nex compile jvm app.nex build/           # Compile to a standalone app.jar in build/
-    nex compile jvm app.nex --classpath a.jar:b.jar
-                                              # Compile, bundling extra jars into the output jar
-    nex compile jvm app.nex --skip-contracts
-                                              # Compile a release build with contracts off
-    nex format src/                          # Format all files in directory
-    nex format MyClass.nex                   # Format single file
-    nex doc MyClass.nex MyClass.md           # Generate documentation
-    nex doc src/ docs/                       # Generate docs for directory
-    nex eval 'print("Hello, World!")'        # Evaluate code
-
-ENVIRONMENT VARIABLES:
-    NEX_HOME                  Nex installation directory (default: auto-detected)
-
-For more information, visit: https://github.com/your-repo/nex
-EOF
-}
-
-show_version() {
-    echo "Nex Language v$VERSION (JVM)"
-}
+# JAVA_HOME's Java when it has one, else `java` on PATH.
+JAVA="java"
+if [[ -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]]; then
+    JAVA="$JAVA_HOME/bin/java"
+fi
 
 J_OPTIONS="${J_OPTIONS:--J--enable-native-access=ALL-UNNAMED}"
-USER_DIR="$(pwd)"
 
-# JVM system properties (-Dk=v) for the next run_main call.
-NEX_JVM_PROPS=()
+# Relative paths on the command line are resolved by nex.cli against this
+# folder, since the JVM runs in NEX_HOME; programs see it as their working
+# directory.
+export NEX_USER_DIR="$(pwd)"
 
-# An installed Nex (install.sh) ships an AOT-compiled nex.jar plus its
-# dependency jars, listed in $NEX_HOME/classpath, and runs them with plain
-# `java`. A source checkout has neither and loads the Clojure source through
-# the Clojure CLI instead, which is several times slower to start.
+# A release lists its jars, relative to NEX_HOME, in $NEX_HOME/classpath.
 NEX_CP=""
 if [[ -f "$NEX_HOME/nex.jar" && -f "$NEX_HOME/classpath" ]]; then
     while IFS= read -r entry || [[ -n "$entry" ]]; do
@@ -102,16 +63,51 @@ if [[ -f "$NEX_HOME/nex.jar" && -f "$NEX_HOME/classpath" ]]; then
     done < "$NEX_HOME/classpath"
 fi
 
-# Version of the `java` on PATH (e.g. 21.0.12), read from the JDK's `release`
-# file when there is one, which is much cheaper than starting a JVM.
+# The real path of FILE, following symlinks.
+real_path() {
+    local src="$1" dir
+    while [[ -L "$src" ]]; do
+        dir="$(cd -P "$(dirname "$src")" && pwd)"
+        src="$(readlink "$src")"
+        [[ "$src" != /* ]] && src="$dir/$src"
+    done
+    echo "$(cd -P "$(dirname "$src")" && pwd)/$(basename "$src")"
+}
+
+# Version of $JAVA (e.g. 21.0.12), read from the JDK's `release` file when
+# there is one, which is much cheaper than starting a JVM.
 java_version() {
     local java_bin home
-    java_bin="$(command -v java)" || return 0
-    home="$(dirname "$(dirname "$(readlink -f "$java_bin")")")"
+    java_bin="$(command -v "$JAVA")" || return 0
+    home="$(dirname "$(dirname "$(real_path "$java_bin")")")"
     if [[ -f "$home/release" ]]; then
         sed -n 's/^JAVA_VERSION="\(.*\)"/\1/p' "$home/release"
     else
-        java -version 2>&1 | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -n 1
+        "$JAVA" -version 2>&1 | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -n 1
+    fi
+}
+
+# Major number of a Java version: 21 for 21.0.12, 8 for 1.8.0_402.
+java_major() {
+    local v="$1"
+    [[ "$v" == 1.* ]] && v="${v#1.}"
+    echo "${v%%[.+_-]*}"
+}
+
+# Stop with a clear message when there is no Java, or it is too old to run
+# Nex (the compiler emits Java 17 class files).
+check_java() {
+    if ! command -v "$JAVA" &> /dev/null; then
+        echo "Error: Nex needs Java $MIN_JAVA or later, and no Java was found." >&2
+        echo "Install one from https://adoptium.net/ (or set JAVA_HOME)." >&2
+        exit 1
+    fi
+    JAVA_VERSION="$(java_version)"
+    JAVA_MAJOR="$(java_major "$JAVA_VERSION")"
+    if [[ "$JAVA_MAJOR" =~ ^[0-9]+$ ]] && (( JAVA_MAJOR < MIN_JAVA )); then
+        echo "Error: Nex needs Java $MIN_JAVA or later, but $JAVA is Java $JAVA_VERSION." >&2
+        echo "Install a newer one from https://adoptium.net/ (or set JAVA_HOME)." >&2
+        exit 1
     fi
 }
 
@@ -126,10 +122,8 @@ NEX_CACHE_OPTS=()
 NEX_CACHE_TRAIN=()
 NEX_CACHE_FILE=""
 setup_jvm_cache() {
-    [[ -n "$NEX_CP" && "${NEX_JVM_CACHE:-on}" != off ]] || return 0
-    local version major dir
-    version="$(java_version)"
-    major="${version%%[.+_-]*}"
+    [[ "${NEX_JVM_CACHE:-on}" != off ]] || return 0
+    local version="$JAVA_VERSION" major="$JAVA_MAJOR" dir
     [[ "$major" =~ ^[0-9]+$ ]] && (( major >= 17 )) || return 0
     dir="${XDG_CACHE_HOME:-$HOME/.cache}/nex"
     mkdir -p "$dir" 2> /dev/null || return 0
@@ -171,38 +165,58 @@ train_jvm_cache() {
     (
         trap '' HUP
         cd "$NEX_HOME" \
-            && java -XX:+UseSerialGC "${NEX_CACHE_OPTS[@]}" "${NEX_CACHE_TRAIN[@]}" "${java_opts[@]}" \
-                    -cp "$NEX_CP" clojure.main -m nex.eval "$NEX_HOME/aot-training.nex" \
+            && "$JAVA" -XX:+UseSerialGC "${NEX_CACHE_OPTS[@]}" "${NEX_CACHE_TRAIN[@]}" "${java_opts[@]}" \
+                    -cp "$NEX_CP" clojure.main -m nex.cli "$NEX_HOME/aot-training.nex" \
             && [[ -s "$tmp" ]] \
             && mv -f "$tmp" "$NEX_CACHE_FILE"
         rm -rf "$tmp" "$lock"
     ) < /dev/null > /dev/null 2>&1 &
 }
 
-# Run `clojure.main -m NS ARGS...` from NEX_HOME:
-#   run_main EXTRA_CP NS [ARGS...]
-# EXTRA_CP (colon-separated, `java -cp` style, may be empty) is appended to
-# Nex's own classpath, and is put on the real JVM classpath from process start
-# so both compile-time interop resolution (Class/forName) and runtime class
-# linkage see it — no dynamic classloader trickery, and no reliance on
-# `URLClassLoader`, which the JDK 9+ app classloader isn't.
-run_main() {
-    local extra_cp="$1"
-    shift
+# The value of the last `--classpath ENTRIES` among the arguments, if any,
+# with each relative entry made absolute: the JVM runs in NEX_HOME, but the
+# entries are relative to the folder nex was started from. It goes on the
+# real JVM classpath from process start, so both compile-time interop
+# resolution (Class/forName) and runtime class linkage see it — no dynamic
+# classloader trickery. nex.cli drops the option itself.
+extra_classpath() {
+    local cp="" entry out=""
+    local -a entries=()
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == --classpath && $# -ge 2 ]]; then
+            cp="$2"
+            shift
+        fi
+        shift
+    done
+    # read -a rather than an unquoted expansion, which would glob `dir/*`.
+    IFS=: read -r -a entries <<< "$cp"
+    for entry in "${entries[@]}"; do
+        [[ -z "$entry" ]] && continue
+        [[ "$entry" != /* ]] && entry="$NEX_USER_DIR/$entry"
+        out="${out:+$out:}$entry"
+    done
+    echo "$out"
+}
+
+main() {
+    local extra_cp tok
+    extra_cp="$(extra_classpath "$@")"
+
     local -a java_opts=()
-    local tok
     for tok in $J_OPTIONS; do
         java_opts+=("${tok#-J}")
     done
-    java_opts+=("${NEX_JVM_PROPS[@]}")
+    java_opts+=(-Dnex.user.dir="$NEX_USER_DIR" -Dnex.home="$NEX_HOME")
 
     if [[ -n "$NEX_CP" ]]; then
+        check_java
         # The class-data cache is tied to the exact classpath, so runs with
         # extra entries go without it rather than rebuilding it every time.
         [[ -z "$extra_cp" ]] && setup_jvm_cache
         local status=0
-        (cd "$NEX_HOME" && java -XX:+UseSerialGC "${NEX_CACHE_OPTS[@]}" "${java_opts[@]}" \
-            -cp "$NEX_CP${extra_cp:+:$extra_cp}" clojure.main -m "$@") || status=$?
+        (cd "$NEX_HOME" && "$JAVA" -XX:+UseSerialGC "${NEX_CACHE_OPTS[@]}" "${java_opts[@]}" \
+            -cp "$NEX_CP${extra_cp:+:$extra_cp}" clojure.main -m nex.cli "$@") || status=$?
         if (( ${#NEX_CACHE_TRAIN[@]} > 0 )); then
             train_jvm_cache "${java_opts[@]}"
         fi
@@ -210,278 +224,14 @@ run_main() {
     elif [[ -n "$extra_cp" ]]; then
         local base_cp
         base_cp="$(cd "$NEX_HOME" && clojure -Spath)" || exit 1
-        cd "$NEX_HOME" && java "${java_opts[@]}" -cp "${base_cp}:${extra_cp}" clojure.main -m "$@"
+        cd "$NEX_HOME" && "$JAVA" "${java_opts[@]}" -cp "${base_cp}:${extra_cp}" clojure.main -m nex.cli "$@"
     else
         local -a clj_opts=()
         for tok in "${java_opts[@]}"; do
             clj_opts+=("-J$tok")
         done
-        cd "$NEX_HOME" && clojure "${clj_opts[@]}" -M -m "$@"
+        cd "$NEX_HOME" && clojure "${clj_opts[@]}" -M -m nex.cli "$@"
     fi
-}
-
-# Command implementations
-cmd_repl() {
-    NEX_JVM_PROPS=(-Dnex.user.dir="$USER_DIR")
-    run_main "" nex.repl
-}
-
-cmd_compile() {
-    # `intern`'s path-qualified lookup (`units/Money`) falls back to
-    # NEX_USER_DIR for the project root — needed once a narrowing site is
-    # reached transitively (script -> lib A -> lib B, B in a different lib/
-    # subdirectory than A), where the immediately-interning file's own
-    # directory isn't the right root (see nex.interpreter/intern-search-
-    # roots). cmd_run_script exports this; cmd_compile didn't, so `nex
-    # compile jvm` failed on exactly the programs `nex <file>` already ran.
-    export NEX_USER_DIR="$USER_DIR"
-
-    local classpath=""
-    local skip_contracts=""
-    local max_errors=""
-    local -a positional=()
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --classpath)
-                if [[ -z "$2" ]]; then
-                    echo "Error: --classpath requires an argument"
-                    exit 1
-                fi
-                classpath="$2"
-                shift 2
-                ;;
-            --skip-contracts)
-                skip_contracts="1"
-                shift
-                ;;
-            --max-errors)
-                if [[ -z "$2" ]]; then
-                    echo "Error: --max-errors requires an argument"
-                    exit 1
-                fi
-                max_errors="$2"
-                shift 2
-                ;;
-            *)
-                positional+=("$1")
-                shift
-                ;;
-        esac
-    done
-    set -- "${positional[@]}"
-
-    local target="$1"
-    local file="$2"
-    local output="$3"
-
-    if [[ -z "$target" || -z "$file" ]]; then
-        echo "Error: compile requires target and file arguments"
-        echo "Usage: nex compile jvm <file> [output-dir] [--classpath entries] [--skip-contracts] [--max-errors N]"
-        exit 1
-    fi
-
-    if [[ "$target" != "jvm" ]]; then
-        echo "Error: Invalid target '$target'. The only compile target is 'jvm'."
-        exit 1
-    fi
-
-    if [[ ! -f "$file" ]]; then
-        echo "Error: File not found: $file"
-        exit 1
-    fi
-
-    # Use absolute path for file
-    file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
-
-    # The JVM target defaults to the user's current directory
-    if [[ -z "$output" ]]; then
-        output="$USER_DIR"
-    fi
-
-    # Make output path absolute
-    mkdir -p "$output"
-    output="$(cd "$output" && pwd)"
-
-    local -a extra_flags=()
-    if [[ -n "$skip_contracts" ]]; then
-        extra_flags+=(--skip-contracts)
-    fi
-    if [[ -n "$max_errors" ]]; then
-        extra_flags+=(--max-errors "$max_errors")
-    fi
-
-    run_main "$classpath" nex.compiler.jvm.file "$file" "$output" "${extra_flags[@]}"
-}
-
-cmd_format() {
-    local path="$1"
-
-    if [[ -z "$path" ]]; then
-        echo "Error: format requires a file or directory argument"
-        echo "Usage: nex format <file|dir>"
-        exit 1
-    fi
-
-    if [[ ! -e "$path" ]]; then
-        echo "Error: Path not found: $path"
-        exit 1
-    fi
-
-    # Use absolute path
-    path="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
-
-    if [[ -d "$path" ]]; then
-        # Format all .nex files in directory
-        find "$path" -name "*.nex" -type f | while read -r file; do
-            echo "Formatting: $file"
-            run_main "" nex.fmt "$file"
-        done
-    else
-        run_main "" nex.fmt "$path"
-    fi
-}
-
-cmd_doc() {
-    local input="$1"
-    local output="$2"
-
-    if [[ -z "$input" ]]; then
-        echo "Error: doc requires an input file or directory"
-        echo "Usage: nex doc <file|dir> [output]"
-        exit 1
-    fi
-
-    if [[ ! -e "$input" ]]; then
-        echo "Error: Path not found: $input"
-        exit 1
-    fi
-
-    # Use absolute path
-    input="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
-
-    if [[ -d "$input" ]]; then
-        # Generate docs for all .nex files in directory
-        local output_dir="${output:-.}"
-        mkdir -p "$output_dir"
-        output_dir="$(cd "$output_dir" && pwd)"
-
-        find "$input" -name "*.nex" -type f | while read -r file; do
-            local basename="$(basename "$file" .nex)"
-            local output_file="$output_dir/${basename}.md"
-            echo "Generating docs: $file -> $output_file"
-            run_main "" nex.docgen "$file" "$output_file"
-        done
-    else
-        if [[ -z "$output" ]]; then
-            # Output to stdout
-            run_main "" nex.docgen "$input"
-        else
-            # Output to file
-            run_main "" nex.docgen "$input" "$output"
-        fi
-    fi
-}
-
-cmd_eval() {
-    local code="$1"
-
-    if [[ -z "$code" ]]; then
-        echo "Error: eval requires a code argument"
-        echo "Usage: nex eval '<code>'"
-        exit 1
-    fi
-
-    # Create temporary file with the code
-    local tmpfile=$(mktemp /tmp/nex.XXXXXX.nex)
-    echo "$code" > "$tmpfile"
-
-    # Parse and evaluate
-    run_main "" nex.eval "$tmpfile"
-
-    # Clean up
-    rm -f "$tmpfile"
-}
-
-cmd_lsp() {
-    # Interns named by path (`units/Money`) fall back to the editor's
-    # working directory, as they do for `nex <file>`.
-    export NEX_USER_DIR="$USER_DIR"
-    run_main "" nex.lsp
-}
-
-cmd_run_script() {
-    export NEX_USER_DIR=`pwd`
-    fullpath=$(readlink -f "$1")
-    shift
-
-    local classpath=""
-    local -a rest=()
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --classpath)
-                if [[ -z "$2" ]]; then
-                    echo "Error: --classpath requires an argument"
-                    exit 1
-                fi
-                classpath="$2"
-                shift 2
-                ;;
-            *)
-                rest+=("$1")
-                shift
-                ;;
-        esac
-    done
-
-    run_main "$classpath" nex.eval "$fullpath" "${rest[@]}"
-}
-
-# Main command dispatcher
-main() {
-    local command="${1:-repl}"
-
-    case "$command" in
-        repl)
-            cmd_repl
-            ;;
-        compile)
-            shift
-            cmd_compile "$@"
-            ;;
-        format)
-            shift
-            cmd_format "$@"
-            ;;
-        doc)
-            shift
-            cmd_doc "$@"
-            ;;
-        eval)
-            shift
-            cmd_eval "$@"
-            ;;
-        lsp)
-            cmd_lsp
-            ;;
-        help|--help|-h)
-            show_help
-            ;;
-        version|--version|-v)
-            show_version
-            ;;
-        *)
-	    # A script run through a `#!` line (`#!/usr/bin/env nex`) may be
-	    # named without .nex.
-	    if [[ -f "$command" && ( "$command" == *.nex || "$(head -c 2 "$command")" == "#!" ) ]]; then
-		cmd_run_script "$@"
-		exit $?
-	    else
-		echo "Error: Unknown command '$command'"
-		echo "Run 'nex help' for usage information."
-		exit 1
-	    fi
-            ;;
-    esac
 }
 
 main "$@"

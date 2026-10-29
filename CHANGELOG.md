@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 0.6.5 - 2026-10-29
+
+- **Prebuilt releases for Linux, macOS and Windows.** Each GitHub release
+  now carries `nex-<version>.tar.gz` and `nex-<version>.zip`, which need only
+  Java 17 or later: unpack, put `bin` on `PATH`, run `nex`. Windows gets its
+  own launcher, `bin/nex.cmd`. `scripts/package-release.sh` builds the
+  archives, and the new Release workflow tests them on all three systems
+  (Java 17 and 25) before attaching them to the release. The command line
+  itself is now handled in one place, `nex.cli`, which both launchers start,
+  so they behave the same. `install.sh` installs this same folder layout,
+  with the shipped libraries inside it rather than copied to `~/.nex/deps`,
+  and links `nex` to its launcher. `bootstrap-install.sh` now installs the
+  latest prebuilt release (`--version` picks another), checked against the
+  release's `SHA256SUMS`, so the one-line install needs only Java;
+  `--from-source [--ref REF]` builds from source as before (default
+  `main`), and a release without a prebuilt archive is built from source
+  automatically. The release archive includes `install.sh`, which installs
+  a prebuilt folder as it is, without the Clojure CLI. On Windows,
+  `irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1 | iex`
+  installs the latest release for the current user (no administrator
+  rights), checked against `SHA256SUMS`, adds it to the user `PATH`, offers
+  to install Java with `winget` when there is none, and takes `-Version`,
+  `-InstallDir`, `-NoModifyPath` and `-Uninstall`. Fixed along the way: a relative
+  `--classpath` entry (`--classpath lib.jar`) was looked up in the Nex
+  installation folder rather than the folder `nex` was run from;
+  `nex doc file.nex out.md` likewise wrote `out.md` into the installation
+  folder; and the REPL's `program.working_directory` was the installation
+  folder.
+
 - **Debugger: line breakpoints work.** `:break file.nex:17` and
   `:break Class.method:17` never stopped: the interpreter handed the debugger
   a copy of each statement without its line number (only `assert` kept

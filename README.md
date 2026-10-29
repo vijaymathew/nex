@@ -238,7 +238,8 @@ From Clojure, use the JVM backend directly:
 ### Prerequisites
 
 - Java 17 or higher
-- [Clojure CLI tools](https://clojure.org/guides/install_clojure) (version 1.11.1.1420+)
+- [Clojure CLI tools](https://clojure.org/guides/install_clojure) (version 1.11.1.1420+),
+  only to build from source (as `./install.sh` in a clone does)
 
 The installer checks both, and `--install-deps` installs or upgrades them.
 
@@ -255,7 +256,9 @@ cd nex
 nex help
 ```
 
-If you want a single downloadable installer instead of cloning the repo:
+If you want a single downloadable installer instead of cloning the repo (it
+installs the latest prebuilt release, which needs only Java 17+; add
+`--from-source` to build from source instead):
 
 ```bash
 curl -fsSL -o bootstrap-install.sh https://raw.githubusercontent.com/vijaymathew/nex/main/bootstrap-install.sh
@@ -269,11 +272,19 @@ bash bootstrap-install.sh jvm --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The installer also copies the shipped Nex libraries from `lib/` into `~/.nex/deps`,
-so `intern` can resolve standard library namespaces such as `io/Path`, `time/Date_Time`,
-and `net/Http_Client` from an installed Nex command.
+The shipped Nex libraries from `lib/` are installed with Nex, so `intern` can
+resolve standard library namespaces such as `io/Path`, `time/Date_Time`, and
+`net/Http_Client` from an installed Nex command.
 
-Supported platforms: Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro, macOS.
+The installer supports Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro and
+macOS. On Windows, run this in PowerShell (see [INSTALL.md](INSTALL.md#windows)):
+
+```powershell
+irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1 | iex
+```
+
+On any platform you can also download a prebuilt release by hand; it needs
+only Java 17+ (see [INSTALL.md](INSTALL.md#prebuilt-release-linux-macos-windows)).
 
 For manual installation and platform-specific instructions, see [INSTALL.md](INSTALL.md).
 

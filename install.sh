@@ -3,14 +3,19 @@ set -e
 
 # Nex Language Installation Script
 # Usage: ./install.sh [--install-deps] [--prefix DIR]
+#
+# Run from either of:
+#   - a prebuilt release folder (nex-<version>/, unpacked from the release
+#     archive): installs it as it is; only Java 17+ is needed.
+#   - a source checkout: builds that folder first (scripts/package-release.sh),
+#     which also needs the Clojure CLI.
 
-VERSION="0.6.4"
+VERSION="0.6.5"
 TARGET="jvm"
 INSTALL_DEPS=false
 INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"
 BIN_DIR="$INSTALL_PREFIX/bin"
 LIB_DIR="$INSTALL_PREFIX/lib/nex"
-USER_DEPS_DIR="${HOME}/.nex/deps"
 
 # The compiler emits Java 17 class files and the launcher passes
 # --enable-native-access, which older JVMs reject at startup.
@@ -20,6 +25,18 @@ MIN_JAVA=17
 # read-only install such as /usr/local/lib/nex.
 MIN_CLOJURE_CLI="1.11.1.1420"
 CLOJURE_LINUX_INSTALLER="https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh"
+
+# Work from this script's folder, wherever it was run from.
+cd "$(dirname "$0")"
+
+# A prebuilt release has nex.jar next to this script and no source.
+if [[ -f nex.jar && -f classpath && ! -f deps.edn ]]; then
+    PREBUILT=true
+    RELEASE_DIR="$(pwd)"
+else
+    PREBUILT=false
+    RELEASE_DIR="target/release/nex-$VERSION"
+fi
 
 # Command prefix for writing into the install directories: empty when the
 # current user can write there, "sudo" otherwise (set by choose_sudo).
@@ -70,6 +87,11 @@ if [[ "$TARGET" != "jvm" ]]; then
 fi
 
 echo "Installation target: $TARGET"
+if [[ "$PREBUILT" == true ]]; then
+    echo "Installing from: prebuilt release ($RELEASE_DIR)"
+else
+    echo "Installing from: source (built here)"
+fi
 echo "Install prefix: $INSTALL_PREFIX"
 echo "Auto-install dependencies: $INSTALL_DEPS"
 echo ""
@@ -331,21 +353,21 @@ check_prerequisites() {
 
     detect_os
     ensure_java
-    ensure_clojure
+    # Only a build from source needs the Clojure CLI.
+    [[ "$PREBUILT" == true ]] || ensure_clojure
     echo ""
 }
 
-# Build for target
-# AOT-compile Nex into target/dist (see scripts/build-dist.clj), so the
-# installed command starts with plain `java` instead of loading the Clojure
-# source on every run.
+# Build the same folder a prebuilt release ships (scripts/package-release.sh):
+# Nex AOT-compiled into nex.jar, its dependency jars, the launchers and the
+# shipped libraries. The installed command then starts with plain `java`
+# instead of loading the Clojure source on every run.
 build() {
     echo "Building Nex (compiling ahead of time; this takes a minute)..."
 
     local log
     log="$(mktemp)"
-    rm -rf target/dist
-    if ! clojure -M:dist > "$log" 2>&1; then
+    if ! bash scripts/package-release.sh --no-archives > "$log" 2>&1; then
         echo "Error: building Nex failed. The build output ends with:"
         tail -n 30 "$log" | sed 's/^/    /'
         rm -f "$log"
@@ -353,7 +375,7 @@ build() {
     fi
     rm -f "$log"
 
-    echo "  ✓ Compiled $(wc -l < target/dist/classpath | tr -d ' ') jars into target/dist"
+    echo "  ✓ Built $RELEASE_DIR"
     echo ""
 }
 
@@ -372,57 +394,36 @@ setup_directories() {
 # Install files
 install_files() {
     echo "Installing Nex files..."
-    echo "  Cleaning previously installed managed files to avoid stale namespace conflicts..."
 
-    # Remove previously installed managed content first so deleted/renamed source
-    # files do not linger and shadow newer namespaces.
-    $SUDO rm -rf "$LIB_DIR/src" "$LIB_DIR/grammar" "$LIB_DIR/deps"
-    $SUDO rm -f "$LIB_DIR/deps.edn" "$LIB_DIR/nex.jar" "$LIB_DIR/classpath" "$LIB_DIR/aot-training.nex"
+    # Re-running the installed copy's own install.sh into the same prefix
+    # has nothing to copy (and must not delete what it is about to copy).
+    if [[ "$(cd "$RELEASE_DIR" && pwd -P)" == "$(cd "$LIB_DIR" && pwd -P)" ]]; then
+        echo "  ✓ Nex is already in $LIB_DIR"
+        echo ""
+        return
+    fi
 
-    # Copy source files
-    $SUDO cp -r src "$LIB_DIR/"
-    $SUDO cp -r grammar "$LIB_DIR/"
-    $SUDO cp deps.edn "$LIB_DIR/"
+    # Remove what earlier installers put here first, so deleted or renamed
+    # files do not linger: older ones copied the Clojure source as well.
+    $SUDO rm -rf "$LIB_DIR/src" "$LIB_DIR/grammar" "$LIB_DIR/deps" \
+        "$LIB_DIR/bin" "$LIB_DIR/lib"
+    $SUDO rm -f "$LIB_DIR/deps.edn" "$LIB_DIR/nex.jar" "$LIB_DIR/classpath" \
+        "$LIB_DIR/aot-training.nex" "$LIB_DIR/LICENSE" "$LIB_DIR/README.md" \
+        "$LIB_DIR/install.sh" "$LIB_DIR/install.ps1"
 
-    # Copy the compiled distribution the nex command runs
-    $SUDO cp target/dist/nex.jar target/dist/classpath "$LIB_DIR/"
-    $SUDO cp -r target/dist/deps "$LIB_DIR/"
-    $SUDO cp scripts/aot-training.nex "$LIB_DIR/"
+    $SUDO cp -R "$RELEASE_DIR/." "$LIB_DIR/"
 
     echo "  ✓ Installed Nex to $LIB_DIR"
     echo ""
 }
 
-install_shipped_libraries() {
-    echo "Installing shipped Nex libraries to $USER_DEPS_DIR..."
-
-    mkdir -p "$USER_DEPS_DIR"
-
-    if [[ -d "lib" ]]; then
-        shopt -s nullglob
-        for entry in lib/*; do
-            name="$(basename "$entry")"
-            target="$USER_DEPS_DIR/$name"
-            rm -rf "$target"
-            cp -r "$entry" "$target"
-            echo "  ✓ Installed library namespace $name"
-        done
-        shopt -u nullglob
-    fi
-
-    echo ""
-}
-
-# Install executable
+# Install executable: a link to the launcher inside the installed folder,
+# which finds that folder by following the link.
 install_executable() {
     echo "Installing nex executable..."
 
-    $SUDO cp bin/nex "$BIN_DIR/nex"
-    $SUDO chmod +x "$BIN_DIR/nex"
-
-    # Update the NEX_HOME in the installed script
-    $SUDO sed -i.bak "s|NEX_HOME=.*|NEX_HOME=\"$LIB_DIR\"|" "$BIN_DIR/nex"
-    $SUDO rm -f "$BIN_DIR/nex.bak"
+    $SUDO rm -f "$BIN_DIR/nex"
+    $SUDO ln -s "$LIB_DIR/bin/nex" "$BIN_DIR/nex"
 
     echo "  ✓ Installed nex command to $BIN_DIR/nex"
     echo ""
@@ -430,11 +431,9 @@ install_executable() {
 
 # Verify installation
 # Run a real program through the installed command, so a broken install is
-# reported here rather than on the user's first program. The first run also
-# downloads Nex's Java libraries, so later runs work offline.
+# reported here rather than on the user's first program.
 verify_installation() {
-    echo "Verifying installation (the first run downloads Nex's Java libraries;"
-    echo "this can take a minute)..."
+    echo "Verifying installation..."
 
     local tmpdir out status=0
     tmpdir="$(mktemp -d)"
@@ -460,10 +459,9 @@ verify_installation() {
 main() {
     choose_sudo
     check_prerequisites
-    build
+    [[ "$PREBUILT" == true ]] || build
     setup_directories
     install_files
-    install_shipped_libraries
     install_executable
     verify_installation
 
@@ -475,7 +473,6 @@ main() {
     echo "  Target:      $TARGET"
     echo "  Executable:  $BIN_DIR/nex"
     echo "  Library:     $LIB_DIR"
-    echo "  Shipped lib: $USER_DEPS_DIR"
     echo ""
     echo "Try it out:"
     echo "  nex                  # Start REPL"
