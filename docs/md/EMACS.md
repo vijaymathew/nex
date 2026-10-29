@@ -26,6 +26,10 @@ A comprehensive Emacs major mode for editing Nex programming language files.
   - Imenu support for quick navigation
   - Comment support
 
+- ✅ **Errors as you type** (through eglot and `nex lsp`)
+  - Syntax and type errors underlined while you edit
+  - `M-x eglot-format-buffer` runs `nex format`
+
 ## Installation
 
 ### Option 1: Manual Installation
@@ -240,12 +244,16 @@ end
 (add-hook 'nex-mode-hook 'electric-pair-mode)
 ```
 
-### 4. Enable Flycheck (if you add a linter later)
+### 4. Errors as you type with eglot
+
+`nex lsp` is a language server. nex-mode registers it with eglot (built into
+Emacs 29), so `M-x eglot` in a Nex buffer turns it on: syntax and type errors
+are underlined as you type (`M-x flymake-show-buffer-diagnostics` lists them),
+`M-x eglot-format-buffer` formats the file, and imenu lists its classes and
+features. To start it for every Nex file:
 
 ```elisp
-(use-package flycheck
-  :ensure t
-  :hook (nex-mode . flycheck-mode))
+(add-hook 'nex-mode-hook #'eglot-ensure)
 ```
 
 ### 5. Prettify Symbols

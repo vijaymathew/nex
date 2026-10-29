@@ -1,0 +1,31 @@
+{
+  "comments": {
+    "lineComment": "--"
+  },
+  "brackets": [
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"]
+  ],
+  "autoClosingPairs": [
+    { "open": "(", "close": ")" },
+    { "open": "[", "close": "]" },
+    { "open": "{", "close": "}" },
+    { "open": "\"", "close": "\"", "notIn": ["string", "comment"] }
+  ],
+  "surroundingPairs": [
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"],
+    ["\"", "\""],
+    ["'", "'"]
+  ],
+  "wordPattern": "[A-Za-z_][A-Za-z0-9_]*|-?\\d+(?:\\.\\d+)?",
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*((deferred\\s+|sealed\\s+)*class\\b|(enum\\s+)?union\\b|feature\\b|private\\s+feature\\b|create\\b|inherit\\b|require\\b|ensure\\b|invariant\\b|variant\\b|rescue\\b|else\\b|elseif\\b.*\\bthen\\s*$|from\\b|until\\b|case\\b|match\\b|select\\b|timeout\\b|.*\\b(do|then|of)\\s*(--.*)?$)",
+    "decreaseIndentPattern": "^\\s*(end|else|elseif|rescue|ensure|until|feature|create|invariant)\\b"
+  },
+  "folding": {
+    "offSide": true
+  }
+}

@@ -294,9 +294,26 @@
 
       :else msg)))
 
-(defn format-parse-errors
-  "Print parse errors from a clj-antlr ParseError with source context and caret pointers.
-   line-offset is subtracted from ANTLR line numbers (0 for files, >0 for REPL wrappers)."
+(defn- friendly-parser-message
+  [msg src-line col]
+  (-> msg
+      (str/replace #"mismatched input '(.+?)' expecting (.+)"
+                   (fn [[_ token expected]]
+                     (str "unexpected '" token "', expected " (simplify-expected expected))))
+      (str/replace #"extraneous input '(.+?)' expecting (.+)"
+                   (fn [[_ token expected]]
+                     (str "unexpected '" token "', expected " (simplify-expected expected))))
+      (str/replace #"missing '(.+?)' at '(.+?)'"
+                   "missing '$1' before '$2'")
+      (plain-parser-message src-line col)))
+
+(defn parse-error-entries
+  "The syntax errors in a clj-antlr ParseError, as `format-parse-errors` reports
+   them: [{:line :col :message :length :eof?}], at most three, one per line.
+   :line is 1-based, :col 0-based (nil when unknown), :length the width of the
+   offending token when known. :eof? marks the \"unexpected end of input\"
+   entry given when the parser reported nothing usable. line-offset is
+   subtracted from ANTLR line numbers (0 for files, >0 for REPL wrappers)."
   [^ParseError e source-code line-offset]
   (let [source-lines (str/split-lines source-code)
         num-lines    (count source-lines)
@@ -322,30 +339,38 @@
                    (catch Exception _ nil))]
     (cond
       (seq hints)
-      (doseq [{:keys [line col message]} hints]
-        (print-located source-lines line col message))
+      (mapv #(select-keys % [:line :col :message]) hints)
 
       (empty? limited-errors)
-      (let [last-line (last source-lines)
-            last-num  num-lines]
-        (println (str "  Line " last-num ": unexpected end of input"))
-        (when last-line
-          (println (str "  | " last-line))
-          (println (str "  | " (apply str (repeat (count last-line) " ")) "^"))))
+      [{:line (max 1 num-lines)
+        :col (count (or (last source-lines) ""))
+        :message "unexpected end of input"
+        :eof? true}]
 
       :else
-      (doseq [err limited-errors]
-        (let [line (:adjusted-line err)
-              col  (:char err)
-              msg  (:message err)
-              friendly-msg (-> msg
-                               (str/replace #"mismatched input '(.+?)' expecting (.+)"
-                                            (fn [[_ token expected]]
-                                              (str "unexpected '" token "', expected " (simplify-expected expected))))
-                               (str/replace #"extraneous input '(.+?)' expecting (.+)"
-                                            (fn [[_ token expected]]
-                                              (str "unexpected '" token "', expected " (simplify-expected expected))))
-                               (str/replace #"missing '(.+?)' at '(.+?)'"
-                                            "missing '$1' before '$2'")
-                               (plain-parser-message (nth source-lines (dec line) nil) col))]
-          (print-located source-lines line col friendly-msg))))))
+      (mapv (fn [err]
+              (let [line (:adjusted-line err)
+                    col  (:char err)
+                    token-text (some-> ^org.antlr.v4.runtime.Token (:token err) .getText)]
+                (cond-> {:line line
+                         :col col
+                         :message (friendly-parser-message (:message err)
+                                                           (nth source-lines (dec line) nil)
+                                                           col)}
+                  (and token-text (not= token-text "<EOF>"))
+                  (assoc :length (count token-text)))))
+            limited-errors))))
+
+(defn format-parse-errors
+  "Print parse errors from a clj-antlr ParseError with source context and caret pointers.
+   line-offset is subtracted from ANTLR line numbers (0 for files, >0 for REPL wrappers)."
+  [^ParseError e source-code line-offset]
+  (let [source-lines (str/split-lines source-code)]
+    (doseq [{:keys [line col message eof?]} (parse-error-entries e source-code line-offset)]
+      (if eof?
+        (let [last-line (last source-lines)]
+          (println (str "  Line " line ": " message))
+          (when last-line
+            (println (str "  | " last-line))
+            (println (str "  | " (apply str (repeat (count last-line) " ")) "^"))))
+        (print-located source-lines line col message)))))

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Editor support: `nex lsp` and a VS Code extension.** `nex lsp` is a
+  language server: in any LSP editor it underlines the syntax and type errors
+  `nex <file>` would report while you type (an error inside an interned file
+  shows on its `intern` line, linked to where it is), formats the document
+  with `nex format`, and gives an outline of classes, constructors, features,
+  functions, unions, type aliases and top-level `let`s. The VS Code extension
+  in `editor/vscode` runs it and adds a TextMate grammar for highlighting,
+  snippets, a Run button and REPL commands (Shift+Enter sends the selection
+  to a `nex` REPL in the terminal). nex-mode registers `nex lsp` with eglot,
+  so `M-x eglot` (or `eglot-ensure` on `nex-mode-hook`) gives Emacs the same
+  errors and formatting.
+
 ## 0.6.4 - 2026-10-28
 
 - **`implies`.** `a implies b` is true when `a` is false, and otherwise `b`,

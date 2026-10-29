@@ -1,0 +1,424 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Nex",
+  "scopeName": "source.nex",
+  "fileTypes": [
+    "nex"
+  ],
+  "firstLineMatch": "^#!.*\\bnex\\b",
+  "patterns": [
+    {
+      "include": "#shebang"
+    },
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#contract-clause"
+    },
+    {
+      "include": "#code"
+    }
+  ],
+  "repository": {
+    "shebang": {
+      "match": "\\A#!.*$",
+      "name": "comment.line.shebang.nex"
+    },
+    "comment": {
+      "match": "--.*$",
+      "name": "comment.line.double-dash.nex"
+    },
+    "code": {
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#set-literal"
+        },
+        {
+          "include": "#char"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#declaration"
+        },
+        {
+          "include": "#keyword"
+        },
+        {
+          "include": "#operator"
+        },
+        {
+          "include": "#constant"
+        },
+        {
+          "include": "#type"
+        },
+        {
+          "include": "#call"
+        }
+      ]
+    },
+    "string": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.nex",
+          "begin": "\"",
+          "end": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.nex"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.nex"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.nex",
+          "begin": "'",
+          "end": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.nex"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.nex"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        }
+      ]
+    },
+    "escape": {
+      "patterns": [
+        {
+          "match": "\\\\u\\{[0-9A-Fa-f]+\\}",
+          "name": "constant.character.escape.unicode.nex"
+        },
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.nex"
+        }
+      ]
+    },
+    "set-literal": {
+      "match": "#\\{",
+      "name": "punctuation.definition.set.begin.nex"
+    },
+    "char": {
+      "match": "#(?:nul|space|newline|tab|return|[0-9](?:_?[0-9])*|[^0-9\\s])(?![A-Za-z0-9_])|#[^0-9\\s]",
+      "name": "constant.character.nex"
+    },
+    "number": {
+      "patterns": [
+        {
+          "match": "(?<![\\w.])(?:[0-9](?:_?[0-9])*)?\\.[0-9](?:_?[0-9])*(?:[eE][+-]?[0-9](?:_?[0-9])*)?\\b",
+          "name": "constant.numeric.float.nex"
+        },
+        {
+          "match": "\\b0b[01](?:_?[01])*(u8|i16|i32)?\\b",
+          "name": "constant.numeric.integer.binary.nex",
+          "captures": {
+            "1": {
+              "name": "storage.type.numeric.nex"
+            }
+          }
+        },
+        {
+          "match": "\\b0o[0-7](?:_?[0-7])*(u8|i16|i32)?\\b",
+          "name": "constant.numeric.integer.octal.nex",
+          "captures": {
+            "1": {
+              "name": "storage.type.numeric.nex"
+            }
+          }
+        },
+        {
+          "match": "\\b0x[0-9A-Fa-f](?:_?[0-9A-Fa-f])*(u8|i16|i32)?\\b",
+          "name": "constant.numeric.integer.hexadecimal.nex",
+          "captures": {
+            "1": {
+              "name": "storage.type.numeric.nex"
+            }
+          }
+        },
+        {
+          "match": "\\b[0-9](?:_?[0-9])*(u8|i16|i32)?\\b",
+          "name": "constant.numeric.integer.decimal.nex",
+          "captures": {
+            "1": {
+              "name": "storage.type.numeric.nex"
+            }
+          }
+        }
+      ]
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "match": "\\b((?:(?:deferred|sealed|enum)\\s+)*)(class|union)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.nex"
+            },
+            "2": {
+              "name": "storage.type.class.nex"
+            },
+            "3": {
+              "name": "entity.name.type.class.nex"
+            }
+          }
+        },
+        {
+          "match": "\\b(declare\\s+)?(function)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.nex"
+            },
+            "2": {
+              "name": "storage.type.function.nex"
+            },
+            "3": {
+              "name": "entity.name.function.nex"
+            }
+          }
+        },
+        {
+          "match": "\\b(declare)\\s+(type)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.nex"
+            },
+            "2": {
+              "name": "storage.type.alias.nex"
+            },
+            "3": {
+              "name": "entity.name.type.alias.nex"
+            }
+          }
+        },
+        {
+          "match": "\\b(let)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.variable.nex"
+            },
+            "2": {
+              "name": "variable.other.declaration.nex"
+            }
+          }
+        },
+        {
+          "match": "\\b(across)\\b(.*?)\\b(as)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.loop.nex"
+            },
+            "2": {
+              "patterns": [
+                {
+                  "include": "#code"
+                }
+              ]
+            },
+            "3": {
+              "name": "keyword.control.loop.nex"
+            },
+            "4": {
+              "name": "variable.other.declaration.nex"
+            }
+          }
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "match": "\\b(assert)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)(?!=)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.contract.nex"
+            },
+            "2": {
+              "name": "entity.name.label.nex"
+            },
+            "3": {
+              "name": "punctuation.separator.label.nex"
+            }
+          }
+        },
+        {
+          "match": "\\b(?:do|end)\\b",
+          "name": "keyword.control.nex"
+        },
+        {
+          "match": "\\b(?:if|then|elseif|else|when|case|of|match|select|timeout)\\b",
+          "name": "keyword.control.conditional.nex"
+        },
+        {
+          "match": "\\b(?:from|until|repeat|across)\\b",
+          "name": "keyword.control.loop.nex"
+        },
+        {
+          "match": "\\b(?:raise|rescue|retry)\\b",
+          "name": "keyword.control.exception.nex"
+        },
+        {
+          "match": "\\b(?:spawn)\\b",
+          "name": "keyword.control.concurrency.nex"
+        },
+        {
+          "match": "\\b(?:intern|import|with)\\b",
+          "name": "keyword.control.import.nex"
+        },
+        {
+          "match": "\\b(?:require|ensure|invariant|variant|assert|old)\\b",
+          "name": "keyword.other.contract.nex"
+        },
+        {
+          "match": "\\b(?:class|union|enum|function|fn|declare|type|let)\\b",
+          "name": "storage.type.nex"
+        },
+        {
+          "match": "\\b(?:feature|inherit|create|note)\\b",
+          "name": "keyword.other.section.nex"
+        },
+        {
+          "match": "\\b(?:deferred|sealed|once|private)\\b",
+          "name": "storage.modifier.nex"
+        },
+        {
+          "match": "\\b(?:convert|to|as)\\b",
+          "name": "keyword.other.nex"
+        },
+        {
+          "match": "\\b(?:and|or|not|implies)\\b",
+          "name": "keyword.operator.logical.nex"
+        }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        {
+          "match": ":=",
+          "name": "keyword.operator.assignment.nex"
+        },
+        {
+          "match": "=>",
+          "name": "keyword.operator.arrow.nex"
+        },
+        {
+          "match": "->",
+          "name": "keyword.operator.arrow.nex"
+        },
+        {
+          "match": "==|!=|/=|<=|>=|=|<|>",
+          "name": "keyword.operator.comparison.nex"
+        },
+        {
+          "match": "\\?\\.|\\?",
+          "name": "keyword.operator.detachable.nex"
+        },
+        {
+          "match": "[-+*/%^]",
+          "name": "keyword.operator.arithmetic.nex"
+        }
+      ]
+    },
+    "constant": {
+      "patterns": [
+        {
+          "match": "\\b(?:true|false)\\b",
+          "name": "constant.language.boolean.nex"
+        },
+        {
+          "match": "\\b(?:nil)\\b",
+          "name": "constant.language.nil.nex"
+        },
+        {
+          "match": "\\b(?:this|super)\\b",
+          "name": "variable.language.this.nex"
+        },
+        {
+          "match": "\\b(?:result)\\b",
+          "name": "variable.language.result.nex"
+        },
+        {
+          "match": "\\b(?:console|program)\\b",
+          "name": "variable.language.predeclared.nex"
+        }
+      ]
+    },
+    "type": {
+      "patterns": [
+        {
+          "match": "\\b(?:Integer|Integer16|Integer32|Integer64|Byte|Real|Decimal|Char|Boolean|String|Array|Map|Set|Map_Entry|Min_Heap|Task|Channel|Any|Void|Nil|Function|Cursor|Iterable|Console|Process|Program|Atomic_Integer|Atomic_Integer64|Atomic_Boolean|Atomic_Reference)\\b",
+          "name": "support.type.builtin.nex"
+        },
+        {
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b",
+          "name": "entity.name.type.nex"
+        }
+      ]
+    },
+    "call": {
+      "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.nex"
+        }
+      }
+    },
+    "contract-clause": {
+      "comment": "require / ensure / invariant clauses, where `name:` starts a labelled assertion.",
+      "begin": "\\b(require|ensure|invariant)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.contract.nex"
+        }
+      },
+      "end": "(?=\\b(?:do|end|ensure|rescue|feature|create|private|variant|until|from|inherit|require|deferred|note|class)\\b)",
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(:)(?!=)",
+          "captures": {
+            "1": {
+              "name": "entity.name.label.nex"
+            },
+            "2": {
+              "name": "punctuation.separator.label.nex"
+            }
+          }
+        },
+        {
+          "include": "#code"
+        }
+      ],
+      "name": "meta.contract.nex"
+    }
+  }
+}

@@ -19,6 +19,7 @@
 ;; - REPL integration (C-c C-z to start, C-c C-c to eval buffer)
 ;; - Comment support
 ;; - Imenu support for navigation
+;; - Errors as you type and formatting through eglot (`nex lsp')
 ;;
 ;; Installation:
 ;;
@@ -915,6 +916,16 @@ Nex is an Eiffel-inspired language with Design by Contract features.
 
     (when (executable-find "nex")
       (princ "✅ nex executable found\n"))))
+
+;;;; Language server
+
+;; `nex lsp' gives eglot errors as you type, formatting (`eglot-format')
+;; and an outline (imenu).  Start it with M-x eglot in a Nex buffer, or
+;; every time with (add-hook 'nex-mode-hook #'eglot-ensure).
+(with-eval-after-load 'eglot
+  (when (boundp 'eglot-server-programs)
+    (add-to-list 'eglot-server-programs
+                 `(nex-mode . (,nex-repl-program "lsp")))))
 
 ;;;; Footer
 

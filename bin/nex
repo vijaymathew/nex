@@ -32,6 +32,8 @@ COMMANDS:
     format <file|dir>         Format Nex source files
     doc <file|dir> [output]   Generate documentation from Nex files
     eval <code>               Evaluate a Nex code snippet
+    lsp                       Start the language server (for editors; speaks
+                              LSP on stdin/stdout)
     help                      Show this help message
 
 OPTIONS:
@@ -400,6 +402,13 @@ cmd_eval() {
     rm -f "$tmpfile"
 }
 
+cmd_lsp() {
+    # Interns named by path (`units/Money`) fall back to the editor's
+    # working directory, as they do for `nex <file>`.
+    export NEX_USER_DIR="$USER_DIR"
+    run_main "" nex.lsp
+}
+
 cmd_run_script() {
     export NEX_USER_DIR=`pwd`
     fullpath=$(readlink -f "$1")
@@ -450,6 +459,9 @@ main() {
         eval)
             shift
             cmd_eval "$@"
+            ;;
+        lsp)
+            cmd_lsp
             ;;
         help|--help|-h)
             show_help
