@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **Debugger: line breakpoints work.** `:break file.nex:17` and
+  `:break Class.method:17` never stopped: the interpreter handed the debugger
+  a copy of each statement without its line number (only `assert` kept
+  one). A file can now be named as written (`text_buffer.nex:17`, or
+  `tut/text_buffer.nex:17`), not only by its full path. A line breakpoint
+  stops once each time the line runs, and `:next` moves to the next line,
+  rather than stopping again at each call on the same line. `:ignore` and
+  `:every` counted every hit twice, so `:ignore 1 1` skipped nothing; they
+  count each hit once now.
+
+- **Editor support: `nex lsp` and a VS Code extension.** `nex lsp` is a
+  language server: in any LSP editor it underlines the syntax and type errors
+  `nex <file>` would report while you type (an error inside an interned file
+  shows on its `intern` line, linked to where it is), formats the document
+  with `nex format`, and gives an outline of classes, constructors, features,
+  functions, unions, type aliases and top-level `let`s. Hovering over a name
+  shows its type, or the signature, note and `require`/`ensure` of the
+  feature, constructor or function it calls (a class shows its note and
+  invariant), and go to definition jumps to where it is declared — a
+  feature, class or function, in an interned file or the standard library
+  too, or a local, parameter or global. Completion offers, after `x.`, the
+  features of x's type (worked out even while the line is half-typed and
+  does not parse), after `create C.` C's constructors, the classes where a
+  type is expected, and elsewhere the locals, parameters, features,
+  globals, functions, classes and keywords in scope. The VS Code extension
+  in `editor/vscode` runs it and adds a TextMate grammar for highlighting,
+  snippets, a Run button and REPL commands (Shift+Enter sends the selection
+  to a `nex` REPL in the terminal). nex-mode registers `nex lsp` with eglot,
+  so `M-x eglot` (or `eglot-ensure` on `nex-mode-hook`) gives Emacs the same
+  errors and formatting.
+
 ## 0.6.4 - 2026-10-28
 
 - **`implies`.** `a implies b` is true when `a` is false, and otherwise `b`,

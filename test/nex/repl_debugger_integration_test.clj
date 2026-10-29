@@ -441,3 +441,65 @@ lg.calc(3)")))]
       (is (.contains out "fields:"))
       (is (.contains out "locals:"))
       (is (.contains out "special:")))))
+
+;; A file loaded with :load, the way the README and the editors use the
+;; debugger: line breakpoints inside a routine body.
+
+(def ^:private buffer-source
+  "class Buf
+  feature
+    text: String
+    add(s: String) do
+      let before := text.length
+      text := text + s
+    end
+end
+let b := create Buf
+b.add(\"ab\")
+b.add(\"cd\")
+b.add(\"ef\")
+")
+
+(defn- load-buffer-program
+  "Write buffer-source to a temp file and :load-equivalently evaluate it
+   with the debugger reading INPUTS. Returns what it printed."
+  [inputs]
+  (let [dir (doto (io/file (System/getProperty "java.io.tmpdir") (str "nex-dbg-" (System/nanoTime))) (.mkdirs))
+        file (io/file dir "buf.nex")
+        _ (spit file buffer-source)
+        ctx (repl/init-repl-context)]
+    (with-out-str
+      (with-redefs [repl/read-line-safe (scripted-reader inputs)]
+        (repl/eval-code ctx (slurp file) (.getPath file))))))
+
+(defn- pauses [out]
+  (re-seq #"Paused at statement #\d+ depth=\d+ node=(\w+) line=(\d+)" out))
+
+(deftest debugger-line-breakpoint-by-file-name
+  (testing "file.nex:line names a loaded file by its name, and stops once per visit of the line"
+    (dbg/add-breakpoint! {:kind :file-line :source "buf.nex" :line 5})
+    (let [out (load-buffer-program [":print s" ":c" ":print s" ":c" ":print s" ":c"])]
+      (is (= [["let" "5"] ["let" "5"] ["let" "5"]] (map rest (pauses out))))
+      (is (.contains out "\"ab\""))
+      (is (.contains out "\"ef\"")))))
+
+(deftest debugger-class-method-line-breakpoint
+  (testing "Class.method:line stops at that line of the routine"
+    (dbg/add-breakpoint! {:kind :cm-line :class "Buf" :method "add" :line 6})
+    (let [out (load-buffer-program [":c" ":c" ":c"])]
+      (is (= ["6" "6" "6"] (map #(nth % 2) (pauses out)))))))
+
+(deftest debugger-next-moves-to-the-next-line
+  (testing ":next leaves a line once, even when it holds several nodes"
+    (dbg/add-breakpoint! {:kind :file-line :source "buf.nex" :line 5})
+    (let [out (load-buffer-program [":n" ":clearbreak all" ":c"])]
+      (is (= [["let" "5"] ["assign" "6"]] (take 2 (map rest (pauses out))))))))
+
+(deftest debugger-ignore-counts-each-hit-once
+  (testing ":ignore 1 1 skips exactly the first hit"
+    (let [id (dbg/add-breakpoint! {:kind :file-line :source "buf.nex" :line 5})]
+      (dbg/set-breakpoint-after! id 1)
+      (let [out (load-buffer-program [":print s" ":c" ":print s" ":c"])]
+        (is (= 2 (count (pauses out))))
+        (is (not (.contains out "\"ab\"")))
+        (is (.contains out "\"cd\""))))))

@@ -483,8 +483,9 @@ nex/
 │   ├── design/                 # Design and implementation notes
 │   └── book/                   # Longer book manuscript
 ├── editor/
-│   └── emacs/
-│       └── nex-mode.el         # Emacs major mode
+│   ├── emacs/
+│   │   └── nex-mode.el         # Emacs major mode
+│   └── vscode/                 # VS Code extension (and the TextMate grammar)
 ├── grammar/
 │   └── nexlang.g4              # ANTLR grammar definition
 ├── deps.edn
@@ -500,6 +501,7 @@ nex/
 | [Syntax on a Postcard](docs/md/SYNTAX.md) | Core language syntax and quick reference |
 | [Tutorial](docs/md/TUTORIAL.md) | Step-by-step introduction to the language |
 | [Emacs Support](docs/md/EMACS.md) | Emacs mode setup and key bindings |
+| [VS Code Extension](editor/vscode/README.md) | VS Code support: highlighting, errors as you type, REPL |
 | [Development Notes](docs/md/DEVELOPMENT.md) | Architecture and contribution notes |
 | [JVM Bytecode Translation Reference](https://schemer.in/nex/docs/design/chapter_5.html) | How the current JVM backend lowers and emits Nex programs |
 | [Library Reference Index](docs/ref/index.md) | Standard library reference (collections, I/O, networking, time, ...) |
@@ -526,6 +528,28 @@ sock.close()
 
 ## Editor Support
 
+`nex lsp` is a [language server](https://microsoft.github.io/language-server-protocol/):
+any editor that speaks LSP gets the syntax and type errors `nex` reports,
+underlined as you type; hover (types, and the signature and contracts of the
+feature a name calls); go to definition, into interned files too; completion (the features of a
+value after `.`, and the names in scope elsewhere); formatting
+(`nex format`); and an outline of classes, features and functions.
+
+### VS Code
+
+The extension in [`editor/vscode`](editor/vscode/README.md) adds syntax
+highlighting, the language server, snippets, a Run button and REPL commands
+(Shift+Enter sends the selection to a `nex` REPL in the terminal):
+
+```sh
+cd editor/vscode && npm install && npm run package
+code --install-extension nex-*.vsix
+```
+
+Its TextMate grammar, `editor/vscode/syntaxes/nex.tmLanguage.json`, also works
+in Sublime Text, JetBrains IDEs (TextMate bundles) and highlighters such as
+Shiki.
+
 ### Emacs
 
 A full major mode is included with syntax highlighting, automatic indentation, REPL integration, and Imenu navigation support.
@@ -533,6 +557,7 @@ A full major mode is included with syntax highlighting, automatic indentation, R
 ```elisp
 ;; Add to ~/.emacs.d/init.el
 (load-file "/path/to/nex/editor/emacs/nex-mode.el")
+(add-hook 'nex-mode-hook #'eglot-ensure)   ; errors as you type, via nex lsp
 ```
 
 Key bindings:
@@ -545,7 +570,31 @@ Key bindings:
 
 See [docs/md/EMACS.md](docs/md/EMACS.md) for full configuration options.
 
-Support for VS Code, Vim, and other editors is planned. Contributions welcome.
+### Other editors
+
+Point the editor's LSP client at `nex lsp` for `.nex` files. Neovim 0.11+:
+
+```lua
+vim.filetype.add({ extension = { nex = "nex" } })
+vim.lsp.config("nex", { cmd = { "nex", "lsp" }, filetypes = { "nex" }, root_markers = { ".git" } })
+vim.lsp.enable("nex")
+```
+
+Helix (`~/.config/helix/languages.toml`):
+
+```toml
+[language-server.nex]
+command = "nex"
+args = ["lsp"]
+
+[[language]]
+name = "nex"
+scope = "source.nex"
+file-types = ["nex"]
+comment-token = "--"
+indent = { tab-width = 2, unit = "  " }
+language-servers = ["nex"]
+```
 
 ---
 

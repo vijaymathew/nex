@@ -1,0 +1,175 @@
+{
+  "name": "nex",
+  "displayName": "Nex",
+  "description": "Nex language support: syntax highlighting, errors as you type, formatting, outline, snippets and a REPL.",
+  "version": "0.6.4",
+  "publisher": "nex-lang",
+  "license": "MPL-2.0",
+  "homepage": "https://schemer.in/nex",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vijaymathew/nex.git",
+    "directory": "editor/vscode"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Snippets"
+  ],
+  "keywords": [
+    "nex",
+    "design by contract",
+    "contracts"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:nex",
+    "onCommand:nex.startRepl"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "nex",
+        "aliases": [
+          "Nex",
+          "nex"
+        ],
+        "extensions": [
+          ".nex"
+        ],
+        "firstLine": "^#!.*\\bnex\\b",
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nex",
+        "scopeName": "source.nex",
+        "path": "./syntaxes/nex.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "nex",
+        "path": "./snippets/nex.json"
+      }
+    ],
+    "configuration": {
+      "title": "Nex",
+      "properties": {
+        "nex.path": {
+          "type": "string",
+          "default": "nex",
+          "description": "The `nex` command: a name on PATH or a full path to it."
+        },
+        "nex.languageServer.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `nex lsp` for errors as you type, formatting and the outline."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[nex]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false
+      }
+    },
+    "commands": [
+      {
+        "command": "nex.runFile",
+        "title": "Run File",
+        "category": "Nex",
+        "icon": "$(play)"
+      },
+      {
+        "command": "nex.startRepl",
+        "title": "Start REPL",
+        "category": "Nex"
+      },
+      {
+        "command": "nex.sendSelection",
+        "title": "Send Selection to REPL",
+        "category": "Nex"
+      },
+      {
+        "command": "nex.loadFile",
+        "title": "Load File into REPL",
+        "category": "Nex"
+      },
+      {
+        "command": "nex.restartLanguageServer",
+        "title": "Restart Language Server",
+        "category": "Nex"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "nex.sendSelection",
+        "key": "shift+enter",
+        "when": "editorTextFocus && editorLangId == nex && !suggestWidgetVisible"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "nex.runFile",
+          "when": "resourceLangId == nex"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "nex.sendSelection",
+          "when": "editorLangId == nex",
+          "group": "nex@1"
+        },
+        {
+          "command": "nex.loadFile",
+          "when": "editorLangId == nex",
+          "group": "nex@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "nex.runFile",
+          "when": "editorLangId == nex"
+        },
+        {
+          "command": "nex.sendSelection",
+          "when": "editorLangId == nex"
+        },
+        {
+          "command": "nex.loadFile",
+          "when": "editorLangId == nex"
+        }
+      ]
+    },
+    "taskDefinitions": [
+      {
+        "type": "nex",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The Nex file to run."
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "package": "cp ../../LICENSE LICENSE && vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.1"
+  }
+}

@@ -188,6 +188,26 @@
     (:name acc)
     acc))
 
+(defn- node-start [n]
+  (when (and (map? n) (:dbg/line n)) [(:dbg/line n) (:dbg/col n)]))
+
+(defn- with-name-positions
+  "CALL with where its name and its identifier target sit in the source, for
+   editor tooling (nex.lsp): :nex/name-pos is NAME-NODE's start (a member
+   access's `.`/`?.`, or the called identifier), :nex/target-pos the start of
+   TARGET-NODE when that is a bare identifier. [line col], 1-based. Kept as
+   metadata, so ASTs compare equal with or without it."
+  [call name-node target-node]
+  (let [name-pos (node-start name-node)
+        target-pos (when (and (map? target-node) (= :identifier (:type target-node)))
+                     (node-start target-node))]
+    (if (or name-pos target-pos)
+      (vary-meta call merge
+                 (cond-> {}
+                   name-pos (assoc :nex/name-pos name-pos)
+                   target-pos (assoc :nex/target-pos target-pos)))
+      call)))
+
 (defn- negate-sized-literal
   "-5i16 is one Integer16 literal, not a negation of one (arithmetic on a sized
    type promotes to Integer). Returns the negated literal, or nil for any other
@@ -2765,24 +2785,28 @@
        (reduce (fn [acc part]
                  (case (:type part)
                    :member-access
-                   (cond-> {:type :call
-                            :target (call-target acc)
-                            :method (:name part)
-                            :args (:args part)}
-                     (some? (:has-parens part))
-                     (assoc :has-parens (:has-parens part))
-                     (:safe? part)
-                     (assoc :safe? true))
+                   (with-name-positions
+                     (cond-> {:type :call
+                              :target (call-target acc)
+                              :method (:name part)
+                              :args (:args part)}
+                       (some? (:has-parens part))
+                       (assoc :has-parens (:has-parens part))
+                       (:safe? part)
+                       (assoc :safe? true))
+                     part acc)
 
                    :call-suffix
                    (cond
                      ;; Function call: f(...)
                      (and (map? acc) (= :identifier (:type acc)))
-                     {:type :call
-                      :target nil
-                      :method (:name acc)
-                      :args (:args part)
-                      :has-parens true}
+                     (with-name-positions
+                       {:type :call
+                        :target nil
+                        :method (:name acc)
+                        :args (:args part)
+                        :has-parens true}
+                       acc nil)
 
                      ;; Method call split as memberAccess + callSuffix: obj.m(...)
                      (and (map? acc)
@@ -2891,14 +2915,16 @@
         [(case (:type part)
            :member-access
            (desugar-safe-expression-call
-            (cond-> {:type :call
-                     :target (call-target acc)
-                     :method (:name part)
-                     :args (:args part)}
-              (some? (:has-parens part))
-              (assoc :has-parens (:has-parens part))
-              (:safe? part)
-              (assoc :safe? true)))
+            (with-name-positions
+              (cond-> {:type :call
+                       :target (call-target acc)
+                       :method (:name part)
+                       :args (:args part)}
+                (some? (:has-parens part))
+                (assoc :has-parens (:has-parens part))
+                (:safe? part)
+                (assoc :safe? true))
+              part acc))
 
            ;; `name[Integer]` (no call following, or a call-suffix part
            ;; still to come): stash the explicit type args on the
@@ -2913,13 +2939,15 @@
            (cond
              ;; Function call: f(...)
              (and (map? acc) (= :identifier (:type acc)))
-             (cond-> {:type :call
-                      :target nil
-                      :method (:name acc)
-                      :args (:args part)
-                      :has-parens true}
-               (:explicit-generic-args acc)
-               (assoc :explicit-generic-args (:explicit-generic-args acc)))
+             (with-name-positions
+               (cond-> {:type :call
+                        :target nil
+                        :method (:name acc)
+                        :args (:args part)
+                        :has-parens true}
+                 (:explicit-generic-args acc)
+                 (assoc :explicit-generic-args (:explicit-generic-args acc)))
+               acc nil)
 
              ;; Method call split as memberAccess + callSuffix: obj.m(...)
              (and (map? acc)

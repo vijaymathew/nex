@@ -2762,7 +2762,9 @@
 
 (defmethod eval-node :call
   [ctx {:keys [target method args has-parens] :as expr}]
-  (maybe-debug-pause ctx {:type :call :target target :method method :args args :has-parens has-parens})
+  ;; The node itself, not a copy of some of its keys: the debugger needs its
+  ;; :dbg/line for line breakpoints.
+  (maybe-debug-pause ctx expr)
   (if (and (map? target) (= :create (:type target)) (nil? method))
     (if (nil? (:constructor target))
       (throw (ex-info (str "Invalid create syntax for " (:class-name target)
@@ -2791,8 +2793,8 @@
   (:current-object ctx))
 
 (defmethod eval-node :member-assign
-  [ctx {:keys [object object-type field value]}]
-  (maybe-debug-pause ctx {:type :member-assign :object object :object-type object-type :field field :value value})
+  [ctx {:keys [object object-type field value] :as node}]
+  (maybe-debug-pause ctx node)
   (let [;; `super.field := value`: like `this`, `super` has its own node type
         ;; (`{:type :super}`), detected here rather than evaluated as a plain
         ;; expression. It writes to the same object as `this` would (the
@@ -2886,8 +2888,8 @@
               val)))))))
 
 (defmethod eval-node :assign
-  [ctx {:keys [target value]}]
-  (maybe-debug-pause ctx {:type :assign :target target :value value})
+  [ctx {:keys [target value] :as node}]
+  (maybe-debug-pause ctx node)
   (when-let [current-class-name (:current-class-name ctx)]
     (when-let [class-def (lookup-class-if-exists ctx current-class-name)]
       (when (lookup-class-constant ctx class-def target)
@@ -2908,8 +2910,8 @@
     val))
 
 (defmethod eval-node :let
-  [ctx {:keys [name value]}]
-  (maybe-debug-pause ctx {:type :let :name name :value value})
+  [ctx {:keys [name value] :as node}]
+  (maybe-debug-pause ctx node)
   (let [val (eval-node ctx value)]
     ;; Always define a new binding in the current scope (can shadow outer scopes)
     (env-define (:current-env ctx) name val)
@@ -2926,8 +2928,8 @@
     (last (map #(eval-node ctx %) statements))))
 
 (defmethod eval-node :raise
-  [ctx {:keys [value builtin]}]
-  (maybe-debug-pause ctx {:type :raise :value value})
+  [ctx {:keys [value builtin] :as node}]
+  (maybe-debug-pause ctx node)
   (let [val (eval-node ctx value)]
     (if builtin
       ;; A failure the language raises itself through a generated `raise`
@@ -2940,8 +2942,8 @@
                       {:type :nex-exception :value val})))))
 
 (defmethod eval-node :retry
-  [ctx _node]
-  (maybe-debug-pause ctx {:type :retry})
+  [ctx node]
+  (maybe-debug-pause ctx node)
   (throw (ex-info "retry" {:type :nex-retry})))
 
 (defmethod eval-node :assert
@@ -3024,8 +3026,8 @@
                     (throw re)))))))))))
 
 (defmethod eval-node :scoped-block
-  [ctx {:keys [body rescue]}]
-  (maybe-debug-pause ctx {:type :scoped-block :body body :rescue rescue})
+  [ctx {:keys [body rescue] :as node}]
+  (maybe-debug-pause ctx node)
   ;; Create a new lexical scope
   (let [new-env (make-env (:current-env ctx))
         new-ctx (assoc ctx :current-env new-env)]
@@ -3083,8 +3085,8 @@
     (some? v)))
 
 (defmethod eval-node :if
-  [ctx {:keys [condition then elseif else]}]
-  (maybe-debug-pause ctx {:type :if :condition condition :then then :elseif elseif :else else})
+  [ctx {:keys [condition then elseif else] :as node}]
+  (maybe-debug-pause ctx node)
   ;; Evaluate condition, then elseif chain, then optional else. Each branch
   ;; runs in its own scope, so a `let` inside it shadows rather than
   ;; overwriting an outer variable of the same name.
