@@ -5477,6 +5477,18 @@
 
         nil))))
 
+(defn- record-let-type!
+  "Note the type a `let` gave its variable in *expression-types*, at the
+   variable's name (editor tooling only)."
+  [env stmt]
+  (when (and (not *checking-source-file*) (:dbg/line stmt) (string? (:name stmt))
+             (not (:synthetic stmt)))
+    (when-let [t (env-lookup-var env (:name stmt))]
+      (swap! (:by-pos *expression-types*) assoc
+             ;; the name follows `let `
+             [(:dbg/line stmt) (+ (:dbg/col stmt) 4)]
+             {:name (:name stmt) :type t :declared? true}))))
+
 (defn- check-expression-value
   "The raw dispatch behind check-expression, with no Void guard. Used only by
    check-statement's :call case: a Void-returning method/function call used
@@ -6649,7 +6661,9 @@
       (when (map? stmt)
         (case (:type stmt)
           :assign (check-assignment env stmt)
-          :let (check-let env stmt)
+          :let (let [r (check-let env stmt)]
+                 (when *expression-types* (record-let-type! env stmt))
+                 r)
           ;; A bare-statement call is the one place a Void-returning call is
           ;; legitimate — its result is discarded, not used as a value — so
           ;; this goes through check-expression-value directly rather than

@@ -30,6 +30,8 @@ A comprehensive Emacs major mode for editing Nex programming language files.
   - Syntax and type errors underlined while you edit
   - Types and contracts in the echo area (eldoc) for the name at point
   - `M-.` jumps to a feature's, class's or variable's definition
+  - Completion (`completion-at-point`, or company/corfu) of features after `.`
+    and of the names in scope
   - `M-x eglot-format-buffer` runs `nex format`
 
 ## Installation

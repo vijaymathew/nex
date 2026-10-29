@@ -281,3 +281,90 @@
       (is (= [:main 26] (def-at 10))))
     (testing "result"
       (is (str/includes? (hover-text 11) "result: Integer")))))
+
+;;
+;; Completion
+;;
+
+(deftest completion
+  (let [dir (doto (io/file (System/getProperty "java.io.tmpdir") (str "nex-lsp-complete-" (System/nanoTime)))
+              (.mkdirs))
+        main (io/file dir "main.nex")
+        text (lines "class Account"
+                    "  create"
+                    "    make(start: Integer) do"
+                    "      balance := start"
+                    "    end"
+                    "  feature"
+                    "    balance: Integer"
+                    "    deposit(n: Integer)"
+                    "      do"
+                    "        let before := balance"
+                    "        balance := before + n"
+                    "      end"
+                    "  private feature"
+                    "    secret: Integer"
+                    "end"
+                    "let acct := create Account.make(10)"
+                    "let names: Array[String] := [\"a\"]")
+        _ (spit main text)
+        uri (str (.toUri (.toPath main)))
+        ;; each case: the document with `|` where the cursor is
+        cases ["acct.|"
+               "print(acct.dep|)"
+               "names.get(0).to_|"
+               "let other := create Account.|"
+               "let a: Acc|"
+               "acc|"]
+        edit (fn [i c]
+               (let [doc (str text c "\n")
+                     ls (str/split doc #"\n" -1)
+                     l (count (str/split-lines text))
+                     col (str/index-of (nth ls l) "|")]
+                 [{:notify? true :method "textDocument/didChange"
+                   :params {:textDocument {:uri uri :version (+ 2 i)}
+                            :contentChanges [{:text (str/replace doc "|" "")}]}}
+                  {:method "textDocument/completion"
+                   :params {:textDocument {:uri uri} :position {:line l :character col}}}]))
+        responses (run-session (concat [{:method "initialize" :params {:capabilities {}}}
+                                        {:notify? true :method "textDocument/didOpen"
+                                         :params {:textDocument {:uri uri :languageId "nex" :version 1 :text text}}}]
+                                       (mapcat edit (range) cases)))
+        ;; initialize is 1, didOpen 2; each case is a didChange then its request
+        labels (fn [i] (set (map :label (:items (get responses (+ 4 (* 2 i)))))))
+        item (fn [i label] (some #(when (= label (:label %)) %) (:items (get responses (+ 4 (* 2 i))))))]
+    (testing "after `x.`: the features of x's class and of Any, but not its private ones"
+      (is (every? (labels 0) ["balance" "deposit" "to_string"]))
+      (is (not ((labels 0) "secret")))
+      (is (not ((labels 0) "make")))
+      (is (= "Account.deposit(n: Integer)" (:detail (item 0 "deposit")))))
+    (testing "inside a call's arguments"
+      (is ((labels 1) "deposit")))
+    (testing "a built-in type, through a generic's element type"
+      (is (every? (labels 2) ["to_upper" "length"])))
+    (testing "after `create C.`: C's constructors"
+      (is (= #{"make"} (labels 3))))
+    (testing "where a type is expected: classes and built-in types"
+      (is (every? (labels 4) ["Account" "Integer" "Array"]))
+      (is (not ((labels 4) "acct"))))
+    (testing "elsewhere: the names in scope, and keywords"
+      (is (every? (labels 5) ["acct" "names" "Account" "print" "if" "console"]))
+      (is (str/includes? (:detail (item 5 "acct")) "Account")))))
+
+(deftest locals-in-scope
+  (let [text (lines "class A"
+                    "  feature"
+                    "    f(n: Integer): Integer do"
+                    "      let k := n"
+                    "      across [1] as i do"
+                    "        result := k + i"
+                    "      end"
+                    "    end"
+                    "end"
+                    "let g := 1")
+        ls (str/split text #"\n" -1)
+        ast (nex.parser/ast text)
+        names (fn [line col] (set (map :name (#'lsp/visible-bindings ls ast line col))))]
+    (is (= #{"n" "k" "i"} (names 5 8)))
+    (is (= #{"n"} (names 3 6)) "a local is in scope only after its `let`")
+    (is (= #{} (names 9 0)) "what routines bind is not in scope at top level")))

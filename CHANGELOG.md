@@ -12,7 +12,11 @@
   feature, constructor or function it calls (a class shows its note and
   invariant), and go to definition jumps to where it is declared — a
   feature, class or function, in an interned file or the standard library
-  too, or a local, parameter or global. The VS Code extension
+  too, or a local, parameter or global. Completion offers, after `x.`, the
+  features of x's type (worked out even while the line is half-typed and
+  does not parse), after `create C.` C's constructors, the classes where a
+  type is expected, and elsewhere the locals, parameters, features,
+  globals, functions, classes and keywords in scope. The VS Code extension
   in `editor/vscode` runs it and adds a TextMate grammar for highlighting,
   snippets, a Run button and REPL commands (Shift+Enter sends the selection
   to a `nex` REPL in the terminal). nex-mode registers `nex lsp` with eglot,

@@ -9,7 +9,9 @@
      unions, type aliases and top-level `let`s;
    - hover: the type of a variable, or the signature, note and contracts of
      the feature, function or class a name refers to;
-   - go to definition, into interned files too.
+   - go to definition, into interned files too;
+   - completion: features after `.`, constructors after `create C.`, types
+     where one is expected, and the names in scope elsewhere.
 
    Everything runs on one worker thread, in the order messages arrive, so
    the parser and type checker are never used from two threads at once.
@@ -18,6 +20,7 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [clojure.walk]
             [nex.compiler.jvm.file :as jvm-file]
             [nex.fmt :as fmt]
             [nex.parser :as parser]
@@ -581,29 +584,36 @@
         (for [f (:functions ast) :when (:dbg/line f)]
           {:start (dec (:dbg/line f)) :end (block-end lines (dec (:dbg/line f)))}))))
 
+(def ^:private identifier-re "[A-Za-z_][A-Za-z0-9_]*")
+
+(defn- line-bindings
+  "The names bound on line text L: `let x`, `as x` (across, object tests,
+   match), `to x:` (convert), and parameter lists (`f(a, b: T)`, `fn (x)`) —
+   [[col name kind]], kind :let, :local or :parameter. NAME-RE (a regex
+   string) limits them to matching names."
+  ([l] (line-bindings l identifier-re))
+  ([^String l name-re]
+   (let [found (fn [re kind]
+                 (let [m (re-matcher re l)]
+                   (loop [acc []]
+                     (if (.find m) (recur (conj acc [(.start m 1) (.group m 1) kind])) acc))))]
+     (concat (found (re-pattern (str "\\blet\\s+(" name-re ")(?![A-Za-z0-9_])")) :let)
+             (found (re-pattern (str "\\bas\\s+(" name-re ")(?![A-Za-z0-9_])")) :local)
+             (found (re-pattern (str "\\bto\\s+(" name-re ")\\s*:")) :local)
+             (for [[open close] (let [m (re-matcher #"\(([^()]*)\)" l)]
+                                  (loop [acc []] (if (.find m) (recur (conj acc [(.start m 1) (.end m 1)])) acc)))
+                   :let [inner (subs l open close)]
+                   :when (re-find #":" inner)
+                   ;; a parameter starts the list or follows a comma
+                   :let [m (re-matcher (re-pattern (str "(?:^|,)\\s*(" name-re ")\\s*(?=[,:])")) inner)]
+                   hit (loop [acc []]
+                         (if (.find m) (recur (conj acc [(+ open (.start m 1)) (.group m 1) :parameter])) acc))]
+               hit)))))
+
 (defn- binding-matches
-  "Where NAME is bound on line text L: `let name`, `as name` (across,
-   object tests, match), `to name:` (convert), and parameter lists —
-   [[col kind]], kind :let, :local or :parameter."
-  [^String l name]
-  (let [q (java.util.regex.Pattern/quote name)
-        found (fn [re kind]
-                (let [m (re-matcher re l)]
-                  (loop [acc []]
-                    (if (.find m) (recur (conj acc [(.start m 1) kind])) acc))))]
-    (concat (found (re-pattern (str "\\blet\\s+(" q ")\\b")) :let)
-            (found (re-pattern (str "\\bas\\s+(" q ")\\b")) :local)
-            (found (re-pattern (str "\\bto\\s+(" q ")\\s*:")) :local)
-            ;; inside a parenthesised parameter list: `f(a, b: T)`, `fn (x)`
-            (for [[open close] (let [m (re-matcher #"\(([^()]*)\)" l)]
-                                 (loop [acc []] (if (.find m) (recur (conj acc [(.start m 1) (.end m 1)])) acc)))
-                  :let [inner (subs l open close)]
-                  :when (re-find #":" inner)
-                  :let [m (re-matcher (word-pattern name) inner)]
-                  :when (.find m)
-                  :let [after (subs inner (.end m))]
-                  :when (re-find #"^\s*[,:]" after)]
-              [(+ open (.start m)) :parameter]))))
+  "Where NAME is bound on line text L: [[col kind]] (see line-bindings)."
+  [l name]
+  (map (fn [[c _ kind]] [c kind]) (line-bindings l (java.util.regex.Pattern/quote name))))
 
 (defn- local-binding
   "The closest binding of NAME at or above (LINE, COL) within the routine
@@ -659,11 +669,11 @@
                 second str/trim not-empty)
         (some-> (re-find (re-pattern (str "\\b" q "\\s*,[^:()]*:\\s*([^:=,)]+?)\\s*(?:,|\\)|$)")) text)
                 second str/trim not-empty)
-        (->> index
-             (filter (fn [[[l c] e]] (and (= name (:name e)) (not (:call? e))
-                                          (or (> l (:line b)) (and (= l (:line b)) (> c (:col b)))))))
-             (sort-by key)
-             first val :type))))
+        (some->> index
+                 (filter (fn [[[l c] e]] (and (= name (:name e)) (not (:call? e))
+                                              (or (> l (:line b)) (and (= l (:line b)) (>= c (:col b)))))))
+                 (sort-by key)
+                 first val :type))))
 
 (defn- create-class-before
   "The class named by `create C.` just before START on LINE-TEXT, or nil."
@@ -867,6 +877,357 @@
       nil)))
 
 ;;
+;; Completion
+;;
+;; After `x.` the features of x's type; after `create C.` C's constructors;
+;; where a type is expected, the classes and built-in types; anywhere else
+;; the names in scope — locals and parameters, the enclosing class's
+;; features, globals, functions, classes, built-ins — and the keywords.
+;;
+;; A document being typed in rarely parses at the `.` just typed, so x's
+;; type comes from checking a copy without the `.` and what follows it
+;; (`acct.dep` checked as `acct`), and only failing that from the last check
+;; that parsed.
+
+(def ^:private keywords
+  ["across" "and" "as" "assert" "case" "class" "convert" "create" "declare"
+   "deferred" "do" "else" "elseif" "end" "ensure" "enum" "false" "feature" "fn"
+   "from" "function" "if" "implies" "import" "inherit" "intern" "invariant" "let"
+   "match" "nil" "not" "note" "of" "old" "once" "or" "private" "raise" "repeat"
+   "require" "rescue" "result" "retry" "sealed" "select" "spawn" "super" "then"
+   "this" "timeout" "to" "true" "type" "union" "until" "variant" "when" "with"])
+
+(def ^:private builtin-functions
+  ["print" "sleep" "exit" "type_of" "type_is" "await_all" "await_any" "random_real"])
+
+(def ^:private builtin-type-params
+  "The generic parameters of the built-in generic types, as their methods'
+   signatures name them."
+  {"Array" ["T"] "Set" ["T"] "Map" ["K" "V"] "Map_Entry" ["K" "V"] "Task" ["T"]
+   "Channel" ["T"] "Min_Heap" ["T"] "Atomic_Reference" ["T"] "Cursor" ["T"]
+   "Iterable" ["T"]})
+
+(def ^:private item-kind
+  {:method 2 :function 3 :constructor 4 :field 5 :variable 6 :class 7
+   :keyword 14 :constant 21})
+
+(def ^:private client-snippets?
+  "Whether the editor takes snippet insert texts (`f($1)`)."
+  (atom false))
+
+(defn- call-insert [name params]
+  (if (and (seq params) @client-snippets?)
+    {:insertText (str name "($1)") :insertTextFormat 2}
+    {:insertText name}))
+
+(defn- substitute-type
+  "Type T with the generic parameter names in BINDINGS replaced."
+  [bindings t]
+  (if (empty? bindings)
+    t
+    (clojure.walk/postwalk
+     (fn [x]
+       (cond
+         (and (string? x) (contains? bindings x)) (get bindings x)
+         (and (map? x) (string? (:base-type x)) (contains? bindings (:base-type x))
+              (nil? (:type-params x)) (nil? (:type-args x)))
+         (let [b (get bindings (:base-type x))]
+           (if (:detachable x)
+             (if (string? b) (str "?" (str/replace b #"^\?" "")) (assoc b :detachable true))
+             b))
+         :else x))
+     t)))
+
+(defn- generic-bindings
+  "{param-name type} for a receiver of type T."
+  [classes t]
+  (let [base (type-base t)
+        args (when (map? t) (or (:type-params t) (:type-args t)))
+        names (or (some->> (get classes base) :generic-params seq (map #(if (map? %) (:name %) %)))
+                  (get builtin-type-params base))]
+    (if (and (seq args) (seq names))
+      (zipmap names args)
+      {})))
+
+(defn- member-item [{:keys [member class]} bindings sort-group]
+  (let [m member
+        owner (:name class)
+        sub #(show-type (substitute-type bindings %))]
+    (merge {:label (:name m)
+            :kind (item-kind (case (:type m)
+                               :field (if (:constant? m) :constant :field)
+                               :constructor :constructor
+                               :method))
+            :detail (case (:type m)
+                      :field (str owner "." (:name m) (when-let [t (:field-type m)] (str ": " (sub t))))
+                      :constructor (str "create " owner "." (:name m) (params-str (:params m)))
+                      (str owner "." (:name m)
+                           "(" (str/join ", " (map #(str (:name %) ": " (sub (:type %))) (:params m))) ")"
+                           (when-let [r (:return-type m)] (str ": " (sub r)))))
+            :documentation {:kind "markdown" :value (member-hover {:member m :class class})}
+            :sortText (str sort-group (:name m))}
+           (if (= :field (:type m)) {:insertText (:name m)} (call-insert (:name m) (:params m))))))
+
+(defn- class-features
+  "The features of CLASS-NAME and its ancestors, nearest first, one per
+   name: [{:member :class :private?}]. Constructors are not features."
+  [classes class-name]
+  (loop [queue [class-name] seen #{} names #{} acc []]
+    (if-let [[cn & more] (seq queue)]
+      (if (or (seen cn) (nil? (get classes cn)))
+        (recur more (conj seen cn) names acc)
+        (let [c (get classes cn)
+              fs (for [sec (:body c)
+                       :when (= :feature-section (:type sec))
+                       m (:members sec)
+                       :when (and (:name m) (not (str/starts-with? (:name m) "__")))]
+                   {:member m :class c :private? (= :private (get-in sec [:visibility :type]))})
+              new (remove #(names (:name (:member %))) fs)]
+          (recur (concat more (keep :parent (:parents c))) (conj seen cn)
+                 (into names (map (comp :name :member) new)) (into acc new))))
+      acc)))
+
+(defn- builtin-items
+  "Items for the built-in features of BASE, on a receiver of type T."
+  [base t bindings sort-group skip]
+  (for [[name by-arity] (sort-by key (get @(:methods @builtin-env) base))
+        :when (and (not (str/starts-with? name "__")) (not (skip name)))
+        :let [sig (val (first (sort-by key by-arity)))
+              sub #(show-type (substitute-type bindings %))
+              ret (:return-type sig)]]
+    (merge {:label name
+            :kind (item-kind :method)
+            :detail (str (if t (show-type t) base) "." name
+                         "(" (str/join ", " (map #(str (:name %) ": " (sub (:type %))) (:params sig))) ")"
+                         (when (and ret (not= "Void" ret)) (str ": " (sub ret))))
+            :sortText (str sort-group name)}
+           (call-insert name (:params sig)))))
+
+(defn- type-items
+  "Items for the features of a value of type T, used in class INSIDE (whose
+   private features it may see)."
+  [classes t inside]
+  (let [base (type-base t)
+        bindings (generic-bindings classes t)]
+    (if-let [_ (get classes base)]
+      (let [features (->> (class-features classes base)
+                          (remove #(and (:private? %) (not= inside base))))]
+        (concat (map #(member-item % bindings "1") features)
+                (builtin-items "Any" nil {} "2" (set (map (comp :name :member) features)))))
+      (builtin-items base t bindings "1" #{}))))
+
+(defn- matching-open
+  "The index of the `(` matching the `)` at CLOSE on TEXT, or nil."
+  [^String text close]
+  (loop [i (dec close) depth 1]
+    (when (>= i 0)
+      (case (.charAt text i)
+        \) (recur (dec i) (inc depth))
+        \( (if (= 1 depth) i (recur (dec i) (dec depth)))
+        (recur (dec i) depth)))))
+
+(defn- type-ending-at
+  "The type of the expression that ends just before column END on line L,
+   from the checker's records about LINES."
+  [lines ast index l end]
+  (let [^String text (nth lines l "")
+        c (dec end)]
+    (when (and (>= c 0) (< c (count text)))
+      (let [ch (.charAt text c)]
+        (cond
+          (word-char? ch)
+          (let [[s _ w] (word-at text c)]
+            (or (:type (get index [l s]))
+                (when (= "this" w) (:name (enclosing lines (:classes ast) l)))))
+
+          (= \) ch)
+          (when-let [open (matching-open text c)]
+            (let [before (str/trimr (subs text 0 open))]
+              (when (and (seq before) (word-char? (.charAt ^String before (dec (count before)))))
+                (let [[s _ _] (word-at before (dec (count before)))]
+                  (:type (get index [l s]))))))
+
+          (= \" ch) "String"
+          :else nil)))))
+
+(defn- known-type
+  "The type the last check that parsed URI's document gave a variable NAME,
+   wherever it was used."
+  [uri name]
+  (some->> (get-in @programs [uri :program :types])
+           (filter #(and (= name (:name (val %))) (not (:call? (val %)))))
+           (sort-by key) last val :type))
+
+(defn- replace-line [lines l new-text]
+  (str/join "\n" (assoc lines l new-text)))
+
+(defn- receiver-type
+  "The type of what is before the `.` at column DOT on line L of URI's
+   document (LINES, its text now): {:type :lines :program}, with the
+   checked program it was found in."
+  [uri lines l dot character]
+  (let [line-text (nth lines l)
+        sid (source-id uri)
+        typed-at (fn [text end]
+                   (when-let [{:keys [ast types] :as program} (:program (analyze-text sid text))]
+                     (let [ls (text-lines text)]
+                       (when-let [t (type-ending-at ls ast (index-types ls types) l end)]
+                         {:type t :lines ls :program program}))))
+        prefix (subs line-text 0 dot)
+        indent (re-find #"^\s*" prefix)
+        stmt (subs prefix (count indent))
+        wrapper "let nex_completion_receiver := "]
+    (or
+     ;; `acct.de|` checked as `acct`
+     (typed-at (replace-line lines l (str prefix (subs line-text (min (count line-text) character)))) dot)
+     ;; a whole statement `acct.` is checked as a value: `let ... := acct`
+     (when (seq stmt)
+       (typed-at (replace-line lines l (str indent wrapper stmt))
+                 (+ (count indent) (count wrapper) (count stmt))))
+     ;; the last check that parsed: a name's latest known type
+     (when-let [[_ _ w] (word-at prefix (dec (count prefix)))]
+       (when-let [{:keys [program] :as last-good} (get @programs uri)]
+         (when-let [t (known-type uri w)]
+           (assoc last-good :type t)))))))
+
+(defn- program-for
+  "The checked program to complete in, {:lines :program}: TEXT's own when
+   it parses, else TEXT's without the line LINE being typed, else the last
+   that parsed."
+  [uri text line]
+  (let [sid (source-id uri)
+        lines (text-lines text)
+        parsed (fn [t] (when-let [p (:program (analyze-text sid t))]
+                         {:lines (text-lines t) :program p}))]
+    (or (parsed text)
+        (parsed (replace-line lines line (re-find #"^\s*" (nth lines line ""))))
+        (get @programs uri))))
+
+(defn- visible-bindings
+  "The locals and parameters (or, at top level, globals) bound before
+   (LINE, COL), nearest first, one per name: [{:line :col :name :kind}]."
+  [lines ast line col]
+  (let [ranges (routine-ranges lines ast)
+        routine (->> ranges
+                     (filter #(<= (:start %) line (:end %)))
+                     (sort-by :start)
+                     last)
+        from (or (:start routine) 0)
+        ;; at top level, what routines bind is not in scope
+        in-routine? (fn [l] (some #(<= (:start %) l (:end %)) ranges))]
+    (->> (range line (dec from) -1)
+         (remove #(and (nil? routine) (in-routine? %)))
+         (mapcat (fn [l]
+                   (let [text (nth lines l "")
+                         params-here? (or (and routine (= l from)) (re-find #"\bfn\b" text))]
+                     (->> (line-bindings text)
+                          (remove #(and (not params-here?) (= :parameter (nth % 2))))
+                          (remove #(and (= l line) (>= (first %) col)))
+                          (sort-by first >)
+                          (map (fn [[c n k]]
+                                 {:line l :col c :name n
+                                  :kind (cond (= k :parameter) :parameter
+                                              (and (nil? routine) (= k :let)) :global
+                                              :else :local)}))))))
+         (reduce (fn [acc b] (if (some #(= (:name %) (:name b)) acc) acc (conj acc b))) []))))
+
+(defn- class-items [module-ast]
+  (let [wrappers (set (keep :class-name (:functions module-ast)))]
+    (concat
+     (for [c (:classes module-ast)
+           :when (and (not (wrappers (:name c))) (not (str/starts-with? (:name c) "__")))]
+       {:label (:name c) :kind (item-kind :class)
+        :detail (str/trim (str (when (:deferred? c) "deferred ") "class"
+                               (when-let [ps (seq (:parents c))]
+                                 (str " inherit " (str/join ", " (map :parent ps))))))
+        :documentation {:kind "markdown" :value (class-hover c)}
+        :sortText (str "3" (:name c))})
+     (for [t (sort (disj tc/builtin-types "Nil" "Void"))
+           :when (not (some #(= t (:name %)) (:classes module-ast)))]
+       {:label t :kind (item-kind :class) :detail "built-in type" :sortText (str "4" t)}))))
+
+(defn- scope-items
+  "Everything a name could be at (LINE, COL) of URI's document."
+  [uri {:keys [lines program]} current-lines line col]
+  (let [{:keys [ast module-ast types]} program
+        classes (class-table module-ast)
+        index (index-types lines types)
+        here (enclosing lines (:classes ast) line)
+        locals (visible-bindings current-lines ast line col)
+        local-names (set (map :name locals))
+        features (when here (remove #(local-names (:name (:member %))) (class-features classes (:name here))))
+        globals (for [s (:statements ast)
+                      :when (and (= :let (:type s)) (string? (:name s)) (:dbg/line s)
+                                 (not (local-names (:name s))))]
+                  [(:name s) (or (binding-type lines index {:line (dec (:dbg/line s)) :col (dec (:dbg/col s))} (:name s))
+                                 (known-type uri (:name s)))])
+        functions (remove #(str/starts-with? (:name %) "__") (:functions module-ast))]
+    (concat
+     (for [{:keys [name kind] :as b} locals
+           :let [t (or (binding-type current-lines index b name) (known-type uri name))]]
+       {:label name :kind (item-kind :variable)
+        :detail (str (when t (str name ": " (show-type t)))
+                     (when t "  ") (clojure.core/name kind))
+        :sortText (str "0" name)})
+     (map #(member-item % {} "1") features)
+     (for [[g t] (concat (distinct globals) [["console" "Console"] ["program" "Program"]])]
+       {:label g :kind (item-kind :variable)
+        :detail (str (when t (str g ": " (show-type t) "  ")) "global")
+        :sortText (str "2" g)})
+     (for [f functions]
+       (merge {:label (:name f) :kind (item-kind :function)
+               :detail (str (:name f) (routine-detail f))
+               :documentation {:kind "markdown" :value (routine-hover nil f)}
+               :sortText (str "2" (:name f))}
+              (call-insert (:name f) (:params f))))
+     (class-items module-ast)
+     (for [f builtin-functions]
+       (merge {:label f :kind (item-kind :function) :detail "built-in" :sortText (str "4" f)}
+              (call-insert f [:arg])))
+     (for [k keywords]
+       {:label k :kind (item-kind :keyword) :sortText (str "5" k)}))))
+
+(def ^:private type-context-re
+  "Text before the cursor where a type is expected."
+  #"(?:\blet\s+\w+\s*:|\)\s*:|[(,]\s*\w+\s*:|\binherit\s+(?:[\w\[\], ]*,\s*)?|\bcreate\s+|\bto\s+\w+\s*:|->\s*)\s*\??[A-Za-z_]*$")
+
+(defn- completion [uri {:keys [line character]}]
+  (when-let [{:keys [text]} (get @documents uri)]
+    (let [lines (text-lines text)
+          line-text (nth lines line "")
+          before (subs line-text 0 (min character (count line-text)))
+          items
+          (cond
+            ;; `create C.` -> C's constructors
+            (re-find #"\bcreate\s+[A-Za-z_]\w*(?:\[[^\]]*\])?\s*\.\s*\w*$" before)
+            (let [cname (second (re-find #"\bcreate\s+([A-Za-z_]\w*)" (re-find #"\bcreate\s+[A-Za-z_]\w*(?:\[[^\]]*\])?\s*\.\s*\w*$" before)))]
+              (when-let [{:keys [program]} (program-for uri text line)]
+                (let [classes (class-table (:module-ast program))]
+                  (for [{:keys [constructors]} (filter #(= :constructors (:type %)) (:body (get classes cname)))
+                        ctor constructors]
+                    (member-item {:member ctor :class (get classes cname)} {} "1")))))
+
+            ;; `x.` -> the features of x's type (not the `.` of `1.5`)
+            (and (re-find #"\??\.\s*\w*$" before)
+                 (not (re-find #"(?<![A-Za-z0-9_])[0-9][0-9_]*\??\.\s*\w*$" before)))
+            (let [dot-at (- (count before) (count (re-find #"\??\.\s*\w*$" before)))]
+              (when-let [{:keys [type program] :as found} (receiver-type uri lines line dot-at character)]
+                (let [classes (class-table (:module-ast program))
+                      inside (:name (enclosing (:lines found) (:classes (:ast program)) line))]
+                  (type-items classes type inside))))
+
+            ;; a type is expected
+            (re-find type-context-re before)
+            (when-let [{:keys [program]} (program-for uri text line)]
+              (class-items (:module-ast program)))
+
+            :else
+            (when-let [p (program-for uri text line)]
+              (scope-items uri p lines line (- (count before) (count (re-find #"\w*$" before))))))]
+      {:isIncomplete false
+       :items (vec items)})))
+
+;;
 ;; Dispatch
 ;;
 
@@ -905,17 +1266,22 @@
    :documentFormattingProvider true
    :documentSymbolProvider true
    :hoverProvider true
-   :definitionProvider true})
+   :definitionProvider true
+   :completionProvider {:triggerCharacters ["."]}})
 
 (defn- handle-request [method params]
   (case method
-    "initialize" {:capabilities server-capabilities
-                  :serverInfo {:name "nex-lsp"}}
+    "initialize" (do (reset! client-snippets?
+                             (boolean (get-in params [:capabilities :textDocument :completion
+                                                      :completionItem :snippetSupport])))
+                     {:capabilities server-capabilities
+                      :serverInfo {:name "nex-lsp"}})
     "shutdown" (do (reset! shut-down? true) nil)
     "textDocument/formatting" (format-edits (get-in params [:textDocument :uri]))
     "textDocument/documentSymbol" (symbols-for (get-in params [:textDocument :uri]))
     "textDocument/hover" (hover (get-in params [:textDocument :uri]) (:position params))
     "textDocument/definition" (definition (get-in params [:textDocument :uri]) (:position params))
+    "textDocument/completion" (completion (get-in params [:textDocument :uri]) (:position params))
     ::unknown))
 
 (defn- handle-notification [method params]
