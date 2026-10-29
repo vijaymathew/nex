@@ -7,7 +7,12 @@
   `nex <file>` would report while you type (an error inside an interned file
   shows on its `intern` line, linked to where it is), formats the document
   with `nex format`, and gives an outline of classes, constructors, features,
-  functions, unions, type aliases and top-level `let`s. The VS Code extension
+  functions, unions, type aliases and top-level `let`s. Hovering over a name
+  shows its type, or the signature, note and `require`/`ensure` of the
+  feature, constructor or function it calls (a class shows its note and
+  invariant), and go to definition jumps to where it is declared — a
+  feature, class or function, in an interned file or the standard library
+  too, or a local, parameter or global. The VS Code extension
   in `editor/vscode` runs it and adds a TextMate grammar for highlighting,
   snippets, a Run button and REPL commands (Shift+Enter sends the selection
   to a `nex` REPL in the terminal). nex-mode registers `nex lsp` with eglot,

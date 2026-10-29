@@ -768,6 +768,19 @@
         ::failed))
     (f)))
 
+(def ^:dynamic *expression-types*
+  "nil, or what editor tooling (nex.lsp) asked the checker to record about
+   the entry file: {:by-pos (atom {[line col] entry}) :by-node
+   IdentityHashMap}. An entry is {:name n :type T} for a variable, or
+   {:name m :type T :call? true :target-type T' :current-class C} for a
+   call, keyed by where the name starts (see record-expression-type!)."
+  nil)
+
+(def ^:dynamic *checking-source-file*
+  "The interned file whose class or function is being checked, or nil in the
+   entry file (see with-source-file)."
+  nil)
+
 (defn- with-source-file
   "Run f, and — when source-file is given — stamp it onto any TypeError(s)
    an exception escaping f carries (see annotate-type-exception-source-file).
@@ -782,8 +795,9 @@
    before this existed."
   [source-file f]
   (if-not source-file
-    (f)
-    (let [sink *collected-errors*
+    (binding [*checking-source-file* nil] (f))
+    (binding [*checking-source-file* source-file]
+     (let [sink *collected-errors*
           before (when sink (count @sink))]
       (try
         (f)
@@ -795,7 +809,7 @@
             (swap! sink (fn [errs]
                           (into (subvec errs 0 before)
                                 (map #(error-with-source-file % source-file))
-                                (subvec errs before))))))))))
+                                (subvec errs before)))))))))))
 
 (def unknown-type-arg
   "A type argument inference left open: the element type of an empty `[]`,
@@ -5426,6 +5440,43 @@
    :this               check-expr-this
    :super              check-expr-super})
 
+(defn- record-expression-type!
+  "Note T, the type EXPR checked as, in *expression-types* (editor tooling
+   only): every node by identity, and each name with a source position —
+   an identifier, a call's name, and a call's bare-identifier target — by
+   where it starts."
+  [env expr t]
+  (let [{:keys [by-pos ^java.util.IdentityHashMap by-node]} *expression-types*]
+    (.put by-node expr t)
+    (when-not *checking-source-file*
+      (case (:type expr)
+        :identifier
+        (when-let [line (:dbg/line expr)]
+          (swap! by-pos assoc [line (:dbg/col expr)]
+                 {:name (:name expr) :type t
+                  :current-class (env-lookup-var env "__current_class__")}))
+
+        :call
+        (let [{:nex/keys [name-pos target-pos]} (meta expr)
+              target (:target expr)
+              target-type (cond
+                            (nil? target) nil
+                            (string? target) (env-lookup-var env target)
+                            :else (.get by-node target))
+              name-pos (or name-pos
+                           (when (and (nil? target) (:dbg/line expr))
+                             [(:dbg/line expr) (:dbg/col expr)]))]
+          (when (and name-pos (:method expr))
+            (swap! by-pos assoc name-pos
+                   {:name (:method expr) :type t :call? true
+                    :target (when (string? target) target)
+                    :target-type target-type
+                    :current-class (env-lookup-var env "__current_class__")}))
+          (when (and target-pos (string? target) target-type)
+            (swap! by-pos assoc target-pos {:name target :type target-type})))
+
+        nil))))
+
 (defn- check-expression-value
   "The raw dispatch behind check-expression, with no Void guard. Used only by
    check-statement's :call case: a Void-returning method/function call used
@@ -5446,7 +5497,9 @@
         (boolean? expr) "Boolean"
         (map? expr)
         (if-let [handler (get check-expression-dispatch (:type expr))]
-          (handler env expr)
+          (let [t (handler env expr)]
+            (when *expression-types* (record-expression-type! env expr t))
+            t)
           "Any")
         :else "Any"))))
 

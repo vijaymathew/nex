@@ -530,8 +530,9 @@ sock.close()
 
 `nex lsp` is a [language server](https://microsoft.github.io/language-server-protocol/):
 any editor that speaks LSP gets the syntax and type errors `nex` reports,
-underlined as you type, plus formatting (`nex format`) and an outline of
-classes, features and functions.
+underlined as you type; hover (types, and the signature and contracts of the
+feature a name calls); go to definition, into interned files too; formatting
+(`nex format`); and an outline of classes, features and functions.
 
 ### VS Code
 

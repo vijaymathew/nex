@@ -28,6 +28,8 @@ A comprehensive Emacs major mode for editing Nex programming language files.
 
 - ✅ **Errors as you type** (through eglot and `nex lsp`)
   - Syntax and type errors underlined while you edit
+  - Types and contracts in the echo area (eldoc) for the name at point
+  - `M-.` jumps to a feature's, class's or variable's definition
   - `M-x eglot-format-buffer` runs `nex format`
 
 ## Installation

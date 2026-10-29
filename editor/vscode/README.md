@@ -14,6 +14,12 @@ invariants and explicit guarantees are the ordinary way code is written.
   to where it is.
 - **Formatting** with `nex format`: *Format Document* (Shift+Alt+F), or turn
   on `editor.formatOnSave` for Nex files.
+- **Hover** over a name to see its type, or the signature, note and
+  `require`/`ensure` contracts of the feature or function it calls; over a
+  class, its note and invariant.
+- **Go to Definition** (F12, or Ctrl+click) for features, constructors,
+  classes, functions, locals, parameters and globals, into interned files
+  and the standard library too.
 - **Outline** of classes, constructors, features, functions, unions and
   top-level `let`s, in the Outline view, breadcrumbs and *Go to Symbol*
   (Ctrl+Shift+O).
@@ -40,7 +46,7 @@ If it is somewhere else, set `nex.path` to its full path.
 | Setting | Default | |
 |---|---|---|
 | `nex.path` | `nex` | The `nex` command |
-| `nex.languageServer.enable` | `true` | Run `nex lsp` for errors, formatting and the outline |
+| `nex.languageServer.enable` | `true` | Run `nex lsp` for errors, hover, go to definition, formatting and the outline |
 
 Interned files are read from disk, so after changing one, save it to update
 the errors shown in the files that intern it.
