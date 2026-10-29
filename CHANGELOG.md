@@ -17,7 +17,12 @@
   `--from-source [--ref REF]` builds from source as before (default
   `main`), and a release without a prebuilt archive is built from source
   automatically. The release archive includes `install.sh`, which installs
-  a prebuilt folder as it is, without the Clojure CLI. Fixed along the way: a relative
+  a prebuilt folder as it is, without the Clojure CLI. On Windows,
+  `irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1 | iex`
+  installs the latest release for the current user (no administrator
+  rights), checked against `SHA256SUMS`, adds it to the user `PATH`, offers
+  to install Java with `winget` when there is none, and takes `-Version`,
+  `-InstallDir`, `-NoModifyPath` and `-Uninstall`. Fixed along the way: a relative
   `--classpath` entry (`--classpath lib.jar`) was looked up in the Nex
   installation folder rather than the folder `nex` was run from;
   `nex doc file.nex out.md` likewise wrote `out.md` into the installation

@@ -409,7 +409,7 @@ install_files() {
         "$LIB_DIR/bin" "$LIB_DIR/lib"
     $SUDO rm -f "$LIB_DIR/deps.edn" "$LIB_DIR/nex.jar" "$LIB_DIR/classpath" \
         "$LIB_DIR/aot-training.nex" "$LIB_DIR/LICENSE" "$LIB_DIR/README.md" \
-        "$LIB_DIR/install.sh"
+        "$LIB_DIR/install.sh" "$LIB_DIR/install.ps1"
 
     $SUDO cp -R "$RELEASE_DIR/." "$LIB_DIR/"
 

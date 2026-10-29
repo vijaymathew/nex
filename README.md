@@ -277,8 +277,14 @@ resolve standard library namespaces such as `io/Path`, `time/Date_Time`, and
 `net/Http_Client` from an installed Nex command.
 
 The installer supports Ubuntu, Debian, Fedora, CentOS, RHEL, Arch, Manjaro and
-macOS. On any platform, Windows included, you can instead download a prebuilt
-release that needs only Java 17+ (see [INSTALL.md](INSTALL.md#prebuilt-release-linux-macos-windows)).
+macOS. On Windows, run this in PowerShell (see [INSTALL.md](INSTALL.md#windows)):
+
+```powershell
+irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1 | iex
+```
+
+On any platform you can also download a prebuilt release by hand; it needs
+only Java 17+ (see [INSTALL.md](INSTALL.md#prebuilt-release-linux-macos-windows)).
 
 For manual installation and platform-specific instructions, see [INSTALL.md](INSTALL.md).
 

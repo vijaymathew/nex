@@ -14,6 +14,46 @@ installs or upgrades whichever is missing or too old.
 
 ## Quick Install
 
+### Windows
+
+In PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1 | iex
+```
+
+or from `cmd`:
+
+```bat
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1 | iex"
+```
+
+This downloads the latest prebuilt release, checks it against the release's
+`SHA256SUMS`, installs it for your user in `%LOCALAPPDATA%\Programs\nex` (no
+administrator rights needed), adds its `bin` folder to your user `PATH`, and
+runs a test program. When there is no Java 17 or later, it offers to install
+one with `winget`. Open a new terminal afterwards so it sees the new `PATH`.
+
+Options go to the script block form:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1))) -Version 0.6.5 -InstallDir C:\Tools\nex
+```
+
+| Option | Meaning |
+|---|---|
+| `-Version 0.6.5` | install that release instead of the latest |
+| `-InstallDir DIR` | install somewhere else |
+| `-InstallDeps` | install Java with `winget` without asking |
+| `-NoModifyPath` | leave your `PATH` alone |
+| `-Uninstall` | remove Nex and its `PATH` entry |
+
+With the one-line form, set `$env:NEX_VERSION`, `$env:NEX_INSTALL_DIR` or
+`$env:NEX_INSTALL_DEPS = '1'` first instead. The release zip contains
+`install.ps1` too: run it from the unpacked folder to install that folder
+without downloading anything. The Windows installer installs prebuilt
+releases only; to build from source on Windows, use WSL.
+
 ### Prebuilt Release (Linux, macOS, Windows)
 
 Each GitHub release has a prebuilt Nex that needs only **Java 17 or later**:
@@ -24,7 +64,7 @@ no Clojure CLI and no build step. The same files run on every platform.
 2. Unpack it anywhere, for example `C:\Tools\nex-<version>` or
    `~/.local/share/nex-<version>`.
 3. Put its `bin` folder on your `PATH`, or link the launcher into a folder
-   already on it:
+   already on it (on Windows, `install.ps1` above does all of this):
 
 ```bash
 # Linux, macOS

@@ -13,6 +13,7 @@
 #   lib/                   the Nex libraries that ship with Nex
 #   aot-training.nex       the program the launcher trains its JVM cache on
 #   install.sh             installs this folder under a prefix (Linux, macOS)
+#   install.ps1            installs this folder for the current user (Windows)
 #
 # and target/release/SHA256SUMS lists the archives' checksums, which
 # bootstrap-install.sh checks.
@@ -50,7 +51,7 @@ sed 's/\r*$/\r/' bin/nex.cmd > "$OUT/bin/nex.cmd"
 cp target/dist/nex.jar target/dist/classpath "$OUT/"
 cp -R target/dist/deps "$OUT/deps"
 cp -R lib "$OUT/lib"
-cp scripts/aot-training.nex LICENSE README.md install.sh "$OUT/"
+cp scripts/aot-training.nex LICENSE README.md install.sh install.ps1 "$OUT/"
 
 if [[ "$ARCHIVES" == true ]]; then
     (

@@ -15,6 +15,7 @@ on:
       - scripts/build-dist.clj
       - src/nex/cli.clj
       - test/release/**
+      - install.ps1
       - .github/workflows/release.yml
 
 concurrency:
@@ -61,6 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Files at the top level, such as install.ps1, come too.
           sparse-checkout: test/release
 
       - uses: actions/setup-java@v4
@@ -115,6 +117,17 @@ jobs:
           findstr /c:"release smoke ok" out.txt || exit /b 1
           call nex compile jvm smoke.nex build || exit /b 1
           java -jar build\smoke.jar | findstr /c:"release smoke ok" || exit /b 1
+
+      # install.ps1 against this run's archives, in both PowerShells users have.
+      - name: Test install.ps1 (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./test/release/install-ps1-test.ps1 -Artifacts artifacts -Installer ./install.ps1 -ReleaseDir dist/nex
+
+      - name: Test install.ps1 (PowerShell 7)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./test/release/install-ps1-test.ps1 -Artifacts artifacts -Installer ./install.ps1 -ReleaseDir dist/nex
 
   publish:
     name: Attach to release
