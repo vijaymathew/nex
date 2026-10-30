@@ -1,0 +1,145 @@
+-- helpers.nex: small text utilities the rest of the agent uses, and
+-- finding the user's files.
+
+-- Where `part` first occurs in `text` at or after position `start`, or -1.
+function index_from(text, part: String, start: Integer): Integer
+require
+  part_given: part /= ""
+  start_in_range: start >= 0 and start <= text.length
+do
+  let at: Integer := text.substring(start, text.length).index_of(part)
+  result := when at < 0 then -1 else start + at end
+ensure
+  not_found_or_after: result = -1 or result >= start
+end
+
+-- How many times `part` occurs in `text`, not counting overlaps:
+-- count_occurrences("banana", "an") is 2.
+function count_occurrences(text, part: String): Integer
+require
+  part_given: part /= ""
+do
+  let at: Integer := index_from(text, part, 0)
+  from until at < 0 do
+    result := result + 1
+    at := index_from(text, part, at + part.length)
+  end
+ensure
+  never_negative: result >= 0
+end
+
+-- `text` with its first `before` replaced by `after`.
+function replace_first(text, before, after: String): String
+require
+  occurs: text.index_of(before) >= 0
+do
+  let at: Integer := text.index_of(before)
+  result := text.substring(0, at) + after + text.substring(at + before.length, text.length)
+end
+
+-- The lines of `text`, without their line breaks. A final line break
+-- does not start another line: lines_of("a\nb\n") is ["a", "b"], and
+-- lines_of("") is [].
+function lines_of(text: String): Array[String] do
+  let start: Integer := 0
+  from until start >= text.length do
+    let stop: Integer := index_from(text, "\n", start)
+    if stop < 0 then
+      stop := text.length
+    end
+    result.add(text.substring(start, stop))
+    start := stop + 1
+  end
+end
+
+-- Lines joined back together, each ending in a line break.
+function joined_lines(lines: Array[String]): String do
+  result := ""
+  across lines as line do
+    result := result + line + "\n"
+  end
+end
+
+-- `lines` numbered from `first`, the way read_file shows a file:
+--    12  some code
+function numbered(lines: Array[String], first: Integer): String do
+  result := ""
+  let n: Integer := first
+  across lines as line do
+    result := result + n.to_string.pad_start(" ", 5) + "  " + line + "\n"
+    n := n + 1
+  end
+end
+
+-- `text` cut down to at most about `limit` characters by dropping the
+-- middle. The start and the end of a long output are usually the useful
+-- parts: what a command was doing, and how it finished.
+function shortened(text: String, limit: Integer): String
+require
+  sensible_limit: limit >= 100
+do
+  if text.length <= limit then
+    result := text
+  else
+    let keep: Integer := (limit - 60) / 2
+    let cut: Integer := text.length - 2 * keep
+    result := text.substring(0, keep)
+      + "\n[... " + cut.to_string + " characters cut ...]\n"
+      + text.substring(text.length - keep, text.length)
+  end
+ensure
+  short_enough: result.length <= limit
+end
+
+-- The first line of `text`, cut to `limit` characters: a one-line preview.
+function preview(text: String, limit: Integer): String
+require
+  sensible_limit: limit >= 10
+do
+  result := text.trim()
+  let stop: Integer := result.index_of("\n")
+  if stop >= 0 then
+    result := result.substring(0, stop) + " ..."
+  end
+  if result.length > limit then
+    result := result.substring(0, limit - 3) + "..."
+  end
+ensure
+  short_enough: result.length <= limit
+end
+
+-- "1 line", "3 lines", "2 replies", "4 matches".
+function count_text(n: Integer, thing: String): String do
+  result := n.to_string + " " + (when n = 1 then thing else plural(thing) end)
+end
+
+-- The plural of a noun, for the usual cases: lines, days, replies, matches.
+function plural(noun: String): String do
+  let ending: String := noun.substring((noun.length - 2).max(0), noun.length)
+  if noun.ends_with("y") and not "aeiou".contains(ending.substring(0, 1)) then
+    result := noun.substring(0, noun.length - 1) + "ies"
+  elseif noun.ends_with("s") or noun.ends_with("x") or ending = "ch" or ending = "sh" then
+    result := noun + "es"
+  else
+    result := noun + "s"
+  end
+end
+
+-- Every line of `text` with `prefix` in front.
+function indented(text, prefix: String): String do
+  result := ""
+  across lines_of(text) as line do
+    result := result + prefix + line + "\n"
+  end
+end
+
+-- The full path of a file the user named. The `nex` launcher runs
+-- programs from its own installation folder, so a relative name is
+-- resolved against the folder the program was started from.
+function user_path(raw: String): String do
+  if raw.starts_with("/") then
+    result := raw
+  else
+    result := program.working_directory + "/" + raw
+  end
+end

@@ -1,0 +1,233 @@
+-- code.nex: the coding agent, on the command line.
+--
+--   nex code.nex "make the failing checks pass"     -- one task, then stop
+--   nex code.nex                                    -- type tasks one after another
+--   nex code.nex --replay sessions/fix_late_fines.json --yes
+--
+-- By default the agent works in workspace/, a copy of sample_project/
+-- (a small lending library with a bug). It asks before it changes a file
+-- or runs a command, unless you give --yes.
+--
+-- Talking to Claude needs ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN) in
+-- the environment. --replay plays back a recorded session instead, with
+-- no key, no network and no cost.
+
+intern Agent
+intern Claude_Model
+intern Helpers
+intern io/Path
+
+-- The settings of one run, read from the command line.
+class Options
+create
+  from_command_line(args: Array[String]) do
+    model_id := "claude-opus-5-5"
+    effort := "high"
+    max_replies := 40
+    command_seconds := 120
+    task := ""
+    from_folder := ""
+    dir := ""
+    replay := ""
+    record := ""
+    let words: Array[String] := []
+    from
+      let i: Integer := 0
+    until
+      i >= args.length
+    do
+      let arg: String := args.get(i)
+      if arg = "--yes" then
+        yes := true
+      elseif arg = "--read-only" then
+        read_only := true
+      elseif arg = "--fresh" then
+        fresh := true
+      elseif arg = "--full-output" then
+        full_output := true
+      elseif arg = "--help" or arg = "-h" then
+        help := true
+      elseif arg.starts_with("--") then
+        if i + 1 >= args.length then
+          raise "missing value after " + arg
+        end
+        let value: String := args.get(i + 1)
+        case arg of
+          "--model"     then model_id := value
+          "--effort"    then effort := value
+          "--max-turns" then max_replies := value.to_integer
+          "--timeout"   then command_seconds := value.to_integer
+          "--from"      then from_folder := value
+          "--dir"       then dir := value
+          "--replay"    then replay := value
+          "--record"    then record := value
+          else raise "unknown option " + arg + " (try --help)"
+        end
+        i := i + 1
+      else
+        words.add(arg)
+      end
+      i := i + 1
+    end
+    task := " ".join(words)
+  end
+
+feature
+  task: String         -- what to do; "" to ask for tasks one by one
+  model_id: String     -- which Claude
+  effort: String       -- low, medium, high, xhigh or max
+  from_folder: String  -- copy this folder into workspace/ and work there
+  dir: String          -- work in this folder itself
+  replay: String       -- play back this recorded session
+  record: String       -- record the session to this file
+  yes: Boolean         -- allow changes without asking
+  read_only: Boolean   -- allow no changes at all
+  fresh: Boolean       -- start workspace/ again from its template
+  full_output: Boolean -- print the output of every tool in full
+  help: Boolean
+  max_replies: Integer -- the most replies one task may take
+  command_seconds: Integer  -- how long a command may run
+
+invariant
+  positive_limits: max_replies > 0 and command_seconds > 0
+end
+
+function usage_text(): String do
+  result := "usage: nex code.nex [options] [task]\n\n"
+    + "Without a task, it asks for one task after another (an empty line quits).\n\n"
+    + "  --replay FILE     play back a recorded session (no API key needed)\n"
+    + "  --record FILE     record the session, for --replay\n"
+    + "  --from FOLDER     work in workspace/, a fresh copy of FOLDER (default: sample_project)\n"
+    + "  --dir FOLDER      work in FOLDER itself; careful, its files will change\n"
+    + "  --fresh           start workspace/ again from a fresh copy\n"
+    + "  --yes             let the agent edit files and run commands without asking\n"
+    + "  --read-only       never let it edit files or run commands\n"
+    + "  --model ID        which Claude (default claude-opus-5-5)\n"
+    + "  --effort LEVEL    low, medium, high, xhigh or max (default high)\n"
+    + "  --max-turns N     the most replies one task may take (default 40)\n"
+    + "  --timeout SECS    how long a command may run (default 120)\n"
+    + "  --full-output     print every tool's output in full\n"
+end
+
+function fail(message: String) do
+  console.print_line(message)
+  exit(1)
+end
+
+let options: Options := create Options.from_command_line(program.arguments)
+if options.help then
+  console.print_line(usage_text())
+  exit(0)
+end
+if options.dir /= "" and (options.from_folder /= "" or options.replay /= "" or options.record /= "") then
+  fail("--dir can't be used with --from, --replay or --record: they work in a fresh copy")
+end
+if not Claude_Model.EFFORTS.contains(options.effort) then
+  fail("--effort must be one of " + ", ".join(Claude_Model.EFFORTS))
+end
+
+-- The model, and the folder the workspace starts as a copy of.
+let model: Model := create Scripted_Model.make([])
+let task: String := options.task
+let template: String := when options.from_folder = "" then "sample_project" else options.from_folder end
+let replayer: ?Replay_Model := nil
+if options.replay /= "" then
+  if not (create Path.make(user_path(options.replay))).is_file() then
+    fail("there is no session file " + options.replay)
+  end
+  let replay: Replay_Model := create Replay_Model.make(user_path(options.replay))
+  replayer := replay
+  model := replay
+  template := replay.template()
+  if task = "" then
+    task := replay.task()
+  end
+else
+  if not has_credentials() then
+    fail("To talk to Claude, set ANTHROPIC_API_KEY to your API key.\n"
+      + "To see the agent at work without one, play back a recorded session:\n\n"
+      + "  nex code.nex --replay sessions/fix_late_fines.json --yes")
+  end
+  model := create Claude_Model.from_environment(options.model_id, options.effort)
+  if options.record /= "" then
+    if task = "" then
+      fail("--record needs a task on the command line")
+    end
+    model := create Recording_Model.make(model, user_path(options.record), task, template)
+  end
+end
+
+-- The workspace.
+let folder: String := user_path("workspace")
+if options.dir /= "" then
+  folder := user_path(options.dir)
+  if not (create Path.make(folder)).is_directory() then
+    fail("there is no folder " + options.dir)
+  end
+else
+  let copy_again: Boolean := options.fresh or options.from_folder /= "" or options.replay /= ""
+    or options.record /= "" or not (create Path.make(folder)).exists()
+  if copy_again then
+    if not (create Path.make(user_path(template))).is_directory() then
+      fail("there is no folder " + template)
+    end
+    fresh_workspace(user_path(template), folder)
+    console.print_line("(workspace/ is a fresh copy of " + template + "/)")
+  else
+    console.print_line("(working in workspace/ as it is; --fresh starts it again)")
+  end
+end
+let ws: Workspace := create Workspace.make(folder)
+
+-- Who allows what.
+let permission: Permission := create Ask_First.make()
+if options.read_only then
+  permission := create Allow_Reading.make()
+elseif options.yes then
+  permission := create Allow_Everything.make()
+end
+
+let tools: Array[Tool] := [create List_Files.make(ws), create Read_File.make(ws),
+  create Search.make(ws), create Edit_File.make(ws), create Write_File.make(ws),
+  create Run_Command.make(ws, options.command_seconds)]
+let agent: Agent := create Agent.make(model, tools, permission,
+  create Reporter.make(false, options.full_output))
+agent.set_max_replies(options.max_replies)
+console.print_line("(the model is " + model.name() + ")")
+
+-- Run one task, reporting any failure of the model or the network
+-- instead of stopping.
+function attempt(agent: Agent, task: String) do
+  do
+    agent.run(task)
+  rescue
+    console.print_line("\nerror: " + exception)
+  end
+end
+
+if task /= "" then
+  attempt(agent, task)
+else
+  console.print_line("Type a task, or an empty line to quit.")
+  let going: Boolean := true
+  from until not going do
+    let line: ?String := console.read_line("\nyou> ")
+    if ?line as text then
+      if text.trim() = "" then
+        going := false
+      else
+        attempt(agent, text.trim())
+      end
+    else
+      going := false
+    end
+  end
+end
+
+if ?replayer as replay then
+  if replay.diverged_at > 0 then
+    console.print_line("\nNote: from reply " + replay.diverged_at.to_string
+      + " on, the tools gave different results than when the session was recorded,"
+      + " so the recorded replies may not fit what happened this time.")
+  end
+end

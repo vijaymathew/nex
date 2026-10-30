@@ -1,0 +1,366 @@
+-- checks.nex: executable checks for every piece of the agent.
+-- Run: nex checks.nex
+--
+-- None of them needs Claude or the network: the model is played by
+-- scripts and recordings, and the API client talks to a pretend API
+-- server running inside this program.
+
+intern Agent
+intern Claude_Model
+intern Helpers
+intern net/Http_Server
+intern io/Path
+
+class Checker
+create
+  make() do
+  end
+feature
+  passed: Integer
+  failed: Integer
+
+  check(label: String, ok: Boolean) do
+    if ok then
+      passed := passed + 1
+      console.print_line("PASS " + label)
+    else
+      failed := failed + 1
+      console.print_line("FAIL " + label)
+    end
+  end
+
+  summary() do
+    console.print_line("---")
+    console.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
+    if failed > 0 then
+      raise failed.to_string + " check(s) failed"
+    end
+  end
+end
+
+-- A tool that always fails, to see that the agent survives it.
+class Exploding_Tool inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  name(): String do
+    result := "explode"
+  end
+
+  description(): String do
+    result := "Always fails."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"why": parameter("string", "Any reason.")}
+  end
+
+  required(): Array[String] do
+    result := []
+  end
+
+  describe(input: Json_Value): String do
+    result := "explode"
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    raise "boom"
+  end
+end
+
+-- A fresh copy of the sample project to work on.
+function scratch(): Workspace do
+  result := fresh_workspace(user_path("sample_project"), user_path("tmp_checks"))
+end
+
+function run_tool(tool: Tool, input: String): Tool_Outcome do
+  result := tool.run(json_value(input))
+end
+
+-- An agent with a script, all the usual tools and no output.
+function scripted_agent(ws: Workspace, model: Model, permission: Permission): Agent do
+  result := create Agent.make(model, standard_tools(ws), permission,
+    create Reporter.make(true, false))
+end
+
+-- A reply as the API would send it, from its JSON.
+function api_reply(json: String): Reply do
+  result := create Reply.from_json(json_value(json))
+end
+
+-- The edit that fixes the sample project.
+function the_fix(): String do
+  result := '{"path": "loans.nex", "old_text": "    if day >= due_on() then\n      result := day - due_on() + 1", "new_text": "    if day > due_on() then\n      result := day - due_on()"}'
+end
+
+let checker: Checker := create Checker.make()
+
+-- Helpers
+checker.check("count_occurrences", count_occurrences("banana", "an") = 2
+  and count_occurrences("aaaa", "aa") = 2 and count_occurrences("abc", "x") = 0)
+checker.check("lines_of keeps blank lines, not a final line break",
+  lines_of("a\n\nb\n") = ["a", "", "b"] and lines_of("") = [])
+checker.check("replace_first", replace_first("x x x", "x", "y") = "y x x")
+let long_text: String := ""
+repeat 100 do
+  long_text := long_text + "0123456789"
+end
+let short: String := shortened("START" + long_text + "END", 300)
+checker.check("shortened keeps both ends", short.length <= 300
+  and short.starts_with("START") and short.ends_with("END") and short.contains("characters cut"))
+checker.check("grouped", grouped(45210) = "45,210" and grouped(999) = "999"
+  and grouped(1000000) = "1,000,000")
+checker.check("count_text", count_text(1, "line") = "1 line" and count_text(2, "reply") = "2 replies"
+  and count_text(3, "match") = "3 matches" and count_text(0, "day") = "0 days")
+
+-- The workspace
+let ws: Workspace := scratch()
+checker.check("paths inside the workspace", ws.contains("loans.nex") and ws.contains(".")
+  and ws.contains("a/../loans.nex"))
+checker.check("paths outside it", not ws.contains("../x") and not ws.contains("/etc/passwd")
+  and not ws.contains("a/../../b") and not ws.contains("") and not ws.contains("~/x"))
+let refused: String := ""
+do
+  ws.full_path("../helpers.nex")
+rescue
+  refused := "" + exception
+end
+checker.check("full_path refuses a path outside", refused.contains("inside"))
+ws.write("notes/.hidden", "x")
+ws.write("notes/todo.txt", "one\n")
+checker.check("write makes folders; entries are sorted, without hidden files",
+  ws.entries(".") = ["README.md", "checks.nex", "fines.nex", "loans.nex", "notes/", "notes/todo.txt"])
+checker.check("files", ws.files("notes") = ["notes/todo.txt"])
+
+-- Tools
+let read_file: Read_File := create Read_File.make(ws)
+checker.check("a missing parameter", read_file.problem_with(json_value('{}')) = "missing parameter `path`")
+checker.check("an unknown parameter",
+  read_file.problem_with(json_value('{"path": "a", "lines": 3}')) = "unknown parameter `lines`")
+checker.check("a parameter of the wrong type",
+  read_file.problem_with(json_value('{"path": "a", "start_line": "3"}')) = "`start_line` must be a whole number")
+checker.check("input that is not an object", read_file.problem_with(json_value('[1]')) /= "")
+let listing: Tool_Outcome := run_tool(create List_Files.make(ws), '{}')
+checker.check("list_files", not listing.is_error and listing.text.contains("fines.nex\nloans.nex\n"))
+let lines: Tool_Outcome := run_tool(read_file, '{"path": "loans.nex", "start_line": 32, "end_line": 33}')
+checker.check("read_file numbers the lines it shows", lines.text.starts_with(
+  "   32      if day >= due_on() then\n   33        result := day - due_on() + 1\n(lines 32-33 of 38)"))
+checker.check("read_file outside the workspace", run_tool(read_file, '{"path": "../code.nex"}').is_error)
+checker.check("read_file of a folder", run_tool(read_file, '{"path": "notes"}').is_error)
+let search: Search := create Search.make(ws)
+checker.check("search", run_tool(search, '{"pattern": "days_late\\(day\\)"}').text
+  = "fines.nex:25: result := (loan.days_late(day) * per_day).min(maximum)\n")
+checker.check("search with a broken pattern", run_tool(search, '{"pattern": "("}').is_error)
+let edit: Edit_File := create Edit_File.make(ws)
+let before: String := ws.read("loans.nex")
+let ambiguous: Tool_Outcome := run_tool(edit, '{"path": "loans.nex", "old_text": "result", "new_text": "r"}')
+checker.check("edit_file refuses text that occurs more than once",
+  ambiguous.is_error and ambiguous.text.contains("occurs 3 times"))
+checker.check("edit_file refuses text that does not occur",
+  run_tool(edit, '{"path": "loans.nex", "old_text": "nothing", "new_text": "r"}').is_error)
+checker.check("a refused edit changes nothing", ws.read("loans.nex") = before)
+let fixed: Tool_Outcome := run_tool(edit, the_fix())
+checker.check("edit_file", not fixed.is_error and ws.read("loans.nex").contains("    if day > due_on() then\n")
+  and fixed.text.contains("   32      if day > due_on() then"))
+checker.check("write_file", run_tool(create Write_File.make(ws), '{"path": "a/b.txt", "content": "hi\n"}').text
+  = "Created a/b.txt (1 line)" and ws.read("a/b.txt") = "hi\n")
+let echo: Tool_Outcome := run_tool(create Run_Command.make(ws, 30), '{"command": "echo out; echo err >&2; exit 3"}')
+checker.check("run_command: exit code, output and errors", echo.text = "exit code 3\nout\nerr\n")
+checker.check("run_command runs in the workspace",
+  run_tool(create Run_Command.make(ws, 30), '{"command": "ls loans.nex"}').text = "exit code 0\nloans.nex\n")
+let slow: Tool_Outcome := run_tool(create Run_Command.make(ws, 1), '{"command": "echo started; sleep 30"}')
+checker.check("run_command stops a command that runs too long",
+  slow.is_error and slow.text.contains("stopped after 1 second") and slow.text.contains("started"))
+let definition: String := json_text(read_file.definition())
+checker.check("a tool's definition", definition.contains('"name":"read_file"')
+  and definition.contains('"required":["path"]') and definition.contains('"additionalProperties":false'))
+
+-- The conversation
+let conversation: Conversation := create Conversation.make()
+conversation.add_user_text("one")
+conversation.add_user_text("two")
+checker.check("user text in a row joins one message", conversation.length() = 1)
+conversation.add_reply(use_tool("", "read_file", '{"path": "loans.nex"}'))
+let early: String := ""
+do
+  conversation.add_user_text("hello?")
+rescue
+  early := "" + exception
+end
+checker.check("no new text while a tool call is unanswered", early.contains("no_calls_waiting"))
+let wrong: String := ""
+do
+  conversation.add_tool_results([create Tool_Result.make("someone else's", "x", false)])
+rescue
+  wrong := "" + exception
+end
+checker.check("tool results must answer the calls", wrong.contains("answers_every_call"))
+let thinking: Reply := api_reply('{"content": [{"type": "thinking", "thinking": "", "signature": "Ev4CkQ=="}, {"type": "text", "text": "Hm."}, {"type": "tool_use", "id": "a", "name": "list_files", "input": {}}, {"type": "tool_use", "id": "b", "name": "read_file", "input": {"path": "x"}}], "stop_reason": "tool_use", "usage": {"input_tokens": 10, "cache_creation_input_tokens": 200, "cache_read_input_tokens": 3000, "output_tokens": 40}}')
+checker.check("a reply's text and tool calls", thinking.text() = "Hm." and thinking.tool_calls().length = 2
+  and thinking.tool_calls().get(1).input.get("path").as_string = "x")
+checker.check("a reply's token counts", thinking.context_tokens() = 3210 and thinking.cached_tokens() = 3000
+  and thinking.output_tokens() = 40)
+let kept: Conversation := create Conversation.make()
+kept.add_user_text("go")
+kept.add_reply(thinking)
+checker.check("a reply goes back exactly as it came",
+  json_text(kept.to_json().get(1)).contains('{"type":"thinking","thinking":"","signature":"Ev4CkQ=="}'))
+
+-- The agent loop, with a script
+ws := scratch()
+let script: Scripted_Model := create Scripted_Model.make([
+  use_tool("Let me look.", "read_file", '{"path": "loans.nex"}'),
+  use_tool("", "delete_everything", '{}'),
+  use_tool("", "read_file", '{"name": "loans.nex"}'),
+  use_tool("", "explode", '{}'),
+  use_tool("", "edit_file", the_fix()),
+  say("Fixed.")
+])
+let few_tools: Array[Tool] := [create Read_File.make(ws), create Edit_File.make(ws),
+  create Exploding_Tool.make(ws)]
+let agent: Agent := create Agent.make(script, few_tools, create Allow_Everything.make(),
+  create Reporter.make(true, false))
+let outcome: Run_Result := agent.run("Fix it.")
+checker.check("a scripted run", outcome.finished() and outcome.replies = 6 and outcome.calls = 5
+  and outcome.text = "Fixed.")
+checker.check("the first request is the task", script.sent.get(0) = '[{"type":"text","text":"Fix it."}]')
+checker.check("tool output goes back to the model", script.sent.get(1).contains("class Loan"))
+checker.check("an unknown tool is an error for the model",
+  script.sent.get(2).contains("There is no tool called `delete_everything`") and script.sent.get(2).contains('"is_error":true'))
+checker.check("bad input is an error for the model", script.sent.get(3).contains("Not run: missing parameter `path`"))
+checker.check("a tool that fails is an error for the model", script.sent.get(4).contains("The tool failed: boom"))
+checker.check("the scripted fix is made", ws.read("loans.nex").contains("result := day - due_on()\n"))
+
+ws := scratch()
+let refused_edit: Scripted_Model := create Scripted_Model.make([use_tool("", "edit_file", the_fix()), say("I can't.")])
+let reader: Agent := scripted_agent(ws, refused_edit, create Allow_Reading.make())
+reader.run("Fix it.")
+checker.check("read-only: an edit is refused", refused_edit.sent.get(1).contains("did not allow")
+  and ws.read("loans.nex") = before)
+let asked: Answers_Given := create Answers_Given.make([false, true])
+let two_tries: Scripted_Model := create Scripted_Model.make([use_tool("", "list_files", '{}'),
+  use_tool("", "edit_file", the_fix()), use_tool("", "edit_file", the_fix()), say("Done.")])
+scripted_agent(ws, two_tries, asked).run("Fix it.")
+checker.check("permission: reading is not asked about; no, then yes", asked.asked = 2
+  and two_tries.sent.get(2).contains("did not allow") and not two_tries.sent.get(3).contains("did not allow")
+  and ws.read("loans.nex") /= before)
+
+let busy: Scripted_Model := create Scripted_Model.make([use_tool("", "list_files", '{}'),
+  use_tool("", "list_files", '{}'), use_tool("", "list_files", '{}'), say("Here is the list.")])
+let limited: Agent := scripted_agent(ws, busy, create Allow_Everything.make())
+limited.set_max_replies(2)
+checker.check("the turn limit", limited.run("List the files.").ending = "turn limit")
+checker.check("after the turn limit, the next task carries on",
+  limited.run("Go on.").ending = "done" and limited.conversation.alternates()
+  and busy.sent.get(2).contains('{"type":"text","text":"Go on."}'))
+checker.check("out of script", limited.run("And then?").ending = "out of script")
+let cut: Scripted_Model := create Scripted_Model.make([
+  api_reply('{"content": [{"type": "tool_use", "id": "t1", "name": "write_file", "input": {"path": "x"}}], "stop_reason": "max_tokens"}'),
+  api_reply('{"content": [{"type": "text", "text": "I cannot help with that."}], "stop_reason": "refusal"}')])
+let cut_agent: Agent := scripted_agent(ws, cut, create Allow_Everything.make())
+let cut_outcome: Run_Result := cut_agent.run("Write x.")
+checker.check("a call in a reply that was cut off is not run",
+  cut.sent.get(1).contains("cut off") and not ws.exists("x"))
+checker.check("a refusal ends the task", cut_outcome.ending = "refused")
+
+-- Starting afresh when the conversation grows too long
+let long_one: Scripted_Model := create Scripted_Model.make([
+  api_reply('{"content": [{"type": "tool_use", "id": "t1", "name": "list_files", "input": {}}], "stop_reason": "tool_use", "usage": {"input_tokens": 5000, "output_tokens": 10}}'),
+  say("Summary: I listed the files."),
+  say("Done.")])
+let roomy: Agent := scripted_agent(ws, long_one, create Allow_Everything.make())
+roomy.set_context_limit(1000)
+checker.check("a long conversation is summed up", roomy.run("Look around.").finished()
+  and long_one.sent.get(1).contains("getting long"))
+checker.check("and carries on from the summary", long_one.sent.get(2).contains("part way through")
+  and long_one.sent.get(2).contains("Summary: I listed the files.") and roomy.conversation.length() = 2)
+
+-- Recording and replaying
+ws := scratch()
+let session_file: String := user_path("tmp_checks/session.json")
+let actor: Scripted_Model := create Scripted_Model.make([use_tool("", "read_file", '{"path": "fines.nex"}'),
+  say("It looks fine.")])
+scripted_agent(ws, create Recording_Model.make(actor, session_file, "Look at the fines.", "sample_project"),
+  create Allow_Everything.make()).run("Look at the fines.")
+let replay: Replay_Model := create Replay_Model.make(session_file)
+let replayed: Run_Result := scripted_agent(ws, replay, create Allow_Everything.make()).run(replay.task())
+checker.check("a recorded session plays back", replayed.finished() and replayed.text = "It looks fine."
+  and replay.diverged_at = 0 and replay.template() = "sample_project")
+ws.write("fines.nex", "-- something else\n")
+let diverging: Replay_Model := create Replay_Model.make(session_file)
+scripted_agent(ws, diverging, create Allow_Everything.make()).run(diverging.task())
+checker.check("a replay notices when the tools give different results", diverging.diverged_at = 2)
+
+let shipped: Replay_Model := create Replay_Model.make(user_path("sessions/fix_late_fines.json"))
+ws := fresh_workspace(user_path(shipped.template()), user_path("tmp_checks"))
+let shipped_run: Run_Result := scripted_agent(ws, shipped, create Allow_Everything.make()).run(shipped.task())
+checker.check("the shipped session plays back and fixes the project", shipped_run.finished()
+  and ws.read("loans.nex").contains("    if day > due_on() then\n"))
+let nex_found: Tool_Outcome := run_tool(create Run_Command.make(ws, 60), '{"command": "command -v nex"}')
+if nex_found.text.starts_with("exit code 0") then
+  checker.check("and the tools gave the results it was recorded with", shipped.diverged_at = 0)
+else
+  console.print_line("SKIP the shipped session's results (no `nex` on the PATH to run its checks)")
+end
+
+-- The Claude API client, against a pretend API server
+let conversation_to_send: Conversation := create Conversation.make()
+conversation_to_send.add_user_text("hi")
+let request: Request := create Request.make("Be brief.", conversation_to_send, [read_file.definition()])
+let opus: Claude_Model := create Claude_Model.make("key", false, "claude-opus-5-5", "high")
+let body: Json_Value := json_value(opus.request_body(request))
+checker.check("the request body", body.get("model").as_string = "claude-opus-5-5"
+  and body.get("system").as_string = "Be brief." and body.get("tools").at(0).get("name").as_string = "read_file"
+  and body.get("messages").at(0).get("role").as_string = "user"
+  and body.get("output_config").get("effort").as_string = "high"
+  and body.get("cache_control").get("type").as_string = "ephemeral"
+  and body.get("fallbacks").as_string = "default")
+checker.check("the headers", opus.headers().get("x-api-key") = "key"
+  and opus.headers().get("anthropic-version") = "2026-10-21"
+  and opus.headers().get("anthropic-beta") = "server-side-fallback-2026-07-01")
+let haiku: Claude_Model := create Claude_Model.make("token", true, "claude-haiku-5-5", "low")
+checker.check("no fallbacks for Haiku; a login token", not json_value(haiku.request_body(request)).has("fallbacks")
+  and haiku.headers().get("authorization") = "Bearer token"
+  and haiku.headers().get("anthropic-beta") = "oauth-2025-04-20" and not haiku.headers().contains_key("x-api-key"))
+checker.check("which errors are worth another try", opus.is_retryable(429) and opus.is_retryable(529)
+  and opus.is_retryable(500) and not opus.is_retryable(400) and not opus.is_retryable(401))
+
+let hits: Array[Integer] := [0]
+let server: Http_Server := create Http_Server.make(0)
+server.post("/v1/messages", fn (req: Http_Request): Http_Server_Response do
+  hits.set(0, hits.get(0) + 1)
+  if hits.get(0) = 1 then
+    result := create Http_Server_Response.make(529,
+      '{"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}', {"retry-after": "1"})
+  elseif req.headers().try_get("X-api-key", "") /= "key" then
+    result := create Http_Server_Response.make(401,
+      '{"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}}', {"x": "y"})
+  else
+    let sent: Json_Value := json_value(req.body())
+    result := create Http_Server_Response.text('{"content": [{"type": "text", "text": "You said: '
+      + sent.get("messages").at(0).get("content").at(0).get("text").as_string
+      + '"}], "stop_reason": "end_turn", "usage": {"input_tokens": 12, "output_tokens": 3}}')
+  end
+end)
+server.start()
+opus.set_base_url("http://127.0.0.1:" + server.port.to_string)
+let answer: Reply := opus.reply(request)
+checker.check("a reply through the API, after the API was busy once", hits.get(0) = 2
+  and answer.text() = "You said: hi" and answer.context_tokens() = 12)
+let wrong_key: Claude_Model := create Claude_Model.make("wrong", false, "claude-opus-5-5", "high")
+wrong_key.set_base_url("http://127.0.0.1:" + server.port.to_string)
+let api_error: String := ""
+do
+  wrong_key.reply(request)
+rescue
+  api_error := "" + exception
+end
+checker.check("an API error is reported, not retried",
+  api_error = "Claude API error 401 (authentication_error): invalid x-api-key" and hits.get(0) = 3)
+server.stop()
+
+(create Path.make(user_path("tmp_checks"))).delete_tree()
+checker.summary()

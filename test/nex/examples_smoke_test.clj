@@ -54,6 +54,22 @@
   (and (str/includes? (.getPath f) (str java.io.File/separator "neural_network" java.io.File/separator))
        (contains? excluded-neural-network-mains (.getName f))))
 
+(defn- excluded-coding-agent-path?
+  "coding_agent/'s command-line program, code.nex, which its checks.nex
+   covers: without an API key it prints how to get one and calls `exit(1)`,
+   which would end this test's JVM, and with one it would talk to Claude.
+   Also its sample_project/, a small project whose checks fail on purpose
+   (it is what the agent is asked to fix), and the copies of it the agent
+   works on, workspace/ and tmp_checks/."
+  [^java.io.File f]
+  (let [sep java.io.File/separator
+        path (.getPath f)
+        dir (str sep "coding_agent" sep)]
+    (and (str/includes? path dir)
+         (or (= (.getName f) "code.nex")
+             (some #(str/includes? path (str dir % sep))
+                   ["sample_project" "workspace" "tmp_checks"])))))
+
 (defn- tutorial-build-path?
   "Anything under a tutorial's build/ folder (neural_network/, digital_map/):
    the git-ignored output of tutorial/build.py, one copy of the project per
@@ -67,10 +83,16 @@
   "digital_map/'s programs read kestrel_island.map from the folder they are
    started in (via NEX_USER_DIR, as `nex` sets it), so they run in a
    subprocess started there; see run-failure-with-nex-user-dir. Its library
-   files, which only define things, run in-process like any other example."
+   files, which only define things, run in-process like any other example.
+   coding_agent/checks.nex is the same: it copies sample_project/ from the
+   folder it is started in."
   [^java.io.File f]
-  (and (str/includes? (.getPath f) (str java.io.File/separator "digital_map" java.io.File/separator))
-       (str/includes? (slurp f) "kestrel_island.map")))
+  (let [sep java.io.File/separator
+        in-dir? #(str/includes? (.getPath f) (str sep % sep))]
+    (or (and (in-dir? "digital_map")
+             (str/includes? (slurp f) "kestrel_island.map"))
+        (and (in-dir? "coding_agent")
+             (str/includes? (slurp f) "sample_project")))))
 
 ;; Files examples write into the folder they run in: navigate.nex, run with
 ;; no display, draws its window into navigate.png instead.
@@ -94,6 +116,7 @@
        (remove #(contains? excluded-network-examples (.getName ^java.io.File %)))
        (remove excluded-contracts-at-work-path?)
        (remove excluded-neural-network-path?)
+       (remove excluded-coding-agent-path?)
        (remove tutorial-build-path?)
        (sort-by #(.getPath ^java.io.File %))))
 

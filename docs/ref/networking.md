@@ -8,7 +8,7 @@ The networking library surface under `lib/net` runs on the JVM:
 
 ## `net/Http_Client`
 
-`Http_Client` is a small portable HTTP client wrapper shipped as a Nex library under [`lib/net/http_client.nex`](/home/vijay/Projects/nex/lib/net/http_client.nex). Its Nex methods are implemented on top of the built-in `http_get` and `http_post` functions.
+`Http_Client` is a small portable HTTP client wrapper shipped as a Nex library under [`lib/net/http_client.nex`](/home/vijay/Projects/nex/lib/net/http_client.nex). Its Nex methods are implemented on top of the built-in `http_get`, `http_post` and `http_request` functions.
 
 ### Loading
 
@@ -53,6 +53,8 @@ Requests return `Http_Response`, a small value object with:
 | `get` | `url: String, timeout_ms: Integer` | `Http_Response` | Perform an HTTP GET request with a timeout in milliseconds. |
 | `post` | `url: String, body_text: String` | `Http_Response` | Perform an HTTP POST request with a text body. |
 | `post` | `url: String, body_text: String, timeout_ms: Integer` | `Http_Response` | Perform an HTTP POST request with a text body and timeout in milliseconds. |
+| `request` | `method, url, body_text: String, headers: Map[String, String]` | `Http_Response` | Send a request with any method, a text body (may be empty) and request headers. |
+| `request` | `method, url, body_text: String, headers: Map[String, String], timeout_ms: Integer` | `Http_Response` | The same, with a timeout in milliseconds. |
 
 ### Example
 
@@ -63,6 +65,15 @@ let client: Http_Client := create Http_Client.make()
 let response: Http_Response := client.get("https://example.com")
 print(response.status())
 print(response.body())
+```
+
+Request with headers (for example an API key):
+
+```nex
+let response := client.request("POST", "https://api.example.com/v1/items",
+  "{\"name\": \"nex\"}",
+  {"content-type": "application/json", "x-api-key": "..."})
+print(response.status())
 ```
 
 Timeout-aware request:

@@ -21,6 +21,8 @@
            (implied-interns "let r := http_get(\"http://localhost\")\nprint(r.status())")))
     (is (= [["net" "Http_Client"]]
            (implied-interns "function f(): Integer do result := http_post(\"u\", \"b\").status() end")))
+    (is (= [["net" "Http_Client"]]
+           (implied-interns "let r := http_request(\"GET\", \"u\", \"\", {\"a\": \"b\"})\nprint(r.status())")))
     (is (= [["net" "Http_Server"]]
            (implied-interns "let h := http_server_create(0)\nprint(http_server_start(h))"))))
   (testing "no implied intern when the program already has the library or the call is not the builtin"

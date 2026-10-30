@@ -1,0 +1,352 @@
+% ===========================================================================
+\chapter{The program}\label{ch:program}
+
+All the parts are there. This chapter puts them together into a program,
+\code{code.nex}, that you run from the command line: give it a task, and
+it works on the sample project. Or give it no task, and it asks for one
+task after another, carrying the conversation from each to the next, so
+that you can say ``now add a check for that''.
+
+\section{Options}
+
+The program's settings come from the command line. Most have sensible
+defaults: the model is \code{claude-opus-5-5} at \code{high} effort, a task
+may take at most 40 replies, and a command at most two minutes. Words that
+are not options make up the task.
+
+\begin{newfile}{code.nex}
+-- code.nex: the coding agent, on the command line.
+--
+--   nex code.nex "make the failing checks pass"     -- one task, then stop
+--   nex code.nex                                    -- type tasks one after another
+--   nex code.nex --replay sessions/fix_late_fines.json --yes
+--
+-- By default the agent works in workspace/, a copy of sample_project/
+-- (a small lending library with a bug). It asks before it changes a file
+-- or runs a command, unless you give --yes.
+--
+-- Talking to Claude needs ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN) in
+-- the environment. --replay plays back a recorded session instead, with
+-- no key, no network and no cost.
+
+intern Agent
+intern Claude_Model
+intern Helpers
+intern io/Path
+
+-- The settings of one run, read from the command line.
+class Options
+create
+  from_command_line(args: Array[String]) do
+    model_id := "claude-opus-5-5"
+    effort := "high"
+    max_replies := 40
+    command_seconds := 120
+    task := ""
+    from_folder := ""
+    dir := ""
+    replay := ""
+    record := ""
+    let words: Array[String] := []
+    from
+      let i: Integer := 0
+    until
+      i >= args.length
+    do
+      let arg: String := args.get(i)
+      if arg = "--yes" then
+        yes := true
+      elseif arg = "--read-only" then
+        read_only := true
+      elseif arg = "--fresh" then
+        fresh := true
+      elseif arg = "--full-output" then
+        full_output := true
+      elseif arg = "--help" or arg = "-h" then
+        help := true
+      elseif arg.starts_with("--") then
+        if i + 1 >= args.length then
+          raise "missing value after " + arg
+        end
+        let value: String := args.get(i + 1)
+        case arg of
+          "--model"     then model_id := value
+          "--effort"    then effort := value
+          "--max-turns" then max_replies := value.to_integer
+          "--timeout"   then command_seconds := value.to_integer
+          "--from"      then from_folder := value
+          "--dir"       then dir := value
+          "--replay"    then replay := value
+          "--record"    then record := value
+          else raise "unknown option " + arg + " (try --help)"
+        end
+        i := i + 1
+      else
+        words.add(arg)
+      end
+      i := i + 1
+    end
+    task := " ".join(words)
+  end
+
+feature
+  task: String         -- what to do; "" to ask for tasks one by one
+  model_id: String     -- which Claude
+  effort: String       -- low, medium, high, xhigh or max
+  from_folder: String  -- copy this folder into workspace/ and work there
+  dir: String          -- work in this folder itself
+  replay: String       -- play back this recorded session
+  record: String       -- record the session to this file
+  yes: Boolean         -- allow changes without asking
+  read_only: Boolean   -- allow no changes at all
+  fresh: Boolean       -- start workspace/ again from its template
+  full_output: Boolean -- print the output of every tool in full
+  help: Boolean
+  max_replies: Integer -- the most replies one task may take
+  command_seconds: Integer  -- how long a command may run
+
+invariant
+  positive_limits: max_replies > 0 and command_seconds > 0
+end
+\end{newfile}
+
+\code{case} \ldots\ \code{of} picks a branch by value. The invariant catches
+a \code{--max-turns 0} as soon as the options are read.
+
+The help text lists them all, and \code{fail} is for mistakes on the
+command line: it says what is wrong and stops the program with
+\code{exit(1)}, the usual signal to whoever ran it that something failed.
+
+\begin{continued}{code.nex}
+function usage_text(): String do
+  result := "usage: nex code.nex [options] [task]\n\n"
+    + "Without a task, it asks for one task after another (an empty line quits).\n\n"
+    + "  --replay FILE     play back a recorded session (no API key needed)\n"
+    + "  --record FILE     record the session, for --replay\n"
+    + "  --from FOLDER     work in workspace/, a fresh copy of FOLDER (default: sample_project)\n"
+    + "  --dir FOLDER      work in FOLDER itself; careful, its files will change\n"
+    + "  --fresh           start workspace/ again from a fresh copy\n"
+    + "  --yes             let the agent edit files and run commands without asking\n"
+    + "  --read-only       never let it edit files or run commands\n"
+    + "  --model ID        which Claude (default claude-opus-5-5)\n"
+    + "  --effort LEVEL    low, medium, high, xhigh or max (default high)\n"
+    + "  --max-turns N     the most replies one task may take (default 40)\n"
+    + "  --timeout SECS    how long a command may run (default 120)\n"
+    + "  --full-output     print every tool's output in full\n"
+end
+
+function fail(message: String) do
+  console.print_line(message)
+  exit(1)
+end
+\end{continued}
+
+\section{Choosing the model}
+
+The rest of the file is the program itself, statements at the top level,
+run in order. First the options, and two mistakes worth catching before
+anything happens:
+
+\begin{continued}{code.nex}
+let options: Options := create Options.from_command_line(program.arguments)
+if options.help then
+  console.print_line(usage_text())
+  exit(0)
+end
+if options.dir /= "" and (options.from_folder /= "" or options.replay /= "" or options.record /= "") then
+  fail("--dir can't be used with --from, --replay or --record: they work in a fresh copy")
+end
+if not Claude_Model.EFFORTS.contains(options.effort) then
+  fail("--effort must be one of " + ", ".join(Claude_Model.EFFORTS))
+end
+\end{continued}
+
+Then the model. With \code{--replay}, it is the recorded session, which
+also says what the task was and which folder to copy. Otherwise it is
+Claude, and there must be a key; without one, the program explains how to
+get one, and how to see the agent at work anyway. With \code{--record},
+Claude is wrapped in a recorder.
+
+The variable \code{model} needs a value from the start, so it begins as an
+empty script, which every branch below replaces. \code{replayer} keeps the
+replay as a \code{Replay_Model}, to ask it at the end whether the session
+diverged; \code{model} can't be asked that, being only a \code{Model}.
+
+\begin{continued}{code.nex}
+-- The model, and the folder the workspace starts as a copy of.
+let model: Model := create Scripted_Model.make([])
+let task: String := options.task
+let template: String := when options.from_folder = "" then "sample_project" else options.from_folder end
+let replayer: ?Replay_Model := nil
+if options.replay /= "" then
+  if not (create Path.make(user_path(options.replay))).is_file() then
+    fail("there is no session file " + options.replay)
+  end
+  let replay: Replay_Model := create Replay_Model.make(user_path(options.replay))
+  replayer := replay
+  model := replay
+  template := replay.template()
+  if task = "" then
+    task := replay.task()
+  end
+else
+  if not has_credentials() then
+    fail("To talk to Claude, set ANTHROPIC_API_KEY to your API key.\n"
+      + "To see the agent at work without one, play back a recorded session:\n\n"
+      + "  nex code.nex --replay sessions/fix_late_fines.json --yes")
+  end
+  model := create Claude_Model.from_environment(options.model_id, options.effort)
+  if options.record /= "" then
+    if task = "" then
+      fail("--record needs a task on the command line")
+    end
+    model := create Recording_Model.make(model, user_path(options.record), task, template)
+  end
+end
+\end{continued}
+
+\section{The workspace, the permission, the agent}
+
+Normally the agent works in \code{workspace/}, a copy of the sample
+project. The copy is made fresh when it doesn't exist yet, when you ask
+with \code{--fresh}, and always for a replay or a recording, which must
+start from the same files every time. Otherwise the workspace is left as
+the last run left it, so that you can carry on. \code{--dir} points the
+agent at a folder of your own, in place: it will change your files, so use
+it on something under version control.
+
+\begin{continued}{code.nex}
+-- The workspace.
+let folder: String := user_path("workspace")
+if options.dir /= "" then
+  folder := user_path(options.dir)
+  if not (create Path.make(folder)).is_directory() then
+    fail("there is no folder " + options.dir)
+  end
+else
+  let copy_again: Boolean := options.fresh or options.from_folder /= "" or options.replay /= ""
+    or options.record /= "" or not (create Path.make(folder)).exists()
+  if copy_again then
+    if not (create Path.make(user_path(template))).is_directory() then
+      fail("there is no folder " + template)
+    end
+    fresh_workspace(user_path(template), folder)
+    console.print_line("(workspace/ is a fresh copy of " + template + "/)")
+  else
+    console.print_line("(working in workspace/ as it is; --fresh starts it again)")
+  end
+end
+let ws: Workspace := create Workspace.make(folder)
+\end{continued}
+
+The agent asks before changing anything, unless told otherwise. That
+includes replays: a session file holds commands, and playing back a file
+you were sent means running its commands. Asking is the safe default.
+
+\begin{continued}{code.nex}
+-- Who allows what.
+let permission: Permission := create Ask_First.make()
+if options.read_only then
+  permission := create Allow_Reading.make()
+elseif options.yes then
+  permission := create Allow_Everything.make()
+end
+
+let tools: Array[Tool] := [create List_Files.make(ws), create Read_File.make(ws),
+  create Search.make(ws), create Edit_File.make(ws), create Write_File.make(ws),
+  create Run_Command.make(ws, options.command_seconds)]
+let agent: Agent := create Agent.make(model, tools, permission,
+  create Reporter.make(false, options.full_output))
+agent.set_max_replies(options.max_replies)
+console.print_line("(the model is " + model.name() + ")")
+\end{continued}
+
+\section{Running tasks}
+
+A task can fail for reasons that are nobody's fault: the network goes
+down, or the API refuses a key. That should end the task, with a message,
+not the program: in interactive use you may want to try again.
+\code{attempt} catches the failure, and reports it.
+
+\begin{continued}{code.nex}
+-- Run one task, reporting any failure of the model or the network
+-- instead of stopping.
+function attempt(agent: Agent, task: String) do
+  do
+    agent.run(task)
+  rescue
+    console.print_line("\nerror: " + exception)
+  end
+end
+
+if task /= "" then
+  attempt(agent, task)
+else
+  console.print_line("Type a task, or an empty line to quit.")
+  let going: Boolean := true
+  from until not going do
+    let line: ?String := console.read_line("\nyou> ")
+    if ?line as text then
+      if text.trim() = "" then
+        going := false
+      else
+        attempt(agent, text.trim())
+      end
+    else
+      going := false
+    end
+  end
+end
+
+if ?replayer as replay then
+  if replay.diverged_at > 0 then
+    console.print_line("\nNote: from reply " + replay.diverged_at.to_string
+      + " on, the tools gave different results than when the session was recorded,"
+      + " so the recorded replies may not fit what happened this time.")
+  end
+end
+\end{continued}
+
+\section{Running it}
+
+Here is the help:
+
+\runoutput{code.nex --help}{help}
+
+Without a key, the program says what to do:
+
+\runoutput{code.nex "Fix the checks."}{no_key_fails}
+
+So let's play back the session that comes with the tutorial, letting the
+agent do what it likes, with \code{--yes}:
+
+\runoutput{code.nex --replay sessions/fix_late_fines.json --yes}{replay}
+
+The same session without \code{--yes} asks before the first command, the
+edit and the second command. Here the answers were typed in advance: yes
+to the command, ``always'' to the edit, and yes to the second command.
+(The answers don't show, because they were not typed at a keyboard.)
+
+% input: y\na\ny
+\runoutput{code.nex --replay sessions/fix_late_fines.json}{replay_asking}
+
+After either run, the fixed project is in \code{workspace/}, and
+\code{cd workspace; nex checks.nex} shows all seven checks passing.
+
+\section{For real}
+
+With \code{ANTHROPIC_API_KEY} set, the same program talks to Claude:
+
+\begin{shell}
+nex code.nex "Some of the checks fail. Find out why and fix it."
+nex code.nex --fresh                    # a fresh copy, then type tasks
+nex code.nex --read-only "Explain how fines are worked out."
+nex code.nex --effort low --model claude-sonnet-5-5 "Add a check for a loan returned early."
+nex code.nex --record sessions/mine.json --yes "Some of the checks fail. Find out why and fix it."
+nex code.nex --replay sessions/mine.json --yes
+\end{shell}
+
+Each real run is different: the model may look at the files in another
+order, or explain the bug in other words, or (now and then) take a wrong
+turn and come back from it. That is exactly why recorded sessions are
+useful.

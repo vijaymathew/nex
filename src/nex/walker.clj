@@ -1465,7 +1465,7 @@
    build those objects as instances of the library's own classes, so a
    program using one of these builtins gets the library, as if it had written
    the `intern` itself — otherwise the classes would not exist in it at all."
-  [{:builtins #{"http_get" "http_post"}
+  [{:builtins #{"http_get" "http_post" "http_request"}
     :path "net" :class-name "Http_Client"
     :provides #{"Http_Response"}}
    {:builtins #{"http_server_create" "http_server_get" "http_server_post"

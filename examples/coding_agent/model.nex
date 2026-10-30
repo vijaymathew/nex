@@ -1,0 +1,181 @@
+-- model.nex: the model, seen from the agent: something that takes the
+-- conversation so far and gives the next reply.
+--
+-- Claude_Model (claude_model.nex) asks Claude over the network. The
+-- models here don't: Scripted_Model plays a part written by hand,
+-- Replay_Model plays back a session recorded earlier, and
+-- Recording_Model records a session while another model does the work.
+
+intern Messages
+intern io/Path
+
+-- Everything the model is given for one reply.
+class Request
+create
+  make(system: String, conversation: Conversation, tools: Array[Map[String, Any]])
+  require
+    models_turn: conversation.models_turn()
+  do
+    this.system := system
+    this.conversation := conversation
+    this.tools := tools
+  end
+
+feature
+  system: String                    -- the standing instructions
+  conversation: Conversation
+  tools: Array[Map[String, Any]]    -- the tools it may ask for
+end
+
+deferred class Model
+feature
+  -- The model's next reply.
+  reply(request: Request): Reply
+  require
+    ready: can_reply()
+  deferred
+
+  -- Whether it can give another reply. A model over the network always
+  -- can (though the network may fail); a script can run out.
+  can_reply(): Boolean do
+    result := true
+  end
+
+  -- Who is answering, for the transcript: "claude-opus-5-5".
+  name(): String deferred
+end
+
+-- The JSON of the message the user sent last in `request`, the part of
+-- the request that is new. JSON text read back is used for both sides of
+-- a comparison, so that two equal messages give equal text.
+function last_message_json(request: Request): String do
+  result := json_text(json_value(json_text(request.conversation.last_user_message())).raw())
+end
+
+-- A model that gives the replies it was given, in order, whatever it is
+-- asked: an actor reading a script. It keeps what it was sent each
+-- time, so a check can look at it.
+class Scripted_Model inherit Model
+create
+  make(replies: Array[Reply]) do
+    this.replies := replies
+  end
+
+feature
+  replies: Array[Reply]
+  sent: Array[String]   -- the new message of each request, as JSON
+
+  name(): String do
+    result := "a script"
+  end
+
+  can_reply(): Boolean do
+    result := sent.length < replies.length
+  end
+
+  reply(request: Request): Reply do
+    result := replies.get(sent.length)
+    sent.add(last_message_json(request))
+  end
+end
+
+-- A model that plays back a session recorded by Recording_Model: the
+-- same replies, in the same order, with no network and no cost.
+--
+-- A recorded reply only makes sense after what was sent before it, so
+-- it compares each request with the recording. If the tools gave
+-- different results this time (the project's files are not the ones
+-- the session was recorded with, say), the replies may no longer fit,
+-- and it says so.
+class Replay_Model inherit Model
+create
+  -- The session saved in the file `path`.
+  make(path: String)
+  require
+    file_exists: (create Path.make(path)).is_file()
+  do
+    session := json_value((create Path.make(path)).read_text())
+    diverged_at := 0
+  end
+
+feature
+  session: Json_Value
+  played: Integer        -- how many replies it has given
+  diverged_at: Integer   -- the first reply whose request differed, or 0
+
+  name(): String do
+    result := session.get("model").as_string + " (recorded)"
+  end
+
+  -- The task the session was recorded with.
+  task(): String do
+    result := session.get("task").as_string
+  end
+
+  -- The folder the session's workspace was copied from.
+  template(): String do
+    result := session.get("template").as_string
+  end
+
+  turns(): Integer do
+    result := session.get("turns").length
+  end
+
+  can_reply(): Boolean do
+    result := played < turns()
+  end
+
+  reply(request: Request): Reply do
+    let turn: Json_Value := session.get("turns").at(played)
+    played := played + 1
+    if diverged_at = 0 and last_message_json(request) /= turn.get("sent").to_string then
+      diverged_at := played
+    end
+    result := create Reply.from_json(turn.get("response"))
+  end
+end
+
+-- A model that passes every request on to another model and saves each
+-- exchange to a file as it goes, for Replay_Model to play back.
+class Recording_Model inherit Model
+create
+  make(inner: Model, path, task, template: String) do
+    this.inner := inner
+    this.path := path
+    this.task := task
+    this.template := template
+  end
+
+feature
+  inner: Model
+  path: String         -- where the session is saved
+  task: String
+  template: String
+  turns: Array[Any]
+
+  name(): String do
+    result := inner.name()
+  end
+
+  can_reply(): Boolean do
+    result := inner.can_reply()
+  end
+
+  reply(request: Request): Reply do
+    result := inner.reply(request)
+    let turn: Map[String, Any] := {
+      "sent": json_value(last_message_json(request)).raw(),
+      "response": result.response.raw()
+    }
+    turns.add(turn)
+    save()
+  end
+
+  private feature
+    -- Saved after every reply, so a session stopped part way is kept.
+    save() do
+      let session: Map[String, Any] := {"model": inner.name(), "task": task,
+        "template": template, "turns": turns}
+      (create Path.make(path)).write_text(json_text(session))
+    end
+end

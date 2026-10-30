@@ -1,0 +1,240 @@
+% ===========================================================================
+\chapter{Changing things safely}\label{ch:editing}
+
+Now the agent gets to change files. How it does that is one of the most
+important choices in the whole design, so let's look at the options first.
+
+\section{Three ways to edit a file}
+
+\textbf{Write the whole file.} The model sends the complete new text.
+Simple, and for a new file it is the only way. For a change to an existing
+file it is wasteful (a one-line fix to a 2,000-line file means writing
+2,000 lines), and it is risky: in all that copying, the model may change
+something else by accident, or leave something out, and nothing tells
+you.
+
+\textbf{Replace lines by number.} ``Replace lines 32 and 33 with \ldots''.
+Short, but fragile. Line numbers go stale: after one edit adds a line,
+every number below it is off by one, and the model must keep track. Get it
+wrong and the edit lands in the wrong place, again silently.
+
+\textbf{Replace text by text.} ``Replace \emph{this} text with \emph{that}
+text.'' The model quotes what it wants to change, exactly, and what to put
+in its place. This is what we will use, with one rule that makes it safe:
+\emph{the old text must occur exactly once in the file}. If it doesn't
+occur at all, the model has misremembered the file, and should read it
+again. If it occurs more than once, the edit is ambiguous, and the model
+should quote more of the lines around it. Either way the edit is refused,
+the file is untouched, and the model is told why. An edit either does
+exactly what was meant, or nothing.
+
+That rule is \code{count_occurrences(text, old_text) = 1}, using the helper
+from Chapter~\ref{ch:setup}. Most coding agents in use today edit this way,
+for these reasons.
+
+\section{The edit tool}
+
+The description repeats the rule, because the model has to follow it to
+succeed: quote the text exactly, without the line numbers that
+\code{read_file} added. This tool changes things, so it says so, and will
+need permission.
+
+\begin{append}{tools.nex}
+class Edit_File inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  name(): String do
+    result := "edit_file"
+  end
+
+  description(): String do
+    result := "Change a file by replacing one piece of its text with another. "
+      + "`old_text` must match exactly one place in the file, character for character, "
+      + "including spaces and line breaks (without the line numbers read_file shows). "
+      + "If it matches more than one place, include more of the surrounding lines. "
+      + "Use this for every change to an existing file."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"path": parameter("string", "The file, relative to the workspace."),
+      "old_text": parameter("string", "The exact text to replace."),
+      "new_text": parameter("string", "The text to put in its place.")}
+  end
+
+  required(): Array[String] do
+    result := ["path", "old_text", "new_text"]
+  end
+
+  changes_things(): Boolean do
+    result := true
+  end
+
+  describe(input: Json_Value): String do
+    result := "edit_file " + string_argument(input, "path", "?")
+  end
+\end{append}
+
+\code{run} checks the path, then the edit. If both are fine, it replaces
+the one occurrence and writes the file. What it sends back is not just
+``done'': it shows the changed lines, numbered, with two lines either
+side. The model sees the result of its edit straight away, as you would in
+an editor, and can tell if something is off (the indentation, say)
+without another \code{read_file}.
+
+\begin{continued}{tools.nex}
+  run(input: Json_Value): Tool_Outcome do
+    let path: String := string_argument(input, "path", "")
+    let old_text: String := string_argument(input, "old_text", "")
+    let new_text: String := string_argument(input, "new_text", "")
+    let problem: String := path_problem(path, "file")
+    let before: String := ""
+    if problem = "" then
+      before := workspace.read(path)
+      problem := edit_problem(before, path, old_text, new_text)
+    end
+    if problem /= "" then
+      result := create Tool_Outcome.error(problem)
+    else
+      let after: String := replace_first(before, old_text, new_text)
+      workspace.write(path, after)
+      result := create Tool_Outcome.ok("Edited " + path + ": replaced "
+        + count_text(lines_of(old_text).length, "line") + " with "
+        + count_text(lines_of(new_text).length, "line") + ". It now reads:\n"
+        + around(after, before.index_of(old_text), new_text))
+    end
+  end
+\end{continued}
+
+The checks get their own routine. Each refusal says what to do instead.
+An empty \code{old_text} would match everywhere, and an edit that changes
+nothing is a sign the model is confused; both are refused too.
+
+\begin{continued}{tools.nex}
+  -- Why `old_text` can't be replaced in `text`, or "" if it can.
+  edit_problem(text, path, old_text, new_text: String): String do
+    result := ""
+    if old_text = "" then
+      result := "`old_text` is empty; to write a whole file, use write_file"
+    elseif old_text = new_text then
+      result := "`old_text` and `new_text` are the same, so nothing would change"
+    else
+      let n: Integer := count_occurrences(text, old_text)
+      if n = 0 then
+        result := "`old_text` does not occur in " + path + ". Read the file again "
+          + "and copy the text exactly, including spaces and line breaks."
+      elseif n > 1 then
+        result := "`old_text` occurs " + n.to_string + " times in " + path
+          + ". Include more of the lines around it, so that it matches exactly one place."
+      end
+    end
+  end
+\end{continued}
+
+To show the lines around the edit, \code{around} works out which line the
+new text starts on (one more than the number of line breaks before it)
+and how many lines it has:
+
+\begin{continued}{tools.nex}
+  private feature
+    -- The lines of `text` around `new_text`, which starts at `start`,
+    -- numbered, with two lines of context either side.
+    around(text: String, start: Integer, new_text: String): String do
+      let lines: Array[String] := lines_of(text)
+      let first: Integer := count_occurrences(text.substring(0, start), "\n") + 1
+      let last: Integer := first + lines_of(new_text).length - 1
+      let from_line: Integer := (first - 2).max(1)
+      let to_line: Integer := (last + 2).min(lines.length)
+      result := numbered(lines.slice(from_line - 1, to_line), from_line)
+    end
+end
+\end{continued}
+
+\section{Writing whole files}
+
+For new files, there is \code{write_file}. Its description steers the
+model away from using it on existing files, for the reasons above.
+
+\begin{append}{tools.nex}
+class Write_File inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  name(): String do
+    result := "write_file"
+  end
+
+  description(): String do
+    result := "Create a new file, or replace a whole file, with the given text. "
+      + "Folders on the way are created. Use edit_file instead to change part of an existing file."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"path": parameter("string", "The file, relative to the workspace."),
+      "content": parameter("string", "The complete text of the file.")}
+  end
+
+  required(): Array[String] do
+    result := ["path", "content"]
+  end
+
+  changes_things(): Boolean do
+    result := true
+  end
+
+  describe(input: Json_Value): String do
+    result := "write_file " + string_argument(input, "path", "?")
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let path: String := string_argument(input, "path", "")
+    let content: String := string_argument(input, "content", "")
+    let problem: String := path_problem(path, "any")
+    if problem = "" and workspace.is_folder(path) then
+      problem := "`" + path + "` is a folder"
+    end
+    if problem /= "" then
+      result := create Tool_Outcome.error(problem)
+    else
+      let existed: Boolean := workspace.exists(path)
+      workspace.write(path, content)
+      result := create Tool_Outcome.ok((when existed then "Replaced " else "Created " end)
+        + path + " (" + count_text(lines_of(content).length, "line") + ")")
+    end
+  end
+end
+\end{append}
+
+The result says whether the file is new or replaced: if the model meant to
+create a file and replaced one, that is something it should notice.
+
+Let's try the edits a model might make on the sample project: one that is
+ambiguous, one that quotes the file wrongly (it has the line numbers in),
+and the real fix:
+
+\begin{tryit}{try_edit.nex}
+intern Tools
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+let edit: Edit_File := create Edit_File.make(ws)
+
+function show(outcome: Tool_Outcome) do
+  console.print_line((when outcome.is_error then "error: " else "" end) + outcome.text)
+end
+
+show(edit.run(json_value('{"path": "loans.nex", "old_text": "result := ", "new_text": "result = "}')))
+show(edit.run(json_value('{"path": "loans.nex", "old_text": "   32      if day >= due_on() then", "new_text": "if day > due_on() then"}')))
+show(edit.run(json_value('{"path": "loans.nex", "old_text": "    if day >= due_on() then\n      result := day - due_on() + 1", "new_text": "    if day > due_on() then\n      result := day - due_on()"}')))
+show(create Write_File.make(ws).run(json_value('{"path": "notes/fix.md", "content": "Late only after the due day.\n"}')))
+\end{tryit}
+\tryoutput{try_edit}
+
+The two bad edits changed nothing. The good one shows its result. The
+sample project is now fixed, in this scratch copy at least; we can't run
+its checks yet, because the agent can't run commands. That is next.

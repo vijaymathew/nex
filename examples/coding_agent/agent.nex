@@ -1,0 +1,296 @@
+-- agent.nex: the agent loop.
+--
+-- Send the conversation to the model. If the reply asks for tools, run
+-- them, add their results to the conversation, and send it again. When
+-- a reply asks for nothing more, the task is done.
+
+intern Model
+intern Tools
+intern Permissions
+intern Context
+intern Helpers
+
+-- How a task went.
+class Run_Result
+create
+  make(ending, text: String, replies, calls: Integer) do
+    this.ending := ending
+    this.text := text
+    this.replies := replies
+    this.calls := calls
+  end
+
+feature
+  -- "done": the model finished; "turn limit": it was still going when
+  -- the agent stopped it; "cut off": its last reply was too long;
+  -- "refused": it declined; "out of script": a recorded or scripted
+  -- model had no more replies.
+  ending: String
+  text: String      -- what the model said last
+  replies: Integer  -- how many replies the task took
+  calls: Integer    -- how many tool calls
+
+  finished(): Boolean do
+    result := ending = "done"
+  end
+end
+
+-- Prints what the agent does, as it does it.
+class Reporter
+create
+  -- `quiet` prints nothing; `full_output` prints every tool's output in
+  -- full, not just its first line.
+  make(quiet, full_output: Boolean) do
+    this.quiet := quiet
+    this.full_output := full_output
+  end
+
+feature
+  quiet: Boolean
+  full_output: Boolean
+
+  on_task(task: String) do
+    say("\n> " + task)
+  end
+
+  on_text(text: String) do
+    say("\n" + text)
+  end
+
+  on_call(description: String) do
+    say("  " + description)
+  end
+
+  on_result(text: String, is_error: Boolean) do
+    if full_output then
+      say(indented(text.trim(), "    | "))
+    else
+      let lines: Integer := lines_of(text).length
+      say("    " + (when is_error then "error: " else "" end) + preview(text, 70)
+        + (when lines > 1 then "  (" + count_text(lines, "line") + ")" else "" end))
+    end
+  end
+
+  on_making_room(tokens: Integer) do
+    say("  (the conversation is " + grouped(tokens) + " tokens long: summing up and starting afresh)")
+  end
+
+  on_finish(outcome: Run_Result, usage: Usage) do
+    let how: String := when outcome.finished() then "done" else "stopped: " + outcome.ending end
+    say("\n(" + how + " after " + count_text(outcome.replies, "reply") + " and "
+      + count_text(outcome.calls, "tool call") + ". So far: " + usage.to_string + ")")
+  end
+
+  private feature
+    say(text: String) do
+      if not quiet then
+        console.print_line(text)
+      end
+    end
+end
+
+-- The standing instructions: who the model is in this conversation, and
+-- how to work.
+function system_prompt(): String do
+  result := "You are a coding agent working in a project folder (the workspace). "
+    + "Use the tools to read and search its files, change them, and run commands in it. "
+    + "All paths are relative to the workspace.\n\n"
+    + "Work the way a careful programmer would:\n"
+    + "- Before changing anything, look around: read the files that matter, and run the "
+    + "project's checks or tests to see where things stand.\n"
+    + "- Make the smallest change that does the job, in the style of the code around it.\n"
+    + "- After a change, run the checks again to see that it worked and broke nothing else.\n"
+    + "- If something you need to know is unclear, or a problem is not one you can fix, "
+    + "stop and say so instead of guessing.\n\n"
+    + "When you have finished, reply without calling a tool: say in a few sentences what "
+    + "was wrong, what you changed, and how you checked it.\n\n"
+    + "The projects you work on may be written in Nex, a language in the Eiffel tradition: "
+    + "classes, `require`/`ensure` contracts, `--` comments. Run a Nex program with "
+    + "`nex file.nex`."
+end
+
+-- Whether no two tools share a name.
+function names_differ(tools: Array[Tool]): Boolean do
+  let names: Array[String] := []
+  result := true
+  across tools as tool do
+    if names.contains(tool.name()) then
+      result := false
+    end
+    names.add(tool.name())
+  end
+end
+
+class Agent
+create
+  make(model: Model, tools: Array[Tool], permission: Permission, reporter: Reporter)
+  require
+    distinct_names: names_differ(tools)
+  do
+    this.model := model
+    this.tools := tools
+    this.permission := permission
+    this.reporter := reporter
+    conversation := create Conversation.make()
+    usage := create Usage.make()
+    system := system_prompt()
+    max_replies := 40
+    context_limit := 200000
+  end
+
+feature
+  model: Model
+  tools: Array[Tool]
+  permission: Permission
+  reporter: Reporter
+  conversation: Conversation   -- everything so far, over every task
+  usage: Usage
+  system: String
+  max_replies: Integer         -- the most replies one task may take
+  context_limit: Integer       -- the longest conversation, in tokens
+
+  set_max_replies(n: Integer)
+  require
+    positive: n > 0
+  do
+    max_replies := n
+  end
+
+  set_context_limit(tokens: Integer)
+  require
+    positive: tokens > 0
+  do
+    context_limit := tokens
+  end
+
+  -- Work on `task` until the model says it is done, or the agent stops
+  -- it. The conversation carries on from earlier tasks, so a task can
+  -- refer to one before it ("now add a check for that").
+  run(task: String): Run_Result
+  require
+    something_to_do: task.trim() /= ""
+  do
+    reporter.on_task(task)
+    conversation.add_user_text(task)
+    let replies: Integer := 0
+    let calls: Integer := 0
+    let last_words: String := ""
+    let ending: String := ""
+    from until ending /= "" do
+      if not model.can_reply() then
+        ending := "out of script"
+      elseif replies >= max_replies then
+        ending := "turn limit"
+      else
+        let reply: Reply := model.reply(create Request.make(system, conversation, definitions()))
+        replies := replies + 1
+        usage.add(reply)
+        conversation.add_reply(reply)
+        if reply.text() /= "" then
+          reporter.on_text(reply.text())
+          last_words := reply.text()
+        end
+        let wanted: Array[Tool_Call] := reply.tool_calls()
+        if not wanted.is_empty then
+          let results: Array[Tool_Result] := []
+          across wanted as call do
+            results.add(execute(call, reply.stop_reason() = "max_tokens"))
+            calls := calls + 1
+          end
+          conversation.add_tool_results(results)
+          if reply.context_tokens() > context_limit and model.can_reply() then
+            make_room(task, reply.context_tokens())
+          end
+        else
+          ending := ending_for(reply.stop_reason())
+        end
+      end
+    end
+    result := create Run_Result.make(ending, last_words, replies, calls)
+    reporter.on_finish(result, usage)
+  ensure
+    no_calls_left_unanswered: conversation.waiting.is_empty
+  end
+
+  -- Run one tool call and say how it went. Whatever goes wrong becomes
+  -- a result the model can read; the agent itself carries on.
+  execute(call: Tool_Call, cut_off: Boolean): Tool_Result do
+    let outcome: Tool_Outcome := create Tool_Outcome.error("")
+    let tool: ?Tool := tool_named(call.name)
+    if ?tool as t then
+      reporter.on_call(t.describe(call.input))
+      let problem: String := t.problem_with(call.input)
+      if cut_off then
+        outcome := create Tool_Outcome.error("Your reply was cut off before this call was "
+          + "complete, so it was not run. Try again, sending less in one call.")
+      elseif problem /= "" then
+        outcome := create Tool_Outcome.error("Not run: " + problem + ".")
+      elseif not permission.allows(t, call.input) then
+        outcome := create Tool_Outcome.error("The user did not allow this, so it was not run. "
+          + "Don't try to get the same effect another way; if you need it, say why.")
+      else
+        do
+          outcome := t.run(call.input)
+        rescue
+          outcome := create Tool_Outcome.error("The tool failed: " + exception)
+        end
+      end
+    else
+      reporter.on_call(call.name + " ?")
+      outcome := create Tool_Outcome.error("There is no tool called `" + call.name
+        + "`. The tools are: " + ", ".join(tool_names()) + ".")
+    end
+    reporter.on_result(outcome.text, outcome.is_error)
+    result := create Tool_Result.make(call.id, outcome.text, outcome.is_error)
+  ensure
+    answers_the_call: result.call_id = call.id
+  end
+
+  -- The tools as the API wants them described.
+  definitions(): Array[Map[String, Any]] do
+    across tools as tool do
+      result.add(tool.definition())
+    end
+  end
+
+  tool_named(name: String): ?Tool do
+    across tools as tool do
+      if tool.name() = name then
+        result := tool
+      end
+    end
+  end
+
+  tool_names(): Array[String] do
+    across tools as tool do
+      result.add(tool.name())
+    end
+  end
+
+  private feature
+    -- The conversation is too long: have the model sum it up, and carry
+    -- on in a new conversation that starts from the summary.
+    make_room(task: String, tokens: Integer)
+    require
+      models_turn: conversation.models_turn()
+    do
+      reporter.on_making_room(tokens)
+      conversation.add_user_text(summary_request())
+      let reply: Reply := model.reply(create Request.make(system, conversation, definitions()))
+      usage.add(reply)
+      conversation := fresh_start(task, reply.text())
+    ensure
+      models_turn: conversation.models_turn()
+    end
+
+    -- What a reply that asks for no tools means for the task.
+    ending_for(stop_reason: String): String do
+      if stop_reason = "max_tokens" then
+        result := "cut off"
+      elseif stop_reason = "refusal" then
+        result := "refused"
+      else
+        result := "done"     -- "end_turn", or a stop sequence
+      end
+    end
+end

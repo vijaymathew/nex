@@ -43,6 +43,12 @@ read one is to run it alongside the source.
   breadth-first search, Dijkstra and A*, turn-by-turn directions, and a live
   map in a window where a simulated traveller follows the route (and gets
   rerouted after a wrong turn), with a step-by-step tutorial (PDF)
+- **coding_agent/** — a coding agent: a program that gives Claude tools to
+  read, search, edit and test a project, and fixes a bug in a small sample
+  project; the agent loop, a sandboxed workspace, safe edits, commands with
+  time limits, permissions, the Messages API over HTTP, and recorded
+  sessions you can play back without an API key, with a step-by-step
+  tutorial (PDF)
 
 ## Data structures
 

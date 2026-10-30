@@ -63,4 +63,16 @@ feature
   do
     result := http_post(url, body_text, timeout_ms)
   end
+
+  request(method, url, body_text: String, headers: Map[String, String]): Http_Response
+    note "Send an HTTP request with any method, a text body (may be empty) and request headers."
+  do
+    result := http_request(method, url, body_text, headers)
+  end
+
+  request(method, url, body_text: String, headers: Map[String, String], timeout_ms: Integer): Http_Response
+    note "Send an HTTP request with any method, body and headers, and a timeout in milliseconds."
+  do
+    result := http_request(method, url, body_text, headers, timeout_ms)
+  end
 end

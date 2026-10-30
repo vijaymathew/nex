@@ -1,0 +1,512 @@
+% ===========================================================================
+\chapter{A conversation as data}\label{ch:conversation}
+
+Before the agent can talk to a model, we need a way to write the
+conversation down. This chapter builds the data: messages, the tool calls
+a model makes, the results we send back, and the model's replies. It uses
+the shapes of Claude's Messages API, so that in Chapter~\ref{ch:claude}
+sending a conversation is only a matter of turning it into JSON.
+
+\section{What the model sees}
+
+A language model has no memory between requests. Each request carries the
+whole conversation so far, and the model writes the next message. A
+conversation is a list of messages, each from one of two \emph{roles}:
+\code{"user"} (us) and \code{"assistant"} (the model). They take turns,
+and the first message is the user's. Each message holds a list of
+\emph{content blocks}. The simplest is text. Here is the start of a
+conversation, as JSON:
+
+\begin{json}
+[{"role": "user",
+  "content": [{"type": "text", "text": "Some of the checks fail. Find out why and fix it."}]}]
+\end{json}
+
+The model's reply is another message. Along with the request, we tell the
+model which tools it may use (Chapter~\ref{ch:tools}), and if it wants one,
+its reply contains a \code{tool_use} block. The block names the tool,
+gives its input as a JSON object, and has an \code{id}:
+
+\begin{json}
+{"role": "assistant",
+ "content": [{"type": "text", "text": "I'll start by running the checks."},
+             {"type": "tool_use", "id": "toolu_01", "name": "run_command",
+              "input": {"command": "nex checks.nex"}}],
+ "stop_reason": "tool_use"}
+\end{json}
+
+The \code{stop_reason} says why the model stopped writing. Here it is
+\code{"tool_use"}: it is waiting for the result. The result goes in the
+next user message, as a \code{tool_result} block quoting the call's
+\code{id}:
+
+\begin{json}
+{"role": "user",
+ "content": [{"type": "tool_result", "tool_use_id": "toolu_01",
+              "content": "exit code 1\nPASS a loan is due 14 days ...", "is_error": false}]}
+\end{json}
+
+A reply may ask for several tools at once, each with its own \code{id}.
+Every one of them must be answered, all in the next message. When the
+model has finished, its \code{stop_reason} is \code{"end_turn"}.
+
+That is all the structure there is. The rest of this chapter writes it in
+Nex.
+
+\section{JSON in Nex}
+
+Nex's \code{data/Json} library reads JSON text into a \code{Json_Value},
+which we can take apart with \code{get} (a field of an object), \code{at}
+(an element of an array), \code{items} (all the elements), and
+\code{as_string}, \code{as_integer} and so on, which check the value's type
+as they go. In the other direction, \code{stringify} turns Nex maps, arrays,
+strings and numbers into JSON text. Two short functions make both
+directions easier to write:
+
+\begin{newfile}{messages.nex}
+-- messages.nex: a conversation with the model, as data.
+--
+-- The Claude API is stateless: every request carries the whole
+-- conversation so far. A conversation is a list of messages, alternating
+-- between the user and the assistant (the model). Each message holds a
+-- list of content blocks: text, a tool call the model makes ("tool_use"),
+-- or the result of one ("tool_result").
+
+intern data/Json
+
+-- A JSON text read back as a Json_Value: json_value('{"path": "a.nex"}').
+function json_value(text: String): Json_Value do
+  result := create Json.make().read(text)
+end
+
+-- Any value built from Nex maps and arrays, as JSON text.
+function json_text(value: Any): String do
+  result := create Json.make().stringify(value)
+end
+\end{newfile}
+
+The example in the comment uses a \emph{raw} string, in single quotes.
+Nothing inside one is special: no backslash escapes, and double quotes are
+just characters. That makes raw strings the easy way to write JSON in Nex
+code, and we will use them a lot.
+
+\section{Tool calls and their results}
+
+A tool call is three things: the \code{id}, the tool's name, and its
+input. The input stays a \code{Json_Value}, because each tool expects
+different arguments, and each tool will take apart its own.
+
+\begin{append}{messages.nex}
+-- The model asking for one tool to be run.
+class Tool_Call
+create
+  make(id, name: String, input: Json_Value) do
+    this.id := id
+    this.name := name
+    this.input := input
+  end
+
+feature
+  id: String          -- chosen by the model; the result must quote it
+  name: String        -- which tool
+  input: Json_Value   -- the tool's arguments, a JSON object
+end
+\end{append}
+
+The constructor's parameters have the same names as the fields, so it
+writes \code{this.id} for the field. (Writing \code{id := id} would assign
+the parameter to itself, and leave the field empty.)
+
+A result is the text a tool gave back, and whether it failed. That second
+part matters more than it looks. A failed tool is not the end of the
+world: the model reads the error, just as a programmer would, and tries
+something else. But it needs to know that it \emph{was} an error. The
+\code{to_json} routine builds the block the API wants, as a Nex map:
+
+\begin{append}{messages.nex}
+-- What running one tool gave back, ready to send to the model.
+class Tool_Result
+create
+  make(call_id, text: String, is_error: Boolean) do
+    this.call_id := call_id
+    this.text := text
+    this.is_error := is_error
+  end
+
+feature
+  call_id: String
+  text: String
+  is_error: Boolean   -- tells the model the tool failed, and why
+
+  to_json(): Map[String, Any] do
+    result := {"type": "tool_result", "tool_use_id": call_id,
+      "content": text, "is_error": is_error}
+  end
+end
+\end{append}
+
+\code{Map[String, Any]} is a map from strings to values of any type: here,
+strings and a boolean. That is what a JSON object is.
+
+\section{Replies}
+
+A reply arrives from the API as a JSON object. The obvious thing to do
+would be to take it apart into Nex objects (some text, some tool calls)
+and build the JSON again when we send the conversation back. We will not
+do that, and the reason is worth knowing. Models like Claude can
+\emph{think} before they answer, and a reply then contains
+\code{thinking} blocks too, with a signature that the API checks when they
+come back. Any change to them, or to the blocks around them, and they are
+no longer valid. The safe rule, and the one we follow, is: \emph{a reply
+goes back to the API exactly as it came}. So a \code{Reply} keeps the whole
+response, and reads things out of it when asked:
+
+\begin{append}{messages.nex}
+-- One reply from the model, kept exactly as the API sent it.
+--
+-- Its content blocks go back to the API unchanged in every later
+-- request. Some of them (the model's "thinking") are only valid if
+-- nothing about them changes, so a reply is never rebuilt from the
+-- pieces this class reads out of it.
+class Reply
+create
+  -- A reply from the body of a Messages API response.
+  from_json(response: Json_Value) do
+    this.response := response
+  end
+
+feature
+  response: Json_Value
+
+  -- The content blocks, a JSON array.
+  content(): Json_Value do
+    result := response.get("content")
+  end
+
+  -- Why the model stopped: "end_turn" (it has finished), "tool_use" (it
+  -- wants tools run), "max_tokens" (it ran out of room), "refusal", ...
+  stop_reason(): String do
+    result := response.get("stop_reason").as_string
+  end
+\end{append}
+
+The text of a reply is its text blocks, joined. The tool calls are its
+\code{tool_use} blocks, in order. Blocks of any other type, thinking
+included, are simply skipped: they are for the API, not for us.
+
+\begin{continued}{messages.nex}
+  -- The text of the reply: its text blocks, one per paragraph.
+  text(): String do
+    let parts: Array[String] := []
+    across content().items as block do
+      if block.get("type").as_string = "text" then
+        parts.add(block.get("text").as_string)
+      end
+    end
+    result := "\n\n".join(parts)
+  end
+
+  -- The tools the model wants run, in the order it asked for them.
+  tool_calls(): Array[Tool_Call] do
+    across content().items as block do
+      if block.get("type").as_string = "tool_use" then
+        result.add(create Tool_Call.make(block.get("id").as_string,
+          block.get("name").as_string, block.get("input")))
+      end
+    end
+  end
+\end{continued}
+
+\texttt{"\textbackslash n\textbackslash n".join(parts)} joins the parts with
+a blank line between them.
+
+A response from the API also says how many tokens the request used, in its
+\code{usage} field. We will want that in Chapter~\ref{ch:long}, to see how
+long the conversation is getting. The API can keep a request's start in a
+\emph{prompt cache}, so that the next request, which starts the same way,
+is cheaper; then the tokens read are split into three counts (fresh, read
+from the cache, and written to it), and the length of the conversation is
+their sum:
+
+\begin{continued}{messages.nex}
+  -- How many tokens the model read: the whole request, cached or not.
+  -- This is how full the context window is.
+  context_tokens(): Integer do
+    result := usage("input_tokens") + usage("cache_read_input_tokens")
+      + usage("cache_creation_input_tokens")
+  end
+
+  -- How many of those were read from the prompt cache, at a tenth of
+  -- the price.
+  cached_tokens(): Integer do
+    result := usage("cache_read_input_tokens")
+  end
+
+  -- How many tokens the model wrote.
+  output_tokens(): Integer do
+    result := usage("output_tokens")
+  end
+
+  private feature
+    usage(field: String): Integer do
+      if response.has("usage") and response.get("usage").has(field)
+        and response.get("usage").get(field).is_number then
+        result := response.get("usage").get(field).as_integer
+      end
+    end
+end
+\end{continued}
+
+A \code{private feature} section is for the class's own use: other code
+can't call \code{usage}. If a count is missing, as it will be in the
+replies we write by hand, it is 0.
+
+\section{Replies written by hand}
+
+Until Chapter~\ref{ch:claude} the model will be played by a script, so we
+need replies we can write ourselves. \code{scripted_reply} builds the same
+JSON the API would send: an optional text block, and an optional tool call,
+whose input is given as JSON text. It then turns it into text and reads it
+back, so that a reply we write and a reply from the API are made of exactly
+the same kind of values.
+
+\begin{append}{messages.nex}
+-- A reply written by hand, for a pretend model: `text` and, if `tool`
+-- is not "", one call of `tool` with `input` (a JSON object as text).
+function scripted_reply(text, tool, input: String): Reply do
+  let blocks: Array[Any] := []
+  if text /= "" then
+    blocks.add({"type": "text", "text": text})
+  end
+  let stop: String := "end_turn"
+  if tool /= "" then
+    blocks.add({"type": "tool_use", "id": "call_" + tool + "_" + input.hash.abs.to_string,
+      "name": tool, "input": json_value(input).raw()})
+    stop := "tool_use"
+  end
+  let response: Map[String, Any] := {"type": "message", "role": "assistant",
+    "content": blocks, "stop_reason": stop}
+  result := create Reply.from_json(json_value(json_text(response)))
+end
+
+-- A reply that only talks.
+function say(text: String): Reply do
+  result := scripted_reply(text, "", "")
+end
+
+-- A reply that says `text` and asks for `tool` to be run on `input`.
+function use_tool(text, tool, input: String): Reply do
+  result := scripted_reply(text, tool, input)
+end
+\end{append}
+
+\code{raw()} gives back the plain Nex value inside a \code{Json_Value}, to
+put inside another one. The call's \code{id} is made from the tool and a
+hash of its input, so it is the same every time the script runs.
+
+\section{The conversation}
+
+Now the conversation itself. It keeps, for each message, its role and its
+content blocks. It also keeps the ids of the tool calls in the last reply
+that haven't been answered yet, so that it can refuse to go on until they
+are.
+
+\begin{append}{messages.nex}
+-- The conversation so far.
+class Conversation
+create
+  make() do
+  end
+
+feature
+  roles: Array[String]           -- "user" or "assistant", one per message
+  contents: Array[Array[Any]]    -- each message's content blocks
+  waiting: Array[String]         -- ids of tool calls not yet answered
+
+  length(): Integer do
+    result := roles.length
+  end
+
+  -- Whether the conversation ends with the user, so it is the model's
+  -- turn to speak.
+  models_turn(): Boolean do
+    result := not roles.is_empty and roles.get(roles.length - 1) = "user"
+      and waiting.is_empty
+  end
+\end{append}
+
+There are three ways the conversation grows: the user says something, the
+model replies, or we send back tool results. Each comes with a contract
+that keeps the conversation the way the API wants it.
+
+When the user speaks right after a user message (as happens when we send
+tool results and then have something to add), the new text joins that
+message instead of starting another one. That way the roles always take
+turns. But the user may not speak at all while a tool call is waiting for
+its answer: the API would reject the conversation.
+
+\begin{continued}{messages.nex}
+  -- Add something the user says. If the conversation already ends with
+  -- the user (with tool results, say), it joins that message, so that
+  -- user and assistant still take turns.
+  add_user_text(text: String)
+  require
+    something_said: text /= ""
+    no_calls_waiting: waiting.is_empty
+  do
+    let block: Map[String, Any] := {"type": "text", "text": text}
+    add_user_block(block)
+  ensure
+    models_turn: models_turn()
+  end
+\end{continued}
+
+A reply goes in exactly as it came, block by block, and its tool calls
+start waiting:
+
+\begin{continued}{messages.nex}
+  -- Add a reply from the model, exactly as it came.
+  add_reply(reply: Reply)
+  require
+    models_turn: models_turn()
+  do
+    roles.add("assistant")
+    let blocks: Array[Any] := []
+    across reply.content().items as block do
+      blocks.add(block.raw())
+    end
+    contents.add(blocks)
+    across reply.tool_calls() as call do
+      waiting.add(call.id)
+    end
+  end
+\end{continued}
+
+Tool results must answer the waiting calls exactly: one result for each,
+no more, no fewer, all in one message.
+
+\begin{continued}{messages.nex}
+  -- Answer the tool calls of the last reply: one result for every call,
+  -- all in one message.
+  add_tool_results(results: Array[Tool_Result])
+  require
+    answers_every_call: answers_exactly(results)
+  do
+    across results as r do
+      add_user_block(r.to_json())
+    end
+    waiting := []
+  ensure
+    models_turn: models_turn()
+  end
+
+  -- Whether `results` answer the calls that are waiting, each once.
+  answers_exactly(results: Array[Tool_Result]): Boolean do
+    result := results.length = waiting.length and not waiting.is_empty
+    across results as r do
+      if not waiting.contains(r.call_id) then
+        result := false
+      end
+    end
+  end
+\end{continued}
+
+These preconditions turn mistakes that the API would report much later,
+with a confusing error, into an immediate stop at the line that made them.
+
+The remaining routines read the conversation: the last user message (we
+will need it to record sessions, in Chapter~\ref{ch:replay}), the whole
+conversation as the API wants it, and whether the roles take turns.
+
+\begin{continued}{messages.nex}
+  -- The last message the user sent: what a request adds to the ones
+  -- before it.
+  last_user_message(): Array[Any]
+  require
+    there_is_one: roles.contains("user")
+  do
+    let i: Integer := roles.length - 1
+    from until roles.get(i) = "user" do
+      i := i - 1
+    end
+    result := contents.get(i)
+  end
+
+  -- The messages as the API wants them.
+  to_json(): Array[Any] do
+    let i: Integer := 0
+    across roles as role do
+      result.add({"role": role, "content": contents.get(i)})
+      i := i + 1
+    end
+  end
+
+  -- Whether no two messages in a row come from the same side.
+  alternates(): Boolean do
+    result := true
+    let i: Integer := 1
+    from until i >= roles.length do
+      if roles.get(i) = roles.get(i - 1) then
+        result := false
+      end
+      i := i + 1
+    end
+  end
+\end{continued}
+
+Last, the private routine that adds a block to the user's side, and the
+class \emph{invariant}: what must be true of every conversation, before
+and after every call of its routines. Nex checks it each time.
+
+\begin{continued}{messages.nex}
+  private feature
+    add_user_block(block: Map[String, Any]) do
+      if roles.is_empty or roles.get(roles.length - 1) = "assistant" then
+        roles.add("user")
+        contents.add([])
+      end
+      contents.get(contents.length - 1).add(block)
+    end
+
+invariant
+  one_content_per_role: roles.length = contents.length
+  starts_with_user: roles.is_empty or roles.get(0) = "user"
+  takes_turns: alternates()
+end
+\end{continued}
+
+Let's build a conversation, and see it as the API will:
+
+\begin{tryit}{try_conversation.nex}
+intern Messages
+
+let c: Conversation := create Conversation.make()
+c.add_user_text("Some of the checks fail. Find out why and fix it.")
+let reply: Reply := use_tool("I'll start by running the checks.", "run_command",
+  '{"command": "nex checks.nex"}')
+c.add_reply(reply)
+console.print_line("waiting for: " + c.waiting.to_string)
+
+let call: Tool_Call := reply.tool_calls().get(0)
+console.print_line(call.name + " " + call.input.get("command").as_string)
+c.add_tool_results([create Tool_Result.make(call.id, "exit code 1\n...", false)])
+console.print_line("the model's turn: " + c.models_turn().to_string)
+across c.to_json() as message do
+  console.print_line(json_text(message))
+end
+
+let refused: String := ""
+do
+  c.add_reply(say("Hello again."))
+  c.add_reply(say("And again."))
+rescue
+  refused := "" + exception
+end
+console.print_line(refused)
+\end{tryit}
+\tryoutput{try_conversation}
+
+The last part breaks a rule on purpose: two replies in a row. The second
+\code{add_reply} stops with a precondition violation, which the
+\code{rescue} clause catches. (In a \code{rescue}, \code{exception} is
+what went wrong; adding it to a string gives its message.)

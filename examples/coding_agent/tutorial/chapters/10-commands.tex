@@ -1,0 +1,205 @@
+% ===========================================================================
+\chapter{Running commands}\label{ch:commands}
+
+The last tool is the most powerful: running a shell command in the
+workspace. With it, the agent can do what a programmer does after every
+change, run the tests, and see for itself whether its change worked. That
+is what turns ``a model that suggests fixes'' into ``an agent that fixes
+things'': it can check its own work, and try again when it is wrong.
+
+It is also the most dangerous tool, since a command can do anything you
+can. Chapter~\ref{ch:permission} puts it behind your permission. This
+chapter is about running a command well.
+
+\section{Running a process}
+
+Nex's \code{Process} runs another program. \code{create
+Process.command("bash", ["-c", command])} sets up bash to run the
+command; nothing happens until \code{start}. Before that we say where it
+runs (the workspace), and that its error output should be mixed into its
+ordinary output, so the model sees both, in the order they were printed.
+Once it has started, we close its input. A command that waits for the
+keyboard (a program asking ``Are you sure?'') would otherwise wait for
+ever; with its input closed, it reads end-of-input at once and usually
+gives up.
+
+Two things can go wrong while it runs, and both would hang the agent.
+
+\textbf{The pipe fills up.} A process's output goes through a pipe with a
+small buffer. If nobody reads it, a process that prints a lot fills the
+buffer and stops, waiting for room, while we wait for it to finish: each
+waits for the other, for ever. So we read the output \emph{while} the
+process runs, in a separate task: \code{spawn do \ldots\ end} starts its
+body running alongside the rest of the program and gives back a
+\code{Task}, whose \code{await} waits for the body to finish and gives its
+result.
+
+\textbf{It never finishes.} A test stuck in a loop, a server that keeps
+serving. \code{process.wait(ms)} waits at most so long, and gives back the
+exit code, or \code{nil} if the process is still running. Then we stop it.
+
+Stopping it is less simple than it sounds. Killing bash is not enough: the
+command it is running (and anything that started) carries on, holding the
+output pipe open, and the reading task waits on. We have to stop the whole
+tree of processes. Nex doesn't do that itself, but the Java platform it
+runs on does, and Nex can call Java directly. First, import the Java class
+at the top of \code{tools.nex}:
+
+\begin{addbefore}{tools.nex}{before the Tool_Outcome class}{-- What running a tool gave back: some text, and whether it failed.}
+import java.lang.ProcessHandle
+\end{addbefore}
+
+Now the tool. Its timeout is set when it is made.
+
+\begin{append}{tools.nex}
+class Run_Command inherit Tool
+create
+  make(ws: Workspace, timeout_seconds: Integer)
+  require
+    positive_timeout: timeout_seconds > 0
+  do
+    super.make(ws)
+    this.timeout_seconds := timeout_seconds
+  end
+
+feature
+  timeout_seconds: Integer
+
+  name(): String do
+    result := "run_command"
+  end
+
+  description(): String do
+    result := "Run a shell command (bash) in the workspace folder and get its exit code "
+      + "and output (standard output and standard error together). Use it to run the "
+      + "project's checks or tests, or a program. Commands that wait for keyboard input "
+      + "will not get any. A command running longer than "
+      + count_text(timeout_seconds, "second") + " is stopped."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"command": parameter("string", "The command, e.g. `nex checks.nex`.")}
+  end
+
+  required(): Array[String] do
+    result := ["command"]
+  end
+
+  changes_things(): Boolean do
+    result := true
+  end
+
+  describe(input: Json_Value): String do
+    result := "run_command " + string_argument(input, "command", "?")
+  end
+\end{append}
+
+The description tells the model the two surprises: no keyboard, and a time
+limit. A model that knows a command will be stopped after two minutes
+won't start a server and wait for it.
+
+The result starts with the exit code, on a line of its own, because that
+is the first thing to know about a command: did it work? Then the output,
+cut to size.
+
+\begin{continued}{tools.nex}
+  run(input: Json_Value): Tool_Outcome do
+    let command: String := string_argument(input, "command", "")
+    if command.trim() = "" then
+      result := create Tool_Outcome.error("the command is empty")
+    else
+      let process: Process := create Process.command("bash", ["-c", command])
+      process.set_working_directory(workspace.root)
+      process.set_redirect_error_to_output(true)
+      process.start()
+      process.close_stdin()
+      -- Read the output while the command runs: a command that writes a
+      -- lot would otherwise fill the pipe and wait for ever.
+      let output: Task[String] := spawn do
+        result := process.read_all
+      end
+      let code: ?Integer := process.wait(timeout_seconds * 1000)
+      if ?code as exit_code then
+        result := create Tool_Outcome.ok("exit code " + exit_code.to_string + "\n"
+          + shortened(output.await, output_limit()))
+      else
+        stop_children()
+        result := create Tool_Outcome.error("the command was stopped after "
+          + count_text(timeout_seconds, "second") + ". Its output so far:\n"
+          + shortened(output.await, output_limit()))
+      end
+    end
+  end
+\end{continued}
+
+A command that fails, with a non-zero exit code, is not an error of the
+\emph{tool}: the tool did its job, and a failing test run is exactly what
+the model needs to see. Only a command that had to be stopped is reported
+as an error.
+
+\code{stop_children} is where Nex calls Java. Inside \code{with "java" do}
+\ldots\ \code{end}, method calls go to Java objects. \code{ProcessHandle}
+can list a process's descendants: everything it started, and everything
+those started. We would like to ask for the descendants of the bash
+process, but that needs \code{ProcessHandle.of}, and \code{of} is a word
+Nex keeps for itself (in \code{case} \ldots\ \code{of}). There is a simple
+way round, which also happens to be the right rule: the agent runs one
+command at a time, so \emph{every} process below the agent belongs to the
+command that ran too long. We stop them all.
+
+\begin{continued}{tools.nex}
+  private feature
+    -- Stop every process this program has started. The agent runs one
+    -- command at a time, so they all belong to the command that ran too
+    -- long: bash, and whatever bash started.
+    stop_children() do
+      with "java" do
+        let children := ProcessHandle.current().descendants().toList()
+        let i: Integer := 0
+        from until i = children.size() do
+          children.get(i).destroyForcibly()
+          i := i + 1
+        end
+      end
+    end
+end
+\end{continued}
+
+With all six tools written, one function gives the usual set, all working
+in one workspace, with a two-minute limit on commands:
+
+\begin{append}{tools.nex}
+-- The usual set of tools, all working in `ws`.
+function standard_tools(ws: Workspace): Array[Tool] do
+  result := [create List_Files.make(ws), create Read_File.make(ws),
+    create Search.make(ws), create Edit_File.make(ws),
+    create Write_File.make(ws), create Run_Command.make(ws, 120)]
+end
+\end{append}
+
+Let's run the sample project's checks, a command that writes to both
+outputs and fails, and one that runs too long (with a one-second limit, so
+we don't have to wait):
+
+\begin{tryit}{try_commands.nex}
+intern Tools
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+
+function show(outcome: Tool_Outcome) do
+  console.print_line((when outcome.is_error then "error: " else "" end) + outcome.text)
+end
+
+let run: Run_Command := create Run_Command.make(ws, 60)
+show(run.run(json_value('{"command": "nex checks.nex"}')))
+show(run.run(json_value('{"command": "echo to output; echo to errors >&2; exit 3"}')))
+let impatient: Run_Command := create Run_Command.make(ws, 1)
+show(impatient.run(json_value('{"command": "echo starting; sleep 60; echo never"}')))
+\end{tryit}
+\tryoutput{try_commands}
+
+The checks ran in the workspace and failed, as they should: this copy has
+the bug. The second command's two outputs arrive together, and the third
+was stopped after one second, with what it printed before. Our agent now
+has everything it needs to fix the bug. Before we let it, we should decide
+who says it may.

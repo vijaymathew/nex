@@ -46,24 +46,33 @@
     m))
 
 (defn java-http-request
-  [make-object-fn method url body timeout-ms]
-  (let [builder (java.net.http.HttpRequest/newBuilder
-                 (java.net.URI/create url))
-        _ (when (some? timeout-ms)
-            (.timeout builder (java.time.Duration/ofMillis (long timeout-ms))))
-        publisher (if (= method "POST")
-                    (java.net.http.HttpRequest$BodyPublishers/ofString (or body ""))
-                    (java.net.http.HttpRequest$BodyPublishers/noBody))
-        _ (if (= method "POST")
-            (.POST builder publisher)
-            (.GET builder))
-        request (.build builder)
-        client (.build (java.net.http.HttpClient/newBuilder))
-        response (.send client request (java.net.http.HttpResponse$BodyHandlers/ofString))]
-    (make-http-response-object make-object-fn
-                               (.statusCode response)
-                               (.body response)
-                               (http-response-headers->nex-map (.headers response)))))
+  "Send one HTTP request. HEADERS, when given, is a Nex map of header name to
+   value (portable or host map)."
+  ([make-object-fn method url body timeout-ms]
+   (java-http-request make-object-fn method url body timeout-ms nil))
+  ([make-object-fn method url body timeout-ms headers]
+   (let [builder (java.net.http.HttpRequest/newBuilder
+                  (java.net.URI/create url))
+         _ (when (some? timeout-ms)
+             (.timeout builder (java.time.Duration/ofMillis (long timeout-ms))))
+         _ (when (some? headers)
+             (doseq [[k v] (rt/nex-map-entries headers)]
+               (.header builder (str k) (str v))))
+         method (str/upper-case (str method))
+         publisher (if (some? body)
+                     (java.net.http.HttpRequest$BodyPublishers/ofString (str body))
+                     (java.net.http.HttpRequest$BodyPublishers/noBody))
+         _ (case method
+             "GET" (.GET builder)
+             "POST" (.POST builder publisher)
+             (.method builder method publisher))
+         request (.build builder)
+         client (.build (java.net.http.HttpClient/newBuilder))
+         response (.send client request (java.net.http.HttpResponse$BodyHandlers/ofString))]
+     (make-http-response-object make-object-fn
+                                (.statusCode response)
+                                (.body response)
+                                (http-response-headers->nex-map (.headers response))))))
 
 (defn make-http-server-handle
   [port]

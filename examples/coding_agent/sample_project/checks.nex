@@ -1,0 +1,43 @@
+-- checks.nex: executable checks for the library. Run: nex checks.nex
+
+intern Loans
+intern Fines
+
+class Checker
+create
+  make() do
+  end
+feature
+  passed: Integer
+  failed: Integer
+
+  check(label: String, ok: Boolean) do
+    if ok then
+      passed := passed + 1
+      console.print_line("PASS " + label)
+    else
+      failed := failed + 1
+      console.print_line("FAIL " + label)
+    end
+  end
+
+  summary() do
+    console.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
+    if failed > 0 then
+      raise failed.to_string + " check(s) failed"
+    end
+  end
+end
+
+let checker: Checker := create Checker.make()
+let loan: Loan := create Loan.make("Middlemarch", "Ada", 10)
+let policy: Fine_Policy := create Fine_Policy.make(25, 500)
+
+checker.check("a loan is due 14 days after it is lent", loan.due_on() = 24)
+checker.check("returned early: not late", loan.days_late(20) = 0)
+checker.check("returned on the due day: not late", loan.days_late(24) = 0)
+checker.check("returned the day after: 1 day late", loan.days_late(25) = 1)
+checker.check("no fine on the due day", policy.fine(loan, 24) = 0)
+checker.check("one day late costs 25 cents", policy.fine(loan, 25) = 25)
+checker.check("the fine stops growing at 5 dollars", policy.fine(loan, 100) = 500)
+checker.summary()

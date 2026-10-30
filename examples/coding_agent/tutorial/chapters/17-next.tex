@@ -1,0 +1,72 @@
+% ===========================================================================
+\chapter{Where to go next}\label{ch:next}
+
+The agent is small: about 2,300 lines in ten files, comments and all. The coding
+agents people use every day do far more, but most of what they add is
+built on what you have here: the loop, the tools, and the rules around
+them. Here are some directions, roughly from easiest to hardest.
+
+\section{Small additions}
+
+\textbf{Project instructions.} Many projects keep notes for agents in a
+file such as \code{AGENTS.md}: how to run the tests, the house style,
+what not to touch. Read it at the start, and add it to the system prompt.
+
+\textbf{Cost.} \code{Usage} counts tokens. Multiply by the model's prices
+(fresh input, cached input and output are priced differently) and print
+what each task cost.
+
+\textbf{Undo.} Before every edit or write, keep the file as it was. An
+\code{undo} command (or a tool) puts it back. Simpler still, in a
+project under git: commit before each task, so that \code{git diff} shows
+what the agent did and \code{git checkout .} takes it all back.
+
+\textbf{More tools.} A tool to delete or rename a file; one to look at a
+web page; one that runs just the tests for one file. Each is a class
+inheriting \code{Tool}, plus checks. Write its description as carefully
+as its code.
+
+\section{Doing things at once}
+
+\textbf{Several tool calls in parallel.} A model often asks for three files
+at once. The agent runs them one after another; with \code{spawn}, it
+could read them at the same time. Only for tools that change nothing,
+though: two edits to one file must not race.
+
+\textbf{Streaming.} The agent waits for each reply to be complete before
+showing any of it. The API can instead \emph{stream} a reply, sending it as
+it is written, as a series of events; the agent can then show the model's
+text as it appears. With streaming, \code{max_tokens} can be much larger,
+too, since a long reply no longer risks an HTTP timeout. It is mostly HTTP
+work: reading the response line by line, and assembling the blocks from
+the events.
+
+\section{Bigger ideas}
+
+\textbf{Sub-agents.} When a task needs a lot of reading (``find everything
+that uses the old API''), all that reading fills the conversation. Give
+the agent a tool that starts \emph{another} agent, with its own fresh
+conversation and only the reading tools, to do the search and report back
+in a paragraph. The main conversation only ever sees the paragraph.
+
+\textbf{A plan.} For a long task, a tool with which the model keeps a
+checklist (``1. find the bug; 2. fix it; 3. add a check'') and ticks items
+off. It helps the model keep track, and it shows you where it is.
+
+\textbf{Server-side compaction.} Chapter~\ref{ch:long}'s summing up, done by
+the API instead, in a form designed for it.
+
+\textbf{A stronger sandbox.} The workspace rule covers the file tools; a
+command can still do anything you can. Run the commands in a container
+with only the workspace mounted, and without the network, and the
+permission questions can be fewer.
+
+\section{Testing an agent}
+
+Our checks test the agent's code. Whether it does its \emph{job} well is a
+different question, and a statistical one: a model can solve a task four
+times out of five. To answer it, collect tasks with a way to check the
+result (here: ``do the checks pass afterwards?''), run each several
+times, and count. Then every change to a tool description or to the system
+prompt can be measured, not guessed at. Recorded sessions help here too:
+when a run goes wrong, its recording shows exactly what the model saw.

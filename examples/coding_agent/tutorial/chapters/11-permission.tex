@@ -1,0 +1,156 @@
+% ===========================================================================
+\chapter{Asking first}\label{ch:permission}
+
+Our agent can now read, search, edit and run anything in its workspace.
+Who decides whether it should? So far, \code{Allow_Everything}. That is
+fine for a scratch copy you are happy to throw away, and that is what
+\code{--yes} will mean in Chapter~\ref{ch:program}. For anything else, the
+agent should ask you first.
+
+The line is drawn by the tools themselves: each says whether running it
+\code{changes_things}. Reading and searching don't, and are always allowed;
+asking you every time the agent wants to look at a file would make it
+useless, and looking can't do harm in a workspace that holds nothing
+secret. Editing, writing and running commands do change things, and need
+a yes.
+
+Every permission is only asked about calls whose input has been checked
+(that is \code{Permission}'s precondition, from Chapter~\ref{ch:loop}), so
+a policy that shows you the call can rely on its arguments being there.
+
+\section{Read-only}
+
+The simplest policy that says no allows only tools that change nothing.
+With it, the agent can still explore a project and explain it, or find a
+bug and tell you where it is, without being able to touch anything:
+
+\begin{append}{permissions.nex}
+-- Only tools that change nothing: `--read-only`. The agent can still
+-- explore the project and explain it.
+class Allow_Reading inherit Permission
+create
+  make() do
+  end
+
+feature
+  allows(tool: Tool, input: Json_Value): Boolean do
+    result := not tool.changes_things()
+  end
+end
+\end{append}
+
+\section{Asking you}
+
+\code{Ask_First} asks at the keyboard, about the call the agent has just
+printed (\code{run_command nex checks.nex}, say). For an edit it also shows
+the lines going out and coming in, the way a diff does, so you know what
+you are allowing.
+Besides yes and no, you can answer ``always'', which allows that tool for
+the rest of the session: after you have seen the agent make a few good
+edits, approving each one becomes a chore.
+
+\begin{append}{permissions.nex}
+-- Ask the person at the keyboard before anything that changes things.
+-- "a" (always) allows that tool for the rest of the session.
+class Ask_First inherit Permission
+create
+  make() do
+  end
+
+feature
+  always: Array[String]    -- tools the user has allowed for good
+
+  allows(tool: Tool, input: Json_Value): Boolean do
+    if not tool.changes_things() or always.contains(tool.name()) then
+      result := true
+    else
+      result := ask(tool, input)
+    end
+  end
+
+  private feature
+    -- Ask about the call the agent has just printed.
+    ask(tool: Tool, input: Json_Value): Boolean do
+      if tool.name() = "edit_file" then
+        console.print(indented(edit_preview(input), "      "))
+      end
+      let answer: ?String := console.read_line("    allow? [y]es, [n]o, [a]lways for "
+        + tool.name() + "> ")
+      if ?answer as text then
+        let a: String := text.trim().to_lower()
+        if a = "a" or a = "always" then
+          always.add(tool.name())
+          result := true
+        else
+          result := a = "y" or a = "yes"
+        end
+      else
+        result := false     -- no answer (end of input) is a no
+      end
+    end
+
+    -- An edit as lines taken out and lines put in.
+    edit_preview(input: Json_Value): String do
+      result := indented(input.get("old_text").as_string, "- ")
+        + indented(input.get("new_text").as_string, "+ ")
+    end
+end
+\end{append}
+
+\code{console.read_line} gives a \code{?String}: \code{nil} at the end of
+the input (Ctrl-D, or a program whose input has run out). Anything but a
+clear yes is a no.
+
+\section{Answers given in advance}
+
+Checks can't type at a keyboard, so there is one more policy, for them: a
+list of answers, given in advance, used in order.
+
+\begin{append}{permissions.nex}
+-- Answers given in advance, in order, for checks: true allows the next
+-- tool that asks, false refuses it.
+class Answers_Given inherit Permission
+create
+  make(answers: Array[Boolean]) do
+    this.answers := answers
+  end
+
+feature
+  answers: Array[Boolean]
+  asked: Integer
+
+  allows(tool: Tool, input: Json_Value): Boolean do
+    if not tool.changes_things() then
+      result := true
+    else
+      result := asked < answers.length and answers.get(asked)
+      asked := asked + 1
+    end
+  end
+end
+\end{append}
+
+Here is a script that tries the fix twice. The first time it is refused;
+the second time it is allowed. Watch what the model is told:
+
+\begin{tryit}{try_permission.nex}
+intern Agent
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+let fix: String := '{"path": "loans.nex", "old_text": "    if day >= due_on() then\n      result := day - due_on() + 1", "new_text": "    if day > due_on() then\n      result := day - due_on()"}'
+let model: Scripted_Model := create Scripted_Model.make([
+  use_tool("A book is late only after its due day.", "edit_file", fix),
+  use_tool("May I? It is a two-line change to days_late.", "edit_file", fix),
+  say("Done.")
+])
+let permission: Answers_Given := create Answers_Given.make([false, true])
+let agent: Agent := create Agent.make(model, standard_tools(ws), permission,
+  create Reporter.make(false, false))
+agent.run("Fix the late fines.")
+console.print_line("asked " + permission.asked.to_string + " times")
+\end{tryit}
+\tryoutput{try_permission}
+
+The refusal reached the model as an error, with the request not to look
+for another way round it. You will see \code{Ask_First} at work in
+Chapter~\ref{ch:program}, once there is a program to type at.

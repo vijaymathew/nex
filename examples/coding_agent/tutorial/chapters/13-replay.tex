@@ -1,0 +1,232 @@
+% ===========================================================================
+\chapter{Record and replay}\label{ch:replay}
+
+A real model is a nuisance to test with. It costs money, it needs the
+network, and it never answers the same way twice. That last part matters
+most: you can't write a check that says ``after this request, the reply is
+that'', and you can't show a session in a tutorial and expect a reader to
+get the same one.
+
+The usual answer, in any program that talks to a service, is to
+\emph{record} a real session once, and \emph{replay} it afterwards. While
+recording, every request goes to the real model, and every reply is saved
+to a file along with what was sent. While replaying, the replies come from
+the file instead. The agent can't tell the difference: it is given a
+\code{Model}, and both are models.
+
+A replay is only faithful if the agent does the same things it did when
+the session was recorded. The replies are fixed; but the agent really runs
+the tools, so the results it sends back are produced afresh each time, from
+the workspace as it is. If the sample project were different, or
+\code{nex} printed its errors differently, the results would differ, and
+the recorded replies (which answered the old results) might no longer make
+sense. So the replay compares what is sent with what was sent when the
+session was recorded, and notes where they first differ.
+
+\section{The session file}
+
+A session is a JSON file holding the task, the folder the workspace was
+copied from, the model's name, and the turns. Each turn is the new part of
+one request (the last user message, from Chapter~\ref{ch:model}) and the
+model's response, exactly as it came:
+
+\begin{json}
+{"model": "claude-opus-5-5",
+ "task": "Some of the checks fail. Find out why and fix it.",
+ "template": "sample_project",
+ "turns": [{"sent": [{"type": "text", "text": "Some of the checks fail. ..."}],
+            "response": {"content": [...], "stop_reason": "tool_use", ...}},
+           {"sent": [{"type": "tool_result", ...}],
+            "response": ...},
+           ...]}
+\end{json}
+
+Both new models read and write files, so \code{model.nex} needs
+\code{io/Path}:
+
+\begin{tightaddbefore}{model.nex}{after intern Messages}{|-- Everything the model is given for one reply.}
+intern io/Path
+\end{tightaddbefore}
+
+\section{Playing back}
+
+\code{Replay_Model} reads a session, and gives its responses back in order.
+Before each one, it compares the request it was sent with the recording.
+\code{diverged_at} is the first reply whose request was different, or 0 if
+there has been none.
+
+\begin{append}{model.nex}
+-- A model that plays back a session recorded by Recording_Model: the
+-- same replies, in the same order, with no network and no cost.
+--
+-- A recorded reply only makes sense after what was sent before it, so
+-- it compares each request with the recording. If the tools gave
+-- different results this time (the project's files are not the ones
+-- the session was recorded with, say), the replies may no longer fit,
+-- and it says so.
+class Replay_Model inherit Model
+create
+  -- The session saved in the file `path`.
+  make(path: String)
+  require
+    file_exists: (create Path.make(path)).is_file()
+  do
+    session := json_value((create Path.make(path)).read_text())
+    diverged_at := 0
+  end
+
+feature
+  session: Json_Value
+  played: Integer        -- how many replies it has given
+  diverged_at: Integer   -- the first reply whose request differed, or 0
+
+  name(): String do
+    result := session.get("model").as_string + " (recorded)"
+  end
+
+  -- The task the session was recorded with.
+  task(): String do
+    result := session.get("task").as_string
+  end
+
+  -- The folder the session's workspace was copied from.
+  template(): String do
+    result := session.get("template").as_string
+  end
+
+  turns(): Integer do
+    result := session.get("turns").length
+  end
+
+  can_reply(): Boolean do
+    result := played < turns()
+  end
+
+  reply(request: Request): Reply do
+    let turn: Json_Value := session.get("turns").at(played)
+    played := played + 1
+    if diverged_at = 0 and last_message_json(request) /= turn.get("sent").to_string then
+      diverged_at := played
+    end
+    result := create Reply.from_json(turn.get("response"))
+  end
+end
+\end{append}
+
+A replay that diverges carries on regardless. Often the difference is
+harmless (a line in an error message that changed between versions of
+\code{nex}), and the session still plays out sensibly; and if it doesn't,
+seeing how it goes wrong is more useful than a refusal to play. The program
+will say so at the end.
+
+\section{Recording}
+
+\code{Recording_Model} is a \emph{wrapper}: it is given another model, and
+passes every request on to it. Each time a reply comes back, it adds the
+turn to the session, and saves the file. Saving after every reply, rather
+than at the end, means that a session stopped part way (with Ctrl-C,
+say) is still kept, as far as it went.
+
+\begin{append}{model.nex}
+-- A model that passes every request on to another model and saves each
+-- exchange to a file as it goes, for Replay_Model to play back.
+class Recording_Model inherit Model
+create
+  make(inner: Model, path, task, template: String) do
+    this.inner := inner
+    this.path := path
+    this.task := task
+    this.template := template
+  end
+
+feature
+  inner: Model
+  path: String         -- where the session is saved
+  task: String
+  template: String
+  turns: Array[Any]
+
+  name(): String do
+    result := inner.name()
+  end
+
+  can_reply(): Boolean do
+    result := inner.can_reply()
+  end
+
+  reply(request: Request): Reply do
+    result := inner.reply(request)
+    let turn: Map[String, Any] := {
+      "sent": json_value(last_message_json(request)).raw(),
+      "response": result.response.raw()
+    }
+    turns.add(turn)
+    save()
+  end
+
+  private feature
+    -- Saved after every reply, so a session stopped part way is kept.
+    save() do
+      let session: Map[String, Any] := {"model": inner.name(), "task": task,
+        "template": template, "turns": turns}
+      (create Path.make(path)).write_text(json_text(session))
+    end
+end
+\end{append}
+
+\code{Recording_Model} can reply whenever the model inside it can: that is
+the \code{can_reply} it redefines. (Without it, a recording of a script
+would claim it could always reply, and break \code{reply}'s precondition
+when the script ran out.)
+
+This is a pattern worth knowing. A wrapper adds something (here,
+recording) to any model, without changing it and without the agent
+knowing. The same trick would log every request, or count the cost, or
+stop after a budget.
+
+\section{Trying it}
+
+We can record a scripted session, play it back, and then play it back
+again on a workspace that has changed:
+
+\begin{tryit}{try_replay.nex}
+intern Agent
+
+let task: String := "What does fines.nex do?"
+let quiet: Reporter := create Reporter.make(true, false)
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+let script: Scripted_Model := create Scripted_Model.make([
+  use_tool("", "read_file", '{"path": "fines.nex"}'),
+  say("It charges a fine per day late, up to a maximum.")
+])
+let recorder: Recording_Model := create Recording_Model.make(script,
+  user_path("session.json"), task, "sample_project")
+create Agent.make(recorder, standard_tools(ws), create Allow_Everything.make(), quiet).run(task)
+
+let replay: Replay_Model := create Replay_Model.make(user_path("session.json"))
+console.print_line("the session has " + count_text(replay.turns(), "turn")
+  + "; its task: " + replay.task())
+let again: Run_Result := create Agent.make(replay, standard_tools(ws),
+  create Allow_Everything.make(), quiet).run(replay.task())
+console.print_line(again.ending + ": " + again.text + " (diverged at "
+  + replay.diverged_at.to_string + ")")
+
+ws.write("fines.nex", "-- no fines any more\n")
+let changed: Replay_Model := create Replay_Model.make(user_path("session.json"))
+create Agent.make(changed, standard_tools(ws), create Allow_Everything.make(), quiet).run(task)
+console.print_line("after the change, diverged at " + changed.diverged_at.to_string)
+\end{tryit}
+\tryoutput{try_replay}
+
+The first replay matched the recording all the way. The second was sent a
+different \code{fines.nex}, so its second request (which carried the file)
+differed from the recording, and the replay said so.
+
+\begin{aside}
+\textbf{The session that comes with this tutorial.}
+\code{sessions/fix_late_fines.json} is the session played back in
+Chapter~1 and in the next chapter. Its \code{model} field says who played
+the model's part, and the program prints it when the session is played.
+With \code{--record} (next chapter), the agent records sessions of your
+own.
+\end{aside}

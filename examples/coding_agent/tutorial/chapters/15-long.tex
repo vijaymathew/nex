@@ -1,0 +1,170 @@
+% ===========================================================================
+\chapter{Long conversations}\label{ch:long}
+
+Every request sends the whole conversation. On a long task, with dozens of
+files read and commands run, the conversation grows, and with it three
+costs. Each request takes longer. Each costs more: the tenth request reads
+everything the first nine did, so the total read grows with the
+\emph{square} of the number of replies, and caching (Chapter~\ref{ch:claude})
+only softens that. And a model can only read so much, its \emph{context
+window}; a conversation that outgrows it can't be sent at all. Long before
+that point, a model working through a huge conversation also tends to work
+less well: the one detail that matters is buried among a hundred that
+don't.
+
+So an agent needs a plan for when the conversation gets long.
+
+\section{What not to do}
+
+The tempting fix is to edit the conversation: drop old tool results (who
+needs a file listing from forty replies ago?), or shorten them. Don't. We
+decided in Chapter~\ref{ch:conversation} that the model's replies go back
+exactly as they came, and the same goes for the rest of the conversation
+once it has been sent. A model that thinks signs its thinking, and the
+API checks that the conversation the thinking belongs to has not been
+changed since; an edited history can be rejected outright. And the prompt
+cache is keyed on the exact text of the conversation, so editing an early
+message makes every later one a cache miss. The conversation should only
+ever grow at the end.
+
+What we already do helps: every tool result is cut to about 5,000 tokens
+(Chapter~\ref{ch:tools}), and the descriptions steer the model towards
+searching rather than reading everything.
+
+\section{Summing up and starting afresh}
+
+When the conversation passes a budget, the agent asks the model to sum up:
+the task, what it has found, what it has changed, what is left. Then it
+starts a new conversation, whose first message is the task and that
+summary, and carries on. This is what a programmer does at the end of a
+long day: write a note for tomorrow, and start fresh from the note.
+
+The request for the summary, and the start of the new conversation, go in
+\code{context.nex}:
+
+\begin{append}{context.nex}
+-- What the agent asks for when the conversation has grown too long.
+function summary_request(): String do
+  result := "This conversation is getting long, so it will be cut short here. "
+    + "Don't call any tools now. Write a summary for yourself to carry on from: "
+    + "what the task is, what you have found out (the files and the lines that "
+    + "matter), what you have changed so far, and what is left to do."
+end
+
+-- A new conversation that starts from `summary`, for carrying on with `task`.
+function fresh_start(task, summary: String): Conversation
+require
+  task_given: task /= ""
+do
+  result := create Conversation.make()
+  result.add_user_text("You are part way through a task. The conversation so far "
+    + "was too long to keep, so here is the task and your own summary of the work "
+    + "so far. Carry on from there.\n\nThe task:\n" + task
+    + "\n\nYour summary:\n" + (when summary = "" then "(there is no summary)" else summary end))
+ensure
+  models_turn: result.models_turn()
+end
+\end{append}
+
+The summary is written by the model, for the model: it knows best what it
+will need. The summary request names what to keep, so that nothing
+essential is lost, such as which files were already changed.
+
+\section{In the agent}
+
+The agent gets a budget, in tokens. 200,000 is a sensible default: far
+below the context window of current models, but already a long and
+expensive conversation. Add the field, its default, and a way to change it:
+
+\begin{tightaddbefore}{agent.nex}{after max_replies}{|  set_max_replies(n: Integer)}
+  context_limit: Integer       -- the longest conversation, in tokens
+\end{tightaddbefore}
+
+\begin{tightaddbefore}{agent.nex}{at the end of make}{  end||feature|  model: Model}
+    context_limit := 200000
+\end{tightaddbefore}
+
+\begin{addbefore}{agent.nex}{before run}{  -- Work on `task` until the model says it is done, or the agent stops}
+  set_context_limit(tokens: Integer)
+  require
+    positive: tokens > 0
+  do
+    context_limit := tokens
+  end
+\end{addbefore}
+
+How long is the conversation? The API tells us with every reply: its
+\code{context_tokens} (Chapter~\ref{ch:conversation}) is how much the request
+held. The right moment to check is just after the tool results have been
+added, when the conversation is complete and it is the model's turn. In
+\code{run}, right after \code{conversation.add_tool_results(results)}, add:
+
+\begin{tightaddbefore}{agent.nex}{in run, after the tool results}{        else|          ending := ending_for(reply.stop_reason())}
+          if reply.context_tokens() > context_limit and model.can_reply() then
+            make_room(task, reply.context_tokens())
+          end
+\end{tightaddbefore}
+
+\code{make_room} adds the summary request to the conversation (it joins the
+message with the tool results, as \code{add_user_text} promised in
+Chapter~\ref{ch:conversation}), gets the summary, and replaces the
+conversation with a fresh one. The summary costs one more reply, which is
+counted in the usage. The model was told not to call tools; if it does
+anyway, the calls are simply dropped with the old conversation.
+
+\begin{addbefore}{agent.nex}{in the private features, before ending_for}{    -- What a reply that asks for no tools means for the task.}
+    -- The conversation is too long: have the model sum it up, and carry
+    -- on in a new conversation that starts from the summary.
+    make_room(task: String, tokens: Integer)
+    require
+      models_turn: conversation.models_turn()
+    do
+      reporter.on_making_room(tokens)
+      conversation.add_user_text(summary_request())
+      let reply: Reply := model.reply(create Request.make(system, conversation, definitions()))
+      usage.add(reply)
+      conversation := fresh_start(task, reply.text())
+    ensure
+      models_turn: conversation.models_turn()
+    end
+\end{addbefore}
+
+And the reporter says when it happens:
+
+\begin{addbefore}{agent.nex}{in Reporter, before on_finish}{  on_finish(outcome: Run_Result, usage: Usage) do}
+  on_making_room(tokens: Integer) do
+    say("  (the conversation is " + grouped(tokens) + " tokens long: summing up and starting afresh)")
+  end
+\end{addbefore}
+
+To see it work without a long conversation, we give a script replies that
+claim to have read a lot, and set a small budget:
+
+\begin{tryit}{try_long.nex}
+intern Agent
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+let model: Scripted_Model := create Scripted_Model.make([
+  create Reply.from_json(json_value('{"content": [{"type": "tool_use", "id": "t1", "name": "list_files", "input": {}}], "stop_reason": "tool_use", "usage": {"input_tokens": 3000, "output_tokens": 20}}')),
+  say("The task: explain the project. Found: four files; fines are in fines.nex. Changed: nothing. Left: explain."),
+  say("It is a lending library: loans, and fines for late books.")
+])
+let agent: Agent := create Agent.make(model, standard_tools(ws), create Allow_Everything.make(),
+  create Reporter.make(false, false))
+agent.set_context_limit(1000)
+agent.run("Explain this project.")
+console.print_line("\nThe new conversation starts:")
+console.print_line(model.sent.get(2))
+\end{tryit}
+\tryoutput{try_long}
+
+After the summary, the conversation is one message long, and the work
+carries on from it.
+
+\begin{aside}
+\textbf{The API can do this too.} Claude's API has a beta feature called
+\emph{compaction}, which sums up a long conversation on the server, in
+a form the model reads back well, and keeps it valid for thinking and
+caching. It is a good choice for a production agent. Doing it ourselves,
+as here, shows what is involved, and works with any model.
+\end{aside}

@@ -1,0 +1,116 @@
+% ===========================================================================
+\chapter{What we are going to build}
+
+A \emph{coding agent} is a program you give a task in plain words, such as
+``some of the checks fail; find out why and fix it'', and that then works
+on a project by itself. It looks at the files, runs the tests, reads the
+code that matters, changes it, runs the tests again, and tells you what it
+did. The thinking is done by a large language model: in this tutorial,
+Claude. The agent is the program around the model, and that program is
+what we are going to write, in Nex, from scratch.
+
+Here is the finished agent at work on a small project, a lending library
+whose fines come out wrong. Everything the agent does is printed as it
+happens: what the model says, each tool it asks for (indented), and the
+first line of what each tool gave back.
+
+\laterout{code.nex --replay sessions/fix_late_fines.json --yes}{replay}
+
+The model never touches the project. All it can do is write text. What
+makes it an agent is that some of that text is a request to use a tool:
+``run \code{nex checks.nex}'', ``show me \code{loans.nex}'', ``replace
+these two lines with those''. Our program carries out each request, and
+sends back what happened. Then the model writes some more. The whole agent
+is this loop:
+
+\begin{shell}
+conversation := [the task]
+repeat
+    reply := the model's answer to the conversation
+    add the reply to the conversation
+    if the reply asks for tools then
+        run them, and add what they gave back to the conversation
+    else
+        the task is done
+\end{shell}
+
+That is the whole idea, and Chapter~\ref{ch:loop} writes it in about forty
+lines. Most of the work, and most of this tutorial, goes into what is
+around the loop: tools that are safe to hand to a model and give it useful
+answers, edits that fail loudly instead of quietly doing the wrong thing,
+a workspace the agent cannot reach outside of, permission before anything
+changes, limits, recovery from errors, and keeping the conversation from
+growing for ever.
+
+\begin{aside}
+\textbf{Where the safety lives.} The model only ever \emph{asks}. Whether a
+file is read, an edit is made or a command is run is decided by our
+program, every time. So the rules that keep an agent safe (which folder it
+may touch, what needs your permission) are ordinary code, with ordinary
+contracts, that we write and check like any other.
+\end{aside}
+
+\section{How this tutorial works}
+
+We build the agent file by file, in the order you would write it. Every
+line of every file appears in the text, in boxes. A box titled \emph{New
+file} starts a file. Other boxes add to a file you already have: \emph{add at the end},
+\emph{add before} a given line, or \emph{continued} (right after the box
+before). Follow them and you end up with the project in
+\code{examples/coding_agent} of the Nex distribution, exactly: this
+tutorial is built from the same source as the code, and the build checks
+that the two match.
+
+Green boxes are \emph{try-it} scripts: small throwaway programs that show
+what the code so far does. The dark boxes under them are what they print,
+copied from a real run, as is every output in this tutorial.
+
+You need no language model to follow along. Until Chapter~\ref{ch:claude},
+the model is played by a script we write ourselves, which lets us test
+every part of the agent with replies we choose. After that, a recorded
+session plays the model's part, so the outputs in this tutorial are the
+same every time it is built. To have Claude itself do the work, you need
+an API key, and Chapter~\ref{ch:program} shows how to use it.
+
+\section{What you need}
+
+\begin{itemize}
+\item Nex 0.6.5 or later, with \code{nex} on your \code{PATH}. The agent
+  runs \code{nex} itself, to run the checks of the project it works on.
+\item \code{bash}, for the commands the agent runs. Linux and macOS have
+  it.
+\item Optionally, a Claude API key from \code{console.anthropic.com}, to
+  run the agent for real.
+\end{itemize}
+
+You do not need to know anything about language models. You should know
+some Nex, or another language in the same family; anything new is
+explained when it first comes up, and Appendix~\ref{app:api} puts the API
+on one page.
+
+\section{The plan}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Chapter & What we add \\
+\midrule
+\ref{ch:setup}. Setting up & the project folder; text helpers \\
+\ref{ch:conversation}. A conversation as data & messages, tool calls, replies \\
+\ref{ch:model}. A pretend model & the \code{Model} class, and a model played by a script \\
+\ref{ch:workspace}. A place to work & a workspace the agent can't reach outside of \\
+\ref{ch:tools}. Giving the model hands & tools: listing and reading files \\
+\ref{ch:loop}. The agent loop & the agent itself \\
+\ref{ch:search}. Finding things & searching the code \\
+\ref{ch:editing}. Changing things safely & editing and writing files \\
+\ref{ch:commands}. Running commands & running checks, with a time limit \\
+\ref{ch:permission}. Asking first & permission before anything changes \\
+\ref{ch:claude}. Talking to Claude & the Messages API, over HTTP \\
+\ref{ch:replay}. Record and replay & sessions you can play back \\
+\ref{ch:program}. The program & \code{code.nex}, the agent on the command line \\
+\ref{ch:long}. Long conversations & counting tokens; summing up and starting afresh \\
+\ref{ch:checks}. Trust, but verify & executable checks for all of it \\
+\ref{ch:next}. Where to go next & streaming, sub-agents, undo, \ldots \\
+\bottomrule
+\end{tabular}
+\end{center}

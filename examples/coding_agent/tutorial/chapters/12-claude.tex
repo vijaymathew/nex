@@ -1,0 +1,405 @@
+% ===========================================================================
+\chapter{Talking to Claude}\label{ch:claude}
+
+Everything so far has worked with a pretend model. Now the real one. The
+agent talks to Claude through Anthropic's \emph{Messages API}: one HTTP
+request per reply, to \url{https://api.anthropic.com/v1/messages}, with
+the conversation, the tools and the system prompt as JSON. The answer is a
+JSON reply, of the shape we have been writing by hand since
+Chapter~\ref{ch:conversation}. So \code{Claude_Model} is mostly about
+HTTP: building the request, sending it, and coping when it fails.
+
+\section{The request}
+
+Here is a request with everything we send, abridged:
+
+\begin{json}
+POST /v1/messages
+content-type: application/json
+x-api-key: sk-ant-...
+anthropic-version: 2026-10-21
+anthropic-beta: server-side-fallback-2026-07-01
+
+{"model": "claude-opus-5-5",
+ "max_tokens": 16000,
+ "system": "You are a coding agent working in a project folder ...",
+ "tools": [{"name": "list_files", ...}, {"name": "read_file", ...}, ...],
+ "messages": [{"role": "user", "content": [...]}, ...],
+ "cache_control": {"type": "ephemeral"},
+ "output_config": {"effort": "high"},
+ "fallbacks": "default"}
+\end{json}
+
+The headers say who we are (the API key) and which version of the API we
+are written for. In the body:
+
+\begin{itemize}
+\item \code{model} is which Claude. We use \code{claude-opus-5-5}; any
+  other can be chosen on the command line.
+\item \code{max_tokens} is the longest reply allowed. A reply that reaches
+  it is cut off, with the \code{stop_reason} \code{"max_tokens"}, which the
+  agent handles (Chapter~\ref{ch:loop}).
+\item \code{system}, \code{tools} and \code{messages} are what a
+  \code{Request} holds.
+\item \code{cache_control} asks the API to cache the request. Every
+  request repeats the one before it, plus a little; with caching, that
+  repeated part is read from the cache at about a tenth of the price, and
+  faster. For an agent, which sends dozens of requests per task, each
+  longer than the last, this is the difference between cheap and
+  expensive.
+\item \code{output_config.effort} says how hard the model should think:
+  from \code{low} to \code{max}. Claude thinks before it answers, and more
+  effort means more thinking, better work on hard problems, and more
+  tokens. \code{high} is a good default for coding.
+\item \code{fallbacks} deals with something rare. Claude has safety checks
+  that may decline a request, now and then by mistake (code about
+  security, say). With \code{"fallbacks": "default"}, and the
+  \code{anthropic-beta} header that goes with it, the API then tries the
+  request again on another model it recommends, instead of stopping. Not
+  every model has fallbacks, so we only ask for them on those that do.
+\end{itemize}
+
+\section{The model}
+
+A \code{Claude_Model} holds a \emph{credential}: either an API key, or a
+login token (from Anthropic's \code{ant auth login}), which goes in a
+different header. The usual way to make one is from the environment, so
+that the key is never written in a file:
+
+\begin{newfile}{claude_model.nex}
+-- claude_model.nex: asking Claude, through the Messages API.
+--
+-- One HTTP request per reply: POST /v1/messages with the whole
+-- conversation, the tools and the instructions as JSON. The answer is
+-- JSON too, and becomes a Reply.
+
+intern Model
+intern Helpers
+intern net/Http_Client
+
+class Claude_Model inherit Model
+create
+  -- A model that signs its requests with an API key, or with a login
+  -- token if `is_token`.
+  make(credential: String, is_token: Boolean, model_id, effort: String)
+  require
+    has_credential: credential /= ""
+    known_effort: Claude_Model.EFFORTS.contains(effort)
+  do
+    this.credential := credential
+    this.is_token := is_token
+    this.model_id := model_id
+    this.effort := effort
+    base_url := "https://api.anthropic.com"
+  end
+
+  -- A model using the credentials in the environment: ANTHROPIC_API_KEY,
+  -- or else ANTHROPIC_AUTH_TOKEN. ANTHROPIC_BASE_URL, if set, sends the
+  -- requests somewhere else (a proxy, or a test server).
+  from_environment(model_id, effort: String)
+  require
+    has_credential: has_credentials()
+    known_effort: Claude_Model.EFFORTS.contains(effort)
+  do
+    if program.has_env("ANTHROPIC_API_KEY") and program.env("ANTHROPIC_API_KEY") /= "" then
+      make(program.env("ANTHROPIC_API_KEY"), false, model_id, effort)
+    else
+      make(program.env("ANTHROPIC_AUTH_TOKEN"), true, model_id, effort)
+    end
+    if program.has_env("ANTHROPIC_BASE_URL") and program.env("ANTHROPIC_BASE_URL") /= "" then
+      base_url := program.env("ANTHROPIC_BASE_URL")
+    end
+  end
+
+feature
+  API_VERSION = "2026-10-21"
+  MAX_TOKENS = 16000       -- the longest reply, in tokens
+  EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+  ATTEMPTS = 5             -- tries per reply, when the API is busy
+  TIMEOUT_MS = 600000      -- ten minutes: a hard turn can take a while
+
+  credential: String
+  is_token: Boolean
+  model_id: String     -- which Claude: "claude-opus-5-5"
+  effort: String       -- how hard it thinks: "low" .. "max"
+  base_url: String
+
+  name(): String do
+    result := model_id
+  end
+
+  -- Send requests to `url` instead of the Claude API: a proxy, or a
+  -- test server.
+  set_base_url(url: String) do
+    base_url := url
+  end
+\end{newfile}
+
+\code{from_environment} calls \code{make} to do most of its work: one
+constructor may call another, as an ordinary routine.
+\code{Claude_Model.EFFORTS} reads a constant through the class's name,
+which works even before there is an object.
+
+\section{Sending, and trying again}
+
+Requests over a network fail. Most failures are temporary: the API is
+overloaded (status 529), we are sending requests too fast for our account
+(429), the server had a problem (500), or the connection dropped. The
+right response to all of these is to wait a little and try again, waiting
+longer each time (2, 4, 8 seconds, \ldots), so as not to add to the
+problem. If the API says how long to wait, in a \code{retry-after} header,
+we wait that long.
+
+Other failures are not temporary. A malformed request (400) or a wrong key
+(401) will fail the same way every time, and trying again only wastes time.
+Those stop at once, with the API's own explanation.
+
+\begin{continued}{claude_model.nex}
+  reply(request: Request): Reply do
+    let client: Http_Client := create Http_Client.make()
+    let body: String := request_body(request)
+    let attempt: Integer := 0
+    let answer: ?Reply := nil
+    from until answer /= nil do
+      attempt := attempt + 1
+      let wait: Integer := retry_delay_for(attempt)
+      let trouble: String := ""
+      do
+        let response: Http_Response := client.request("POST", base_url + "/v1/messages",
+          body, headers(), Claude_Model.TIMEOUT_MS)
+        if response.status() = 200 then
+          answer := create Reply.from_json(json_value(response.body()))
+        elseif is_retryable(response.status()) and attempt < Claude_Model.ATTEMPTS then
+          trouble := "the API answered " + response.status().to_string
+          wait := retry_delay(response, attempt)
+        else
+          raise api_error(response)
+        end
+      rescue
+        -- A network failure (no connection, a timeout) is worth another
+        -- try too; an error from the API itself is not.
+        let message: String := "" + exception
+        if message.starts_with("Claude API") or attempt >= Claude_Model.ATTEMPTS then
+          raise message
+        end
+        trouble := preview(message, 80)
+      end
+      if answer = nil then
+        console.print_line("  (" + trouble + "; trying again in "
+          + count_text(wait / 1000, "second") + ")")
+        sleep(wait)
+      end
+    end
+    if ?answer as got then
+      result := got
+    else
+      raise "no reply"    -- not reached: the loop ends only with one
+    end
+  end
+\end{continued}
+
+The structure takes a moment to read. Each time round the loop sends the
+request once. A good answer ends the loop. A temporary failure sets
+\code{trouble}, and the loop waits and goes round again. Anything that
+raises an exception inside the \code{do} part (the network failing, or our
+own \code{raise} for an error that is not temporary) lands in the
+\code{rescue} part, which decides: an API error, or the last attempt, is
+raised again and ends the routine; a network failure is one more reason
+to wait and try again.
+
+\code{client.request} is \code{Http_Client}'s way of sending a request
+with headers of our choosing. The last argument is a timeout: a hard
+problem, at high effort, can take the model minutes to answer, so we give
+it ten.
+
+The \code{if ?answer as got} at the end is for Nex's benefit. We know the
+loop only ends once \code{answer} is set, but Nex can't see that, and
+won't let us return a \code{?Reply} as a \code{Reply} without checking.
+
+\section{The body and the headers}
+
+The body is built as a Nex map, as in the request above, and turned into
+JSON. The headers are a map too.
+
+\begin{continued}{claude_model.nex}
+  -- The JSON body of the request for `request`.
+  request_body(request: Request): String do
+    let body: Map[String, Any] := {
+      "model": model_id,
+      "max_tokens": Claude_Model.MAX_TOKENS,
+      "system": request.system,
+      "tools": request.tools,
+      "messages": request.conversation.to_json(),
+      -- Cache the conversation: the next request repeats all of it, and
+      -- reading it from the cache costs a tenth as much.
+      "cache_control": {"type": "ephemeral"}
+    }
+    let output_config: Map[String, Any] := {"effort": effort}
+    body.put("output_config", output_config)
+    if uses_fallbacks() then
+      -- If a safety check declines the request, let the API try it
+      -- again on the model it recommends, instead of stopping.
+      body.put("fallbacks", "default")
+    end
+    result := json_text(body)
+  end
+
+  -- The HTTP headers every request carries.
+  headers(): Map[String, String] do
+    result := {"content-type": "application/json",
+      "anthropic-version": Claude_Model.API_VERSION}
+    let betas: Array[String] := []
+    if is_token then
+      result.put("authorization", "Bearer " + credential)
+      betas.add("oauth-2025-04-20")
+    else
+      result.put("x-api-key", credential)
+    end
+    if uses_fallbacks() then
+      betas.add("server-side-fallback-2026-07-01")
+    end
+    if not betas.is_empty then
+      result.put("anthropic-beta", ",".join(betas))
+    end
+  end
+
+  -- Whether the model can fall back to another when it declines.
+  uses_fallbacks(): Boolean do
+    result := ["claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5",
+      "claude-sonnet-5-5"].contains(model_id)
+  end
+\end{continued}
+
+\code{output_config} is built on its own line, with its type written out,
+before it goes into \code{body}. A map written straight into a call's
+argument, as \code{body.put("output_config", \{"effort": effort\})}, would
+be a \code{Map[String, String]}, and Nex does not treat that as a
+\code{Map[String, Any]}: a map you can put anything into is not the same as
+one that only holds strings.
+
+\section{Errors}
+
+Last, the rules for errors: which are worth another try, how long to wait,
+and how to turn an error from the API into a sentence. The API's errors
+are JSON, \code{\{"type": "error", "error": \{"type": ..., "message":
+...\}\}}, and its message is usually clear enough to act on.
+
+\begin{continued}{claude_model.nex}
+  -- Whether an error is worth trying again after a pause: too many
+  -- requests (429), the API overloaded (529) or failing (5xx), a timeout
+  -- (408) or a conflict (409). Anything else, such as a malformed
+  -- request (400) or a bad key (401), would fail again.
+  is_retryable(status: Integer): Boolean do
+    result := status = 408 or status = 409 or status = 429 or status >= 500
+  end
+
+  -- How long to wait before attempt `attempt` + 1, in milliseconds: what
+  -- the API asked for, if it did; otherwise 2, 4, 8, ... seconds.
+  retry_delay(response: Http_Response, attempt: Integer): Integer do
+    result := retry_delay_for(attempt)
+    across response.headers().keys() as key do
+      if key.to_lower() = "retry-after" then
+        do
+          result := (response.headers().get(key).trim().to_integer * 1000).max(1000)
+        rescue
+          result := retry_delay_for(attempt)
+        end
+      end
+    end
+  end
+
+  retry_delay_for(attempt: Integer): Integer do
+    result := 1000
+    repeat attempt.min(5) do
+      result := result * 2
+    end
+  end
+
+  -- An API error as a sentence: "Claude API error 401
+  -- (authentication_error): invalid x-api-key".
+  api_error(response: Http_Response): String do
+    result := "Claude API error " + response.status().to_string
+    do
+      let body: Json_Value := json_value(response.body())
+      result := result + " (" + body.get("error").get("type").as_string + "): "
+        + body.get("error").get("message").as_string
+    rescue
+      result := result + ": " + preview(response.body(), 200)
+    end
+  end
+end
+
+-- Whether the environment holds credentials for the Claude API.
+function has_credentials(): Boolean do
+  result := (program.has_env("ANTHROPIC_API_KEY") and program.env("ANTHROPIC_API_KEY") /= "")
+    or (program.has_env("ANTHROPIC_AUTH_TOKEN") and program.env("ANTHROPIC_AUTH_TOKEN") /= "")
+end
+\end{continued}
+
+Header names are not case-sensitive in HTTP, so \code{retry_delay} compares
+them in lower case.
+
+\section{A pretend Claude}
+
+We can try all of this without a key and without the network: Nex can be
+an HTTP server too. This try-it starts a pretend Messages API on this
+computer, answering like Claude would. The first request gets a 529
+(``overloaded''), to see the retry. After that it reads the conversation it
+is sent: with one message, it asks to list the files; with more, it says
+it is done. Then we point a \code{Claude_Model} at it, and give it to the
+agent:
+
+\begin{tryit}{try_pretend_api.nex}
+intern Agent
+intern Claude_Model
+intern net/Http_Server
+
+let requests: Integer := 0
+let server: Http_Server := create Http_Server.make(0)
+server.post("/v1/messages", fn (request: Http_Request): Http_Server_Response do
+  requests := requests + 1
+  let body: Json_Value := json_value(request.body())
+  if requests = 1 then
+    result := create Http_Server_Response.make(529,
+      '{"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}',
+      {"retry-after": "1"})
+  elseif body.get("messages").length = 1 then
+    result := create Http_Server_Response.text('{"content": [{"type": "text", "text": "I will look around."}, {"type": "tool_use", "id": "toolu_1", "name": "list_files", "input": {}}], "stop_reason": "tool_use", "usage": {"input_tokens": 2150, "output_tokens": 40}}')
+  else
+    result := create Http_Server_Response.text('{"content": [{"type": "text", "text": "There are '
+      + body.get("tools").length.to_string + ' tools, and the model is '
+      + body.get("model").as_string + '. Done."}], "stop_reason": "end_turn", "usage": {"input_tokens": 12, "cache_read_input_tokens": 2190, "output_tokens": 20}}')
+  end
+end)
+server.start()
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+let claude: Claude_Model := create Claude_Model.make("not-a-real-key", false, "claude-opus-5-5", "high")
+claude.set_base_url("http://127.0.0.1:" + server.port.to_string)
+console.print_line(claude.headers().to_string)
+let agent: Agent := create Agent.make(claude, standard_tools(ws), create Allow_Everything.make(),
+  create Reporter.make(false, false))
+agent.run("Look around.")
+server.stop()
+\end{tryit}
+\tryoutput{try_pretend_api}
+
+That was the agent talking HTTP to something that behaves like Claude: a
+busy API, a tool call, a final answer, and a token count with the second
+request read mostly from the cache. The server's handler is a \code{fn},
+a function written in place, and it can use and change the variables
+around it, such as \code{requests}.
+
+\section{With a key}
+
+To use Claude itself, get an API key from \code{console.anthropic.com} and
+put it in the environment:
+
+\begin{shell}
+export ANTHROPIC_API_KEY=sk-ant-...
+\end{shell}
+
+Then \code{create Claude_Model.from_environment("claude-opus-5-5",
+"high")} is a model like any other. The program in
+Chapter~\ref{ch:program} does exactly that. First, though, a way to keep
+what Claude did.

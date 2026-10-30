@@ -1,0 +1,80 @@
+-- context.nex: keeping count of tokens, and starting afresh when the
+-- conversation grows too long.
+--
+-- Every request sends the whole conversation, so each one is longer
+-- than the last. The model can only read so much (its context window),
+-- and every token read costs money and time. When the conversation
+-- passes a budget, the agent asks the model to sum up what it has done,
+-- and carries on in a new conversation that starts from that summary.
+
+intern Messages
+intern Helpers
+
+-- What a session has used so far.
+class Usage
+create
+  make() do
+  end
+
+feature
+  replies: Integer        -- how many replies
+  read: Integer           -- tokens read, over all requests
+  cached: Integer         -- how many of those came from the cache
+  written: Integer        -- tokens written
+
+  add(reply: Reply) do
+    replies := replies + 1
+    read := read + reply.context_tokens()
+    cached := cached + reply.cached_tokens()
+    written := written + reply.output_tokens()
+  end
+
+  -- "12 replies; read 45,210 tokens (38,000 from the cache), wrote 1,234".
+  to_string(): String do
+    result := count_text(replies, "reply")
+    if read > 0 then
+      result := result + "; read " + grouped(read) + " tokens"
+      if cached > 0 then
+        result := result + " (" + grouped(cached) + " from the cache)"
+      end
+      result := result + ", wrote " + grouped(written)
+    end
+  end
+end
+
+-- A whole number with its thousands grouped: grouped(45210) is "45,210".
+function grouped(n: Integer): String do
+  let digits: String := n.abs.to_string
+  result := ""
+  let i: Integer := digits.length
+  from until i <= 3 do
+    result := "," + digits.substring(i - 3, i) + result
+    i := i - 3
+  end
+  result := digits.substring(0, i) + result
+  if n < 0 then
+    result := "-" + result
+  end
+end
+
+-- What the agent asks for when the conversation has grown too long.
+function summary_request(): String do
+  result := "This conversation is getting long, so it will be cut short here. "
+    + "Don't call any tools now. Write a summary for yourself to carry on from: "
+    + "what the task is, what you have found out (the files and the lines that "
+    + "matter), what you have changed so far, and what is left to do."
+end
+
+-- A new conversation that starts from `summary`, for carrying on with `task`.
+function fresh_start(task, summary: String): Conversation
+require
+  task_given: task /= ""
+do
+  result := create Conversation.make()
+  result.add_user_text("You are part way through a task. The conversation so far "
+    + "was too long to keep, so here is the task and your own summary of the work "
+    + "so far. Carry on from there.\n\nThe task:\n" + task
+    + "\n\nYour summary:\n" + (when summary = "" then "(there is no summary)" else summary end))
+ensure
+  models_turn: result.models_turn()
+end

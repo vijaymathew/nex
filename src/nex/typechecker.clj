@@ -4158,6 +4158,36 @@
                                       (display-type timeout-type)))})))))
   "Http_Response")
 
+(defn- check-builtin-http-request [env args]
+  (when-not (or (= (count args) 4) (= (count args) 5))
+    (throw (ex-info "http_request expects 4 or 5 arguments"
+                    {:error (type-error
+                             (str "http_request expects 4 or 5 arguments, got " (count args)))})))
+  (doseq [[i what] [[0 "method"] [1 "url"] [2 "body"]]]
+    (let [t (check-expression env (nth args i))]
+      (when-not (= (attachable-type t) "String")
+        (throw (ex-info (str "http_request " what " argument must be String")
+                        {:error (type-error
+                                 (str "http_request " what " argument must be String, got "
+                                      (display-type t)))})))))
+  (let [t (check-expression env (nth args 3))]
+    (when-not (and (map? t)
+                   (= (:base-type t) "Map")
+                   (= (mapv attachable-type (or (:type-params t) (:type-args t)))
+                      ["String" "String"]))
+      (throw (ex-info "http_request headers argument must be Map[String, String]"
+                      {:error (type-error
+                               (str "http_request headers argument must be Map[String, String], got "
+                                    (display-type t)))}))))
+  (when (= (count args) 5)
+    (let [timeout-type (check-expression env (nth args 4))]
+      (when-not (= (attachable-type timeout-type) "Integer")
+        (throw (ex-info "http_request timeout argument must be Integer"
+                        {:error (type-error
+                                 (str "http_request timeout argument must be Integer, got "
+                                      (display-type timeout-type)))})))))
+  "Http_Response")
+
 (defn- check-builtin-text-file-write [env args]
   (assert-builtin-arity! "__text_file_write" 2 args)
   (check-expression env (first args))
@@ -4356,6 +4386,7 @@
    ;; http client / json
    "http_get"  check-builtin-http-get
    "http_post" check-builtin-http-post
+   "http_request" check-builtin-http-request
    "json_parse"     (builtin-single-arg "json_parse" "String" "Any")
    "json_stringify" (builtin-checked-args "json_stringify" 1 "String")
 
