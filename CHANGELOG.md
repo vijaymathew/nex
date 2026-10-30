@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.7 - 2026-10-30
+
 - **`nex doc` marks deferred classes.** A deferred class is headed
   `Deferred class: Tool` (or `Sealed deferred class`), with a line saying
   only its heirs can be created, and each routine it leaves deferred is
