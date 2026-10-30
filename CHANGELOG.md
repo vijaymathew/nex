@@ -13,6 +13,16 @@
   code; it used to stop the compiler with "Unable to infer expression type
   during lowering". Lambdas in a free function's `rescue` clause are
   covered by the same fix.
+- **`nex doc` shows contracts as code.** A lambda in a contract used to
+  come out as the parser's internal data (`words(text).all({:generic-params
+  nil, :expression-body ...})`), and a generic type as its bare name
+  (`Array` for `Array[String]`). Contracts now read as they are written,
+  `words(text).all(fn (w) => w.length <= width)`, with parentheses wherever
+  the meaning needs them (`(a + b) * c`, which used to lose them), and types
+  in full: `Array[String]`, `?Map[String, Integer]`, `Function(Integer):
+  String`. Error messages and editor hovers use the same printer, and gain
+  the same fixes; every contract in the standard library and the examples
+  prints as text that parses back to the same code.
 - **A class defined twice** is now a type error, `Class 'Point' is defined
   more than once (at lines 1 and 6)`, instead of a crash in the compiler
   (`Cannot invoke "Object.toString()" because "s" is null`) or, in the

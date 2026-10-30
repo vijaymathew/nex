@@ -21,24 +21,137 @@
     :selective (str "-> " (str/join ", " classes) " ")
     :public ""))
 
+;; ---------------------------------------------------------------------------
+;; Nex source text for a type, an expression or a statement, from the AST:
+;; for error messages, editor hovers and `nex doc`. The text is what you
+;; would write: generic types as `Array[String]`, lambdas as `fn (w) => ...`,
+;; and parentheses wherever the AST's shape needs them to read the same
+;; (the parser drops the ones in the source).
+;; ---------------------------------------------------------------------------
+
 (defn format-type
-  "Format a type expression"
+  "Nex source text for a type: `Integer`, `?Array[Map[String, Integer]]`,
+   `Function(Integer): String`."
   [type-expr]
   (cond
+    (nil? type-expr) "Void"
     (string? type-expr) type-expr
     (map? type-expr)
     (let [base (:base-type type-expr)
-          params (:type-params type-expr)
-          core (if params
-                 (str base " [" (str/join ", " (map format-type params)) "]")
-                 base)]
+          args (or (:type-args type-expr) (:type-params type-expr))
+          core (cond
+                 (contains? type-expr :param-types)
+                 (str "Function("
+                      (str/join ", " (map (fn [p]
+                                            (if (map? p)
+                                              (str (when (:name p) (str (:name p) ": "))
+                                                   (format-type (:type p)))
+                                              (format-type p)))
+                                          (:param-types type-expr)))
+                      ")"
+                      (when-let [r (:return-type type-expr)]
+                        (when (not= "Void" r) (str ": " (format-type r)))))
+                 (seq args) (str base "[" (str/join ", " (map format-type args)) "]")
+                 :else base)]
       (if (:detachable type-expr) (str "?" core) core))
     :else (str type-expr)))
 
-(declare format-statement)
+(declare format-statement format-statements)
+
+;; How tightly each binary operator binds, from the grammar: `implies`
+;; loosest, then or, and, equality, comparison, + -, * / % ^.
+(def ^:private binary-precedence
+  {"implies" 1
+   "or" 2
+   "and" 3
+   "=" 4 "/=" 4 "==" 4 "/==" 4 "!=" 4
+   "<" 5 "<=" 5 ">" 5 ">=" 5
+   "+" 6 "-" 6
+   "*" 7 "/" 7 "%" 7 "^" 7})
+
+(def ^:private unary-precedence 8)
+(def ^:private postfix-precedence 9)
+
+(defn- expression-precedence
+  "How tightly EXPR holds together as an operand: a binary operator's level,
+   unary 8, and 9 for everything that can be the target of a `.call`.
+   Lambdas, `convert` and `create` read on to the right as far as they can,
+   so they are 0: always in parentheses as an operand."
+  [expr]
+  (if (map? expr)
+    (case (:type expr)
+      :binary (get binary-precedence (:operator expr) 1)
+      (:unary :attached-test :old) unary-precedence
+      (:anonymous-function :convert :create :spawn) 0
+      postfix-precedence)
+    postfix-precedence))
+
+(declare format-expression)
+
+(defn- operand
+  "EXPR as an operand that needs at least precedence MIN, in parentheses if
+   it binds more loosely."
+  [expr min]
+  (let [text (format-expression expr)]
+    (if (< (expression-precedence expr) min) (str "(" text ")") text)))
+
+(defn- escape-string [s]
+  (-> s
+      (str/replace "\\" "\\\\")
+      (str/replace "\"" "\\\"")
+      (str/replace "\n" "\\n")
+      (str/replace "\t" "\\t")
+      (str/replace "\r" "\\r")))
+
+(defn- format-char [c]
+  (let [c (if (char? c) c (first (str c)))]
+    (case c
+      \newline "#newline"
+      \tab "#tab"
+      \space "#space"
+      \return "#return"
+      \u0000 "#nul"
+      (if (or (Character/isDigit (char c)) (Character/isISOControl (char c))
+              (Character/isWhitespace (char c)))
+        (str "#" (int c))
+        (str "#" c)))))
+
+(defn- format-args [args]
+  (str "(" (str/join ", " (map format-expression args)) ")"))
+
+(defn- format-generic-args [args]
+  (when (seq args) (str "[" (str/join ", " (map format-type args)) "]")))
+
+(defn- format-lambda-params [params]
+  (str/join ", " (map (fn [{:keys [name type]}]
+                        (if type (str name ": " (format-type type)) name))
+                      params)))
+
+(defn- format-assertions-inline [keyword assertions]
+  (when (seq assertions)
+    (str " " keyword " "
+         (str/join " " (map (fn [{:keys [label condition]}]
+                              (str (when label (str label ": ")) (format-expression condition)))
+                            assertions)))))
+
+(defn- format-lambda
+  "`fn (w) => w.length <= n`, or `fn (x: T): R do ... end`."
+  [{:keys [params return-type expression-body body require ensure]}]
+  (let [head (str "fn (" (format-lambda-params params) ")"
+                  (when return-type (str ": " (format-type return-type))))]
+    (if (and expression-body (empty? require) (empty? ensure))
+      (str head " => " (format-expression expression-body))
+      (let [stmts (if expression-body
+                    [{:type :assign :target "result" :value expression-body}]
+                    body)
+            contracts (str (format-assertions-inline "require" require))
+            post (str (format-assertions-inline "ensure" ensure))]
+        (if (and (= 1 (count stmts)) (not (str/includes? (format-statement (first stmts) 0) "\n")))
+          (str head contracts " do " (format-statement (first stmts) 0) post " end")
+          (str head contracts " do\n" (format-statements stmts 1) "\n" post (when (seq post) "\n") "end"))))))
 
 (defn format-expression
-  "Format an expression"
+  "Nex source text for an expression."
   [expr]
   (cond
     (nil? expr) "nil"
@@ -47,71 +160,117 @@
     (boolean? expr) (str expr)
     (map? expr)
     (case (:type expr)
-      :integer (str (:value expr))
+      :integer (or (:value-str expr) (str (:value expr)))
       :byte (str (:value expr) "u8")
       :int16 (str (:value expr) "i16")
       :int32 (str (:value expr) "i32")
       :real (or (:source expr) (str (:value expr)))
-      :string (str "\"" (:value expr) "\"")
-      :char (str "'" (:value expr) "'")
+      :string (str "\"" (escape-string (str (:value expr))) "\"")
+      :char (format-char (:value expr))
       :boolean (str (:value expr))
       :nil "nil"
+      :this "this"
+      :super "super"
       :identifier (:name expr)
-      :old (str "old " (format-expression (:expr expr)))
-      :spawn (str "spawn do\n"
-                  (str/join "\n" (map #(format-statement % 1) (:body expr)))
-                  "\nend")
-      :convert (str "convert "
-                    (format-expression (:value expr))
-                    " to "
-                    (:var-name expr)
-                    ":"
-                    (format-type (:target-type expr)))
-      :attached-test (str "?" (format-expression (:value expr)) " as " (:var-name expr))
-      :binary (str (format-expression (:left expr))
-                   " " (:operator expr) " "
-                   (format-expression (:right expr)))
+      :old (str "old " (operand (:expr expr) postfix-precedence))
+      :spawn (str "spawn do\n" (format-statements (:body expr) 1) "\nend")
+      :convert (str "convert " (format-expression (:value expr))
+                    " to " (:var-name expr) ": " (format-type (:target-type expr)))
+      :attached-test (str "?" (operand (:value expr) postfix-precedence) " as " (:var-name expr))
+      :binary (let [op (:operator expr)
+                    level (get binary-precedence op 1)
+                    right-assoc? (= "implies" op)]
+                (str (operand (:left expr) (if right-assoc? (inc level) level))
+                     " " op " "
+                     (operand (:right expr) (if right-assoc? level (inc level)))))
       :unary (let [op (:operator expr)]
-               (str op (when (= "not" op) " ") (format-expression (:expr expr))))
+               (str op (when (= "not" op) " ") (operand (:expr expr) unary-precedence)))
       :when (str "when " (format-expression (:condition expr))
                  " then " (format-expression (:consequent expr))
                  " else " (format-expression (:alternative expr))
                  " end")
-      :call (if (:target expr)
-              (str (format-expression (:target expr)) "." (:method expr)
-                   (when (seq (:args expr))
-                     (str "(" (str/join ", " (map format-expression (:args expr))) ")")))
-              (str (:method expr) "(" (str/join ", " (map format-expression (:args expr))) ")"))
-      :create (str "create " (:class-name expr) "." (:constructor expr)
-                   "(" (str/join ", " (map format-expression (:args expr))) ")")
+      :anonymous-function (format-lambda expr)
+      :call (let [target (:target expr)
+                  args (:args expr)
+                  call-part (str (:method expr) (format-generic-args (:generic-args expr))
+                                 (when (or (seq args) (:has-parens expr) (nil? target))
+                                   (format-args args)))]
+              (cond
+                ;; Calling what an expression gives: `make_adder(1)(2)`.
+                (and target (nil? (:method expr)))
+                (str (operand target postfix-precedence) (format-args args))
+                target (str (operand target postfix-precedence) "." call-part)
+                :else call-part))
+      :create (str "create " (:class-name expr) (format-generic-args (:generic-args expr))
+                   (when (:constructor expr)
+                     (str "." (:constructor expr) (format-args (:args expr)))))
       :array-literal (str "[" (str/join ", " (map format-expression (:elements expr))) "]")
       :set-literal (str "#{" (str/join ", " (map format-expression (:elements expr))) "}")
       :map-literal (str "{" (str/join ", " (map (fn [{:keys [key value]}]
-                                                  (str (format-expression key) " : "
+                                                  (str (format-expression key) ": "
                                                        (format-expression value)))
                                                 (:entries expr))) "}")
-      ;; Default: just return the expression as-is
-      (str expr))
+      ;; Something this printer does not know: say so, rather than print
+      ;; the AST.
+      "...")
     :else (str expr)))
 
+(defn- across-loop
+  "The parts of an `across` loop, as the parser expands it: a synthetic
+   cursor over the collection, an `item` binding first in the body and a
+   `next` call last. Nil when LOOP is not one."
+  [{:keys [init body]}]
+  (let [[cursor-let start] init]
+    (when (and (= 2 (count init))
+               (:synthetic cursor-let)
+               (= "cursor" (get-in cursor-let [:value :method]))
+               (= "start" (:method start))
+               (:synthetic (first body)))
+      {:collection (get-in cursor-let [:value :target])
+       :name (:name (first body))
+       :body (vec (butlast (rest body)))})))
+
+(defn- repeat-loop
+  "The parts of a `repeat n do ... end` loop, as the parser expands it, or nil."
+  [{:keys [init body until]}]
+  (when (and (= 1 (count init)) (= "__repeat_i__" (:name (first init))))
+    {:count (:right until)
+     :body (vec (butlast body))}))
+
+(defn format-statements
+  "STMTS, one per line, at indentation LEVEL."
+  [stmts level]
+  (str/join "\n" (map #(format-statement % level) stmts)))
+
 (defn format-statement
-  "Format a statement at the given indentation level"
+  "Nex source text for a statement, at the given indentation level."
   [stmt level]
   (let [ind (indent level)]
     (cond
       (nil? stmt) ""
       (map? stmt)
       (case (:type stmt)
-        :assign (str ind (:target stmt) " := " (format-expression (:value stmt)))
-        :let (str ind "let " (:name stmt) " := " (format-expression (:value stmt)))
+        :assign (str ind (if (map? (:target stmt)) (format-expression (:target stmt)) (:target stmt))
+                     " := " (format-expression (:value stmt)))
+        :member-assign (str ind (format-expression (:object stmt)) "." (:field stmt)
+                            " := " (format-expression (:value stmt)))
+        :let (str ind "let " (:name stmt)
+                  (when (:var-type stmt) (str ": " (format-type (:var-type stmt))))
+                  " := " (format-expression (:value stmt)))
+        :raise (str ind "raise " (format-expression (:value stmt)))
+        :retry (str ind "retry")
         :call (str ind (format-expression stmt))
         :if (str/join "\n"
-                      [(str ind "if " (format-expression (:condition stmt)) " then")
-                       (str/join "\n" (map #(format-statement % (inc level)) (:then stmt)))
+                      (concat
+                       [(str ind "if " (format-expression (:condition stmt)) " then")
+                        (format-statements (:then stmt) (inc level))]
+                       (mapcat (fn [{:keys [condition then]}]
+                                 [(str ind "elseif " (format-expression condition) " then")
+                                  (format-statements then (inc level))])
+                               (:elseif stmt))
                        (when (seq (:else stmt))
-                         (str ind "else\n"
-                              (str/join "\n" (map #(format-statement % (inc level)) (:else stmt)))))
-                       (str ind "end")])
+                         [(str ind "else") (format-statements (:else stmt) (inc level))])
+                       [(str ind "end")]))
         :select (str/join "\n"
                           (concat
                            [(str ind "select")]
@@ -119,38 +278,52 @@
                                      [(str (indent (inc level)) "when " (format-expression expr)
                                            (when alias (str " as " alias))
                                            " then")
-                                      (str/join "\n" (map #(format-statement % (+ level 2)) body))])
+                                      (format-statements body (+ level 2))])
                                    (:clauses stmt))
                            (when-let [timeout (:timeout stmt)]
                              [(str (indent (inc level)) "timeout " (format-expression (:duration timeout)) " then")
-                              (str/join "\n" (map #(format-statement % (+ level 2)) (:body timeout)))])
+                              (format-statements (:body timeout) (+ level 2))])
                            (when (seq (:else stmt))
                              [(str ind "else")
-                              (str/join "\n" (map #(format-statement % (inc level)) (:else stmt)))])
+                              (format-statements (:else stmt) (inc level))])
                            [(str ind "end")]))
-        :loop (str/join "\n"
-                        [(str ind "from")
-                         (str/join "\n" (map #(format-statement % (inc level)) (:init stmt)))
-                         (when (:invariant stmt)
-                           (str (indent (inc level)) "invariant\n"
-                                (str/join "\n" (map #(str (indent (+ level 2))
-                                                          (:label %) ": " (format-expression (:expr %)))
-                                                    (:invariant stmt)))))
-                         (when (:variant stmt)
-                           (str (indent (inc level)) "variant\n"
-                                (str (indent (+ level 2)) (format-expression (:variant stmt)))))
-                         (str (indent (inc level)) "until " (format-expression (:condition stmt)))
-                         (str (indent (inc level)) "do")
-                         (str/join "\n" (map #(format-statement % (+ level 2)) (:body stmt)))
-                         (str ind "end")])
+        :loop (if-let [{:keys [collection name body]} (across-loop stmt)]
+                (str/join "\n" [(str ind "across " (format-expression collection) " as " name " do")
+                                (format-statements body (inc level))
+                                (str ind "end")])
+                (if-let [{:keys [count body]} (repeat-loop stmt)]
+                  (str/join "\n" [(str ind "repeat " (format-expression count) " do")
+                                  (format-statements body (inc level))
+                                  (str ind "end")])
+                  (str/join "\n"
+                            (remove nil?
+                                    [(str ind "from")
+                                     (when (seq (:init stmt)) (format-statements (:init stmt) (inc level)))
+                                     (when (:invariant stmt)
+                                       (str (indent (inc level)) "invariant\n"
+                                            (str/join "\n" (map #(str (indent (+ level 2))
+                                                                      (when (:label %) (str (:label %) ": "))
+                                                                      (format-expression (or (:condition %) (:expr %))))
+                                                                (:invariant stmt)))))
+                                     (when (:variant stmt)
+                                       (str (indent (inc level)) "variant\n"
+                                            (str (indent (+ level 2)) (format-expression (:variant stmt)))))
+                                     (str ind "until " (format-expression (or (:until stmt) (:condition stmt))))
+                                     (str ind "do")
+                                     (format-statements (:body stmt) (inc level))
+                                     (str ind "end")]))))
         :with (str/join "\n"
                         [(str ind "with \"" (:target stmt) "\" do")
-                         (str/join "\n" (map #(format-statement % (inc level)) (:body stmt)))
+                         (format-statements (:body stmt) (inc level))
                          (str ind "end")])
         :scoped-block (str/join "\n"
-                                [(str ind "do")
-                                 (str/join "\n" (map #(format-statement % (inc level)) (:body stmt)))
-                                 (str ind "end")])
+                                (concat
+                                 [(str ind "do")
+                                  (format-statements (:body stmt) (inc level))]
+                                 (when (:rescue stmt)
+                                   [(str ind "rescue")
+                                    (format-statements (:rescue stmt) (inc level))])
+                                 [(str ind "end")]))
         :assert (let [assertions (:assertions stmt)
                       one-line (fn [{:keys [label condition]}]
                                  (str (when label (str label ": "))
@@ -163,8 +336,11 @@
                               (cons (str ind "assert")
                                     (map #(str (indent (inc level)) (one-line %))
                                          assertions)))))
-        ;; Default: return statement as-is
-        (str ind stmt))
+        ;; An expression used as a statement, or something this printer
+        ;; does not know.
+        (if (contains? #{:binary :unary :identifier :create :when} (:type stmt))
+          (str ind (format-expression stmt))
+          (str ind "...")))
       :else (str ind stmt))))
 
 ;; ---------------------------------------------------------------------------

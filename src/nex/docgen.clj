@@ -1,64 +1,20 @@
 (ns nex.docgen
   "Generate Markdown documentation from Nex source code"
   (:require [nex.parser :as p]
+            [nex.fmt :as fmt]
             [clojure.string :as str])
   (:gen-class))
 
 (defn format-type
-  "Format a type for display"
+  "Nex source text for a type: `Array[String]`, `?Integer`."
   [type-expr]
-  (cond
-    (nil? type-expr) "Void"
-    (string? type-expr) type-expr
-    (map? type-expr)
-    (let [base (:base-type type-expr)
-          params (:type-params type-expr)
-          core (if params
-                 (str base " [" (str/join ", " (map format-type params)) "]")
-                 base)]
-      (if (:detachable type-expr) (str "?" core) core))
-    :else (str type-expr)))
+  (fmt/format-type type-expr))
 
 (defn format-expression
-  "Format an expression for display in documentation"
+  "Nex source text for an expression, as in the code: contracts with
+   lambdas in them read `xs.all(fn (w) => w.length <= n)`."
   [expr]
-  (cond
-    (nil? expr) "nil"
-    (string? expr) expr
-    (number? expr) (str expr)
-    (boolean? expr) (str expr)
-    (map? expr)
-    (case (:type expr)
-      :integer (str (:value expr))
-      :byte (str (:value expr) "u8")
-      :int16 (str (:value expr) "i16")
-      :int32 (str (:value expr) "i32")
-      :real (or (:source expr) (str (:value expr)))
-      :string (str "\"" (:value expr) "\"")
-      :char (str "'" (:value expr) "'")
-      :boolean (str (:value expr))
-      :identifier (:name expr)
-      :old (str "old " (format-expression (:expr expr)))
-      :binary (str (format-expression (:left expr))
-                   " " (:operator expr) " "
-                   (format-expression (:right expr)))
-      :unary (str (:operator expr) (format-expression (:operand expr)))
-      :call (if (:target expr)
-              (str (format-expression (:target expr)) "." (:method expr)
-                   (when (seq (:args expr))
-                     (str "(" (str/join ", " (map format-expression (:args expr))) ")")))
-              (str (:method expr) "(" (str/join ", " (map format-expression (:args expr))) ")"))
-      :create (str "create " (:class-name expr) "." (:constructor expr)
-                   "(" (str/join ", " (map format-expression (:args expr))) ")")
-      :array-literal (str "[" (str/join ", " (map format-expression (:elements expr))) "]")
-      :set-literal (str "#{" (str/join ", " (map format-expression (:elements expr))) "}")
-      :map-literal (str "{" (str/join ", " (map (fn [{:keys [key value]}]
-                                                  (str (format-expression key) ": "
-                                                       (format-expression value)))
-                                                (:entries expr))) "}")
-      ;; Default
-      (pr-str expr))
-    :else (str expr)))
+  (fmt/format-expression expr))
 
 (defn format-assertion
   "Format an assertion for display"
