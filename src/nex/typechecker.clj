@@ -9219,7 +9219,7 @@
   "Type check a complete program.
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([program] (check-program program {}))
-  ([{:keys [classes calls statements imports functions type-aliases duplicate-functions
+  ([{:keys [classes calls statements imports functions type-aliases duplicate-functions duplicate-classes
             function-signature-conflicts] :as program} opts]
    (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))
              *collected-errors* (atom [])]
@@ -9281,6 +9281,20 @@
                                          "Free-function names must be unique within a program; "
                                          "a later definition would silently replace the earlier one. "
                                          "Rename or remove the duplicate."))})))
+
+       ;; Likewise a class declared twice in one source (recorded by the
+       ;; walker). Collapsed last-wins, the earlier one would vanish
+       ;; silently, and the compiled backend would trip over the pair.
+         (when-let [{dup :name :keys [lines line column]} (first duplicate-classes)]
+           (throw (ex-info (str "Duplicate class definition: " dup)
+                           {:error (type-error
+                                    (str "Class '" dup "' is defined more than once"
+                                         (when (seq lines)
+                                           (str " (at lines " (str/join " and " lines) ")"))
+                                         ". Class names must be unique within a program; "
+                                         "a later definition would silently replace the earlier one. "
+                                         "Rename or remove the duplicate.")
+                                    line column)})))
 
        ;; A free function may not reuse a built-in function's name: the compiled
        ;; backend resolves builtins first (silently ignoring the user's

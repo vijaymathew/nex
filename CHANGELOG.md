@@ -7,6 +7,16 @@
   Array[Integer] does not satisfy constraint Comparable`, instead of as the
   type checker's internal data (`{:base-type "Array", :type-args
   ["Integer"]}`).
+- **Lambdas in contracts.** A lambda in a `require` or `ensure` clause that
+  uses the routine's own arguments, such as
+  `require fits: xs.all(fn (w) => w.length <= n)`, now works in compiled
+  code; it used to stop the compiler with "Unable to infer expression type
+  during lowering". Lambdas in a free function's `rescue` clause are
+  covered by the same fix.
+- **A class defined twice** is now a type error, `Class 'Point' is defined
+  more than once (at lines 1 and 6)`, instead of a crash in the compiler
+  (`Cannot invoke "Object.toString()" because "s" is null`) or, in the
+  interpreter, the first definition silently disappearing.
 
 ## 0.6.6 - 2026-10-30
 

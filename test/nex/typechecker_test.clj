@@ -2619,6 +2619,23 @@ end"))
       (is (false? (:success result)))
       (is (some #(str/includes? % "does not satisfy constraint Animal") msgs) (pr-str msgs)))))
 
+(deftest test-duplicate-class-is-a-type-error
+  (testing "a class defined twice in one program is reported, at the second definition"
+    (let [code "class Point
+                feature
+                  x: Integer
+                end
+
+                class Point
+                feature
+                  y: Integer
+                end"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Class 'Point' is defined more than once (at lines 1 and 6)") msgs)
+          (pr-str msgs)))))
+
 (deftest test-explicit-type-argument-constraint-error-is-readable
   (testing "a type argument that fails its constraint is shown as Nex writes it, not as internal data"
     (let [code "class Sorted_List [G -> Comparable]
