@@ -44,7 +44,7 @@
 
 (defn format-method
   "Generate documentation for a method"
-  [{:keys [name params return-type note require ensure visibility]}]
+  [{:keys [name params return-type note require ensure visibility declaration-only?]}]
   (let [param-list (if (seq params)
                      (str "(" (str/join ", " (map format-parameter params)) ")")
                      "()")
@@ -54,7 +54,9 @@
         vis (format-visibility visibility)]
     (str/join "\n"
               (remove empty?
-                      [(str "### " name param-list return-str)
+                      [(str "### " name param-list return-str
+                            ;; `deferred` in place of a body: heirs supply it.
+                            (when declaration-only? " *(deferred)*"))
                        ""
                        vis
                        ""
@@ -138,14 +140,17 @@
   [parents]
   (when (seq parents)
     (str "\n\n**Inherits from:** "
-         (str/join ", " (map (fn [{:keys [parent]}]
-                               (str "`" parent "`"))
+         (str/join ", " (map (fn [{:keys [parent generic-args]}]
+                               (str "`" parent
+                                    (when (seq generic-args)
+                                      (str "[" (str/join ", " (map format-type generic-args)) "]"))
+                                    "`"))
                              parents))
          "\n")))
 
 (defn generate-class-doc
   "Generate Markdown documentation for a single class"
-  [{:keys [name generic-params note parents body invariant]}]
+  [{:keys [name generic-params note parents body invariant deferred? sealed?]}]
   (let [generic-str (format-generic-params generic-params)
         {:keys [fields methods constructors]} (extract-members body)
         public-fields (filter #(= :public (-> % :visibility :type)) fields)
@@ -156,8 +161,17 @@
         selective-methods (filter #(= :selective (-> % :visibility :type)) methods)]
     (str/join "\n"
               (remove empty?
-                      [(str "# Class: " name generic-str)
+                      [(str "# " (when sealed? "Sealed ")
+                            (cond (and deferred? sealed?) "deferred class"
+                                  deferred? "Deferred class"
+                                  :else "Class")
+                            ": " name generic-str)
                        ""
+                       (when deferred?
+                         (str "A deferred class: it cannot be created itself, only its heirs can."
+                              (when (some :declaration-only? methods)
+                                " They supply the routines marked *(deferred)*.")
+                              "\n"))
                        (when note
                          (str note "\n"))
                        (format-inheritance parents)

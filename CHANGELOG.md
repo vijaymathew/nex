@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`nex doc` marks deferred classes.** A deferred class is headed
+  `Deferred class: Tool` (or `Sealed deferred class`), with a line saying
+  only its heirs can be created, and each routine it leaves deferred is
+  marked *(deferred)*. A parent's type arguments are kept too:
+  `Inherits from: Tool[Integer]`, not `Tool`.
 - **Readable constraint errors.** A type argument that does not satisfy its
   generic constraint is now reported as Nex writes it, `Type argument
   Array[Integer] does not satisfy constraint Comparable`, instead of as the

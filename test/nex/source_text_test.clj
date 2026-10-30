@@ -97,3 +97,32 @@
     (is (str/includes? doc "**all_fit**: `result.all(fn (line) => line.length <= width)`") doc)
     (is (str/includes? doc "### wrap(`text: String`, `width: Integer`): `Array[String]`") doc)
     (is (not (str/includes? doc ":expression-body")) doc)))
+
+(deftest nex-doc-marks-deferred-classes-and-routines
+  (let [doc (docgen/generate-file-doc
+             "deferred class Tool [T]
+              feature
+                name(): String deferred
+
+                changes_things(): Boolean do
+                  result := false
+                end
+              end
+
+              sealed deferred class Shape
+              end
+
+              class Saw inherit Tool[Integer]
+              feature
+                name(): String do
+                  result := \"saw\"
+                end
+              end")]
+    (is (str/includes? doc "# Deferred class: Tool [T]") doc)
+    (is (str/includes? doc "### name(): `String` *(deferred)*") doc)
+    (is (str/includes? doc "### changes_things(): `Boolean`\n") doc)
+    (is (str/includes? doc "# Sealed deferred class: Shape") doc)
+    (is (str/includes? doc "# Class: Saw") doc)
+    (is (str/includes? doc "**Inherits from:** `Tool[Integer]`") doc)
+    (is (= 1 (count (re-seq #"### name\(\): `String` \*\(deferred\)\*" doc)))
+        "only Tool's deferred routine is marked; Saw's is not")))
