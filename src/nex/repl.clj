@@ -11,6 +11,7 @@
             [nex.debugger :as dbg]
             [nex.lower :as lower]
             [nex.typechecker :as tc]
+            [nex.cli :as cli]
             [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.io :as io])
@@ -1991,11 +1992,7 @@
 ;;
 
 (defn show-banner []
-  (println "╔════════════════════════════════════════════════════════════╗")
-  (println "║                   NEX REPL v0.6.6                          ║")
-  (println "║     A high-level language for design and implementation    ║")
-  (println "╚════════════════════════════════════════════════════════════╝")
-  (println)
+  (println (str "Nex " cli/version " — write code that keeps its promises"))
   (println "Type :help for help, :quit to exit")
   (println))
 
