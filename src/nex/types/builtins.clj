@@ -1999,8 +1999,10 @@
   (typeinfo/runtime-type-is? runtime-type-name is-parent? ctx target-type value))
 
 (defn java-http-request
-  [method url body timeout-ms]
-  (http/java-http-request make-object method url body timeout-ms))
+  ([method url body timeout-ms]
+   (http/java-http-request make-object method url body timeout-ms))
+  ([method url body timeout-ms headers]
+   (http/java-http-request make-object method url body timeout-ms headers)))
 
 (defn make-http-server-handle
   [port]
@@ -2263,7 +2265,14 @@
        (throw (ex-info "http_post expects 2 or 3 arguments"
                        {:function "http_post" :expected "2 or 3" :actual (count args)})))
      (let [[url body timeout-ms] args]
-       (java-http-request "POST" (str url) (str body) timeout-ms)))})
+       (java-http-request "POST" (str url) (str body) timeout-ms)))
+   "http_request"
+   (fn [_ctx & args]
+     (when-not (or (= (count args) 4) (= (count args) 5))
+       (throw (ex-info "http_request expects 4 or 5 arguments"
+                       {:function "http_request" :expected "4 or 5" :actual (count args)})))
+     (let [[method url body headers timeout-ms] args]
+       (java-http-request (str method) (str url) (str body) timeout-ms headers)))})
 
 (def json-builtins
   {"json_parse"

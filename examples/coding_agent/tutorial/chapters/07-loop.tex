@@ -1,0 +1,527 @@
+% ===========================================================================
+\chapter{The agent loop}\label{ch:loop}
+
+We have a conversation, a model and tools. The agent puts them together.
+Its main routine is the loop from Chapter~1:
+
+\begin{shell}
+add the task to the conversation
+repeat
+    reply := the model's answer to the conversation
+    add the reply to the conversation
+    if the reply asks for tools then
+        run them, and add their results to the conversation
+    else
+        the task is done
+\end{shell}
+
+Before the agent itself, three small things it needs: someone to decide
+whether a tool may run, a tally of the tokens used, and a way to show what
+is going on.
+
+\section{Who decides}
+
+Whether a tool that changes things may run is decided by a
+\code{Permission}. Chapter~\ref{ch:permission} has the interesting ones,
+including asking you. For now we need just the simplest, which allows
+everything:
+
+\begin{newfile}{permissions.nex}
+-- permissions.nex: who decides whether a tool may run.
+--
+-- Reading the workspace is always allowed: it can't do any harm. A tool
+-- that changes things (editing a file, running a command) runs only if
+-- the policy allows it. When it doesn't, the model is told so, and can
+-- try something else or ask.
+
+intern Tools
+
+deferred class Permission
+feature
+  -- Whether `tool` may run on `input`. It is only asked about calls
+  -- whose input has been checked.
+  allows(tool: Tool, input: Json_Value): Boolean
+  require
+    checked_input: tool.problem_with(input) = ""
+  deferred
+end
+
+-- Everything is allowed: `--yes`. For a workspace you can throw away.
+class Allow_Everything inherit Permission
+create
+  make() do
+  end
+
+feature
+  allows(tool: Tool, input: Json_Value): Boolean do
+    result := true
+  end
+end
+\end{newfile}
+
+\section{Counting tokens}
+
+A real model's replies say how many tokens each request read and wrote
+(Chapter~\ref{ch:conversation}). The agent adds them up, so that it can
+tell you what a task used. \code{grouped} writes big numbers the readable
+way, with commas.
+
+\begin{newfile}{context.nex}
+-- context.nex: keeping count of tokens, and starting afresh when the
+-- conversation grows too long.
+--
+-- Every request sends the whole conversation, so each one is longer
+-- than the last. The model can only read so much (its context window),
+-- and every token read costs money and time. When the conversation
+-- passes a budget, the agent asks the model to sum up what it has done,
+-- and carries on in a new conversation that starts from that summary.
+
+intern Messages
+intern Helpers
+
+-- What a session has used so far.
+class Usage
+create
+  make() do
+  end
+
+feature
+  replies: Integer        -- how many replies
+  read: Integer           -- tokens read, over all requests
+  cached: Integer         -- how many of those came from the cache
+  written: Integer        -- tokens written
+
+  add(reply: Reply) do
+    replies := replies + 1
+    read := read + reply.context_tokens()
+    cached := cached + reply.cached_tokens()
+    written := written + reply.output_tokens()
+  end
+
+  -- "12 replies; read 45,210 tokens (38,000 from the cache), wrote 1,234".
+  to_string(): String do
+    result := count_text(replies, "reply")
+    if read > 0 then
+      result := result + "; read " + grouped(read) + " tokens"
+      if cached > 0 then
+        result := result + " (" + grouped(cached) + " from the cache)"
+      end
+      result := result + ", wrote " + grouped(written)
+    end
+  end
+end
+
+-- A whole number with its thousands grouped: grouped(45210) is "45,210".
+function grouped(n: Integer): String do
+  let digits: String := n.abs.to_string
+  result := ""
+  let i: Integer := digits.length
+  from until i <= 3 do
+    result := "," + digits.substring(i - 3, i) + result
+    i := i - 3
+  end
+  result := digits.substring(0, i) + result
+  if n < 0 then
+    result := "-" + result
+  end
+end
+\end{newfile}
+
+Note what \code{read} adds up. Every request sends the whole conversation,
+so the tokens read grow with every reply: the tenth request reads
+everything the first nine did, and more. That is why caching matters
+(Chapter~\ref{ch:claude}), and why long conversations need care
+(Chapter~\ref{ch:long}).
+
+\section{How a task went}
+
+When the agent stops working on a task, it says why. The model may have
+finished (the usual case), or the agent may have stopped it: after too
+many replies, because a reply was cut off, or because the model declined
+the task. A scripted model can also run out of lines.
+
+\begin{newfile}{agent.nex}
+-- agent.nex: the agent loop.
+--
+-- Send the conversation to the model. If the reply asks for tools, run
+-- them, add their results to the conversation, and send it again. When
+-- a reply asks for nothing more, the task is done.
+
+intern Model
+intern Tools
+intern Permissions
+intern Context
+intern Helpers
+
+-- How a task went.
+class Run_Result
+create
+  make(ending, text: String, replies, calls: Integer) do
+    this.ending := ending
+    this.text := text
+    this.replies := replies
+    this.calls := calls
+  end
+
+feature
+  -- "done": the model finished; "turn limit": it was still going when
+  -- the agent stopped it; "cut off": its last reply was too long;
+  -- "refused": it declined; "out of script": a recorded or scripted
+  -- model had no more replies.
+  ending: String
+  text: String      -- what the model said last
+  replies: Integer  -- how many replies the task took
+  calls: Integer    -- how many tool calls
+
+  finished(): Boolean do
+    result := ending = "done"
+  end
+end
+\end{newfile}
+
+\section{Showing what happens}
+
+An agent that works in silence is hard to trust and impossible to debug.
+The \code{Reporter} prints each step as it happens: the task, what the
+model says, each tool call, and the first line of each result. It can also
+be told to print the results in full, or to print nothing at all (for our
+checks, in Chapter~\ref{ch:checks}).
+
+\begin{append}{agent.nex}
+-- Prints what the agent does, as it does it.
+class Reporter
+create
+  -- `quiet` prints nothing; `full_output` prints every tool's output in
+  -- full, not just its first line.
+  make(quiet, full_output: Boolean) do
+    this.quiet := quiet
+    this.full_output := full_output
+  end
+
+feature
+  quiet: Boolean
+  full_output: Boolean
+
+  on_task(task: String) do
+    say("\n> " + task)
+  end
+
+  on_text(text: String) do
+    say("\n" + text)
+  end
+
+  on_call(description: String) do
+    say("  " + description)
+  end
+
+  on_result(text: String, is_error: Boolean) do
+    if full_output then
+      say(indented(text.trim(), "    | "))
+    else
+      let lines: Integer := lines_of(text).length
+      say("    " + (when is_error then "error: " else "" end) + preview(text, 70)
+        + (when lines > 1 then "  (" + count_text(lines, "line") + ")" else "" end))
+    end
+  end
+
+  on_finish(outcome: Run_Result, usage: Usage) do
+    let how: String := when outcome.finished() then "done" else "stopped: " + outcome.ending end
+    say("\n(" + how + " after " + count_text(outcome.replies, "reply") + " and "
+      + count_text(outcome.calls, "tool call") + ". So far: " + usage.to_string + ")")
+  end
+
+  private feature
+    say(text: String) do
+      if not quiet then
+        console.print_line(text)
+      end
+    end
+end
+\end{append}
+
+\section{The system prompt}
+
+The \emph{system prompt} is the standing instructions, sent with every
+request. Ours says what the model is doing and where, and how to go about
+it: look before changing anything, make small changes, check them, and say
+so when stuck. These are the habits of a careful programmer, and a model
+follows them much better when they are written down. It ends by saying
+what Nex is, since the model may never have seen it.
+
+\begin{append}{agent.nex}
+-- The standing instructions: who the model is in this conversation, and
+-- how to work.
+function system_prompt(): String do
+  result := "You are a coding agent working in a project folder (the workspace). "
+    + "Use the tools to read and search its files, change them, and run commands in it. "
+    + "All paths are relative to the workspace.\n\n"
+    + "Work the way a careful programmer would:\n"
+    + "- Before changing anything, look around: read the files that matter, and run the "
+    + "project's checks or tests to see where things stand.\n"
+    + "- Make the smallest change that does the job, in the style of the code around it.\n"
+    + "- After a change, run the checks again to see that it worked and broke nothing else.\n"
+    + "- If something you need to know is unclear, or a problem is not one you can fix, "
+    + "stop and say so instead of guessing.\n\n"
+    + "When you have finished, reply without calling a tool: say in a few sentences what "
+    + "was wrong, what you changed, and how you checked it.\n\n"
+    + "The projects you work on may be written in Nex, a language in the Eiffel tradition: "
+    + "classes, `require`/`ensure` contracts, `--` comments. Run a Nex program with "
+    + "`nex file.nex`."
+end
+
+-- Whether no two tools share a name.
+function names_differ(tools: Array[Tool]): Boolean do
+  let names: Array[String] := []
+  result := true
+  across tools as tool do
+    if names.contains(tool.name()) then
+      result := false
+    end
+    names.add(tool.name())
+  end
+end
+\end{append}
+
+\section{The agent}
+
+The agent is made from a model, its tools, a permission and a reporter. It
+keeps the conversation (over every task you give it, so that a second task
+can refer to the first) and a tally of tokens. Two tools with the same name
+would make the model's requests ambiguous, so that is ruled out at the
+start.
+
+\begin{append}{agent.nex}
+class Agent
+create
+  make(model: Model, tools: Array[Tool], permission: Permission, reporter: Reporter)
+  require
+    distinct_names: names_differ(tools)
+  do
+    this.model := model
+    this.tools := tools
+    this.permission := permission
+    this.reporter := reporter
+    conversation := create Conversation.make()
+    usage := create Usage.make()
+    system := system_prompt()
+    max_replies := 40
+  end
+
+feature
+  model: Model
+  tools: Array[Tool]
+  permission: Permission
+  reporter: Reporter
+  conversation: Conversation   -- everything so far, over every task
+  usage: Usage
+  system: String
+  max_replies: Integer         -- the most replies one task may take
+
+  set_max_replies(n: Integer)
+  require
+    positive: n > 0
+  do
+    max_replies := n
+  end
+\end{append}
+
+\code{max_replies} is a safety net. A model that keeps calling tools
+without getting anywhere (it happens: a test that can't be made to pass, a
+misunderstanding that never clears up) would otherwise go on, at a cost,
+for ever.
+
+Now the loop. It is the plan above, with every way out made explicit:
+
+\begin{continued}{agent.nex}
+  -- Work on `task` until the model says it is done, or the agent stops
+  -- it. The conversation carries on from earlier tasks, so a task can
+  -- refer to one before it ("now add a check for that").
+  run(task: String): Run_Result
+  require
+    something_to_do: task.trim() /= ""
+  do
+    reporter.on_task(task)
+    conversation.add_user_text(task)
+    let replies: Integer := 0
+    let calls: Integer := 0
+    let last_words: String := ""
+    let ending: String := ""
+    from until ending /= "" do
+      if not model.can_reply() then
+        ending := "out of script"
+      elseif replies >= max_replies then
+        ending := "turn limit"
+      else
+        let reply: Reply := model.reply(create Request.make(system, conversation, definitions()))
+        replies := replies + 1
+        usage.add(reply)
+        conversation.add_reply(reply)
+        if reply.text() /= "" then
+          reporter.on_text(reply.text())
+          last_words := reply.text()
+        end
+        let wanted: Array[Tool_Call] := reply.tool_calls()
+        if not wanted.is_empty then
+          let results: Array[Tool_Result] := []
+          across wanted as call do
+            results.add(execute(call, reply.stop_reason() = "max_tokens"))
+            calls := calls + 1
+          end
+          conversation.add_tool_results(results)
+        else
+          ending := ending_for(reply.stop_reason())
+        end
+      end
+    end
+    result := create Run_Result.make(ending, last_words, replies, calls)
+    reporter.on_finish(result, usage)
+  ensure
+    no_calls_left_unanswered: conversation.waiting.is_empty
+  end
+\end{continued}
+
+A few things to notice.
+
+\begin{itemize}
+\item The loop decides what to do from the reply's content, not just its
+  \code{stop_reason}: if there are tool calls, they are answered. That
+  matters in one case. A reply can be cut off part way, when it reaches the
+  longest reply the model is allowed (\code{stop_reason} is
+  \code{"max_tokens"}). If it was in the middle of a tool call, that call's
+  input may be incomplete, so \code{execute} is told, and refuses to run
+  it. But the call is still answered, with an error, because every call
+  must be answered before the conversation can go on.
+\item All the results of one reply go back in one message. A model can ask
+  for several tools at once (to read three files, say), and answering them
+  together is what the API expects.
+\item The postcondition says that however the task ended, no tool call is
+  left unanswered. That is what lets you give the agent another task
+  afterwards.
+\end{itemize}
+
+\section{Running one tool call}
+
+\code{execute} is where the agent's rules are applied. In order: the tool
+must exist, the reply must not have been cut off, the input must be valid,
+and the permission must allow it. Only then does the tool run, and even
+then, if it fails with an exception, the failure becomes an error result.
+\emph{Nothing a model asks for can stop the agent.} Whatever goes wrong
+becomes a message the model can read, and act on.
+
+\begin{continued}{agent.nex}
+  -- Run one tool call and say how it went. Whatever goes wrong becomes
+  -- a result the model can read; the agent itself carries on.
+  execute(call: Tool_Call, cut_off: Boolean): Tool_Result do
+    let outcome: Tool_Outcome := create Tool_Outcome.error("")
+    let tool: ?Tool := tool_named(call.name)
+    if ?tool as t then
+      reporter.on_call(t.describe(call.input))
+      let problem: String := t.problem_with(call.input)
+      if cut_off then
+        outcome := create Tool_Outcome.error("Your reply was cut off before this call was "
+          + "complete, so it was not run. Try again, sending less in one call.")
+      elseif problem /= "" then
+        outcome := create Tool_Outcome.error("Not run: " + problem + ".")
+      elseif not permission.allows(t, call.input) then
+        outcome := create Tool_Outcome.error("The user did not allow this, so it was not run. "
+          + "Don't try to get the same effect another way; if you need it, say why.")
+      else
+        do
+          outcome := t.run(call.input)
+        rescue
+          outcome := create Tool_Outcome.error("The tool failed: " + exception)
+        end
+      end
+    else
+      reporter.on_call(call.name + " ?")
+      outcome := create Tool_Outcome.error("There is no tool called `" + call.name
+        + "`. The tools are: " + ", ".join(tool_names()) + ".")
+    end
+    reporter.on_result(outcome.text, outcome.is_error)
+    result := create Tool_Result.make(call.id, outcome.text, outcome.is_error)
+  ensure
+    answers_the_call: result.call_id = call.id
+  end
+\end{continued}
+
+The message for a refusal is worth a second look: ``Don't try to get the
+same effect another way.'' Without it, a model refused an edit will
+sometimes try writing the whole file instead, or running \code{sed}: it is
+trying to be helpful, and the refusal looks to it like an obstacle. Saying
+plainly what a refusal means is part of the job.
+
+The \code{do} \ldots\ \code{rescue} \ldots\ \code{end} block is how Nex
+catches an exception: if anything in the \code{do} part fails, the
+\code{rescue} part runs instead of the program stopping.
+
+The rest is bookkeeping: the tools' definitions for the request, and
+finding a tool by name.
+
+\begin{continued}{agent.nex}
+  -- The tools as the API wants them described.
+  definitions(): Array[Map[String, Any]] do
+    across tools as tool do
+      result.add(tool.definition())
+    end
+  end
+
+  tool_named(name: String): ?Tool do
+    across tools as tool do
+      if tool.name() = name then
+        result := tool
+      end
+    end
+  end
+
+  tool_names(): Array[String] do
+    across tools as tool do
+      result.add(tool.name())
+    end
+  end
+
+  private feature
+    -- What a reply that asks for no tools means for the task.
+    ending_for(stop_reason: String): String do
+      if stop_reason = "max_tokens" then
+        result := "cut off"
+      elseif stop_reason = "refusal" then
+        result := "refused"
+      else
+        result := "done"     -- "end_turn", or a stop sequence
+      end
+    end
+end
+\end{continued}
+
+\code{tool_named} returns a \code{?Tool}, which is \code{nil} when there is
+no such tool; \code{execute} checks with \code{if ?tool as t}.
+
+\section{A first run}
+
+Our agent can't do much yet: it can only look. But it is complete, so
+let's give it a script. The script lists the files, asks for a tool that
+doesn't exist, gets a parameter wrong, reads a file, and finishes:
+
+\begin{tryit}{try_agent.nex}
+intern Agent
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+let tools: Array[Tool] := [create List_Files.make(ws), create Read_File.make(ws)]
+let model: Scripted_Model := create Scripted_Model.make([
+  use_tool("Let me see what the project has.", "list_files", '{}'),
+  use_tool("", "delete_everything", '{}'),
+  use_tool("", "read_file", '{"name": "fines.nex"}'),
+  use_tool("", "read_file", '{"path": "fines.nex"}'),
+  say("A Fine_Policy charges so much per day late, up to a maximum.")
+])
+let agent: Agent := create Agent.make(model, tools, create Allow_Everything.make(),
+  create Reporter.make(false, false))
+let outcome: Run_Result := agent.run("What does fines.nex do?")
+console.print_line("ending: " + outcome.ending)
+console.print_line("what the model was told about delete_everything: " + model.sent.get(2))
+\end{tryit}
+\tryoutput{try_agent}
+
+The mistakes didn't stop anything: each became an error the model could
+read, as the last line shows. A script can't learn from an error, of
+course, but a real model does, as we will see.

@@ -1,0 +1,175 @@
+% ===========================================================================
+\chapter{A pretend model}\label{ch:model}
+
+To the agent, a model is something that takes the conversation so far and
+gives back the next reply. How it does that is its own business: Claude
+does it over the network, but a script can do it too, and for building and
+testing the agent a script is far better. It costs nothing, it answers
+instantly, and it says exactly what we want it to say, including the odd
+things a real model only does once in a while, like asking for a tool that
+doesn't exist.
+
+\section{What a model is given}
+
+A request to the model holds three things: the \emph{system prompt}, the
+standing instructions that say who the model is in this conversation and
+how to work; the conversation; and the tools it may ask for, each
+described as a JSON object (Chapter~\ref{ch:tools}). A request only makes
+sense when it is the model's turn to speak.
+
+\begin{newfile}{model.nex}
+-- model.nex: the model, seen from the agent: something that takes the
+-- conversation so far and gives the next reply.
+--
+-- Claude_Model (claude_model.nex) asks Claude over the network. The
+-- models here don't: Scripted_Model plays a part written by hand,
+-- Replay_Model plays back a session recorded earlier, and
+-- Recording_Model records a session while another model does the work.
+
+intern Messages
+
+-- Everything the model is given for one reply.
+class Request
+create
+  make(system: String, conversation: Conversation, tools: Array[Map[String, Any]])
+  require
+    models_turn: conversation.models_turn()
+  do
+    this.system := system
+    this.conversation := conversation
+    this.tools := tools
+  end
+
+feature
+  system: String                    -- the standing instructions
+  conversation: Conversation
+  tools: Array[Map[String, Any]]    -- the tools it may ask for
+end
+\end{newfile}
+
+\section{The Model class}
+
+\code{Model} is a \emph{deferred} class: it says what every model can do,
+without saying how. Its \code{reply} routine has no body (the word
+\code{deferred} stands in for one); each kind of model will provide its
+own. A class that \code{inherit}s \code{Model} and provides every deferred
+routine is a model the agent can use, whatever it is underneath.
+
+\begin{append}{model.nex}
+deferred class Model
+feature
+  -- The model's next reply.
+  reply(request: Request): Reply
+  require
+    ready: can_reply()
+  deferred
+
+  -- Whether it can give another reply. A model over the network always
+  -- can (though the network may fail); a script can run out.
+  can_reply(): Boolean do
+    result := true
+  end
+
+  -- Who is answering, for the transcript: "claude-opus-5-5".
+  name(): String deferred
+end
+\end{append}
+
+The precondition on \code{reply} deserves a closer look. A script can run
+out of lines, so a scripted model must not be asked for a reply it doesn't
+have. The obvious place to say that is on the scripted model's own
+\code{reply}. But Nex won't allow it, and rightly so: code that holds a
+\code{Model} (the agent) knows only \code{Model}'s contract, so a
+precondition that a particular kind of model adds would be a rule the
+caller can't see. An heir may only accept \emph{more} than its parent, never
+less. So the rule goes on \code{Model} itself, in a form every model can
+fill in: \code{reply} may be called when \code{can_reply()} is true. Each
+model says when that is, and the agent asks before every reply.
+
+\section{A model that reads a script}
+
+A \code{Scripted_Model} is given its replies in advance, and gives them
+back one at a time, whatever it is asked: an actor reading a script. It
+remembers what it was sent each time, as JSON text, so that our checks can
+look at what the agent told the model.
+
+What is sent each time is the whole conversation, and all but its last
+message were sent before. So the interesting part is the last user
+message: the task, the first time; then the results of the tools the model
+asked for. \code{last_message_json} gets it as JSON text. (It turns the
+message into JSON text, reads it back and turns it into text again. That
+looks pointless, but it means two equal messages always give equal text,
+however they were built, which is what we need to compare them.)
+
+\begin{append}{model.nex}
+-- The JSON of the message the user sent last in `request`, the part of
+-- the request that is new. JSON text read back is used for both sides of
+-- a comparison, so that two equal messages give equal text.
+function last_message_json(request: Request): String do
+  result := json_text(json_value(json_text(request.conversation.last_user_message())).raw())
+end
+
+-- A model that gives the replies it was given, in order, whatever it is
+-- asked: an actor reading a script. It keeps what it was sent each
+-- time, so a check can look at it.
+class Scripted_Model inherit Model
+create
+  make(replies: Array[Reply]) do
+    this.replies := replies
+  end
+
+feature
+  replies: Array[Reply]
+  sent: Array[String]   -- the new message of each request, as JSON
+
+  name(): String do
+    result := "a script"
+  end
+
+  can_reply(): Boolean do
+    result := sent.length < replies.length
+  end
+
+  reply(request: Request): Reply do
+    result := replies.get(sent.length)
+    sent.add(last_message_json(request))
+  end
+end
+\end{append}
+
+\code{Scripted_Model} gives \code{can_reply} a new body: an heir may
+\emph{redefine} a routine it inherits, as long as it keeps its signature.
+And because the agent always asks \code{can_reply} before \code{reply},
+\code{replies.get(sent.length)} is always in range.
+
+Here is a two-line script. We ask for a reply, answer its tool call by
+hand, and ask again:
+
+\begin{tryit}{try_script.nex}
+intern Model
+
+let model: Scripted_Model := create Scripted_Model.make([
+  use_tool("Let me look at the loans.", "read_file", '{"path": "loans.nex"}'),
+  say("I have seen enough.")
+])
+let c: Conversation := create Conversation.make()
+c.add_user_text("What does loans.nex do?")
+
+let first: Reply := model.reply(create Request.make("Be brief.", c, []))
+console.print_line(first.text() + " (" + first.stop_reason() + ")")
+c.add_reply(first)
+c.add_tool_results([create Tool_Result.make(first.tool_calls().get(0).id,
+  "class Loan ...", false)])
+
+let second: Reply := model.reply(create Request.make("Be brief.", c, []))
+console.print_line(second.text() + " (" + second.stop_reason() + ")")
+console.print_line("can reply again: " + model.can_reply().to_string)
+across model.sent as message do
+  console.print_line("sent: " + message)
+end
+\end{tryit}
+\tryoutput{try_script}
+
+The model said what the script said, and kept what it was sent: first the
+question, then the result of the tool. In Chapter~\ref{ch:loop} the agent
+will do the part we just did by hand.

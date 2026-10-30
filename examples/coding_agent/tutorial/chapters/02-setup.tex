@@ -1,0 +1,323 @@
+% ===========================================================================
+\chapter{Setting up}\label{ch:setup}
+
+Make a folder for the project and go into it. Every file in this tutorial
+goes in this one folder.
+
+\begin{shell}
+mkdir agent
+cd agent
+\end{shell}
+
+Copy two folders into it from \code{examples/coding_agent} of the Nex
+distribution:
+
+\begin{itemize}
+\item \code{sample_project}, the project the agent will work on: a small
+  lending library, with a bug;
+\item \code{sessions}, which holds a recorded session, for
+  Chapter~\ref{ch:replay}.
+\end{itemize}
+
+\section{The sample project}
+
+\code{sample_project} has three Nex files and a \code{README.md}. A
+\code{Loan} is a book lent to someone on some day (days are numbered from
+the day the library opened), and is due back 14 days later:
+
+\begin{excerpt}{sample_project/loans.nex}
+  -- The last day the book may be returned without a fine.
+  due_on(): Integer do
+    result := lent_on + LOAN_DAYS
+  end
+
+  -- How many days late a book returned on `day` is: 0 if on time.
+  days_late(day: Integer): Integer
+  require
+    not_before_loan: day >= lent_on
+  do
+    if day >= due_on() then
+      result := day - due_on() + 1
+    end
+  ensure
+    never_negative: result >= 0
+  end
+\end{excerpt}
+
+A \code{Fine_Policy} charges so many cents for each day late, up to a
+maximum. And \code{checks.nex} checks both. Run the checks:
+
+\begin{shell}
+cd sample_project
+nex checks.nex
+\end{shell}
+
+Four of the seven fail. You may already see why, but don't fix it: that is
+the agent's job. (If you do fix it, copy the folder again.)
+
+\section{A first file: text helpers}
+
+An agent spends most of its time moving text around: file contents,
+command output, the model's replies. The first file holds the small text
+utilities the rest of the project uses.
+
+First, a word about printing. Nex's \code{print} shows a string with its
+quotes, as \code{"hello"}, which is handy when debugging but not in a
+program's output. Every Nex program has a \code{Console} called
+\code{console}, ready to use without creating it, and
+\code{console.print_line("hello")} prints the text as it is, on a line of
+its own. We use it for all our output.
+
+Nex strings have \code{index_of}, which finds the first place a piece of
+text occurs. We will often need the next place after some position, to
+count occurrences or to split text into lines, so the first helper does
+that. It searches the rest of the string, from \code{start} on, and adds
+\code{start} back to the position it finds:
+
+\begin{newfile}{helpers.nex}
+-- helpers.nex: small text utilities the rest of the agent uses, and
+-- finding the user's files.
+
+-- Where `part` first occurs in `text` at or after position `start`, or -1.
+function index_from(text, part: String, start: Integer): Integer
+require
+  part_given: part /= ""
+  start_in_range: start >= 0 and start <= text.length
+do
+  let at: Integer := text.substring(start, text.length).index_of(part)
+  result := when at < 0 then -1 else start + at end
+ensure
+  not_found_or_after: result = -1 or result >= start
+end
+\end{newfile}
+
+The \code{require} clause is the function's precondition: what must be true
+when it is called. Searching for the empty string makes no sense, and a
+start outside the string is a mistake by the caller. If a call breaks a
+precondition, Nex stops with an error that names the clause, such as
+\code{Precondition violation: part_given}, instead of carrying on with
+nonsense. The \code{ensure} clause, the postcondition, is what the function
+promises in return. We will lean on contracts like these throughout: they
+say what each piece of code expects and guarantees, and Nex checks them as
+the program runs.
+
+\code{when} \ldots\ \code{then} \ldots\ \code{else} \ldots\ \code{end} is
+an \code{if} that gives a value.
+
+Now we can count how many times a piece of text occurs. This will be the
+heart of the agent's safe editing in Chapter~\ref{ch:editing}: an edit is
+only allowed if the text to replace occurs exactly once.
+
+\begin{append}{helpers.nex}
+-- How many times `part` occurs in `text`, not counting overlaps:
+-- count_occurrences("banana", "an") is 2.
+function count_occurrences(text, part: String): Integer
+require
+  part_given: part /= ""
+do
+  let at: Integer := index_from(text, part, 0)
+  from until at < 0 do
+    result := result + 1
+    at := index_from(text, part, at + part.length)
+  end
+ensure
+  never_negative: result >= 0
+end
+
+-- `text` with its first `before` replaced by `after`.
+function replace_first(text, before, after: String): String
+require
+  occurs: text.index_of(before) >= 0
+do
+  let at: Integer := text.index_of(before)
+  result := text.substring(0, at) + after + text.substring(at + before.length, text.length)
+end
+\end{append}
+
+\code{from} \ldots\ \code{until} \ldots\ \code{do} \ldots\ \code{end} is
+Nex's loop: it repeats the body until the condition becomes true. An
+\code{Integer} \code{result} starts at 0, so \code{count_occurrences} can
+add to it straight away.
+
+Why not use the strings' own \code{split} to cut text into lines? Because
+it takes a regular expression rather than plain text, and it drops empty
+pieces at the end. Files are made of lines, and an agent has to show them
+faithfully, blank lines and all, so we write our own:
+
+\begin{append}{helpers.nex}
+-- The lines of `text`, without their line breaks. A final line break
+-- does not start another line: lines_of("a\nb\n") is ["a", "b"], and
+-- lines_of("") is [].
+function lines_of(text: String): Array[String] do
+  let start: Integer := 0
+  from until start >= text.length do
+    let stop: Integer := index_from(text, "\n", start)
+    if stop < 0 then
+      stop := text.length
+    end
+    result.add(text.substring(start, stop))
+    start := stop + 1
+  end
+end
+
+-- Lines joined back together, each ending in a line break.
+function joined_lines(lines: Array[String]): String do
+  result := ""
+  across lines as line do
+    result := result + line + "\n"
+  end
+end
+\end{append}
+
+An \code{Array} \code{result} starts out empty, ready to \code{add} to.
+\code{across} \ldots\ \code{as} \ldots\ \code{do} runs its body once for
+every element.
+
+When the agent shows the model a file, it numbers the lines, so that the
+model can say ``line 32'' and we can see what it means. \code{pad_start}
+adds spaces on the left until the number is 5 characters wide:
+
+\begin{append}{helpers.nex}
+-- `lines` numbered from `first`, the way read_file shows a file:
+--    12  some code
+function numbered(lines: Array[String], first: Integer): String do
+  result := ""
+  let n: Integer := first
+  across lines as line do
+    result := result + n.to_string.pad_start(" ", 5) + "  " + line + "\n"
+    n := n + 1
+  end
+end
+\end{append}
+
+\section{Keeping output short}
+
+A model reads everything we send it, and pays for it, in time and money:
+models read text as \emph{tokens}, pieces of a few characters each, and
+are priced by the token. A command can print a megabyte. So every tool's
+output will be cut down to a sensible size before the model sees it.
+Which part to keep? Usually the beginning and the end: the beginning says
+what a command was doing, the end how it finished (the error, or the
+summary line of a test run). So \code{shortened} drops the middle, and says
+how much it dropped:
+
+\begin{append}{helpers.nex}
+-- `text` cut down to at most about `limit` characters by dropping the
+-- middle. The start and the end of a long output are usually the useful
+-- parts: what a command was doing, and how it finished.
+function shortened(text: String, limit: Integer): String
+require
+  sensible_limit: limit >= 100
+do
+  if text.length <= limit then
+    result := text
+  else
+    let keep: Integer := (limit - 60) / 2
+    let cut: Integer := text.length - 2 * keep
+    result := text.substring(0, keep)
+      + "\n[... " + cut.to_string + " characters cut ...]\n"
+      + text.substring(text.length - keep, text.length)
+  end
+ensure
+  short_enough: result.length <= limit
+end
+\end{append}
+
+The 60 characters left over are room for the note in the middle; the
+postcondition checks that it fits.
+
+The next helpers are for what the agent prints for you: a one-line preview
+of a long text, counts like ``3 lines'' and ``2 replies'', and indenting:
+
+\begin{append}{helpers.nex}
+-- The first line of `text`, cut to `limit` characters: a one-line preview.
+function preview(text: String, limit: Integer): String
+require
+  sensible_limit: limit >= 10
+do
+  result := text.trim()
+  let stop: Integer := result.index_of("\n")
+  if stop >= 0 then
+    result := result.substring(0, stop) + " ..."
+  end
+  if result.length > limit then
+    result := result.substring(0, limit - 3) + "..."
+  end
+ensure
+  short_enough: result.length <= limit
+end
+
+-- "1 line", "3 lines", "2 replies", "4 matches".
+function count_text(n: Integer, thing: String): String do
+  result := n.to_string + " " + (when n = 1 then thing else plural(thing) end)
+end
+
+-- The plural of a noun, for the usual cases: lines, days, replies, matches.
+function plural(noun: String): String do
+  let ending: String := noun.substring((noun.length - 2).max(0), noun.length)
+  if noun.ends_with("y") and not "aeiou".contains(ending.substring(0, 1)) then
+    result := noun.substring(0, noun.length - 1) + "ies"
+  elseif noun.ends_with("s") or noun.ends_with("x") or ending = "ch" or ending = "sh" then
+    result := noun + "es"
+  else
+    result := noun + "s"
+  end
+end
+
+-- Every line of `text` with `prefix` in front.
+function indented(text, prefix: String): String do
+  result := ""
+  across lines_of(text) as line do
+    result := result + prefix + line + "\n"
+  end
+end
+\end{append}
+
+The last helper finds a file the user names. The \code{nex} launcher runs
+programs from its own installation folder, so a plain name like
+\code{sample_project} would be looked for in the wrong place. Every program
+has \code{program}, the running \code{Program}, which knows the folder you
+ran \code{nex} from: \code{program.working_directory}. We put that in front
+of any name that isn't already a full path:
+
+\begin{append}{helpers.nex}
+-- The full path of a file the user named. The `nex` launcher runs
+-- programs from its own installation folder, so a relative name is
+-- resolved against the folder the program was started from.
+function user_path(raw: String): String do
+  if raw.starts_with("/") then
+    result := raw
+  else
+    result := program.working_directory + "/" + raw
+  end
+end
+\end{append}
+
+\section{Running a try-it script}
+
+Let's check that it works. Make this file and run it:
+
+\begin{tryit}{try_helpers.nex}
+intern Helpers
+
+console.print_line(count_occurrences("banana", "an").to_string)
+console.print_line(lines_of("one\n\nthree\n").to_string)
+console.print_line(numbered(["class Loan", "create"], 9))
+console.print_line(preview("exit code 1\nPASS a loan is due ...", 30))
+console.print_line(count_text(1, "line") + ", " + count_text(2, "reply") + ", "
+  + count_text(3, "match"))
+let long: String := ""
+repeat 30 do
+  long := long + "0123456789"
+end
+console.print_line(shortened(long, 160))
+\end{tryit}
+\tryoutput{try_helpers}
+
+\code{intern Helpers} finds \code{helpers.nex} in the same folder and loads
+everything in it. The file does not need a class called \code{Helpers}:
+ours holds only plain functions. \code{repeat 30 do} runs its body 30
+times.
+
+Try-it scripts are not part of the project. Keep them around to experiment
+with, or delete them when you are done.

@@ -1,0 +1,169 @@
+-- workspace.nex: the folder the agent works in, and the rule that it
+-- never reaches outside it.
+
+intern io/Path
+
+class Workspace
+create
+  -- The workspace rooted at `folder`, which must exist.
+  make(folder: String)
+  require
+    is_a_folder: (create Path.make(folder)).is_directory()
+  do
+    root := (create Path.make(folder)).absolute().normalize().path
+  end
+
+feature
+  root: String    -- the workspace folder, as an absolute path
+
+  -- Whether `relative`, a path the model gave, names something inside
+  -- the workspace. "loans.nex", "src/a.nex" and "." do; "/etc/passwd"
+  -- and "../secrets" do not, and neither does "a/../../b", which only
+  -- looks as if it stays inside.
+  contains(relative: String): Boolean do
+    if relative = "" or relative.starts_with("/") or relative.starts_with("~") then
+      result := false
+    else
+      result := is_under_root(joined(relative))
+    end
+  end
+
+  -- The absolute path of `relative`.
+  full_path(relative: String): String
+  require
+    inside: contains(relative)
+  do
+    result := joined(relative)
+  ensure
+    under_root: is_under_root(result)
+  end
+
+  -- The path of `full`, a path inside the workspace, relative to the
+  -- root: "loans.nex", or "." for the root itself.
+  relative_path(full: String): String
+  require
+    under_root: is_under_root(full)
+  do
+    if full = root then
+      result := "."
+    else
+      result := full.substring(root.length + 1, full.length)
+    end
+  end
+
+  exists(relative: String): Boolean
+  require
+    inside: contains(relative)
+  do
+    result := (create Path.make(full_path(relative))).exists()
+  end
+
+  is_file(relative: String): Boolean
+  require
+    inside: contains(relative)
+  do
+    result := (create Path.make(full_path(relative))).is_file()
+  end
+
+  is_folder(relative: String): Boolean
+  require
+    inside: contains(relative)
+  do
+    result := (create Path.make(full_path(relative))).is_directory()
+  end
+
+  read(relative: String): String
+  require
+    inside: contains(relative)
+    a_file: is_file(relative)
+  do
+    result := (create Path.make(full_path(relative))).read_text()
+  end
+
+  -- Write `text` to the file `relative`, replacing it if it exists and
+  -- creating any folders on the way to it.
+  write(relative, text: String)
+  require
+    inside: contains(relative)
+    not_a_folder: not is_folder(relative)
+  do
+    let file: Path := create Path.make(full_path(relative))
+    let parent: ?Path := file.parent()
+    if ?parent as folder then
+      folder.create_directories()
+    end
+    file.write_text(text)
+  ensure
+    written: read(relative) = text
+  end
+
+  -- Everything below the folder `relative`, as paths relative to the
+  -- root, in alphabetical order. Folders end in "/". Hidden files and
+  -- folders (".git", ".cache", ...) are left out.
+  entries(relative: String): Array[String]
+  require
+    inside: contains(relative)
+    a_folder: is_folder(relative)
+  do
+    collect(create Path.make(full_path(relative)), result, true)
+  end
+
+  -- The files below the folder `relative`, like entries but without the
+  -- folders themselves.
+  files(relative: String): Array[String]
+  require
+    inside: contains(relative)
+    a_folder: is_folder(relative)
+  do
+    collect(create Path.make(full_path(relative)), result, false)
+  end
+
+  private feature
+    -- `relative` joined to the root, with "." and ".." resolved.
+    joined(relative: String): String do
+      result := (create Path.make(root + "/" + relative)).normalize().path
+    end
+
+    is_under_root(full: String): Boolean do
+      result := full = root or full.starts_with(root + "/")
+    end
+
+    -- Add what is below `folder` to `found`, depth first, in order.
+    collect(folder: Path, found: Array[String], with_folders: Boolean) do
+      let children: Array[Path] := folder.list().sort(fn (a, b: Path): Integer do
+        result := a.name().compare(b.name())
+      end)
+      across children as child do
+        if not child.name().starts_with(".") then
+          if child.is_directory() then
+            if with_folders then
+              found.add(relative_path(child.normalize().path) + "/")
+            end
+            collect(child, found, with_folders)
+          else
+            found.add(relative_path(child.normalize().path))
+          end
+        end
+      end
+    end
+
+invariant
+  root_is_absolute: (create Path.make(root)).absolute().normalize().path = root
+end
+
+-- A workspace holding a fresh copy of the folder `template`, at `folder`.
+-- Whatever was at `folder` before is deleted first, so every run starts
+-- from the same files.
+function fresh_workspace(template, folder: String): Workspace
+require
+  template_exists: (create Path.make(template)).is_directory()
+  not_the_template: (create Path.make(template)).absolute().normalize().path
+    /= (create Path.make(folder)).absolute().normalize().path
+do
+  let target: Path := create Path.make(folder)
+  if target.exists() then
+    target.delete_tree()
+  end
+  (create Path.make(template)).copy_to(target)
+  result := create Workspace.make(folder)
+end

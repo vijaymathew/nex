@@ -1,0 +1,159 @@
+% ===========================================================================
+\chapter{Finding things}\label{ch:search}
+
+In a project of four files, the model can read everything. In a project of
+four hundred, it can't, and shouldn't try: every file it reads fills up
+the conversation (and the bill). A programmer in a big project doesn't
+read it all either. They search: where is \code{days_late} defined, and
+who calls it? That is our next tool.
+
+The search takes a \emph{regular expression}, a small language for
+patterns of text: \code{days_late} matches those letters anywhere in a
+line, \code{fine\textbackslash(} matches \code{fine(}, and
+\code{\textasciicircum class} matches a line that starts with
+\code{class}. Models know regular expressions well, which makes them a
+good choice of input: a tool is easiest to use when its input is
+something the model has seen a million times. Nex's \code{text/Regex}
+library supplies them. Add it to the files \code{tools.nex} interns:
+
+\begin{tightaddbefore}{tools.nex}{before intern data/Json}{intern data/Json}
+intern text/Regex
+\end{tightaddbefore}
+
+Each match comes back as \code{file:line: text}, the format of
+\code{grep}, which the model knows too, and which tells it where to look
+next with \code{read_file}.
+
+\begin{append}{tools.nex}
+class Search inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  MOST_MATCHES = 100
+
+  name(): String do
+    result := "search"
+  end
+
+  description(): String do
+    result := "Search the text files in the workspace for lines matching a regular "
+      + "expression (Java syntax). Each match comes as `file:line: text`. Use it to "
+      + "find where something is defined or used without reading every file."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"pattern": parameter("string", "The regular expression, e.g. `days_late` or `fine\\(`."),
+      "path": parameter("string", "The folder to search, relative to the workspace. Default: `.`.")}
+  end
+
+  required(): Array[String] do
+    result := ["pattern"]
+  end
+
+  describe(input: Json_Value): String do
+    result := "search " + string_argument(input, "pattern", "?")
+    if string_argument(input, "path", ".") /= "." then
+      result := result + " in " + string_argument(input, "path", ".")
+    end
+  end
+\end{append}
+
+(In \code{"fine\textbackslash\textbackslash("}, the two backslashes are one
+backslash in the string: this is an ordinary string, not a raw one.)
+
+A pattern can be wrong: \code{fine(} has an opening bracket with no
+closing one. \code{Regex.compile} then raises an exception, which we turn
+into an error the model can read. The \code{regex} variable is a
+\code{?Regex}, \code{nil} unless the compiling worked:
+
+\begin{continued}{tools.nex}
+  run(input: Json_Value): Tool_Outcome do
+    let pattern: String := string_argument(input, "pattern", "")
+    let path: String := string_argument(input, "path", ".")
+    let problem: String := path_problem(path, "folder")
+    if problem = "" and pattern = "" then
+      problem := "the pattern is empty"
+    end
+    let regex: ?Regex := nil
+    if problem = "" then
+      do
+        regex := create Regex.compile(pattern)
+      rescue
+        problem := "not a valid regular expression: " + exception
+      end
+    end
+    if ?regex as r then
+      result := create Tool_Outcome.ok(matches(r, workspace.files(path)))
+    else
+      result := create Tool_Outcome.error(problem)
+    end
+  end
+\end{continued}
+
+The search goes through every file, line by line. Not every file is text:
+reading a picture as text fails, and such a file is simply skipped. A
+common word could match thousands of lines, so after 100 matches the rest
+are only counted. Telling the model how many it didn't see lets it narrow
+the search, instead of believing it has seen them all.
+
+\begin{continued}{tools.nex}
+  private feature
+    matches(regex: Regex, files: Array[String]): String do
+      let found: Array[String] := []
+      let more: Integer := 0
+      across files as file do
+        let text: String := ""
+        do
+          text := workspace.read(file)
+        rescue
+          text := ""     -- not text (a picture, say): nothing to find in it
+        end
+        let number: Integer := 1
+        across lines_of(text) as line do
+          if regex.find(line) /= nil then
+            if found.length < MOST_MATCHES then
+              found.add(file + ":" + number.to_string + ": " + line.trim())
+            else
+              more := more + 1
+            end
+          end
+          number := number + 1
+        end
+      end
+      if found.is_empty then
+        result := "(no matches)"
+      else
+        result := shortened(joined_lines(found), output_limit())
+        if more > 0 then
+          result := result + "... and " + count_text(more, "more match") + "\n"
+        end
+      end
+    end
+end
+\end{continued}
+
+\code{regex.find(line)} gives the part of the line that matches, or
+\code{nil} if none does.
+
+\begin{tryit}{try_search.nex}
+intern Tools
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+let search: Search := create Search.make(ws)
+across ['{"pattern": "days_late"}', '{"pattern": "^class"}', '{"pattern": "fine\\("}',
+    '{"pattern": "fine("}', '{"pattern": "overdue"}'] as input do
+  let arguments: Json_Value := json_value(input)
+  let outcome: Tool_Outcome := search.run(arguments)
+  console.print_line("> " + search.describe(arguments))
+  console.print_line((when outcome.is_error then "error: " else "" end) + outcome.text)
+end
+\end{tryit}
+\tryoutput{try_search}
+
+The third pattern shows the cost of escaping in layers: the regular
+expression \code{fine\textbackslash(} is written \code{fine\textbackslash\textbackslash(}
+inside JSON. The model writes JSON for a living and gets this right; we
+had to think about it.

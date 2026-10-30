@@ -1,0 +1,290 @@
+% ===========================================================================
+\chapter{A place to work}\label{ch:workspace}
+
+The agent works in one folder, the \emph{workspace}, and nowhere else.
+Every path the model gives is taken to be relative to it, and a path that
+leads outside it is refused. This is the first of the agent's safety rules,
+and the most important: a model can make mistakes, and it can be misled
+(a file it reads might contain instructions written to trick it), so what
+it can reach should be limited by the program, not by the model's good
+sense.
+
+\section{Paths that stay inside}
+
+The rule sounds simple: refuse a path that starts with \code{/}, or that
+contains \code{..}. But \code{..} is not always a problem
+(\code{src/../loans.nex} is just \code{loans.nex}), and other paths escape
+without looking as if they do (\code{notes/../../x}). The reliable test is
+to do what the operating system will do: put the path after the workspace
+folder, resolve every \code{.} and \code{..} in it, and see whether the
+result is still inside. \code{Path.normalize} does the resolving.
+
+\begin{newfile}{workspace.nex}
+-- workspace.nex: the folder the agent works in, and the rule that it
+-- never reaches outside it.
+
+intern io/Path
+
+class Workspace
+create
+  -- The workspace rooted at `folder`, which must exist.
+  make(folder: String)
+  require
+    is_a_folder: (create Path.make(folder)).is_directory()
+  do
+    root := (create Path.make(folder)).absolute().normalize().path
+  end
+
+feature
+  root: String    -- the workspace folder, as an absolute path
+
+  -- Whether `relative`, a path the model gave, names something inside
+  -- the workspace. "loans.nex", "src/a.nex" and "." do; "/etc/passwd"
+  -- and "../secrets" do not, and neither does "a/../../b", which only
+  -- looks as if it stays inside.
+  contains(relative: String): Boolean do
+    if relative = "" or relative.starts_with("/") or relative.starts_with("~") then
+      result := false
+    else
+      result := is_under_root(joined(relative))
+    end
+  end
+\end{newfile}
+
+A path starting with \code{~} is refused too: bash would read it as your
+home folder.
+
+Every other routine of \code{Workspace} takes a path the model gave, and
+every one of them has the same precondition: \code{inside:
+contains(relative)}. That is the rule, stated once per routine, and
+checked on every call. A tool that forgets to check a path first doesn't
+quietly read \code{/etc/passwd}; it stops with \code{Precondition
+violation: inside}. In the next chapter the tools will check paths
+themselves, to give the model a helpful message, but the contract is what
+guarantees it.
+
+\begin{continued}{workspace.nex}
+  -- The absolute path of `relative`.
+  full_path(relative: String): String
+  require
+    inside: contains(relative)
+  do
+    result := joined(relative)
+  ensure
+    under_root: is_under_root(result)
+  end
+
+  -- The path of `full`, a path inside the workspace, relative to the
+  -- root: "loans.nex", or "." for the root itself.
+  relative_path(full: String): String
+  require
+    under_root: is_under_root(full)
+  do
+    if full = root then
+      result := "."
+    else
+      result := full.substring(root.length + 1, full.length)
+    end
+  end
+
+  exists(relative: String): Boolean
+  require
+    inside: contains(relative)
+  do
+    result := (create Path.make(full_path(relative))).exists()
+  end
+
+  is_file(relative: String): Boolean
+  require
+    inside: contains(relative)
+  do
+    result := (create Path.make(full_path(relative))).is_file()
+  end
+
+  is_folder(relative: String): Boolean
+  require
+    inside: contains(relative)
+  do
+    result := (create Path.make(full_path(relative))).is_directory()
+  end
+\end{continued}
+
+\section{Reading and writing}
+
+Reading needs the path to be a file. Writing creates any folders on the
+way, so that the model can write \code{notes/plan.md} without first
+making \code{notes}. Its postcondition reads the file back: what was
+written is what is there.
+
+\begin{continued}{workspace.nex}
+  read(relative: String): String
+  require
+    inside: contains(relative)
+    a_file: is_file(relative)
+  do
+    result := (create Path.make(full_path(relative))).read_text()
+  end
+
+  -- Write `text` to the file `relative`, replacing it if it exists and
+  -- creating any folders on the way to it.
+  write(relative, text: String)
+  require
+    inside: contains(relative)
+    not_a_folder: not is_folder(relative)
+  do
+    let file: Path := create Path.make(full_path(relative))
+    let parent: ?Path := file.parent()
+    if ?parent as folder then
+      folder.create_directories()
+    end
+    file.write_text(text)
+  ensure
+    written: read(relative) = text
+  end
+\end{continued}
+
+\code{file.parent()} has the type \code{?Path}: a \emph{detachable}
+\code{Path}, which may be \code{nil} (the root of the file system has no
+parent). Nex won't let us call anything on it until we have checked.
+\code{if ?parent as folder then} does both at once: the branch runs only
+if \code{parent} is not \code{nil}, and inside it \code{folder} is the
+same value as a plain \code{Path}.
+
+\section{What is there}
+
+To find its way around a project, the model needs to see what files it
+has. \code{entries} lists everything below a folder, folders first marked
+with a \code{/}; \code{files} only the files, which is what a search will
+want. Both leave out hidden files and folders, whose names start with a
+dot: a \code{.git} folder holds thousands of files that are of no use to
+the model and would bury the ones that are.
+
+\begin{continued}{workspace.nex}
+  -- Everything below the folder `relative`, as paths relative to the
+  -- root, in alphabetical order. Folders end in "/". Hidden files and
+  -- folders (".git", ".cache", ...) are left out.
+  entries(relative: String): Array[String]
+  require
+    inside: contains(relative)
+    a_folder: is_folder(relative)
+  do
+    collect(create Path.make(full_path(relative)), result, true)
+  end
+
+  -- The files below the folder `relative`, like entries but without the
+  -- folders themselves.
+  files(relative: String): Array[String]
+  require
+    inside: contains(relative)
+    a_folder: is_folder(relative)
+  do
+    collect(create Path.make(full_path(relative)), result, false)
+  end
+\end{continued}
+
+The private routines do the work. \code{collect} walks the folder tree,
+depth first. The operating system lists a folder's contents in no
+particular order, so \code{collect} sorts them by name first: the same
+folder always gives the same list, which makes the model's view of a
+project, and our checks, repeatable. \code{sort} takes a function that
+compares two elements, here written in place with \code{fn}.
+
+\begin{continued}{workspace.nex}
+  private feature
+    -- `relative` joined to the root, with "." and ".." resolved.
+    joined(relative: String): String do
+      result := (create Path.make(root + "/" + relative)).normalize().path
+    end
+
+    is_under_root(full: String): Boolean do
+      result := full = root or full.starts_with(root + "/")
+    end
+
+    -- Add what is below `folder` to `found`, depth first, in order.
+    collect(folder: Path, found: Array[String], with_folders: Boolean) do
+      let children: Array[Path] := folder.list().sort(fn (a, b: Path): Integer do
+        result := a.name().compare(b.name())
+      end)
+      across children as child do
+        if not child.name().starts_with(".") then
+          if child.is_directory() then
+            if with_folders then
+              found.add(relative_path(child.normalize().path) + "/")
+            end
+            collect(child, found, with_folders)
+          else
+            found.add(relative_path(child.normalize().path))
+          end
+        end
+      end
+    end
+
+invariant
+  root_is_absolute: (create Path.make(root)).absolute().normalize().path = root
+end
+\end{continued}
+
+Why \code{root + "/"} in \code{is_under_root}, and not just \code{root}?
+Because the folder \code{/home/ada/agent-old} starts with
+\code{/home/ada/agent} too.
+
+\section{A fresh copy}
+
+The agent will change the files it works on. To be able to run it again
+and again on the same starting point, it works on a copy of the sample
+project, made fresh each time:
+
+\begin{append}{workspace.nex}
+-- A workspace holding a fresh copy of the folder `template`, at `folder`.
+-- Whatever was at `folder` before is deleted first, so every run starts
+-- from the same files.
+function fresh_workspace(template, folder: String): Workspace
+require
+  template_exists: (create Path.make(template)).is_directory()
+  not_the_template: (create Path.make(template)).absolute().normalize().path
+    /= (create Path.make(folder)).absolute().normalize().path
+do
+  let target: Path := create Path.make(folder)
+  if target.exists() then
+    target.delete_tree()
+  end
+  (create Path.make(template)).copy_to(target)
+  result := create Workspace.make(folder)
+end
+\end{append}
+
+The second precondition guards against the one mistake here that would
+hurt: deleting the template itself.
+
+\begin{tryit}{try_workspace.nex}
+intern Workspace
+intern Helpers
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+across ["loans.nex", ".", "src/../loans.nex", "../secrets", "/etc/passwd",
+    "notes/../../x", "~/.ssh"] as path do
+  console.print_line(path.pad_end(" ", 20) + ws.contains(path).to_string)
+end
+ws.write("notes/plan.md", "1. run the checks\n")
+console.print_line(ws.entries(".").to_string)
+console.print_line(ws.read("notes/plan.md"))
+
+let refused: String := ""
+do
+  console.print_line(ws.read("../helpers.nex"))
+rescue
+  refused := "" + exception
+end
+console.print_line(refused)
+\end{tryit}
+\tryoutput{try_workspace}
+
+\begin{aside}
+\textbf{What this does not stop.} A path is checked as text. If the
+workspace contained a symbolic link to a folder outside it, a path through
+the link would pass the test. Our sample project has none, and a more
+careful agent would resolve links too (Java's \code{toRealPath} does). And
+the rule covers the file tools only: a shell command can still
+\code{cat /etc/passwd}. That is why running commands will need permission
+(Chapter~\ref{ch:permission}).
+\end{aside}

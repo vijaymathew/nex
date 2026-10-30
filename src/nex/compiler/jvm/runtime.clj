@@ -2287,6 +2287,18 @@
                            (str body)
                            timeout-ms)))
 
+(defn builtin-http-request
+  ([state method url body headers]
+   (builtin-http-request state method url body headers nil))
+  ([state method url body headers timeout-ms]
+   (http/java-http-request (fn [class-name field-values]
+                             (make-runtime-object state class-name field-values))
+                           (str method)
+                           (str url)
+                           (str body)
+                           timeout-ms
+                           headers)))
+
 (defn builtin-json-parse
   [_state text]
   (json-types/nex-json-parse text))

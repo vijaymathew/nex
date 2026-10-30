@@ -173,6 +173,19 @@ The following are automatically ignored (`.gitignore`):
 3. Verify all tests pass
 4. Commit with descriptive message
 
+### Make a Release
+
+1. Write the release notes under `## Unreleased` in `CHANGELOG.md`
+2. Run `scripts/release.py patch` (or `minor`, `major`, or a version such as
+   `0.7.0`; `--dry-run` shows the changes first). It sets the version in
+   `bin/nex`, `install.sh`, `src/nex/cli.clj`, the REPL banner, the Emacs mode
+   and the VS Code extension, updates the install docs' examples that name the
+   latest release, and moves the unreleased notes under a dated heading
+3. Commit, tag `vX.Y.Z`, push, and publish the GitHub release, as the script
+   prints; `scripts/release.py --notes X.Y.Z` prints the notes for it.
+   Publishing runs the Release workflow, which builds and attaches the
+   archives
+
 ## Dependencies
 
 ### JVM Dependencies (managed by `deps.edn`)

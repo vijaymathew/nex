@@ -1,0 +1,433 @@
+% ===========================================================================
+\chapter{Giving the model hands}\label{ch:tools}
+
+A tool is something the agent can do for the model: list the files, read
+one, search them, edit one, run a command. The model can't do any of
+these itself. It asks, by name, with a JSON object of arguments; the agent
+checks the request, does it, and sends back what happened as text.
+
+For the model to ask for a tool, it has to know the tool exists. Every
+request lists the tools, each with a name, a description, and a
+\emph{schema}: a description, in JSON, of the arguments it takes. Here is
+the one for the file reader we write in this chapter:
+
+\begin{json}
+{"name": "read_file",
+ "description": "Read a text file in the workspace. Lines come numbered, ...",
+ "input_schema": {"type": "object",
+                  "properties": {"path": {"type": "string", "description": "The file, ..."},
+                                 "start_line": {"type": "integer", "description": "..."},
+                                 "end_line": {"type": "integer", "description": "..."}},
+                  "required": ["path"],
+                  "additionalProperties": false}}
+\end{json}
+
+The model reads all of this, every time, and decides from it alone which
+tool to use and how. That makes the descriptions part of the program, as
+much as the code is. A good description says not only what a tool does but
+\emph{when} to use it, and anything about its input or output that would
+otherwise be a surprise.
+
+\section{The Tool class}
+
+A tool's run gives back an outcome: text, and whether it is an error. Two
+constructors, \code{ok} and \code{error}, say which:
+
+\begin{newfile}{tools.nex}
+-- tools.nex: what the agent can do in its workspace.
+--
+-- The model never touches anything itself. It asks for a tool by name,
+-- with a JSON object of arguments; the agent checks the request, runs
+-- the tool, and sends back what happened as text.
+
+intern Messages
+intern Workspace
+intern Helpers
+intern data/Json
+
+-- What running a tool gave back: some text, and whether it failed.
+class Tool_Outcome
+create
+  ok(text: String) do
+    this.text := text
+    is_error := false
+  end
+
+  error(text: String) do
+    this.text := text
+    is_error := true
+  end
+
+feature
+  text: String
+  is_error: Boolean
+end
+
+-- One parameter of a tool: its JSON type ("string" or "integer") and
+-- what it means, for the model to read.
+function parameter(json_type, description: String): Map[String, Any]
+require
+  known_type: json_type = "string" or json_type = "integer"
+do
+  result := {"type": json_type, "description": description}
+end
+\end{newfile}
+
+\code{Tool} is deferred, like \code{Model}: each tool says its name, its
+description, its parameters and how it runs. Each tool works in a
+workspace, which it is given when it is made. A tool also says whether
+running it can change anything; tools that can will need permission
+(Chapter~\ref{ch:permission}). And it can describe one call in a few
+words, such as \code{read_file loans.nex}, for printing.
+
+\begin{append}{tools.nex}
+deferred class Tool
+create
+  make(ws: Workspace) do
+    workspace := ws
+  end
+
+feature
+  workspace: Workspace    -- where it works
+
+  -- The name the model calls it by.
+  name(): String deferred
+
+  -- What it does and when to use it. The model decides which tool to
+  -- call from this alone, so it says when, not just what.
+  description(): String deferred
+
+  -- The parameters, by name.
+  parameters(): Map[String, Any] deferred
+
+  -- The names of the parameters that must be given.
+  required(): Array[String] deferred
+
+  -- Whether running it can change anything: files, or whatever a
+  -- command does. Such tools need permission.
+  changes_things(): Boolean do
+    result := false
+  end
+
+  -- A short description of one call, for the transcript and for
+  -- permission questions: "read_file loans.nex".
+  describe(input: Json_Value): String deferred
+
+  -- Run the tool on `input`, already checked by problem_with.
+  run(input: Json_Value): Tool_Outcome
+  require
+    valid_input: problem_with(input) = ""
+  deferred
+
+  -- The tool as the API wants it described.
+  definition(): Map[String, Any] do
+    let schema: Map[String, Any] := {"type": "object", "properties": parameters(),
+      "required": required(), "additionalProperties": false}
+    result := {"name": name(), "description": description(), "input_schema": schema}
+  end
+\end{append}
+
+\section{Checking the input}
+
+\code{run}'s precondition says its input must already have been checked.
+Models follow schemas well, but not perfectly: now and then an argument is
+missing, misnamed, or a number arrives as a string. Rather than have every
+tool check its own input, \code{problem_with} checks it against the tool's
+parameters, the same ones the model was shown. Its answer is \code{""} if
+all is well, and otherwise a sentence the model can act on. The agent
+sends that sentence back as an error, and the model nearly always corrects
+itself on its next try.
+
+\begin{continued}{tools.nex}
+  -- What is wrong with `input`, or "" if nothing is. The model usually
+  -- follows the schema, but not always, and a tool must not trust it.
+  problem_with(input: Json_Value): String do
+    result := ""
+    if not input.is_object then
+      result := "the input must be a JSON object"
+    else
+      across required() as key do
+        if result = "" and not input.has(key) then
+          result := "missing parameter `" + key + "`"
+        end
+      end
+      let params: Map[String, Any] := parameters()
+      across input.keys() as key do
+        if result = "" then
+          if not params.contains_key(key) then
+            result := "unknown parameter `" + key + "`"
+          elseif type_of_parameter(key) = "string" and not input.get(key).is_string then
+            result := "`" + key + "` must be a string"
+          elseif type_of_parameter(key) = "integer" and not is_whole_number(input.get(key)) then
+            result := "`" + key + "` must be a whole number"
+          end
+        end
+      end
+    end
+  end
+\end{continued}
+
+Nex has no \code{return} statement, so a routine that wants to stop at the
+first problem it finds does it with a test: once \code{result} holds a
+problem, the later checks are skipped.
+
+Tools read their arguments with two helpers that fall back to a default.
+They don't assume the input is valid, because \code{describe} is used on
+input that hasn't been checked (we want to print what the model asked for,
+even when it asked wrongly):
+
+\begin{continued}{tools.nex}
+  -- The string argument `key`, or `default` if it was not given (or is
+  -- not a string: describe is used on input that has not been checked).
+  string_argument(input: Json_Value, key, default: String): String do
+    result := default
+    if input.is_object and input.has(key) and input.get(key).is_string then
+      result := input.get(key).as_string
+    end
+  end
+
+  -- The whole-number argument `key`, or `default` if it was not given.
+  integer_argument(input: Json_Value, key: String, default: Integer): Integer do
+    result := default
+    if input.is_object and input.has(key) and is_whole_number(input.get(key)) then
+      result := input.get(key).as_integer
+    end
+  end
+\end{continued}
+
+Every tool that takes a path checks it the same way, so that is a helper
+too. The workspace's contracts would stop a bad path anyway, but with a
+precondition violation, which is the end of the program. Checked here, a
+bad path is just an error for the model, with a hint:
+
+\begin{continued}{tools.nex}
+  -- What is wrong with the path the model gave, or "": it must stay in
+  -- the workspace and, if `kind` is "file" or "folder", be one.
+  path_problem(path, kind: String): String do
+    result := ""
+    if not workspace.contains(path) then
+      result := "`" + path + "` is outside the workspace; use a path relative to it, such as `loans.nex`"
+    elseif kind /= "any" and not workspace.exists(path) then
+      result := "there is no " + kind + " `" + path + "`"
+    elseif kind = "file" and not workspace.is_file(path) then
+      result := "`" + path + "` is a folder, not a file"
+    elseif kind = "folder" and not workspace.is_folder(path) then
+      result := "`" + path + "` is a file, not a folder"
+    end
+  end
+\end{continued}
+
+Two private helpers finish the class. A parameter's specification is a
+\code{Map[String, Any]} inside another one, so finding its type means
+looking inside an \code{Any}. \code{convert} \ldots\ \code{to} does that
+safely: \code{if convert x to m: Map[String, Any] then} runs its branch only
+if \code{x} really is such a map, with \code{m} as that map.
+
+\begin{continued}{tools.nex}
+  private feature
+    type_of_parameter(key: String): String do
+      result := ""
+      if convert parameters().get(key) to spec: Map[String, Any] then
+        if convert spec.get("type") to json_type: String then
+          result := json_type
+        end
+      end
+    end
+
+    is_whole_number(value: Json_Value): Boolean do
+      result := false
+      if convert value.raw() to n: Integer then
+        result := true
+      end
+    end
+end
+\end{continued}
+
+One more rule, for every tool: no result may be longer than about 5,000
+tokens. A model can only read so much at once, and a whole log file sent
+back by a tool would crowd out everything else.
+
+\begin{append}{tools.nex}
+-- The most text one tool result may hold (about 5,000 tokens). Longer
+-- output is shortened, keeping its start and its end.
+function output_limit(): Integer do
+  result := 20000
+end
+\end{append}
+
+\section{Listing files}
+
+The first real tool lists what is in the workspace. It is the first thing
+a programmer does in a project they don't know, and the description tells
+the model to do the same. A heir's constructor sets up what it inherits by
+calling its parent's, with \code{super.make}.
+
+\begin{append}{tools.nex}
+class List_Files inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  name(): String do
+    result := "list_files"
+  end
+
+  description(): String do
+    result := "List the files and folders in the workspace, or in one folder of it, "
+      + "including everything below it. Folders end in `/`. Use this first, to see "
+      + "what the project contains."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"path": parameter("string", "The folder to list, relative to the workspace. Default: `.`, the whole workspace.")}
+  end
+
+  required(): Array[String] do
+    result := []
+  end
+
+  describe(input: Json_Value): String do
+    result := "list_files " + string_argument(input, "path", ".")
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let path: String := string_argument(input, "path", ".")
+    let problem: String := path_problem(path, "folder")
+    if problem /= "" then
+      result := create Tool_Outcome.error(problem)
+    else
+      let found: Array[String] := workspace.entries(path)
+      if found.is_empty then
+        result := create Tool_Outcome.ok("(the folder is empty)")
+      elseif found.length > 300 then
+        result := create Tool_Outcome.ok(joined_lines(found.take(300))
+          + "... and " + (found.length - 300).to_string + " more")
+      else
+        result := create Tool_Outcome.ok(joined_lines(found))
+      end
+    end
+  end
+end
+\end{append}
+
+An empty folder gives \code{"(the folder is empty)"} rather than nothing at
+all. A model that gets an empty result can't tell whether the tool found
+nothing or failed.
+
+\section{Reading files}
+
+Reading a file numbers its lines. The numbers are for talking about the
+file (``the bug is on line 32''); the description warns the model that they
+are not part of the file, because it will later have to quote text from
+it exactly. A long file is sent 500 lines at a time, and the result says
+which lines it holds, so the model knows to ask for more.
+
+\begin{append}{tools.nex}
+class Read_File inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  MOST_LINES = 500
+
+  name(): String do
+    result := "read_file"
+  end
+
+  description(): String do
+    result := "Read a text file in the workspace. Lines come numbered, like `   12  code`; "
+      + "the numbers are not part of the file. Read a file before you change it. "
+      + "Long files come " + MOST_LINES.to_string + " lines at a time: use start_line to read on."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"path": parameter("string", "The file, relative to the workspace."),
+      "start_line": parameter("integer", "The first line to show, counting from 1. Default: 1."),
+      "end_line": parameter("integer", "The last line to show. Default: the end of the file, or "
+        + MOST_LINES.to_string + " lines on, whichever comes first.")}
+  end
+
+  required(): Array[String] do
+    result := ["path"]
+  end
+
+  describe(input: Json_Value): String do
+    result := "read_file " + string_argument(input, "path", "?")
+    if integer_argument(input, "start_line", 1) > 1 then
+      result := result + " from line " + integer_argument(input, "start_line", 1).to_string
+    end
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let path: String := string_argument(input, "path", "")
+    let problem: String := path_problem(path, "file")
+    if problem /= "" then
+      result := create Tool_Outcome.error(problem)
+    else
+      let lines: Array[String] := lines_of(workspace.read(path))
+      let first: Integer := integer_argument(input, "start_line", 1).max(1)
+      let last: Integer := integer_argument(input, "end_line", first + MOST_LINES - 1)
+        .min(lines.length).min(first + MOST_LINES - 1)
+      if lines.is_empty then
+        result := create Tool_Outcome.ok("(the file is empty)")
+      elseif first > lines.length then
+        result := create Tool_Outcome.error("`" + path + "` has only "
+          + count_text(lines.length, "line"))
+      elseif last < first then
+        result := create Tool_Outcome.error("end_line is before start_line")
+      else
+        let shown: String := numbered(lines.slice(first - 1, last), first)
+        if first > 1 or last < lines.length then
+          shown := shown + "(lines " + first.to_string + "-" + last.to_string
+            + " of " + lines.length.to_string + ")\n"
+        end
+        result := create Tool_Outcome.ok(shortened(shown, output_limit()))
+      end
+    end
+  end
+end
+\end{append}
+
+\code{MOST_LINES = 500} is a \emph{constant}: a feature with a fixed value,
+written in capitals by convention. \code{lines.slice(a, b)} is the lines
+from position \code{a} up to, but not including, \code{b}, counting from 0;
+line numbers count from 1, hence the \code{first - 1}.
+
+Let's try both tools on a fresh copy of the sample project, with good input
+and bad:
+
+\begin{tryit}{try_tools.nex}
+intern Tools
+
+let ws: Workspace := fresh_workspace(user_path("sample_project"), user_path("scratch"))
+let tools: Array[Tool] := [create List_Files.make(ws), create Read_File.make(ws)]
+
+function try(tool: Tool, input: String) do
+  let arguments: Json_Value := json_value(input)
+  console.print_line("> " + tool.describe(arguments))
+  let problem: String := tool.problem_with(arguments)
+  if problem /= "" then
+    console.print_line("bad input: " + problem)
+  else
+    let outcome: Tool_Outcome := tool.run(arguments)
+    console.print_line((when outcome.is_error then "error: " else "" end) + outcome.text)
+  end
+end
+
+try(tools.get(0), '{}')
+try(tools.get(1), '{"path": "loans.nex", "start_line": 26, "end_line": 34}')
+try(tools.get(1), '{"path": "../code.nex"}')
+try(tools.get(1), '{"file": "loans.nex"}')
+try(tools.get(1), '{"path": "loans.nex", "start_line": "26"}')
+console.print_line(json_text(tools.get(0).definition()))
+\end{tryit}
+\tryoutput{try_tools}
+
+The array of tools needs its type written out, \code{Array[Tool]}: its
+elements are of two different classes, and Nex won't guess what they have
+in common. In the next chapter, the agent will do what \code{try} does
+here, for whatever tool the model asks for.

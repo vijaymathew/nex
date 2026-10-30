@@ -1,0 +1,120 @@
+% ===========================================================================
+\chapter{The Messages API on one page}\label{app:api}
+
+Everything the agent uses of Claude's API, in one place. The full
+documentation is at \url{https://platform.claude.com/docs}.
+
+\section*{The request}
+
+\code{POST https://api.anthropic.com/v1/messages}, with a JSON body.
+
+\begin{center}
+\begin{tabular}{@{}lp{0.62\linewidth}@{}}
+\toprule
+Header & \\
+\midrule
+\code{content-type} & \code{application/json} \\
+\code{x-api-key} & the API key (or \code{authorization: Bearer} \emph{token}, with the beta \code{oauth-2025-04-20}) \\
+\code{anthropic-version} & the API version the program is written for: \code{2026-10-21} \\
+\code{anthropic-beta} & beta features, separated by commas \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\begin{tabular}{@{}lp{0.62\linewidth}@{}}
+\toprule
+Body field & \\
+\midrule
+\code{model} & which Claude, e.g. \code{claude-opus-5-5} \\
+\code{max_tokens} & the longest reply, in tokens \\
+\code{system} & the system prompt: standing instructions \\
+\code{messages} & the conversation: \code{\{"role", "content"\}} objects, starting with \code{user} and taking turns \\
+\code{tools} & the tools: \code{\{"name", "description", "input_schema"\}} \\
+\code{cache_control} & \code{\{"type": "ephemeral"\}}: cache the request, for the next one to reuse \\
+\code{output_config} & \code{\{"effort": "low"} \ldots\ \code{"max"\}}: how hard to think \\
+\code{fallbacks} & \code{"default"} (beta \code{server-side-fallback-2026-07-01}): retry a declined request on a recommended model \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{Content blocks}
+
+\begin{center}
+\begin{tabular}{@{}lp{0.62\linewidth}@{}}
+\toprule
+Type & \\
+\midrule
+\code{text} & \code{\{"type": "text", "text": ...\}} \\
+\code{tool_use} & from the model: \code{\{"type": "tool_use", "id", "name", "input"\}} \\
+\code{tool_result} & from us: \code{\{"type": "tool_result", "tool_use_id", "content", "is_error"\}}; every \code{tool_use} must be answered in the next message \\
+\code{thinking} & from the model: its reasoning, signed; send it back unchanged \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{The response}
+
+\code{\{"content": [blocks], "stop_reason": ..., "usage": \{...\}, ...\}}
+
+\begin{center}
+\begin{tabular}{@{}lp{0.62\linewidth}@{}}
+\toprule
+\code{stop_reason} & \\
+\midrule
+\code{end_turn} & the model has finished \\
+\code{tool_use} & it wants tools run \\
+\code{max_tokens} & the reply reached \code{max_tokens} and was cut off \\
+\code{refusal} & a safety check declined the request \\
+\code{stop_sequence}, \code{pause_turn} & not used here \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\code{usage} holds four counts:
+\begin{itemize}
+\item \code{input_tokens}: read fresh;
+\item \code{cache_read_input_tokens}: read from the cache;
+\item \code{cache_creation_input_tokens}: read, and written to the cache;
+\item \code{output_tokens}: written.
+\end{itemize}
+
+\section*{Errors}
+
+An error is \code{\{"type": "error", "error": \{"type", "message"\}\}} with
+an HTTP status. Worth retrying after a pause: 408, 409, 429 (too many
+requests; honour \code{retry-after}), 500 and up, 529 (overloaded), and
+network failures. Not worth retrying: 400 (bad request), 401 (bad key),
+403, 404, 413.
+
+% ===========================================================================
+\chapter{The Nex you met}
+
+The Nex features this tutorial uses, with where they first appear.
+
+\begin{center}
+\begin{tabular}{@{}p{0.36\linewidth}p{0.6\linewidth}@{}}
+\toprule
+Feature & \\
+\midrule
+\code{require}, \code{ensure}, \code{invariant} & contracts: what a routine expects and promises, what a class keeps true (Ch.~\ref{ch:setup}, \ref{ch:conversation}) \\
+\code{when} \ldots\ \code{then} \ldots\ \code{else} \ldots\ \code{end} & an \code{if} that gives a value (Ch.~\ref{ch:setup}) \\
+\code{from} \ldots\ \code{until} \ldots\ \code{do}, \code{across}, \code{repeat} & loops (Ch.~\ref{ch:setup}) \\
+\code{'raw strings'} & strings with no escapes: JSON in code (Ch.~\ref{ch:conversation}) \\
+\code{data/Json}, \code{Json_Value} & reading and writing JSON (Ch.~\ref{ch:conversation}) \\
+\code{private feature} & routines for the class's own use (Ch.~\ref{ch:conversation}) \\
+\code{deferred class}, \code{inherit} & a class that says what, not how; and its heirs (Ch.~\ref{ch:model}) \\
+\code{?T}, \code{if ?x as y} & values that may be \code{nil}, and using them safely (Ch.~\ref{ch:workspace}) \\
+\code{fn} & a function written in place (Ch.~\ref{ch:workspace}) \\
+\code{convert} \ldots\ \code{to} & looking inside an \code{Any} safely (Ch.~\ref{ch:tools}) \\
+\code{super.make} & an heir's constructor calling its parent's (Ch.~\ref{ch:tools}) \\
+\code{do} \ldots\ \code{rescue} \ldots\ \code{end} & catching an exception (Ch.~\ref{ch:loop}) \\
+\code{text/Regex} & regular expressions (Ch.~\ref{ch:search}) \\
+\code{Process}, \code{spawn}, \code{Task} & running programs; doing two things at once (Ch.~\ref{ch:commands}) \\
+\code{with "java"} & calling Java directly (Ch.~\ref{ch:commands}) \\
+\code{console.read_line} & reading the keyboard (Ch.~\ref{ch:permission}) \\
+\code{net/Http_Client}, \code{net/Http_Server} & HTTP, both ends (Ch.~\ref{ch:claude}) \\
+\code{program.arguments}, \code{program.env} & the command line and the environment (Ch.~\ref{ch:claude}, \ref{ch:program}) \\
+\bottomrule
+\end{tabular}
+\end{center}

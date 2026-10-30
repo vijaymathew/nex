@@ -1,0 +1,38 @@
+-- loans.nex: a book lent to a borrower, and when it is due back.
+
+class Loan
+create
+  make(title, borrower: String, lent_on: Integer)
+  require
+    has_title: title /= ""
+    real_day: lent_on >= 1
+  do
+    this.title := title
+    this.borrower := borrower
+    this.lent_on := lent_on
+  end
+
+feature
+  LOAN_DAYS = 14
+
+  title: String
+  borrower: String
+  lent_on: Integer     -- the day the book was lent
+
+  -- The last day the book may be returned without a fine.
+  due_on(): Integer do
+    result := lent_on + LOAN_DAYS
+  end
+
+  -- How many days late a book returned on `day` is: 0 if on time.
+  days_late(day: Integer): Integer
+  require
+    not_before_loan: day >= lent_on
+  do
+    if day >= due_on() then
+      result := day - due_on() + 1
+    end
+  ensure
+    never_negative: result >= 0
+  end
+end

@@ -1,0 +1,29 @@
+-- fines.nex: what a late book costs.
+
+intern Loans
+
+class Fine_Policy
+create
+  make(per_day, maximum: Integer)
+  require
+    positive_rate: per_day > 0
+    cap_covers_a_day: maximum >= per_day
+  do
+    this.per_day := per_day
+    this.maximum := maximum
+  end
+
+feature
+  per_day: Integer    -- cents per day late
+  maximum: Integer    -- the most one loan can be fined, in cents
+
+  -- The fine, in cents, for returning `loan` on `day`.
+  fine(loan: Loan, day: Integer): Integer
+  require
+    not_before_loan: day >= loan.lent_on
+  do
+    result := (loan.days_late(day) * per_day).min(maximum)
+  ensure
+    capped: result <= maximum
+  end
+end

@@ -1258,6 +1258,7 @@
    "exit"                                    ["builtin-exit!" [:b0]]
    "http_get"                                ["builtin-http-get" [:state :bvar]]
    "http_post"                               ["builtin-http-post" [:state :bvar]]
+   "http_request"                            ["builtin-http-request" [:state :bvar]]
    "json_parse"                              ["builtin-json-parse" [:state :b0]]
    "json_stringify"                          ["builtin-json-stringify" [:state :b0]]
    "http_server_create"                      ["builtin-http-server-create" [:b0]]

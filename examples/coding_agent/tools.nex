@@ -1,0 +1,607 @@
+-- tools.nex: what the agent can do in its workspace.
+--
+-- The model never touches anything itself. It asks for a tool by name,
+-- with a JSON object of arguments; the agent checks the request, runs
+-- the tool, and sends back what happened as text.
+
+intern Messages
+intern Workspace
+intern Helpers
+intern text/Regex
+intern data/Json
+
+import java.lang.ProcessHandle
+
+-- What running a tool gave back: some text, and whether it failed.
+class Tool_Outcome
+create
+  ok(text: String) do
+    this.text := text
+    is_error := false
+  end
+
+  error(text: String) do
+    this.text := text
+    is_error := true
+  end
+
+feature
+  text: String
+  is_error: Boolean
+end
+
+-- One parameter of a tool: its JSON type ("string" or "integer") and
+-- what it means, for the model to read.
+function parameter(json_type, description: String): Map[String, Any]
+require
+  known_type: json_type = "string" or json_type = "integer"
+do
+  result := {"type": json_type, "description": description}
+end
+
+deferred class Tool
+create
+  make(ws: Workspace) do
+    workspace := ws
+  end
+
+feature
+  workspace: Workspace    -- where it works
+
+  -- The name the model calls it by.
+  name(): String deferred
+
+  -- What it does and when to use it. The model decides which tool to
+  -- call from this alone, so it says when, not just what.
+  description(): String deferred
+
+  -- The parameters, by name.
+  parameters(): Map[String, Any] deferred
+
+  -- The names of the parameters that must be given.
+  required(): Array[String] deferred
+
+  -- Whether running it can change anything: files, or whatever a
+  -- command does. Such tools need permission.
+  changes_things(): Boolean do
+    result := false
+  end
+
+  -- A short description of one call, for the transcript and for
+  -- permission questions: "read_file loans.nex".
+  describe(input: Json_Value): String deferred
+
+  -- Run the tool on `input`, already checked by problem_with.
+  run(input: Json_Value): Tool_Outcome
+  require
+    valid_input: problem_with(input) = ""
+  deferred
+
+  -- The tool as the API wants it described.
+  definition(): Map[String, Any] do
+    let schema: Map[String, Any] := {"type": "object", "properties": parameters(),
+      "required": required(), "additionalProperties": false}
+    result := {"name": name(), "description": description(), "input_schema": schema}
+  end
+
+  -- What is wrong with `input`, or "" if nothing is. The model usually
+  -- follows the schema, but not always, and a tool must not trust it.
+  problem_with(input: Json_Value): String do
+    result := ""
+    if not input.is_object then
+      result := "the input must be a JSON object"
+    else
+      across required() as key do
+        if result = "" and not input.has(key) then
+          result := "missing parameter `" + key + "`"
+        end
+      end
+      let params: Map[String, Any] := parameters()
+      across input.keys() as key do
+        if result = "" then
+          if not params.contains_key(key) then
+            result := "unknown parameter `" + key + "`"
+          elseif type_of_parameter(key) = "string" and not input.get(key).is_string then
+            result := "`" + key + "` must be a string"
+          elseif type_of_parameter(key) = "integer" and not is_whole_number(input.get(key)) then
+            result := "`" + key + "` must be a whole number"
+          end
+        end
+      end
+    end
+  end
+
+  -- The string argument `key`, or `default` if it was not given (or is
+  -- not a string: describe is used on input that has not been checked).
+  string_argument(input: Json_Value, key, default: String): String do
+    result := default
+    if input.is_object and input.has(key) and input.get(key).is_string then
+      result := input.get(key).as_string
+    end
+  end
+
+  -- The whole-number argument `key`, or `default` if it was not given.
+  integer_argument(input: Json_Value, key: String, default: Integer): Integer do
+    result := default
+    if input.is_object and input.has(key) and is_whole_number(input.get(key)) then
+      result := input.get(key).as_integer
+    end
+  end
+
+  -- What is wrong with the path the model gave, or "": it must stay in
+  -- the workspace and, if `kind` is "file" or "folder", be one.
+  path_problem(path, kind: String): String do
+    result := ""
+    if not workspace.contains(path) then
+      result := "`" + path + "` is outside the workspace; use a path relative to it, such as `loans.nex`"
+    elseif kind /= "any" and not workspace.exists(path) then
+      result := "there is no " + kind + " `" + path + "`"
+    elseif kind = "file" and not workspace.is_file(path) then
+      result := "`" + path + "` is a folder, not a file"
+    elseif kind = "folder" and not workspace.is_folder(path) then
+      result := "`" + path + "` is a file, not a folder"
+    end
+  end
+
+  private feature
+    type_of_parameter(key: String): String do
+      result := ""
+      if convert parameters().get(key) to spec: Map[String, Any] then
+        if convert spec.get("type") to json_type: String then
+          result := json_type
+        end
+      end
+    end
+
+    is_whole_number(value: Json_Value): Boolean do
+      result := false
+      if convert value.raw() to n: Integer then
+        result := true
+      end
+    end
+end
+
+-- The most text one tool result may hold (about 5,000 tokens). Longer
+-- output is shortened, keeping its start and its end.
+function output_limit(): Integer do
+  result := 20000
+end
+
+class List_Files inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  name(): String do
+    result := "list_files"
+  end
+
+  description(): String do
+    result := "List the files and folders in the workspace, or in one folder of it, "
+      + "including everything below it. Folders end in `/`. Use this first, to see "
+      + "what the project contains."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"path": parameter("string", "The folder to list, relative to the workspace. Default: `.`, the whole workspace.")}
+  end
+
+  required(): Array[String] do
+    result := []
+  end
+
+  describe(input: Json_Value): String do
+    result := "list_files " + string_argument(input, "path", ".")
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let path: String := string_argument(input, "path", ".")
+    let problem: String := path_problem(path, "folder")
+    if problem /= "" then
+      result := create Tool_Outcome.error(problem)
+    else
+      let found: Array[String] := workspace.entries(path)
+      if found.is_empty then
+        result := create Tool_Outcome.ok("(the folder is empty)")
+      elseif found.length > 300 then
+        result := create Tool_Outcome.ok(joined_lines(found.take(300))
+          + "... and " + (found.length - 300).to_string + " more")
+      else
+        result := create Tool_Outcome.ok(joined_lines(found))
+      end
+    end
+  end
+end
+
+class Read_File inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  MOST_LINES = 500
+
+  name(): String do
+    result := "read_file"
+  end
+
+  description(): String do
+    result := "Read a text file in the workspace. Lines come numbered, like `   12  code`; "
+      + "the numbers are not part of the file. Read a file before you change it. "
+      + "Long files come " + MOST_LINES.to_string + " lines at a time: use start_line to read on."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"path": parameter("string", "The file, relative to the workspace."),
+      "start_line": parameter("integer", "The first line to show, counting from 1. Default: 1."),
+      "end_line": parameter("integer", "The last line to show. Default: the end of the file, or "
+        + MOST_LINES.to_string + " lines on, whichever comes first.")}
+  end
+
+  required(): Array[String] do
+    result := ["path"]
+  end
+
+  describe(input: Json_Value): String do
+    result := "read_file " + string_argument(input, "path", "?")
+    if integer_argument(input, "start_line", 1) > 1 then
+      result := result + " from line " + integer_argument(input, "start_line", 1).to_string
+    end
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let path: String := string_argument(input, "path", "")
+    let problem: String := path_problem(path, "file")
+    if problem /= "" then
+      result := create Tool_Outcome.error(problem)
+    else
+      let lines: Array[String] := lines_of(workspace.read(path))
+      let first: Integer := integer_argument(input, "start_line", 1).max(1)
+      let last: Integer := integer_argument(input, "end_line", first + MOST_LINES - 1)
+        .min(lines.length).min(first + MOST_LINES - 1)
+      if lines.is_empty then
+        result := create Tool_Outcome.ok("(the file is empty)")
+      elseif first > lines.length then
+        result := create Tool_Outcome.error("`" + path + "` has only "
+          + count_text(lines.length, "line"))
+      elseif last < first then
+        result := create Tool_Outcome.error("end_line is before start_line")
+      else
+        let shown: String := numbered(lines.slice(first - 1, last), first)
+        if first > 1 or last < lines.length then
+          shown := shown + "(lines " + first.to_string + "-" + last.to_string
+            + " of " + lines.length.to_string + ")\n"
+        end
+        result := create Tool_Outcome.ok(shortened(shown, output_limit()))
+      end
+    end
+  end
+end
+
+class Search inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  MOST_MATCHES = 100
+
+  name(): String do
+    result := "search"
+  end
+
+  description(): String do
+    result := "Search the text files in the workspace for lines matching a regular "
+      + "expression (Java syntax). Each match comes as `file:line: text`. Use it to "
+      + "find where something is defined or used without reading every file."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"pattern": parameter("string", "The regular expression, e.g. `days_late` or `fine\\(`."),
+      "path": parameter("string", "The folder to search, relative to the workspace. Default: `.`.")}
+  end
+
+  required(): Array[String] do
+    result := ["pattern"]
+  end
+
+  describe(input: Json_Value): String do
+    result := "search " + string_argument(input, "pattern", "?")
+    if string_argument(input, "path", ".") /= "." then
+      result := result + " in " + string_argument(input, "path", ".")
+    end
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let pattern: String := string_argument(input, "pattern", "")
+    let path: String := string_argument(input, "path", ".")
+    let problem: String := path_problem(path, "folder")
+    if problem = "" and pattern = "" then
+      problem := "the pattern is empty"
+    end
+    let regex: ?Regex := nil
+    if problem = "" then
+      do
+        regex := create Regex.compile(pattern)
+      rescue
+        problem := "not a valid regular expression: " + exception
+      end
+    end
+    if ?regex as r then
+      result := create Tool_Outcome.ok(matches(r, workspace.files(path)))
+    else
+      result := create Tool_Outcome.error(problem)
+    end
+  end
+
+  private feature
+    matches(regex: Regex, files: Array[String]): String do
+      let found: Array[String] := []
+      let more: Integer := 0
+      across files as file do
+        let text: String := ""
+        do
+          text := workspace.read(file)
+        rescue
+          text := ""     -- not text (a picture, say): nothing to find in it
+        end
+        let number: Integer := 1
+        across lines_of(text) as line do
+          if regex.find(line) /= nil then
+            if found.length < MOST_MATCHES then
+              found.add(file + ":" + number.to_string + ": " + line.trim())
+            else
+              more := more + 1
+            end
+          end
+          number := number + 1
+        end
+      end
+      if found.is_empty then
+        result := "(no matches)"
+      else
+        result := shortened(joined_lines(found), output_limit())
+        if more > 0 then
+          result := result + "... and " + count_text(more, "more match") + "\n"
+        end
+      end
+    end
+end
+
+class Edit_File inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  name(): String do
+    result := "edit_file"
+  end
+
+  description(): String do
+    result := "Change a file by replacing one piece of its text with another. "
+      + "`old_text` must match exactly one place in the file, character for character, "
+      + "including spaces and line breaks (without the line numbers read_file shows). "
+      + "If it matches more than one place, include more of the surrounding lines. "
+      + "Use this for every change to an existing file."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"path": parameter("string", "The file, relative to the workspace."),
+      "old_text": parameter("string", "The exact text to replace."),
+      "new_text": parameter("string", "The text to put in its place.")}
+  end
+
+  required(): Array[String] do
+    result := ["path", "old_text", "new_text"]
+  end
+
+  changes_things(): Boolean do
+    result := true
+  end
+
+  describe(input: Json_Value): String do
+    result := "edit_file " + string_argument(input, "path", "?")
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let path: String := string_argument(input, "path", "")
+    let old_text: String := string_argument(input, "old_text", "")
+    let new_text: String := string_argument(input, "new_text", "")
+    let problem: String := path_problem(path, "file")
+    let before: String := ""
+    if problem = "" then
+      before := workspace.read(path)
+      problem := edit_problem(before, path, old_text, new_text)
+    end
+    if problem /= "" then
+      result := create Tool_Outcome.error(problem)
+    else
+      let after: String := replace_first(before, old_text, new_text)
+      workspace.write(path, after)
+      result := create Tool_Outcome.ok("Edited " + path + ": replaced "
+        + count_text(lines_of(old_text).length, "line") + " with "
+        + count_text(lines_of(new_text).length, "line") + ". It now reads:\n"
+        + around(after, before.index_of(old_text), new_text))
+    end
+  end
+
+  -- Why `old_text` can't be replaced in `text`, or "" if it can.
+  edit_problem(text, path, old_text, new_text: String): String do
+    result := ""
+    if old_text = "" then
+      result := "`old_text` is empty; to write a whole file, use write_file"
+    elseif old_text = new_text then
+      result := "`old_text` and `new_text` are the same, so nothing would change"
+    else
+      let n: Integer := count_occurrences(text, old_text)
+      if n = 0 then
+        result := "`old_text` does not occur in " + path + ". Read the file again "
+          + "and copy the text exactly, including spaces and line breaks."
+      elseif n > 1 then
+        result := "`old_text` occurs " + n.to_string + " times in " + path
+          + ". Include more of the lines around it, so that it matches exactly one place."
+      end
+    end
+  end
+
+  private feature
+    -- The lines of `text` around `new_text`, which starts at `start`,
+    -- numbered, with two lines of context either side.
+    around(text: String, start: Integer, new_text: String): String do
+      let lines: Array[String] := lines_of(text)
+      let first: Integer := count_occurrences(text.substring(0, start), "\n") + 1
+      let last: Integer := first + lines_of(new_text).length - 1
+      let from_line: Integer := (first - 2).max(1)
+      let to_line: Integer := (last + 2).min(lines.length)
+      result := numbered(lines.slice(from_line - 1, to_line), from_line)
+    end
+end
+
+class Write_File inherit Tool
+create
+  make(ws: Workspace) do
+    super.make(ws)
+  end
+
+feature
+  name(): String do
+    result := "write_file"
+  end
+
+  description(): String do
+    result := "Create a new file, or replace a whole file, with the given text. "
+      + "Folders on the way are created. Use edit_file instead to change part of an existing file."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"path": parameter("string", "The file, relative to the workspace."),
+      "content": parameter("string", "The complete text of the file.")}
+  end
+
+  required(): Array[String] do
+    result := ["path", "content"]
+  end
+
+  changes_things(): Boolean do
+    result := true
+  end
+
+  describe(input: Json_Value): String do
+    result := "write_file " + string_argument(input, "path", "?")
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let path: String := string_argument(input, "path", "")
+    let content: String := string_argument(input, "content", "")
+    let problem: String := path_problem(path, "any")
+    if problem = "" and workspace.is_folder(path) then
+      problem := "`" + path + "` is a folder"
+    end
+    if problem /= "" then
+      result := create Tool_Outcome.error(problem)
+    else
+      let existed: Boolean := workspace.exists(path)
+      workspace.write(path, content)
+      result := create Tool_Outcome.ok((when existed then "Replaced " else "Created " end)
+        + path + " (" + count_text(lines_of(content).length, "line") + ")")
+    end
+  end
+end
+
+class Run_Command inherit Tool
+create
+  make(ws: Workspace, timeout_seconds: Integer)
+  require
+    positive_timeout: timeout_seconds > 0
+  do
+    super.make(ws)
+    this.timeout_seconds := timeout_seconds
+  end
+
+feature
+  timeout_seconds: Integer
+
+  name(): String do
+    result := "run_command"
+  end
+
+  description(): String do
+    result := "Run a shell command (bash) in the workspace folder and get its exit code "
+      + "and output (standard output and standard error together). Use it to run the "
+      + "project's checks or tests, or a program. Commands that wait for keyboard input "
+      + "will not get any. A command running longer than "
+      + count_text(timeout_seconds, "second") + " is stopped."
+  end
+
+  parameters(): Map[String, Any] do
+    result := {"command": parameter("string", "The command, e.g. `nex checks.nex`.")}
+  end
+
+  required(): Array[String] do
+    result := ["command"]
+  end
+
+  changes_things(): Boolean do
+    result := true
+  end
+
+  describe(input: Json_Value): String do
+    result := "run_command " + string_argument(input, "command", "?")
+  end
+
+  run(input: Json_Value): Tool_Outcome do
+    let command: String := string_argument(input, "command", "")
+    if command.trim() = "" then
+      result := create Tool_Outcome.error("the command is empty")
+    else
+      let process: Process := create Process.command("bash", ["-c", command])
+      process.set_working_directory(workspace.root)
+      process.set_redirect_error_to_output(true)
+      process.start()
+      process.close_stdin()
+      -- Read the output while the command runs: a command that writes a
+      -- lot would otherwise fill the pipe and wait for ever.
+      let output: Task[String] := spawn do
+        result := process.read_all
+      end
+      let code: ?Integer := process.wait(timeout_seconds * 1000)
+      if ?code as exit_code then
+        result := create Tool_Outcome.ok("exit code " + exit_code.to_string + "\n"
+          + shortened(output.await, output_limit()))
+      else
+        stop_children()
+        result := create Tool_Outcome.error("the command was stopped after "
+          + count_text(timeout_seconds, "second") + ". Its output so far:\n"
+          + shortened(output.await, output_limit()))
+      end
+    end
+  end
+
+  private feature
+    -- Stop every process this program has started. The agent runs one
+    -- command at a time, so they all belong to the command that ran too
+    -- long: bash, and whatever bash started.
+    stop_children() do
+      with "java" do
+        let children := ProcessHandle.current().descendants().toList()
+        let i: Integer := 0
+        from until i = children.size() do
+          children.get(i).destroyForcibly()
+          i := i + 1
+        end
+      end
+    end
+end
+
+-- The usual set of tools, all working in `ws`.
+function standard_tools(ws: Workspace): Array[Tool] do
+  result := [create List_Files.make(ws), create Read_File.make(ws),
+    create Search.make(ws), create Edit_File.make(ws),
+    create Write_File.make(ws), create Run_Command.make(ws, 120)]
+end

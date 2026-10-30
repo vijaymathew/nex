@@ -1,0 +1,111 @@
+-- permissions.nex: who decides whether a tool may run.
+--
+-- Reading the workspace is always allowed: it can't do any harm. A tool
+-- that changes things (editing a file, running a command) runs only if
+-- the policy allows it. When it doesn't, the model is told so, and can
+-- try something else or ask.
+
+intern Tools
+
+deferred class Permission
+feature
+  -- Whether `tool` may run on `input`. It is only asked about calls
+  -- whose input has been checked.
+  allows(tool: Tool, input: Json_Value): Boolean
+  require
+    checked_input: tool.problem_with(input) = ""
+  deferred
+end
+
+-- Everything is allowed: `--yes`. For a workspace you can throw away.
+class Allow_Everything inherit Permission
+create
+  make() do
+  end
+
+feature
+  allows(tool: Tool, input: Json_Value): Boolean do
+    result := true
+  end
+end
+
+-- Only tools that change nothing: `--read-only`. The agent can still
+-- explore the project and explain it.
+class Allow_Reading inherit Permission
+create
+  make() do
+  end
+
+feature
+  allows(tool: Tool, input: Json_Value): Boolean do
+    result := not tool.changes_things()
+  end
+end
+
+-- Ask the person at the keyboard before anything that changes things.
+-- "a" (always) allows that tool for the rest of the session.
+class Ask_First inherit Permission
+create
+  make() do
+  end
+
+feature
+  always: Array[String]    -- tools the user has allowed for good
+
+  allows(tool: Tool, input: Json_Value): Boolean do
+    if not tool.changes_things() or always.contains(tool.name()) then
+      result := true
+    else
+      result := ask(tool, input)
+    end
+  end
+
+  private feature
+    -- Ask about the call the agent has just printed.
+    ask(tool: Tool, input: Json_Value): Boolean do
+      if tool.name() = "edit_file" then
+        console.print(indented(edit_preview(input), "      "))
+      end
+      let answer: ?String := console.read_line("    allow? [y]es, [n]o, [a]lways for "
+        + tool.name() + "> ")
+      if ?answer as text then
+        let a: String := text.trim().to_lower()
+        if a = "a" or a = "always" then
+          always.add(tool.name())
+          result := true
+        else
+          result := a = "y" or a = "yes"
+        end
+      else
+        result := false     -- no answer (end of input) is a no
+      end
+    end
+
+    -- An edit as lines taken out and lines put in.
+    edit_preview(input: Json_Value): String do
+      result := indented(input.get("old_text").as_string, "- ")
+        + indented(input.get("new_text").as_string, "+ ")
+    end
+end
+
+-- Answers given in advance, in order, for checks: true allows the next
+-- tool that asks, false refuses it.
+class Answers_Given inherit Permission
+create
+  make(answers: Array[Boolean]) do
+    this.answers := answers
+  end
+
+feature
+  answers: Array[Boolean]
+  asked: Integer
+
+  allows(tool: Tool, input: Json_Value): Boolean do
+    if not tool.changes_things() then
+      result := true
+    else
+      result := asked < answers.length and answers.get(asked)
+      asked := asked + 1
+    end
+  end
+end

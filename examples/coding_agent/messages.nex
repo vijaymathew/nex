@@ -1,0 +1,282 @@
+-- messages.nex: a conversation with the model, as data.
+--
+-- The Claude API is stateless: every request carries the whole
+-- conversation so far. A conversation is a list of messages, alternating
+-- between the user and the assistant (the model). Each message holds a
+-- list of content blocks: text, a tool call the model makes ("tool_use"),
+-- or the result of one ("tool_result").
+
+intern data/Json
+
+-- A JSON text read back as a Json_Value: json_value('{"path": "a.nex"}').
+function json_value(text: String): Json_Value do
+  result := create Json.make().read(text)
+end
+
+-- Any value built from Nex maps and arrays, as JSON text.
+function json_text(value: Any): String do
+  result := create Json.make().stringify(value)
+end
+
+-- The model asking for one tool to be run.
+class Tool_Call
+create
+  make(id, name: String, input: Json_Value) do
+    this.id := id
+    this.name := name
+    this.input := input
+  end
+
+feature
+  id: String          -- chosen by the model; the result must quote it
+  name: String        -- which tool
+  input: Json_Value   -- the tool's arguments, a JSON object
+end
+
+-- What running one tool gave back, ready to send to the model.
+class Tool_Result
+create
+  make(call_id, text: String, is_error: Boolean) do
+    this.call_id := call_id
+    this.text := text
+    this.is_error := is_error
+  end
+
+feature
+  call_id: String
+  text: String
+  is_error: Boolean   -- tells the model the tool failed, and why
+
+  to_json(): Map[String, Any] do
+    result := {"type": "tool_result", "tool_use_id": call_id,
+      "content": text, "is_error": is_error}
+  end
+end
+
+-- One reply from the model, kept exactly as the API sent it.
+--
+-- Its content blocks go back to the API unchanged in every later
+-- request. Some of them (the model's "thinking") are only valid if
+-- nothing about them changes, so a reply is never rebuilt from the
+-- pieces this class reads out of it.
+class Reply
+create
+  -- A reply from the body of a Messages API response.
+  from_json(response: Json_Value) do
+    this.response := response
+  end
+
+feature
+  response: Json_Value
+
+  -- The content blocks, a JSON array.
+  content(): Json_Value do
+    result := response.get("content")
+  end
+
+  -- Why the model stopped: "end_turn" (it has finished), "tool_use" (it
+  -- wants tools run), "max_tokens" (it ran out of room), "refusal", ...
+  stop_reason(): String do
+    result := response.get("stop_reason").as_string
+  end
+
+  -- The text of the reply: its text blocks, one per paragraph.
+  text(): String do
+    let parts: Array[String] := []
+    across content().items as block do
+      if block.get("type").as_string = "text" then
+        parts.add(block.get("text").as_string)
+      end
+    end
+    result := "\n\n".join(parts)
+  end
+
+  -- The tools the model wants run, in the order it asked for them.
+  tool_calls(): Array[Tool_Call] do
+    across content().items as block do
+      if block.get("type").as_string = "tool_use" then
+        result.add(create Tool_Call.make(block.get("id").as_string,
+          block.get("name").as_string, block.get("input")))
+      end
+    end
+  end
+
+  -- How many tokens the model read: the whole request, cached or not.
+  -- This is how full the context window is.
+  context_tokens(): Integer do
+    result := usage("input_tokens") + usage("cache_read_input_tokens")
+      + usage("cache_creation_input_tokens")
+  end
+
+  -- How many of those were read from the prompt cache, at a tenth of
+  -- the price.
+  cached_tokens(): Integer do
+    result := usage("cache_read_input_tokens")
+  end
+
+  -- How many tokens the model wrote.
+  output_tokens(): Integer do
+    result := usage("output_tokens")
+  end
+
+  private feature
+    usage(field: String): Integer do
+      if response.has("usage") and response.get("usage").has(field)
+        and response.get("usage").get(field).is_number then
+        result := response.get("usage").get(field).as_integer
+      end
+    end
+end
+
+-- A reply written by hand, for a pretend model: `text` and, if `tool`
+-- is not "", one call of `tool` with `input` (a JSON object as text).
+function scripted_reply(text, tool, input: String): Reply do
+  let blocks: Array[Any] := []
+  if text /= "" then
+    blocks.add({"type": "text", "text": text})
+  end
+  let stop: String := "end_turn"
+  if tool /= "" then
+    blocks.add({"type": "tool_use", "id": "call_" + tool + "_" + input.hash.abs.to_string,
+      "name": tool, "input": json_value(input).raw()})
+    stop := "tool_use"
+  end
+  let response: Map[String, Any] := {"type": "message", "role": "assistant",
+    "content": blocks, "stop_reason": stop}
+  result := create Reply.from_json(json_value(json_text(response)))
+end
+
+-- A reply that only talks.
+function say(text: String): Reply do
+  result := scripted_reply(text, "", "")
+end
+
+-- A reply that says `text` and asks for `tool` to be run on `input`.
+function use_tool(text, tool, input: String): Reply do
+  result := scripted_reply(text, tool, input)
+end
+
+-- The conversation so far.
+class Conversation
+create
+  make() do
+  end
+
+feature
+  roles: Array[String]           -- "user" or "assistant", one per message
+  contents: Array[Array[Any]]    -- each message's content blocks
+  waiting: Array[String]         -- ids of tool calls not yet answered
+
+  length(): Integer do
+    result := roles.length
+  end
+
+  -- Whether the conversation ends with the user, so it is the model's
+  -- turn to speak.
+  models_turn(): Boolean do
+    result := not roles.is_empty and roles.get(roles.length - 1) = "user"
+      and waiting.is_empty
+  end
+
+  -- Add something the user says. If the conversation already ends with
+  -- the user (with tool results, say), it joins that message, so that
+  -- user and assistant still take turns.
+  add_user_text(text: String)
+  require
+    something_said: text /= ""
+    no_calls_waiting: waiting.is_empty
+  do
+    let block: Map[String, Any] := {"type": "text", "text": text}
+    add_user_block(block)
+  ensure
+    models_turn: models_turn()
+  end
+
+  -- Add a reply from the model, exactly as it came.
+  add_reply(reply: Reply)
+  require
+    models_turn: models_turn()
+  do
+    roles.add("assistant")
+    let blocks: Array[Any] := []
+    across reply.content().items as block do
+      blocks.add(block.raw())
+    end
+    contents.add(blocks)
+    across reply.tool_calls() as call do
+      waiting.add(call.id)
+    end
+  end
+
+  -- Answer the tool calls of the last reply: one result for every call,
+  -- all in one message.
+  add_tool_results(results: Array[Tool_Result])
+  require
+    answers_every_call: answers_exactly(results)
+  do
+    across results as r do
+      add_user_block(r.to_json())
+    end
+    waiting := []
+  ensure
+    models_turn: models_turn()
+  end
+
+  -- Whether `results` answer the calls that are waiting, each once.
+  answers_exactly(results: Array[Tool_Result]): Boolean do
+    result := results.length = waiting.length and not waiting.is_empty
+    across results as r do
+      if not waiting.contains(r.call_id) then
+        result := false
+      end
+    end
+  end
+
+  -- The last message the user sent: what a request adds to the ones
+  -- before it.
+  last_user_message(): Array[Any]
+  require
+    there_is_one: roles.contains("user")
+  do
+    let i: Integer := roles.length - 1
+    from until roles.get(i) = "user" do
+      i := i - 1
+    end
+    result := contents.get(i)
+  end
+
+  -- The messages as the API wants them.
+  to_json(): Array[Any] do
+    let i: Integer := 0
+    across roles as role do
+      result.add({"role": role, "content": contents.get(i)})
+      i := i + 1
+    end
+  end
+
+  -- Whether no two messages in a row come from the same side.
+  alternates(): Boolean do
+    result := true
+    let i: Integer := 1
+    from until i >= roles.length do
+      if roles.get(i) = roles.get(i - 1) then
+        result := false
+      end
+      i := i + 1
+    end
+  end
+
+  private feature
+    add_user_block(block: Map[String, Any]) do
+      if roles.is_empty or roles.get(roles.length - 1) = "assistant" then
+        roles.add("user")
+        contents.add([])
+      end
+      contents.get(contents.length - 1).add(block)
+    end
+
+invariant
+  one_content_per_role: roles.length = contents.length
+  starts_with_user: roles.is_empty or roles.get(0) = "user"
+  takes_turns: alternates()
+end

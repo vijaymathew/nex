@@ -215,6 +215,27 @@ This primitive is intended to support `lib/net/http_client.nex`. A program
 that calls it gets `Http_Response` from that library automatically, as if it
 had written `intern net/Http_Client`.
 
+
+## `http_request`
+
+```nex
+http_request(method, url, body_text: String, headers: Map[String, String]): Http_Response
+http_request(method, url, body_text: String, headers: Map[String, String], timeout_ms: Integer): Http_Response
+```
+
+Performs an HTTP request with any method (`"GET"`, `"POST"`, `"PUT"`,
+`"DELETE"`, ...), a text body and request headers, and returns an
+`Http_Response` object. An empty `body_text` sends an empty body.
+
+Rules:
+
+- `method`, `url` and `body_text` must be strings
+- `headers` must be a `Map[String, String]`; each entry is sent as one header
+- `timeout_ms`, when provided, must be a non-negative integer
+- network failures are raised as runtime errors
+
+Like `http_post`, it supports `lib/net/http_client.nex` (`Http_Client.request`),
+and a program that calls it gets `Http_Response` automatically.
 ## `await_any`
 
 ```nex
