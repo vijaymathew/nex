@@ -1,64 +1,20 @@
 (ns nex.docgen
   "Generate Markdown documentation from Nex source code"
   (:require [nex.parser :as p]
+            [nex.fmt :as fmt]
             [clojure.string :as str])
   (:gen-class))
 
 (defn format-type
-  "Format a type for display"
+  "Nex source text for a type: `Array[String]`, `?Integer`."
   [type-expr]
-  (cond
-    (nil? type-expr) "Void"
-    (string? type-expr) type-expr
-    (map? type-expr)
-    (let [base (:base-type type-expr)
-          params (:type-params type-expr)
-          core (if params
-                 (str base " [" (str/join ", " (map format-type params)) "]")
-                 base)]
-      (if (:detachable type-expr) (str "?" core) core))
-    :else (str type-expr)))
+  (fmt/format-type type-expr))
 
 (defn format-expression
-  "Format an expression for display in documentation"
+  "Nex source text for an expression, as in the code: contracts with
+   lambdas in them read `xs.all(fn (w) => w.length <= n)`."
   [expr]
-  (cond
-    (nil? expr) "nil"
-    (string? expr) expr
-    (number? expr) (str expr)
-    (boolean? expr) (str expr)
-    (map? expr)
-    (case (:type expr)
-      :integer (str (:value expr))
-      :byte (str (:value expr) "u8")
-      :int16 (str (:value expr) "i16")
-      :int32 (str (:value expr) "i32")
-      :real (or (:source expr) (str (:value expr)))
-      :string (str "\"" (:value expr) "\"")
-      :char (str "'" (:value expr) "'")
-      :boolean (str (:value expr))
-      :identifier (:name expr)
-      :old (str "old " (format-expression (:expr expr)))
-      :binary (str (format-expression (:left expr))
-                   " " (:operator expr) " "
-                   (format-expression (:right expr)))
-      :unary (str (:operator expr) (format-expression (:operand expr)))
-      :call (if (:target expr)
-              (str (format-expression (:target expr)) "." (:method expr)
-                   (when (seq (:args expr))
-                     (str "(" (str/join ", " (map format-expression (:args expr))) ")")))
-              (str (:method expr) "(" (str/join ", " (map format-expression (:args expr))) ")"))
-      :create (str "create " (:class-name expr) "." (:constructor expr)
-                   "(" (str/join ", " (map format-expression (:args expr))) ")")
-      :array-literal (str "[" (str/join ", " (map format-expression (:elements expr))) "]")
-      :set-literal (str "#{" (str/join ", " (map format-expression (:elements expr))) "}")
-      :map-literal (str "{" (str/join ", " (map (fn [{:keys [key value]}]
-                                                  (str (format-expression key) ": "
-                                                       (format-expression value)))
-                                                (:entries expr))) "}")
-      ;; Default
-      (pr-str expr))
-    :else (str expr)))
+  (fmt/format-expression expr))
 
 (defn format-assertion
   "Format an assertion for display"
@@ -88,7 +44,7 @@
 
 (defn format-method
   "Generate documentation for a method"
-  [{:keys [name params return-type note require ensure visibility]}]
+  [{:keys [name params return-type note require ensure visibility declaration-only?]}]
   (let [param-list (if (seq params)
                      (str "(" (str/join ", " (map format-parameter params)) ")")
                      "()")
@@ -98,7 +54,9 @@
         vis (format-visibility visibility)]
     (str/join "\n"
               (remove empty?
-                      [(str "### " name param-list return-str)
+                      [(str "### " name param-list return-str
+                            ;; `deferred` in place of a body: heirs supply it.
+                            (when declaration-only? " *(deferred)*"))
                        ""
                        vis
                        ""
@@ -182,14 +140,17 @@
   [parents]
   (when (seq parents)
     (str "\n\n**Inherits from:** "
-         (str/join ", " (map (fn [{:keys [parent]}]
-                               (str "`" parent "`"))
+         (str/join ", " (map (fn [{:keys [parent generic-args]}]
+                               (str "`" parent
+                                    (when (seq generic-args)
+                                      (str "[" (str/join ", " (map format-type generic-args)) "]"))
+                                    "`"))
                              parents))
          "\n")))
 
 (defn generate-class-doc
   "Generate Markdown documentation for a single class"
-  [{:keys [name generic-params note parents body invariant]}]
+  [{:keys [name generic-params note parents body invariant deferred? sealed?]}]
   (let [generic-str (format-generic-params generic-params)
         {:keys [fields methods constructors]} (extract-members body)
         public-fields (filter #(= :public (-> % :visibility :type)) fields)
@@ -200,8 +161,17 @@
         selective-methods (filter #(= :selective (-> % :visibility :type)) methods)]
     (str/join "\n"
               (remove empty?
-                      [(str "# Class: " name generic-str)
+                      [(str "# " (when sealed? "Sealed ")
+                            (cond (and deferred? sealed?) "deferred class"
+                                  deferred? "Deferred class"
+                                  :else "Class")
+                            ": " name generic-str)
                        ""
+                       (when deferred?
+                         (str "A deferred class: it cannot be created itself, only its heirs can."
+                              (when (some :declaration-only? methods)
+                                " They supply the routines marked *(deferred)*.")
+                              "\n"))
                        (when note
                          (str note "\n"))
                        (format-inheritance parents)

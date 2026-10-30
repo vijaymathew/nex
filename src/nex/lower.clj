@@ -3899,7 +3899,22 @@
         [body _ _] (rewrite-statements-for-closures (assoc ctx :var-types initial-var-types)
                                                     local-types
                                                     (:body callable))
+        ;; A lambda in a contract clause (`require all_fit: xs.all(fn (w) =>
+        ;; w.length <= n)`) captures the routine's arguments just as one in
+        ;; the body does, so the clauses are rewritten too; left alone, the
+        ;; lambda's body could not see `n`.
+        rewrite-assertions (fn [assertions]
+                             (when assertions
+                               (mapv #(update % :condition
+                                              (fn [c] (rewrite-expression-for-closures
+                                                       (assoc ctx :var-types initial-var-types)
+                                                       local-types (atom {}) c)))
+                                     assertions)))
         rewritten-callable (cond-> (assoc callable :body body)
+                             (:require callable)
+                             (assoc :require (rewrite-assertions (:require callable)))
+                             (:ensure callable)
+                             (assoc :ensure (rewrite-assertions (:ensure callable)))
                              (:rescue callable)
                              (assoc :rescue (first (rewrite-statements-for-closures (assoc ctx :var-types initial-var-types)
                                                                                     (assoc local-types "exception" "Any")
@@ -4667,10 +4682,14 @@
         boxed-functions (mapv (fn [f]
                                 (update f :body #(box (initial-var-types (:params f)) %)))
                               (:functions program))
+        ;; A free function's contract and rescue clauses live on its
+        ;; wrapper class's callN method, and lower-function merges them in
+        ;; from there (normalized-function-def). Rewrite the merged form, so
+        ;; a lambda in those clauses captures the function's arguments too.
         rewritten-functions (mapv #(rewrite-callable-for-closures
                                     (assoc ctx :scope-generic-params
                                            (function-scope-generic-params (:classes ctx) %))
-                                    % (:var-types opts))
+                                    (normalized-function-def %) (:var-types opts))
                                   boxed-functions)
         boxed-statements (box (:var-types opts) (:statements program))
         [rewritten-statements _ _]

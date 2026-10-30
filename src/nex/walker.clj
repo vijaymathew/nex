@@ -1559,6 +1559,20 @@
                                  distinct
                                  (filter #(> (defined-fn-freq %) 1))
                                  vec)
+        ;; Likewise a class (or union) declared twice in this source: the
+        ;; type checker rejects it. Recorded here, per parsed source, so that
+        ;; a REPL input redefining an earlier input's class is not one.
+        declared-types (concat classes (filter #(= :union (:type %)) transformed))
+        duplicate-classes (->> declared-types
+                               (sort-by #(or (:dbg/line %) 0))
+                               (group-by :name)
+                               (filter #(> (count (val %)) 1))
+                               (sort-by #(:dbg/line (first (val %))))
+                               (mapv (fn [[class-name defs]]
+                                       {:name class-name
+                                        :lines (vec (keep :dbg/line defs))
+                                        :line (:dbg/line (last defs))
+                                        :column (:dbg/col (last defs))})))
         ;; A `declare function` signature must be matched exactly by its
         ;; later definition; record any that disagree before the collapse.
         signature-conflicts (function-signature-conflicts fn-nodes)
@@ -1585,6 +1599,7 @@
          :classes all-classes
          :functions (vec functions)
          :duplicate-functions duplicate-functions
+         :duplicate-classes duplicate-classes
          :function-signature-conflicts signature-conflicts
          :statements (vec statements)
          :calls (vec calls)}
