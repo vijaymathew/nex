@@ -37,12 +37,12 @@ one with `winget`. Open a new terminal afterwards so it sees the new `PATH`.
 Options go to the script block form:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1))) -Version 0.6.5 -InstallDir C:\Tools\nex
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1))) -Version 0.6.6 -InstallDir C:\Tools\nex
 ```
 
 | Option | Meaning |
 |---|---|
-| `-Version 0.6.5` | install that release instead of the latest |
+| `-Version 0.6.6` | install that release instead of the latest |
 | `-InstallDir DIR` | install somewhere else |
 | `-InstallDeps` | install Java with `winget` without asking |
 | `-NoModifyPath` | leave your `PATH` alone |
@@ -96,13 +96,13 @@ bash bootstrap-install.sh jvm --install-deps
 By default the bootstrap script downloads the latest prebuilt release, checks
 it against the release's `SHA256SUMS`, and runs the `install.sh` inside it,
 which installs it under `/usr/local` (or `--prefix`). Only Java 17+ is
-needed. `--version 0.6.5` picks a release other than the latest.
+needed. `--version 0.6.6` picks a release other than the latest.
 
 To build and install from source instead (which also needs the Clojure CLI):
 
 ```bash
 bash bootstrap-install.sh --from-source                 # the main branch
-bash bootstrap-install.sh --from-source --ref v0.6.5    # a tag, branch or commit
+bash bootstrap-install.sh --from-source --ref v0.6.6    # a tag, branch or commit
 ```
 
 A release that has no prebuilt archive (0.6.4 and earlier) is built from
@@ -214,7 +214,7 @@ If Java is not installed:
 ```bash
 $ ./install.sh jvm
 
-Nex Language Installer v0.6.5
+Nex Language Installer v0.6.6
 
 Installation target: jvm
 Install prefix: /usr/local
@@ -241,7 +241,7 @@ Nex Language Installed Successfully!
 ```bash
 $ ./install.sh jvm --install-deps
 
-Nex Language Installer v0.6.5
+Nex Language Installer v0.6.6
 
 Installation target: jvm
 Install prefix: /usr/local

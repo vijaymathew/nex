@@ -25,10 +25,10 @@ Usage:
   ./bootstrap-install.sh [jvm] --from-source [--ref <git-ref>] [--install-deps] [--prefix <dir>]
 
 Options:
-  --version <version>  Release to install, e.g. 0.6.5 (default: the latest)
+  --version <version>  Release to install, e.g. 0.6.6 (default: the latest)
   --from-source        Build and install from source instead of the prebuilt
                        release: the main branch, or --ref
-  --ref <git-ref>      Branch, tag, or commit to build, e.g. v0.6.5
+  --ref <git-ref>      Branch, tag, or commit to build, e.g. v0.6.6
                        (implies --from-source)
   --install-deps       Install missing prerequisites without asking
   --prefix <dir>       Install under <dir> (default: /usr/local)
@@ -37,9 +37,9 @@ Examples:
   ./bootstrap-install.sh
   ./bootstrap-install.sh --install-deps
   ./bootstrap-install.sh --prefix "$HOME/.local"
-  ./bootstrap-install.sh --version 0.6.5
+  ./bootstrap-install.sh --version 0.6.6
   ./bootstrap-install.sh --from-source
-  ./bootstrap-install.sh --from-source --ref v0.6.5
+  ./bootstrap-install.sh --from-source --ref v0.6.6
 
 A release without a prebuilt archive (0.6.4 and earlier) is built from
 source instead, after saying so.
@@ -106,7 +106,7 @@ parse_args() {
                 ;;
             --version)
                 if [[ $# -lt 2 ]]; then
-                    echo "Error: --version requires a version, such as 0.6.5." >&2
+                    echo "Error: --version requires a version, such as 0.6.6." >&2
                     exit 1
                 fi
                 VERSION="$2"

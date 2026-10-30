@@ -2,7 +2,7 @@
   "name": "nex",
   "displayName": "Nex",
   "description": "Nex language support: syntax highlighting, errors as you type, formatting, outline, snippets and a REPL.",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "publisher": "nex-lang",
   "license": "MPL-2.0",
   "homepage": "https://schemer.in/nex",
