@@ -16,10 +16,10 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(def version "0.6.5")
+(def version "0.6.6")
 
 (def ^:private help-text
-  (str "Nex Language v" version " - A high-level language for design and implementation
+  (str "Nex Language v" version " - Write code that keeps its promises
 
 USAGE:
     nex [NEX_SCRIPT | COMMAND] [OPTIONS]

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.6 - 2026-10-30
+
+- Headers support in http-post.
+- Release automation script.
+- Coding agent example and tutorial.
+
 ## 0.6.5 - 2026-10-29
 
 - **Prebuilt releases for Linux, macOS and Windows.** Each GitHub release
