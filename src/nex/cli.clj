@@ -16,7 +16,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(def version "0.6.6")
+(def version "0.6.7")
 
 (def ^:private help-text
   (str "Nex Language v" version " - Write code that keeps its promises

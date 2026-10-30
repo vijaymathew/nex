@@ -10,9 +10,9 @@ changelog.
 
 It changes:
 
-  - the version in bin/nex, install.sh, src/nex/cli.clj, the REPL banner
-    (src/nex/repl.clj), the Emacs mode and the VS Code extension
-    (package.json and package-lock.json);
+  - the version in bin/nex, install.sh, src/nex/cli.clj (which the REPL
+    banner and `nex version` read), the Emacs mode and the VS Code
+    extension (package.json and package-lock.json);
   - the usage examples in INSTALL.md, bootstrap-install.sh and install.ps1
     that name the latest release ("--ref v0.6.5", "-Version 0.6.5", the
     sample installer output, ...). Mentions of a version as a fact
@@ -110,26 +110,6 @@ def apply_rules(texts, old, new):
         texts[path] = regex.sub(replacement.replace("NEW", new), text)
 
 
-def banner(texts, old, new):
-    """The REPL banner is a box 60 characters wide inside: re-centre the
-    version line, so the box stays square whatever the version's length."""
-    path = "src/nex/repl.clj"
-    text = texts.setdefault(path, read(path))
-    line = re.compile(r'^(\s*\(println ")║(\s*)NEX REPL v' + re.escape(old) + r'(\s*)║("\))$', re.M)
-    m = line.search(text)
-    if not m or len(line.findall(text)) != 1:
-        fail(f"{path}: no banner line \"NEX REPL v{old}\"")
-    width = len(m.group(2)) + len(f"NEX REPL v{old}") + len(m.group(3))
-    label = f"NEX REPL v{new}"
-    if len(label) > width:
-        fail(f"{path}: \"{label}\" does not fit in the banner")
-    left = len(m.group(2))
-    if left + len(label) > width:
-        left = (width - len(label)) // 2
-    inner = " " * left + label + " " * (width - left - len(label))
-    texts[path] = text[:m.start()] + m.group(1) + "║" + inner + "║" + m.group(4) + text[m.end():]
-
-
 def changelog(texts, new, date, allow_empty):
     path = "CHANGELOG.md"
     text = texts.setdefault(path, read(path))
@@ -171,7 +151,6 @@ def main():
     originals = {}
     texts = {}
     apply_rules(texts, old, new)
-    banner(texts, old, new)
     notes = changelog(texts, new, args.date, args.allow_empty)
     for path in texts:
         originals[path] = read(path)

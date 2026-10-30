@@ -18,7 +18,7 @@
 
     With options:
 
-        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1))) -Version 0.6.6
+        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/vijaymathew/nex/main/install.ps1))) -Version 0.6.7
 
     or set NEX_VERSION, NEX_INSTALL_DIR or NEX_INSTALL_DEPS=1 before the
     one-line form.
@@ -26,7 +26,7 @@
     Works in Windows PowerShell 5.1 and PowerShell 7.
 
 .PARAMETER Version
-    The release to install, such as 0.6.6 (default: the latest).
+    The release to install, such as 0.6.7 (default: the latest).
 
 .PARAMETER InstallDir
     Where to install Nex (default: %LOCALAPPDATA%\Programs\nex).
