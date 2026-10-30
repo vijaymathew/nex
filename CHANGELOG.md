@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Readable constraint errors.** A type argument that does not satisfy its
+  generic constraint is now reported as Nex writes it, `Type argument
+  Array[Integer] does not satisfy constraint Comparable`, instead of as the
+  type checker's internal data (`{:base-type "Array", :type-args
+  ["Integer"]}`).
+
 ## 0.6.6 - 2026-10-30
 
 - Headers support in http-post.
