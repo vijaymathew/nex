@@ -1462,9 +1462,9 @@
         (doseq [[param arg] (map vector generic-params generic-args)]
           (when-let [constraint (:constraint param)]
             (when-not (types-compatible? env arg constraint)
-              (throw (ex-info (str "Type argument " arg " does not satisfy constraint " constraint)
-                              {:error (type-error
-                                       (str "Type argument " arg " does not satisfy constraint " constraint))})))))))))
+              (let [message (str "Type argument " (display-type arg)
+                                 " does not satisfy constraint " (display-type constraint))]
+                (throw (ex-info message {:error (type-error message)}))))))))))
 
 (defn validate-type-annotation
   "Validate parameterized type annotations against generic constraints."

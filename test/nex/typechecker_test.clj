@@ -2619,6 +2619,22 @@ end"))
       (is (false? (:success result)))
       (is (some #(str/includes? % "does not satisfy constraint Animal") msgs) (pr-str msgs)))))
 
+(deftest test-explicit-type-argument-constraint-error-is-readable
+  (testing "a type argument that fails its constraint is shown as Nex writes it, not as internal data"
+    (let [code "class Sorted_List [G -> Comparable]
+                create
+                  make() do
+                  end
+                end
+
+                let a: Sorted_List[Array[Integer]] := create Sorted_List[Array[Integer]].make()"
+          result (tc/type-check (p/ast code))
+          msgs (error-messages result)]
+      (is (false? (:success result)))
+      (is (some #(str/includes? % "Type argument Array[Integer] does not satisfy constraint Comparable") msgs)
+          (pr-str msgs))
+      (is (not-any? #(str/includes? % ":base-type") msgs) (pr-str msgs)))))
+
 (deftest test-generic-constraint-satisfied-by-inferred-call-argument-succeeds
   (testing "an argument that does satisfy the constraint still checks out"
     (let [code "class Animal
