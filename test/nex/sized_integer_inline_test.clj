@@ -332,3 +332,61 @@ print(hash(10))" "__method_hash$arity1$t")]
       (is (not (some #{"clojure/lang/IFn$LO" "clojure/lang/IFn$OL"} calls)))
       (testing "only the range check of to_integer32"
         (is (some #{"clojure/lang/IFn$LL"} calls))))))
+
+(deftest byte-array-access-test
+  (testing "Byte_Array get/set/length are array instructions, errors unchanged"
+    (is (= ["256" "0" "200" "255" "32640" "\"raised: Byte_Array index out of range: 256 (length 256)\""
+            "\"raised: Byte_Array index out of range: -1 (length 256)\"" "7"]
+           (both "intern data/Byte_Array
+function try_get(a: Byte_Array, i: Integer) do
+  do
+    print(a.get(i))
+  rescue
+    print(\"raised: \" + exception.to_string)
+  end
+end
+function try_set(a: Byte_Array, i: Integer) do
+  do
+    a.set(i, 1u8)
+  rescue
+    print(\"raised: \" + exception.to_string)
+  end
+end
+let a := create Byte_Array.make(256)
+from let i := 0 until i = a.length do
+  a.set(i, i.to_byte())
+  i := i + 1
+end
+print(a.length)
+print(a.get(0))
+print(a.get(200))
+print(a.get(255))
+let total := 0
+from let i := 0 until i = a.length do
+  total := total + a.get(i).to_integer()
+  i := i + 1
+end
+print(total)
+try_get(a, 256)
+try_set(a, -1)
+let b := create Byte_Array.from_array([7u8])
+print(b.get(0))"))))
+  (testing "get, set and length compile to baload, bastore and arraylength"
+    (let [{:keys [classes]} (file/compile-ast "sized_inline.nex"
+                                              (p/ast "intern data/Byte_Array
+let a := create Byte_Array.make(4)
+a.set(1, 9u8)
+print(a.get(1) = 9u8 and a.length = 4)")
+                                              {})
+          [_ bytes] (first (filter #(str/ends-with? (key %) ".Byte_Array") classes))
+          ops (atom {})]
+      (.accept (org.objectweb.asm.ClassReader. ^bytes bytes)
+               (proxy [org.objectweb.asm.ClassVisitor] [org.objectweb.asm.Opcodes/ASM9]
+                 (visitMethod [_access name _desc _sig _exceptions]
+                   (proxy [org.objectweb.asm.MethodVisitor] [org.objectweb.asm.Opcodes/ASM9]
+                     (visitInsn [opcode]
+                       (swap! ops update name (fnil conj #{}) opcode)))))
+               0)
+      (is (contains? (get @ops "__method_get$arity1$t") org.objectweb.asm.Opcodes/BALOAD))
+      (is (contains? (get @ops "__method_set$arity2$t") org.objectweb.asm.Opcodes/BASTORE))
+      (is (contains? (get @ops "__method_length$arity0$t") org.objectweb.asm.Opcodes/ARRAYLENGTH)))))

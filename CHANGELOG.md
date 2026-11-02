@@ -27,6 +27,12 @@
   `Integer32` and `Integer16` code went from about 30x slower than the same
   code on `Integer` to within about 15% of it, and `Byte` code is as fast
   as `Integer` code.
+- **Faster `Byte_Array` in compiled code.** `get`, `set` and `length` are
+  now JVM array instructions on the underlying `byte[]`, with the index
+  checked inline, instead of a call into the runtime with the index boxed.
+  Summing a `Byte_Array` element by element went from about 1 s to about
+  70 ms for 20 million elements. An index out of range raises the same
+  error as before.
 - **Fix: comparing a detachable `?Byte`, `?Integer16` or `?Integer32`**
   with `nil` or with a value (`o /= nil`, `o = 7i16`) failed in compiled
   code ("Used a value that is void").

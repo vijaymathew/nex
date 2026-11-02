@@ -1246,9 +1246,23 @@
 (defn- emit-sized-unbox!
   "Replace the tagged value on the stack (see emit-sized-box!) with the
    sized JVM int of JVM-TYPE it holds."
-  [^MethodVisitor mv _jvm-type]
-  (emit-sized-unwrap! mv (ir/object-jvm-type "java/lang/Object"))
-  (.visitInsn mv Opcodes/L2I))
+  [^MethodVisitor mv jvm-type]
+  (if (= :u8 jvm-type)
+    ;; A Byte's box is a Short: read it directly, and leave anything else
+    ;; (a Long from Java interop) to the runtime.
+    (let [other (Label.) done (Label.)]
+      (.visitInsn mv Opcodes/DUP)
+      (.visitTypeInsn mv Opcodes/INSTANCEOF "java/lang/Short")
+      (.visitJumpInsn mv Opcodes/IFEQ other)
+      (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Short")
+      (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Short" "shortValue" "()S" false)
+      (.visitJumpInsn mv Opcodes/GOTO done)
+      (.visitLabel mv other)
+      (emit-sized-unwrap! mv (ir/object-jvm-type "java/lang/Object"))
+      (.visitInsn mv Opcodes/L2I)
+      (.visitLabel mv done))
+    (do (emit-sized-unwrap! mv (ir/object-jvm-type "java/lang/Object"))
+        (.visitInsn mv Opcodes/L2I))))
 
 (defn- emit-sized-norm!
   "Reduce the long on the stack to NEX-TYPE's range by its low bits, as the
@@ -2214,11 +2228,110 @@
 
       :else nil)))
 
+(defn- emit-byte-array-intrinsic!
+  "EXPR, a call of Byte_Array's support builtins `__byte_array_length`,
+   `__byte_array_get` or `__byte_array_set` (lib/data/byte_array.nex), as JVM
+   array instructions on its handle, a Java byte[]: an `arraylength`, or a
+   `baload`/`bastore` once the index is checked to be in range. A handle that
+   is not a byte[], or an index out of range, goes to the runtime's helper
+   instead, which raises its own error. Each used to be a runtime call, its
+   index boxed, every time. Returns the result's JVM type, or nil when it
+   does not apply (no scratch locals at hand)."
+  [^MethodVisitor mv expr state-slot]
+  (let [helper (:helper expr)
+        args (:args expr)
+        object-type (ir/object-jvm-type "java/lang/Object")]
+    (when (and *scratch-slot*
+               (#{"__byte_array_length" "__byte_array_get" "__byte_array_set"} helper)
+               (= (count args) (case helper "__byte_array_length" 1 "__byte_array_get" 2 3)))
+      (let [slow (Label.)
+            done (Label.)
+            h (alloc-scratch! object-type)
+            store-arg! (fn [arg t]
+                         (let [slot (alloc-scratch! t)]
+                           (emit-value-coerce! mv (emit-expr! mv arg state-slot) t)
+                           (.visitVarInsn mv (local-store-op t) slot)
+                           slot))
+            _ (emit-value-coerce! mv (emit-expr! mv (first args) state-slot) object-type)
+            _ (.visitVarInsn mv Opcodes/ASTORE h)
+            i (when (< 1 (count args)) (store-arg! (second args) :long))
+            v (when (= 3 (count args)) (store-arg! (nth args 2) :u8))
+            push-array! (fn []
+                          (.visitVarInsn mv Opcodes/ALOAD h)
+                          (.visitTypeInsn mv Opcodes/CHECKCAST "[B"))
+            slow-call! (fn [result-type]
+                         (.visitLabel mv slow)
+                         (emit-runtime-call! mv (direct-derived-builtin-helper-name helper)
+                                             (cond-> [(fn [] (.visitVarInsn mv Opcodes/ALOAD h))]
+                                               i (conj (fn [] (.visitVarInsn mv Opcodes/LLOAD i)
+                                                         (emit-box! mv :long)))
+                                               v (conj (fn [] (.visitVarInsn mv Opcodes/ILOAD v)
+                                                         (emit-box! mv :u8)))))
+                         (if (= :void result-type)
+                           (.visitInsn mv Opcodes/POP)
+                           (emit-unbox-or-cast! mv result-type))
+                         (.visitLabel mv done))
+            result-type (case helper
+                          "__byte_array_length" :long
+                          "__byte_array_get" :u8
+                          :void)]
+        ;; A byte[] handle, and an index in 0..length-1.
+        (.visitVarInsn mv Opcodes/ALOAD h)
+        (.visitTypeInsn mv Opcodes/INSTANCEOF "[B")
+        (.visitJumpInsn mv Opcodes/IFEQ slow)
+        (when i
+          (.visitVarInsn mv Opcodes/LLOAD i)
+          (.visitInsn mv Opcodes/LCONST_0)
+          (.visitInsn mv Opcodes/LCMP)
+          (.visitJumpInsn mv Opcodes/IFLT slow)
+          (.visitVarInsn mv Opcodes/LLOAD i)
+          (push-array!)
+          (.visitInsn mv Opcodes/ARRAYLENGTH)
+          (.visitInsn mv Opcodes/I2L)
+          (.visitInsn mv Opcodes/LCMP)
+          (.visitJumpInsn mv Opcodes/IFGE slow))
+        (case helper
+          "__byte_array_length"
+          (do (push-array!)
+              (.visitInsn mv Opcodes/ARRAYLENGTH)
+              (.visitInsn mv Opcodes/I2L))
+          "__byte_array_get"
+          (do (push-array!)
+              (.visitVarInsn mv Opcodes/LLOAD i)
+              (.visitInsn mv Opcodes/L2I)
+              (.visitInsn mv Opcodes/BALOAD)
+              ;; The storage is a signed byte; a Byte is 0..255.
+              (.visitIntInsn mv Opcodes/SIPUSH 255)
+              (.visitInsn mv Opcodes/IAND))
+          "__byte_array_set"
+          (do (push-array!)
+              (.visitVarInsn mv Opcodes/LLOAD i)
+              (.visitInsn mv Opcodes/L2I)
+              (.visitVarInsn mv Opcodes/ILOAD v)
+              (.visitInsn mv Opcodes/BASTORE)))
+        (.visitJumpInsn mv Opcodes/GOTO done)
+        (slow-call! result-type)
+        (cond
+          (= :void (:jvm-type expr))
+          (do (when-not (= :void result-type)
+                (.visitInsn mv (if (= :long result-type) Opcodes/POP2 Opcodes/POP)))
+              :void)
+
+          (= :void result-type)
+          (do (.visitInsn mv Opcodes/ACONST_NULL)
+              (emit-value-coerce! mv object-type (:jvm-type expr))
+              (:jvm-type expr))
+
+          :else
+          (do (emit-value-coerce! mv result-type (:jvm-type expr))
+              (:jvm-type expr)))))))
+
 (declare emit-direct-runtime-helper-call*)
 
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
   (or (emit-sized-intrinsic! mv expr state-slot)
+      (emit-byte-array-intrinsic! mv expr state-slot)
       (emit-numeric-intrinsic! mv expr state-slot)
       (emit-direct-runtime-helper-call* mv expr state-slot)))
 
