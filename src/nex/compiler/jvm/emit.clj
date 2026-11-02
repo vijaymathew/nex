@@ -2961,7 +2961,31 @@
                    (desc/jvm-type->descriptor (:jvm-type expr)))
   (:jvm-type expr))
 
+(declare emit-expr-call-repl-fn-by-name!)
+
 (defn- emit-expr-call-repl-fn!
+  "A call of a free function. One the compiler resolved to a function of the
+   same compiled file (:direct, see nex.lower/*direct-free-functions*) is an
+   INVOKESTATIC of its typed method, each argument passed as the descriptor's
+   type and the result converted to the type the call expects; any other is
+   a lookup by name in the program's function table and a reflective call."
+  [^MethodVisitor mv expr state-slot]
+  (if-let [{:keys [owner method typed-descriptor]} (:direct expr)]
+    (let [param-types (map descriptor-jvm-type (Type/getArgumentTypes ^String typed-descriptor))
+          return-type (descriptor-jvm-type (Type/getReturnType ^String typed-descriptor))]
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (doseq [[arg to] (map vector (:args expr) (rest param-types))]
+        (emit-value-coerce! mv (emit-expr! mv arg state-slot) to))
+      (.visitMethodInsn mv Opcodes/INVOKESTATIC owner (str method "$t") typed-descriptor false)
+      ;; As in emit-typed-call-virtual!: a Void call still leaves a value.
+      (if (= :void (:jvm-type expr))
+        (do (emit-value-coerce! mv return-type (ir/object-jvm-type "java/lang/Object"))
+            (ir/object-jvm-type "java/lang/Object"))
+        (do (emit-value-coerce! mv return-type (:jvm-type expr))
+            (:jvm-type expr))))
+    (emit-expr-call-repl-fn-by-name! mv expr state-slot)))
+
+(defn- emit-expr-call-repl-fn-by-name!
   [^MethodVisitor mv expr state-slot]
   (emit-state-load-functions-map! mv state-slot)
   (.visitLdcInsn mv ^String (:name expr))
@@ -3810,7 +3834,15 @@
     (.visitInsn mv Opcodes/POP)
     (.visitLabel mv ok)))
 
+(declare emit-static-typed-fn-methods! emit-repl-fn-method-boxed!)
+
 (defn- emit-repl-fn-method!
+  [^ClassWriter cw {:keys [name descriptor flags fn-node] :as method-spec}]
+  (if (:static-typed? fn-node)
+    (emit-static-typed-fn-methods! cw method-spec)
+    (emit-repl-fn-method-boxed! cw method-spec)))
+
+(defn- emit-repl-fn-method-boxed!
   [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
   (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
     (.visitCode mv)
@@ -3840,6 +3872,85 @@
         (.visitInsn mv Opcodes/ARETURN)
         (.visitMaxs mv 0 0)
         (.visitEnd mv)))))
+
+(defn- emit-static-typed-fn-methods!
+  "A free function FN-NODE of a whole-file compile (:static-typed?), as two
+   static methods, like a class routine's (emit-typed-routine-methods!).
+   `NAME$t`, of its :typed-descriptor, holds the body; direct calls (an
+   `:call-repl-fn` with :direct) call it with unboxed arguments. NAME, of
+   the uniform (state, Object[]) -> Object descriptor, which the program's
+   function table registers for calls by name, checks the argument count,
+   unpacks the arguments, calls `NAME$t` and boxes the result."
+  [^ClassWriter cw {:keys [name descriptor flags fn-node]}]
+  (let [typed-desc (:typed-descriptor fn-node)
+        owner (:owner fn-node)
+        params (:params fn-node)
+        param-types (map descriptor-jvm-type (rest (Type/getArgumentTypes ^String typed-desc)))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String typed-desc))
+        width (fn [t] (if (#{:long :double} t) 2 1))
+        ;; Incoming argument slots: state 0, then the arguments.
+        in-slots (reductions + 1 (map width param-types))
+        ;; Above every local the body uses, for the two-phase move below.
+        temp-base (+ 4 (reduce max 3 (map (fn [{:keys [slot jvm-type]}] (+ slot (width jvm-type)))
+                                          (concat params (:locals fn-node)))))
+        temp-slots (reductions + temp-base (map width param-types))]
+    ;; NAME$t: the body.
+    (let [^MethodVisitor mv (.visitMethod cw flags (str name "$t") typed-desc nil nil)
+          start-label (Label.)
+          end-label (Label.)
+          local-ranges (atom {})]
+      (.visitCode mv)
+      (binding [*local-debug-ranges* local-ranges
+                *typed-return* return-type
+                *scratch-slot* (atom (max (last temp-slots) (max-ir-slot fn-node)))]
+        (.visitLabel mv start-label)
+        ;; The incoming slots overlap the body's: move each argument out to a
+        ;; temporary first, then into its local, converting it to the
+        ;; local's type.
+        (doseq [[t in tmp] (map vector param-types in-slots temp-slots)]
+          (.visitVarInsn mv (local-load-op t) in)
+          (.visitVarInsn mv (local-store-op t) tmp))
+        (doseq [[{:keys [slot jvm-type]} t tmp] (map vector params param-types temp-slots)]
+          (.visitVarInsn mv (local-load-op t) tmp)
+          (emit-value-coerce! mv t jvm-type)
+          (mark-local-debug-before! mv slot)
+          (.visitVarInsn mv (local-store-op jvm-type) slot)
+          (mark-local-debug-after! mv slot))
+        (doseq [stmt (:body fn-node)]
+          (emit-stmt! mv stmt 0))
+        ;; A function with a result ends in a return; one without returns nil.
+        (if (contains? ir/primitive-jvm-types return-type)
+          (do (.visitInsn mv (case return-type
+                               :long Opcodes/LCONST_0
+                               :double Opcodes/DCONST_0
+                               Opcodes/ICONST_0))
+              (.visitInsn mv (return-op return-type)))
+          (do (.visitInsn mv Opcodes/ACONST_NULL)
+              (.visitInsn mv Opcodes/ARETURN)))
+        (.visitLabel mv end-label)
+        (emit-local-variable-table! mv start-label end-label
+                                    (concat [{:name "state" :slot 0
+                                              :jvm-type (ir/object-jvm-type repl-state-internal-name)}]
+                                            (:locals fn-node))
+                                    @local-ranges))
+      (.visitMaxs mv 0 0)
+      (.visitEnd mv))
+    ;; NAME: check the count, unpack, call NAME$t, box.
+    (let [^MethodVisitor mv (.visitMethod cw flags name descriptor nil nil)]
+      (.visitCode mv)
+      (emit-repl-fn-arity-check! mv fn-node 1)
+      (.visitVarInsn mv Opcodes/ALOAD 0)
+      (doseq [[i t] (map-indexed vector param-types)]
+        (.visitVarInsn mv Opcodes/ALOAD 1)
+        (.visitLdcInsn mv (int i))
+        (.visitInsn mv Opcodes/AALOAD)
+        (emit-unbox-or-cast! mv t))
+      (.visitMethodInsn mv Opcodes/INVOKESTATIC owner (str name "$t") typed-desc false)
+      (when (contains? ir/primitive-jvm-types return-type)
+        (emit-box! mv return-type))
+      (.visitInsn mv Opcodes/ARETURN)
+      (.visitMaxs mv 0 0)
+      (.visitEnd mv))))
 
 (declare emit-instance-fn-method-boxed!)
 
