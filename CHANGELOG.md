@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Faster calls to free functions.** In a compiled program, a call to one
+  of the program's own functions is now a direct JVM call, with `Integer`,
+  `Real`, `Boolean` and `Char` arguments and results passed unboxed. It used
+  to look the function up by name and call it through Java reflection,
+  boxing every argument, on every call. A recursive `fib(40)` went from
+  about 8 s to 0.5 s, close to plain Java. The REPL still looks functions up
+  by name, so a later input can redefine one.
+
 ## 0.6.7 - 2026-10-30
 
 - **`nex doc` marks deferred classes.** A deferred class is headed

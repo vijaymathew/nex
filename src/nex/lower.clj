@@ -261,6 +261,13 @@
 ;; constructor/invariant-method lowering all pick it up automatically.
 (def ^:dynamic *skip-contracts?* false)
 
+;; The free functions a whole-file compile calls directly, by the name a call
+;; uses (see direct-free-function-targets). nil in the REPL, where a later
+;; input may redefine a function, so every call looks it up by name at run
+;; time (`:call-repl-fn`). Bound once at the lowering entry point, like
+;; *skip-contracts?*, so calls from classes and closures see it too.
+(def ^:dynamic *direct-free-functions* nil)
+
 (defn- unsupported
   "An ex-info marking a construct the compiled backend does not implement yet.
 
@@ -5959,8 +5966,15 @@
 
     :else
     (let [nex-type (infer-type env expr)
-          jvm-type (resolve-jvm-type env nex-type)]
-      (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type))))
+          jvm-type (resolve-jvm-type env nex-type)
+          node (ir/call-repl-fn-node (:method expr) arg-irs nex-type jvm-type)
+          target (get *direct-free-functions* (:method expr))]
+      ;; In a whole-file compile, a call to one of the program's own
+      ;; functions is a direct call of its typed static method, instead of a
+      ;; lookup by name and a reflective call.
+      (if (and target (= (:arity target) (count arg-irs)))
+        (assoc node :direct target)
+        node))))
 
 (defn- java-numeric-param-class?
   [^Class param-class]
@@ -9201,13 +9215,42 @@
     (let [blocked (persistent! blocked)]
       (into #{} (remove blocked) (persistent! let-names)))))
 
+(defn- direct-free-function-targets
+  "{call name -> {:owner :method :typed-descriptor :arity}}: the typed static
+   method (emit.clj, emit-static-typed-fn-methods!) that unit UNIT-NAME emits
+   for each of FUNCTIONS, under its bare and its qualified name. When two
+   functions share a name, the later one wins, as in the program's function
+   table, which registers them in the same order."
+  [unit-name functions]
+  (reduce (fn [targets fn-def]
+            (let [fn-def (normalized-function-def fn-def)]
+              (if (or (:declaration-only? fn-def)
+                      (:deferred? fn-def)
+                      ;; lower-function gives a typed method only to these.
+                      (not (:class-name fn-def)))
+                targets
+                (let [target {:owner unit-name
+                              :method (lowered-routine-emitted-name fn-def)
+                              :typed-descriptor (typed-method-descriptor fn-def)
+                              :arity (count (:params fn-def))}]
+                  (reduce #(assoc %1 %2 target)
+                          targets
+                          (distinct (keep identity [(:name fn-def) (:qualified-name fn-def)])))))))
+          {}
+          functions))
+
 (defn lower-repl-cell
   "Lower a narrow REPL/program body to a first compiler unit. With
    :promote-locals? (a compiled file, whose top-level code runs once and
    which no later input extends), a top-level `let` that only top-level code
-   uses is a JVM local (promotable-top-level-names)."
+   uses is a JVM local (promotable-top-level-names), and calls to the
+   program's own functions are direct (*direct-free-functions*)."
   [program opts]
-  (binding [*type-aliases* (merge *type-aliases*
+  (binding [*direct-free-functions* (when (:promote-locals? opts)
+                                      (direct-free-function-targets
+                                       (or (:name opts) "nex/repl/Cell_0001")
+                                       (:functions program)))
+            *type-aliases* (merge *type-aliases*
                                   (into {} (map (juxt :name :type-expr)
                                                 (:type-aliases program))))
             *type-alias-generic-params* (merge *type-alias-generic-params*
@@ -9278,12 +9321,18 @@
                                                              :imports visible-imports
                                                              :source-file (:source-file opts)})
                                         (concat actual-classes anonymous-classes))
-                         :functions (mapv #(lower-function unit-name
-                                                           visible-functions
-                                                           visible-imports
-                                                           (assoc %
-                                                                  :visible-classes visible-classes
-                                                                  :compiled-classes (:compiled-classes opts)))
+                         :functions (mapv #(let [fn-node (lower-function unit-name
+                                                                         visible-functions
+                                                                         visible-imports
+                                                                         (assoc %
+                                                                                :visible-classes visible-classes
+                                                                                :compiled-classes (:compiled-classes opts)))]
+                                             ;; Direct calls need its typed static method.
+                                             (cond-> fn-node
+                                               (and *direct-free-functions*
+                                                    (:typed-descriptor fn-node)
+                                                    (not (:deferred? fn-node)))
+                                               (assoc :static-typed? true)))
                                           (remove :declaration-only? (:functions program)))
                          :body lowered-body''
                          :result-jvm-type (ir/object-jvm-type "java/lang/Object")}))})))
