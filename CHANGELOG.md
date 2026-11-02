@@ -9,6 +9,18 @@
   boxing every argument, on every call. A recursive `fib(40)` went from
   about 8 s to 0.5 s, close to plain Java. The REPL still looks functions up
   by name, so a later input can redefine one.
+- **Faster `Byte`, `Integer16` and `Integer32` in compiled code.**
+  Arithmetic and comparison on them, their literals, conversions between
+  them and `Integer` (`to_integer`, `to_byte`, `to_integer16`,
+  `to_integer32`), and their `bitwise_and`, `bitwise_or`, `bitwise_xor`,
+  `bitwise_not`, `min` and `max` methods are now JVM instructions. So are
+  the shift, rotate and bit methods when the count or bit index is a
+  constant. Each used to be a call into the runtime with its numbers boxed.
+  A literal such as `31i32` is now made once, not each time it is used. In
+  tight loops, `Integer32` code went from about 30x slower than the same
+  code on `Integer` to about 3.5x, and summing an `Array[Byte]` is now as
+  fast as summing an `Array[Integer]`. A count that is not a constant, or is
+  out of range, still goes to the runtime and raises the same errors.
 
 ## 0.6.7 - 2026-10-30
 

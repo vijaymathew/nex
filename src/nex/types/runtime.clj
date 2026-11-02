@@ -484,6 +484,45 @@
     (instance? Short v) (long v)
     :else v))
 
+;; Primitive-typed versions of the conversions above, for compiled code. A
+;; `^long` parameter or result makes each function implement one of Clojure's
+;; primitive interfaces (IFn$OL, IFn$LO), which compiled code calls with an
+;; unboxed long and no Long allocation, and the JIT can inline the call. The
+;; interfaces belong to Clojure itself, so a compiled jar can name them even
+;; though it can't name NexInt16/NexInt32 (this namespace isn't AOT-compiled
+;; into it). Out of range, each defers to the checked function above, so the
+;; error is the same.
+
+(defn sized-long
+  "sized->long as a primitive long."
+  ^long [v]
+  (cond
+    (instance? NexInt32 v) (.v ^NexInt32 v)
+    (instance? NexInt16 v) (.v ^NexInt16 v)
+    (instance? Short v) (long (.shortValue ^Short v))
+    :else (long v)))
+
+(defn long->byte
+  "->nex-byte of a primitive long."
+  [^long n]
+  (if (and (<= 0 n) (<= n 255))
+    (aget byte-box-cache (int n))
+    (->nex-byte n)))
+
+(defn long->int16
+  "->nex-int16 of a primitive long."
+  [^long n]
+  (if (and (<= -32768 n) (<= n 32767))
+    (NexInt16. n)
+    (->nex-int16 n)))
+
+(defn long->int32
+  "->nex-int32 of a primitive long."
+  [^long n]
+  (if (and (<= -2147483648 n) (<= n 2147483647))
+    (NexInt32. n)
+    (->nex-int32 n)))
+
 (defn nex->java
   "Normalize an argument crossing into a reflective Java call. A Nex Byte is a
    java.lang.Short and an Integer16 / Integer32 a wrapper object; clojure.lang.

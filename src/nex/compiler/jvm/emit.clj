@@ -90,12 +90,13 @@
   "([Ljava/lang/String;)V")
 
 (declare emit-runtime-invoke-1!)
+(declare emit-sized-const!)
 
 (defn- emit-short-const!
-  "Push a boxed java.lang.Short for V (the compiled form of a Nex Byte)."
+  "Push a boxed java.lang.Short for V (the compiled form of a Nex Byte): the
+   runtime's own shared box, as a constant (emit-sized-const!)."
   [^MethodVisitor mv v]
-  (.visitIntInsn mv Opcodes/SIPUSH (int v))
-  (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Short" "valueOf" "(S)Ljava/lang/Short;" false))
+  (emit-sized-const! mv "Byte" v))
 
 (defn- class-default-value
   [jvm-type]
@@ -671,10 +672,7 @@
 
         ;; Integer16 / Integer32 default to a wrapper holding 0.
         (and (string? nex-type) (#{"Integer16" "Integer32"} nex-type))
-        (do
-          (.visitInsn mv Opcodes/LCONST_0)
-          (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Long" "valueOf" "(J)Ljava/lang/Long;" false)
-          (emit-runtime-invoke-1! mv (if (= "Integer16" nex-type) "make-int16" "make-int32")))
+        (emit-sized-const! mv nex-type 0)
 
         :else
         (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type}))
@@ -1101,6 +1099,109 @@
                      "Lclojure/lang/Var;"
                      constant-bootstraps-invoke
                      (object-array [rt-var-handle "nex.compiler.jvm.runtime" fn-name]))))
+
+;; ---------------------------------------------------------------------------
+;; Byte, Integer16 and Integer32 values. On the compiled backend a Byte is a
+;; java.lang.Short and an Integer16 / Integer32 a wrapper object (see
+;; nex.types.runtime), so arithmetic needs the value unwrapped to a long, and
+;; a result wrapped again. Both go through the runtime's primitive-typed
+;; functions (sized-long, long->byte, ...) by Clojure's IFn$OL / IFn$LO
+;; interfaces: no Long is boxed, and the JIT can inline the call.
+
+(def ^:private short-jvm-type (ir/object-jvm-type "java/lang/Short"))
+
+(def ^:private sized-wrap-fns
+  "Sized type -> the runtime function making one from a long, range-checked."
+  {"Byte" "long->byte" "Integer16" "long->int16" "Integer32" "long->int32"})
+
+(def ^:private sized-widths {"Byte" 8 "Integer16" 16 "Integer32" 32})
+
+(def ^:private ifn-invoke-1-handle
+  (org.objectweb.asm.Handle. Opcodes/H_INVOKEINTERFACE "clojure/lang/IFn" "invoke"
+                             "(Ljava/lang/Object;)Ljava/lang/Object;" true))
+
+(defn- emit-sized-const!
+  "Push the NEX-TYPE (Byte, Integer16 or Integer32) value N as a dynamic
+   constant: made once, by the runtime's own conversion, then kept by the
+   JVM, rather than built again each time the code runs."
+  [^MethodVisitor mv nex-type n]
+  (.visitLdcInsn mv (org.objectweb.asm.ConstantDynamic.
+                     "nexsized"
+                     "Ljava/lang/Object;"
+                     constant-bootstraps-invoke
+                     (object-array [ifn-invoke-1-handle
+                                    (org.objectweb.asm.ConstantDynamic.
+                                     "nexvar"
+                                     "Lclojure/lang/Var;"
+                                     constant-bootstraps-invoke
+                                     (object-array [rt-var-handle "nex.compiler.jvm.runtime"
+                                                    (get sized-wrap-fns nex-type)]))
+                                    (Long/valueOf (long n))])))
+  (when (= "Byte" nex-type)
+    (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Short")))
+
+(def ^:private var-get-raw-root-handle
+  (org.objectweb.asm.Handle. Opcodes/H_INVOKEVIRTUAL var-internal-name "getRawRoot"
+                             "()Ljava/lang/Object;" false))
+
+(defn- emit-prim-fn!
+  "Push runtime function FN-NAME, cast to Clojure primitive interface IFACE.
+   The function itself, not its Var, is the dynamic constant, so the JIT
+   sees one fixed target and can inline the call."
+  [^MethodVisitor mv fn-name iface]
+  (.visitLdcInsn mv (org.objectweb.asm.ConstantDynamic.
+                     "nexfn"
+                     "Ljava/lang/Object;"
+                     constant-bootstraps-invoke
+                     (object-array [var-get-raw-root-handle
+                                    (org.objectweb.asm.ConstantDynamic.
+                                     "nexvar"
+                                     "Lclojure/lang/Var;"
+                                     constant-bootstraps-invoke
+                                     (object-array [rt-var-handle "nex.compiler.jvm.runtime" fn-name]))])))
+  (.visitTypeInsn mv Opcodes/CHECKCAST iface))
+
+(defn- emit-sized-unwrap!
+  "Replace the Byte, Integer16 or Integer32 value on the stack, of JVM type
+   FROM, with its value as a long."
+  [^MethodVisitor mv from]
+  (cond
+    (= :long from) nil
+
+    (= short-jvm-type from)
+    (do (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Short" "shortValue" "()S" false)
+        (.visitInsn mv Opcodes/I2L))
+
+    :else
+    (do (emit-prim-fn! mv "sized-long" "clojure/lang/IFn$OL")
+        (.visitInsn mv Opcodes/SWAP)
+        (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$OL" "invokePrim"
+                          "(Ljava/lang/Object;)J" true))))
+
+(defn- emit-sized-wrap!
+  "Replace the long on the stack with the NEX-TYPE value holding it, raising
+   as the runtime's conversion does when out of range. Returns the result's
+   JVM type."
+  [^MethodVisitor mv nex-type]
+  (emit-prim-fn! mv (get sized-wrap-fns nex-type) "clojure/lang/IFn$LO")
+  (.visitInsn mv Opcodes/DUP_X2)
+  (.visitInsn mv Opcodes/POP)
+  (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$LO" "invokePrim"
+                    "(J)Ljava/lang/Object;" true)
+  (if (= "Byte" nex-type)
+    (do (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Short")
+        short-jvm-type)
+    (ir/object-jvm-type "java/lang/Object")))
+
+(defn- emit-sized-norm!
+  "Reduce the long on the stack to NEX-TYPE's range by its low bits, as the
+   runtime's bitwise methods do: unsigned for a Byte, sign-extended for an
+   Integer16 / Integer32."
+  [^MethodVisitor mv nex-type]
+  (case nex-type
+    "Byte" (do (.visitLdcInsn mv (Long/valueOf 255)) (.visitInsn mv Opcodes/LAND))
+    "Integer16" (do (.visitInsn mv Opcodes/L2I) (.visitInsn mv Opcodes/I2S) (.visitInsn mv Opcodes/I2L))
+    "Integer32" (do (.visitInsn mv Opcodes/L2I) (.visitInsn mv Opcodes/I2L))))
 
 (defn- emit-runtime-invoke-0!
   [^MethodVisitor mv fn-name]
@@ -1821,11 +1922,234 @@
           (do (emit-value-coerce! mv result (:jvm-type expr))
               (:jvm-type expr)))))))
 
+(defn- const-count
+  "The value of IR when it is an Integer constant, else nil."
+  [ir]
+  (when (and (= :const (:op ir)) (integer? (:value ir)))
+    (long (:value ir))))
+
+(defn- sized-method-plan
+  "How to emit the built-in method call EXPR (helper
+   `builtin-method:<type>:<method>`) inline, for a Byte, Integer16 or Integer32
+   receiver, or an Integer one converted to one of them: [result-kind emit-op],
+   or [result-kind emit-op 1] when only the receiver is pushed (the
+   operation holds a constant count itself), where emit-op emits the
+   operation on the unwrapped long arguments and
+   result-kind is :long (left a long), :boolean or a sized type name (left a
+   long to wrap as one). nil when the call is not emitted inline: then it goes
+   to the runtime's method as before. Each computes what the method in
+   nex.types.builtins does. A shift or bit index must be a constant, so that
+   its range check is done here; any other goes to the runtime, which raises
+   the method's own error for a bad one."
+  [expr]
+  (let [[_ base method] (str/split (str (:helper expr)) #":" 3)
+        args (:args expr)
+        sized? (contains? sized-widths base)
+        w (get sized-widths base)
+        mask (when w (dec (bit-shift-left 1 w)))
+        arity (dec (count args))
+        k (when (= 1 arity) (const-count (second args)))
+        shift! (fn [^MethodVisitor mv op n]
+                 (.visitIntInsn mv Opcodes/BIPUSH (int n))
+                 (.visitInsn mv op))
+        swap-longs! (fn [^MethodVisitor mv]
+                      (.visitInsn mv Opcodes/DUP2_X2)
+                      (.visitInsn mv Opcodes/POP2))
+        bits! (fn [^MethodVisitor mv]
+                (when-not (= "Byte" base)
+                  (.visitLdcInsn mv (Long/valueOf (long mask)))
+                  (.visitInsn mv Opcodes/LAND)))
+        bit (fn [n] (Long/valueOf (bit-shift-left 1 n)))
+        same (fn [emit-op] [base emit-op])
+        ;; For a constant count, which the operation itself holds: only the
+        ;; receiver is pushed.
+        receiver-only (fn [[kind emit-op]] [kind emit-op 1])
+        nothing (fn [& _])]
+    (cond
+      (and (= "Integer" base) (= 0 arity)
+           (contains? #{"to_byte" "to_integer16" "to_integer32"} method))
+      [(case method "to_byte" "Byte" "to_integer16" "Integer16" "to_integer32" "Integer32") nothing]
+
+      (not sized?) nil
+
+      (= 0 arity)
+      (case method
+        "to_integer" [:long nothing]
+        "to_byte" ["Byte" nothing]
+        "to_integer16" ["Integer16" nothing]
+        "to_integer32" ["Integer32" nothing]
+        "bitwise_not" (same (fn [^MethodVisitor mv]
+                              (.visitLdcInsn mv (Long/valueOf (if (= "Byte" base) 255 -1)))
+                              (.visitInsn mv Opcodes/LXOR)))
+        nil)
+
+      (not= 1 arity) nil
+
+      (contains? #{"bitwise_and" "bitwise_or" "bitwise_xor"} method)
+      (same (fn [^MethodVisitor mv]
+              (.visitInsn mv (case method
+                               "bitwise_and" Opcodes/LAND
+                               "bitwise_or" Opcodes/LOR
+                               "bitwise_xor" Opcodes/LXOR))))
+
+      (contains? #{"min" "max"} method)
+      (same (fn [^MethodVisitor mv]
+              (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Math" method "(JJ)J" false)))
+
+      (nil? k) nil
+
+      (contains? #{"bitwise_left_shift" "bitwise_right_shift" "bitwise_logical_right_shift"} method)
+      (when-not (neg? k)
+        (let [n (min k w)]
+          (receiver-only
+           (same (case method
+                  "bitwise_left_shift"
+                  (fn [mv] (shift! mv Opcodes/LSHL n) (emit-sized-norm! mv base))
+                  ;; A Byte is never negative, so its two right shifts agree.
+                  "bitwise_right_shift"
+                  (fn [mv] (shift! mv Opcodes/LSHR n))
+                  "bitwise_logical_right_shift"
+                  (fn [mv] (bits! mv) (shift! mv Opcodes/LUSHR n) (emit-sized-norm! mv base)))))))
+
+      (contains? #{"bitwise_rotate_left" "bitwise_rotate_right"} method)
+      (let [n (mod k w)
+            [first-op second-op] (if (= "bitwise_rotate_left" method)
+                                   [Opcodes/LSHL Opcodes/LUSHR]
+                                   [Opcodes/LUSHR Opcodes/LSHL])]
+        (receiver-only
+         (same (fn [^MethodVisitor mv]
+                (bits! mv)                          ; u
+                (.visitInsn mv Opcodes/DUP2)        ; u u
+                (shift! mv first-op n)              ; u a
+                (swap-longs! mv)                    ; a u
+                (shift! mv second-op (- w n))       ; a b
+                (.visitInsn mv Opcodes/LOR)
+                (emit-sized-norm! mv base)))))
+
+      (contains? #{"bitwise_is_set" "bitwise_set" "bitwise_unset"} method)
+      (when (<= 0 k (dec w))
+        (receiver-only
+         (case method
+          "bitwise_is_set"
+          [:boolean (fn [^MethodVisitor mv]
+                      (let [no (Label.) done (Label.)]
+                        (.visitLdcInsn mv (bit k))
+                        (.visitInsn mv Opcodes/LAND)
+                        (.visitInsn mv Opcodes/LCONST_0)
+                        (.visitInsn mv Opcodes/LCMP)
+                        (.visitJumpInsn mv Opcodes/IFEQ no)
+                        (.visitInsn mv Opcodes/ICONST_1)
+                        (.visitJumpInsn mv Opcodes/GOTO done)
+                        (.visitLabel mv no)
+                        (.visitInsn mv Opcodes/ICONST_0)
+                        (.visitLabel mv done)))]
+          "bitwise_set"
+          (same (fn [^MethodVisitor mv]
+                  (.visitLdcInsn mv (bit k))
+                  (.visitInsn mv Opcodes/LOR)
+                  (emit-sized-norm! mv base)))
+          "bitwise_unset"
+          (same (fn [^MethodVisitor mv]
+                  (.visitLdcInsn mv (Long/valueOf (bit-not (bit-shift-left 1 k))))
+                  (.visitInsn mv Opcodes/LAND)
+                  (emit-sized-norm! mv base))))))
+
+      :else nil)))
+
+(defn- sized-literal-value
+  "[n] when IR is a Byte, Integer16 or Integer32 literal (or default) holding
+   N, else nil."
+  [ir]
+  (cond
+    (and (= :const (:op ir)) (instance? Short (:value ir)))
+    [(long (:value ir))]
+
+    (and (= :call-runtime (:op ir)) (#{"make-int16" "make-int32"} (:helper ir))
+         (= 1 (count (:args ir))))
+    (when-let [n (const-count (first (:args ir)))]
+      (let [w (if (= "make-int16" (:helper ir)) 16 32)
+            bound (bit-shift-left 1 (dec w))]
+        (when (and (<= (- bound) n) (< n bound))
+          [n])))
+
+    :else nil))
+
+(defn- unwrapped-sized-op
+  "[arguments-to-push emit-op] when IR is a built-in bitwise, min or max
+   method on a Byte, Integer16 or Integer32 (sized-method-plan) whose result
+   is of the receiver's type: its long result is always in range, so where it
+   is unwrapped at once it need not be wrapped. nil otherwise, conversions
+   included, since those must check the range."
+  [ir]
+  (when (and (= :call-runtime (:op ir))
+             (str/starts-with? (str (:helper ir)) "builtin-method:"))
+    (let [[_ base method] (str/split (str (:helper ir)) #":" 3)]
+      (when (and (contains? sized-widths base)
+                 (or (str/starts-with? method "bitwise_") (#{"min" "max"} method)))
+        (when-let [[kind emit-op pushed] (sized-method-plan ir)]
+          (when (= kind base)
+            [(if pushed (take pushed (:args ir)) (:args ir)) emit-op]))))))
+
+(defn- emit-sized-intrinsic!
+  "EXPR, an operation on a Byte, Integer16 or Integer32 value, as JVM
+   instructions on its value as a long: unwrapping one for arithmetic
+   (op:sized->integer), a literal or default (make-int16/make-int32 of a
+   constant, which becomes a constant), and the built-in methods
+   sized-method-plan covers. Returns the result's JVM type, or nil when it
+   does not apply."
+  [^MethodVisitor mv expr state-slot]
+  (let [helper (:helper expr)
+        args (:args expr)
+        finish (fn [jvm-type]
+                 (if (= :void (:jvm-type expr))
+                   (do (.visitInsn mv (if (#{:long :double} jvm-type) Opcodes/POP2 Opcodes/POP)) :void)
+                   (do (emit-value-coerce! mv jvm-type (:jvm-type expr))
+                       (:jvm-type expr))))
+        ;; Every argument here is a Byte, Integer16, Integer32 or Integer:
+        ;; an object one is unwrapped by the runtime's sized-long, which
+        ;; also takes a boxed Integer.
+        push-long! (fn push-long! [arg]
+                     (if-let [[n] (sized-literal-value arg)]
+                       (.visitLdcInsn mv (Long/valueOf (long n)))
+                       (if-let [[pushed emit-op] (unwrapped-sized-op arg)]
+                         ;; A bitwise result unwrapped at once: never wrapped.
+                         (do (doseq [a pushed] (push-long! a))
+                             (emit-op mv))
+                         (let [t (emit-expr! mv arg state-slot)]
+                           (if (keyword? t)
+                             (emit-value-coerce! mv t :long)
+                             (emit-sized-unwrap! mv t))))))]
+    (cond
+      (and (= "op:sized->integer" helper) (= 1 (count args)))
+      (do (push-long! (first args))
+          (finish :long))
+
+      (and (#{"make-int16" "make-int32"} helper) (= 1 (count args)))
+      (let [nex-type (if (= "make-int16" helper) "Integer16" "Integer32")
+            n (const-count (first args))]
+        (if n
+          (emit-sized-const! mv nex-type n)
+          (do (push-long! (first args))
+              (emit-sized-wrap! mv nex-type)))
+        (finish (ir/object-jvm-type "java/lang/Object")))
+
+      (str/starts-with? (str helper) "builtin-method:")
+      (when-let [[result-kind emit-op pushed] (sized-method-plan expr)]
+        (doseq [arg (if pushed (take pushed args) args)] (push-long! arg))
+        (emit-op mv)
+        (finish (case result-kind
+                  :long :long
+                  :boolean :boolean
+                  (emit-sized-wrap! mv result-kind))))
+
+      :else nil)))
+
 (declare emit-direct-runtime-helper-call*)
 
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
-  (or (emit-numeric-intrinsic! mv expr state-slot)
+  (or (emit-sized-intrinsic! mv expr state-slot)
+      (emit-numeric-intrinsic! mv expr state-slot)
       (emit-direct-runtime-helper-call* mv expr state-slot)))
 
 (defn- emit-direct-runtime-helper-call*

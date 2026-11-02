@@ -2218,6 +2218,15 @@
 (defn make-int16 [n] (rt/->nex-int16 n))
 (defn make-int32 [n] (rt/->nex-int32 n))
 
+;; The primitive-typed conversions compiled code calls through Clojure's
+;; IFn$OL / IFn$LO interfaces (nex.compiler.jvm.emit/emit-sized-unwrap! and
+;; emit-sized-wrap!). Each Var holds the function object itself, so it keeps
+;; those interfaces.
+(def sized-long rt/sized-long)
+(def long->byte rt/long->byte)
+(def long->int16 rt/long->int16)
+(def long->int32 rt/long->int32)
+
 (defn pow-double
   [a b]
   (Math/pow (double a) (double b)))
