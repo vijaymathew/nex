@@ -1560,7 +1560,8 @@
                                    (throw (ex-info (str "Undefined compiled field: " field-name)
                                                    {:field field-name
                                                     :class (.getName (.getClass ^Object target))})))]
-      (.get field owner))))
+      ;; A Byte/Integer16/Integer32 field is a JVM byte/short/int.
+      (rt/field-value->nex (.getType field) (.get field owner)))))
 
 (defn- set-user-field!
   [target field-name value]
@@ -1568,7 +1569,7 @@
                                  (throw (ex-info (str "Undefined compiled field: " field-name)
                                                  {:field field-name
                                                   :class (.getName (.getClass ^Object target))})))]
-    (.set field owner value)
+    (.set field owner (rt/nex->field-value (.getType field) value))
     nil))
 
 (defn make-raised-exception
@@ -2217,6 +2218,18 @@
 
 (defn make-int16 [n] (rt/->nex-int16 n))
 (defn make-int32 [n] (rt/->nex-int32 n))
+
+;; The primitive-typed conversions compiled code calls through Clojure's
+;; IFn$OL / IFn$LO interfaces (nex.compiler.jvm.emit/emit-sized-unwrap! and
+;; emit-sized-wrap!). Each Var holds the function object itself, so it keeps
+;; those interfaces.
+(def sized-long rt/sized-long)
+(def long->byte rt/long->byte)
+(def long->int16 rt/long->int16)
+(def long->int32 rt/long->int32)
+(def check-byte rt/check-byte)
+(def check-int16 rt/check-int16)
+(def check-int32 rt/check-int32)
 
 (defn pow-double
   [a b]
@@ -3216,7 +3229,9 @@
             dst-part (.get f dst)]
         (when (and src-part dst-part)
           (copy-compiled-fields! state src-part dst-part memo)))
-      (.set f dst (clone-deep state (.get f src) memo)))))
+      (.set f dst (rt/nex->field-value
+                   (.getType f)
+                   (clone-deep state (rt/field-value->nex (.getType f) (.get f src)) memo))))))
 
 (defn- clone-compiled-object
   "A copy of compiled object SRC, made through its class's no-argument <init>

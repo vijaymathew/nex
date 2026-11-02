@@ -484,6 +484,84 @@
     (instance? Short v) (long v)
     :else v))
 
+;; Primitive-typed versions of the conversions above, for compiled code. A
+;; `^long` parameter or result makes each function implement one of Clojure's
+;; primitive interfaces (IFn$OL, IFn$LO), which compiled code calls with an
+;; unboxed long and no Long allocation, and the JIT can inline the call. The
+;; interfaces belong to Clojure itself, so a compiled jar can name them even
+;; though it can't name NexInt16/NexInt32 (this namespace isn't AOT-compiled
+;; into it). Out of range, each defers to the checked function above, so the
+;; error is the same.
+
+(defn sized-long
+  "sized->long as a primitive long."
+  ^long [v]
+  (cond
+    (instance? NexInt32 v) (.v ^NexInt32 v)
+    (instance? NexInt16 v) (.v ^NexInt16 v)
+    (instance? Short v) (long (.shortValue ^Short v))
+    :else (long v)))
+
+(defn long->byte
+  "->nex-byte of a primitive long."
+  [^long n]
+  (if (and (<= 0 n) (<= n 255))
+    (aget byte-box-cache (int n))
+    (->nex-byte n)))
+
+(defn long->int16
+  "->nex-int16 of a primitive long."
+  [^long n]
+  (if (and (<= -32768 n) (<= n 32767))
+    (NexInt16. n)
+    (->nex-int16 n)))
+
+(defn long->int32
+  "->nex-int32 of a primitive long."
+  [^long n]
+  (if (and (<= -2147483648 n) (<= n 2147483647))
+    (NexInt32. n)
+    (->nex-int32 n)))
+
+(defn check-byte
+  "N when it is a Byte's value (0..255); raises as ->nex-byte does otherwise."
+  ^long [^long n]
+  (if (and (<= 0 n) (<= n 255)) n (do (->nex-byte n) n)))
+
+(defn check-int16
+  "N when it is an Integer16's value; raises as ->nex-int16 does otherwise."
+  ^long [^long n]
+  (if (and (<= -32768 n) (<= n 32767)) n (do (->nex-int16 n) n)))
+
+(defn check-int32
+  "N when it is an Integer32's value; raises as ->nex-int32 does otherwise."
+  ^long [^long n]
+  (if (and (<= -2147483648 n) (<= n 2147483647)) n (do (->nex-int32 n) n)))
+
+(defn field-value->nex
+  "The Nex value of V, read by reflection from a compiled object's field of
+   class TYPE: a Byte, Integer16 or Integer32 field is a JVM byte, short or
+   int (see nex.compiler.jvm.descriptor/jvm-type->descriptor), which
+   reflection boxes to a java.lang.Byte, Short or Integer. No other Nex type
+   is stored in a field of these types, so each is turned back into its
+   tagged value. A reference-typed field's value is already a Nex value."
+  [^Class type v]
+  (cond
+    (= Integer/TYPE type) (NexInt32. (long (.intValue ^Integer v)))
+    (= Short/TYPE type) (NexInt16. (long (.shortValue ^Short v)))
+    (= Byte/TYPE type) (aget byte-box-cache (bit-and (long (.byteValue ^Byte v)) 0xFF))
+    :else v))
+
+(defn nex->field-value
+  "V converted for Field/set into a field of class TYPE: a tagged sized value
+   (or an Integer) into a JVM byte, short or int field. Anything else as is."
+  [^Class type v]
+  (cond
+    (= Integer/TYPE type) (Integer/valueOf (int (sized-long v)))
+    (= Short/TYPE type) (Short/valueOf (short (sized-long v)))
+    (= Byte/TYPE type) (Byte/valueOf (unchecked-byte (sized-long v)))
+    :else v))
+
 (defn nex->java
   "Normalize an argument crossing into a reflective Java call. A Nex Byte is a
    java.lang.Short and an Integer16 / Integer32 a wrapper object; clojure.lang.

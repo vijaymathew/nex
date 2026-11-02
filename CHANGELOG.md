@@ -9,6 +9,33 @@
   boxing every argument, on every call. A recursive `fib(40)` went from
   about 8 s to 0.5 s, close to plain Java. The REPL still looks functions up
   by name, so a later input can redefine one.
+- **Faster `Byte`, `Integer16` and `Integer32` in compiled code.**
+  Arithmetic and comparison on them, their literals, conversions between
+  them and `Integer` (`to_integer`, `to_byte`, `to_integer16`,
+  `to_integer32`), and their `bitwise_and`, `bitwise_or`, `bitwise_xor`,
+  `bitwise_not`, `min` and `max` methods are now JVM instructions. So are
+  the shift, rotate and bit methods when the count or bit index is a
+  constant. Each used to be a call into the runtime with its numbers boxed.
+  A literal such as `31i32` is now made once, not each time it is used. A
+  count that is not a constant, or is out of range, still goes to the
+  runtime and raises the same errors.
+
+  Their values are also now plain JVM numbers in variables, fields and
+  routine calls (a `Byte` argument or result stays a shared, cached box):
+  the tagged object that keeps a value's type is made only where one goes
+  into `Any`, a generic, a collection or a runtime call. In tight loops,
+  `Integer32` and `Integer16` code went from about 30x slower than the same
+  code on `Integer` to within about 15% of it, and `Byte` code is as fast
+  as `Integer` code.
+- **Faster `Byte_Array` in compiled code.** `get`, `set` and `length` are
+  now JVM array instructions on the underlying `byte[]`, with the index
+  checked inline, instead of a call into the runtime with the index boxed.
+  Summing a `Byte_Array` element by element went from about 1 s to about
+  70 ms for 20 million elements. An index out of range raises the same
+  error as before.
+- **Fix: comparing a detachable `?Byte`, `?Integer16` or `?Integer32`**
+  with `nil` or with a value (`o /= nil`, `o = 7i16`) failed in compiled
+  code ("Used a value that is void").
 
 ## 0.6.7 - 2026-10-30
 

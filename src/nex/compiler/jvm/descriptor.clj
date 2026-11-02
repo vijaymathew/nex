@@ -43,14 +43,13 @@
       ;; Integer is 64-bit (Int64), matching the interpreter and the numeric-tower
       ;; model (NUMERIC_TOWER.md).
       "Integer" :long
-      ;; A Byte is a boxed java.lang.Short (0..255) — an object type, not a
-      ;; primitive, so its runtime tag survives collections and `Any`. Arithmetic
-      ;; on it unwraps to a long first (see lower-expr-binary).
-      "Byte" (ir/object-jvm-type "java/lang/Short")
-      ;; Integer16 / Integer32 are wrapper objects (rt/nex-int16?); the compiled
-      ;; backend carries them as plain Objects and unwraps for arithmetic.
-      "Integer16" (ir/object-jvm-type "java/lang/Object")
-      "Integer32" (ir/object-jvm-type "java/lang/Object")
+      ;; Byte, Integer16 and Integer32 are JVM ints (ir/sized-jvm-types),
+      ;; boxed to their tagged runtime values (a Short for a Byte, a wrapper
+      ;; for the other two, rt/nex-int16?) only where an object is needed.
+      ;; Arithmetic on one widens it to a long first (see lower-expr-binary).
+      "Byte" :u8
+      "Integer16" :i16
+      "Integer32" :i32
       "Real" :double
       "Boolean" :boolean
       "Char" :char
@@ -83,6 +82,13 @@
   [jvm-type]
   (cond
     (= jvm-type :int) "I"
+    ;; In a field each sized type has its own JVM type, so a field read by
+    ;; reflection comes back as a Byte, Short or Integer the runtime can tell
+    ;; apart (nex.types.runtime/field-value->nex). A Byte (0..255) is stored
+    ;; as a signed byte and masked back on load.
+    (= jvm-type :u8) "B"
+    (= jvm-type :i16) "S"
+    (= jvm-type :i32) "I"
     (= jvm-type :long) "J"
     (= jvm-type :double) "D"
     (= jvm-type :boolean) "Z"

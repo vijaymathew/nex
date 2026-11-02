@@ -1713,6 +1713,7 @@
     :double (ir/const-node 0.0 nex-type :double)
     :boolean (ir/const-node false "Boolean" :boolean)
     :char (ir/const-node (char 0) "Char" :char)
+    (:u8 :i16 :i32) (ir/const-node 0 nex-type jvm-type)
     (ir/const-node nil "Any" (ir/object-jvm-type "java/lang/Object"))))
 
 (defn- init-new-locals-stmts
@@ -5118,14 +5119,26 @@
                            parent-name
                            (exact-class-jvm-type env parent-name))))))
 
+(defn- detachable-sized-ir?
+  "Whether IR's type is a detachable ?Byte, ?Integer16 or ?Integer32."
+  [ir]
+  (let [t (resolve-type-alias (:nex-type ir))]
+    (and (map? t) (:detachable t)
+         (contains? tc/sized-integer-types (base-type-name t)))))
+
 (defn- unwrap-sized-ir
   "A Byte, Integer16 or Integer32 is a boxed object on the compiled backend
    (a Short, or a wrapper); arithmetic and comparison work on a long, so unwrap
    a sized-typed operand first. Any other IR passes through untouched."
   [ir]
-  (if (contains? tc/sized-integer-types (base-type-name (resolve-type-alias (:nex-type ir))))
-    (ir/call-runtime-node "op:sized->integer" [ir] "Integer" :long)
-    ir))
+  (let [t (resolve-type-alias (:nex-type ir))]
+    ;; Not a detachable ?Byte/?Integer16/?Integer32: arithmetic needs it
+    ;; narrowed first, and `o /= nil` compares the reference itself (unwrapping
+    ;; it read nil as a number).
+    (if (and (contains? tc/sized-integer-types (base-type-name t))
+             (not (and (map? t) (:detachable t))))
+      (ir/call-runtime-node "op:sized->integer" [ir] "Integer" :long)
+      ir)))
 
 (defn- lower-expr-binary
   [env expr]
@@ -5158,8 +5171,15 @@
                   [_right-env right-ir] (lower-boolean-condition right-input-env (:right expr))]
               [left-ir right-ir])
 
-            [(unwrap-sized-ir (lower-expression env (:left expr)))
-             (unwrap-sized-ir (lower-expression env (:right expr)))])
+            (let [left (lower-expression env (:left expr))
+                  right (lower-expression env (:right expr))]
+              ;; An equality with a detachable ?Byte/?Integer16/?Integer32
+              ;; on one side compares the two as values, neither unwrapped:
+              ;; the detachable one may be nil.
+              (if (and (#{"=" "/=" "==" "!="} op)
+                       (or (detachable-sized-ir? left) (detachable-sized-ir? right)))
+                [left right]
+                [(unwrap-sized-ir left) (unwrap-sized-ir right)])))
           inferred-type (infer-type env expr)
           nex-type (if (= "Any" inferred-type)
                      (cond
@@ -7889,6 +7909,7 @@
                            (= :double jvm-type) 0.0
                            (= :boolean jvm-type) false
                            (= :char jvm-type) 0
+                           (ir/sized-jvm-type? jvm-type) 0
                            :else nil)
           init-expr (cond
                       (some? scalar-default)
@@ -7960,8 +7981,11 @@
 (def ^:private typed-descriptor-by-type
   "JVM descriptor of a routine parameter or result in its typed method, by
    the Nex type as declared. Anything else, including an alias or a
-   detachable type, is an Object."
-  {"Integer" "J" "Real" "D" "Boolean" "Z" "Char" "C"})
+   detachable type, is an Object. An Integer32 or Integer16 is a JVM int or
+   short (nex.compiler.jvm.emit/descriptor-jvm-type reads them back as
+   :i32/:i16). A Byte stays an Object, its shared Short box: as a JVM byte,
+   0..255 is out of the range the JIT may assume of one."
+  {"Integer" "J" "Real" "D" "Boolean" "Z" "Char" "C" "Integer32" "I" "Integer16" "S"})
 
 (defn typed-method-descriptor
   "Descriptor of the typed method a class routine METHOD-DEF compiles to
