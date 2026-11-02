@@ -24,7 +24,13 @@
   (let [f (java.io.File/createTempFile "sized_inline" ".nex")]
     (try
       (spit f code)
-      (str/split-lines (str/trim-newline (with-out-str (e/eval-file (.getPath f) {:interpret? interpret?}))))
+      (let [err (java.io.StringWriter.)
+            out (binding [*err* err]
+                  (with-out-str (e/eval-file (.getPath f) {:interpret? interpret?})))]
+        ;; A compiled program that fails to compile or link is run by the
+        ;; interpreter instead, which would make the comparison vacuous.
+        (is (not (str/includes? (str err) "falling back")) (str err))
+        (str/split-lines (str/trim-newline out)))
       (finally (.delete f)))))
 
 (defn- both
@@ -165,3 +171,164 @@ print(mix(200u8, 7u8, 5))")]
     (testing "wrapping goes through the primitive-typed conversions"
       (is (str/includes? text "long->int32"))
       (is (str/includes? text "clojure/lang/IFn$LO")))))
+
+(deftest stored-as-jvm-ints-test
+  (testing "fields, constants, Any, generics, collections, closures and contracts"
+    (let [lines (both "class Cell
+  create
+    make(b: Byte, s: Integer16, w: Integer32) do
+      this.b := b
+      this.s := s
+      this.w := w
+    end
+  feature
+    b: Byte
+    s: Integer16
+    w: Integer32
+    Top: Byte = 250u8
+    Low: Integer16 = -32768i16
+    copy_from(o: Cell) do
+      -- Another object's fields: read by reflection.
+      b := o.b
+      s := o.s
+      w := o.w
+    end
+    bump(n: Byte)
+      do
+        b := b.bitwise_xor(n)
+      ensure
+        changed: b /= old b or n = 0u8
+      end
+  invariant
+    small: w.to_integer() < 3000000000
+end
+class Box[T]
+  create
+    make(v: T) do this.item := v end
+  feature
+    item: T
+end
+function twice(w: Integer32): Integer32 do
+  result := (w.to_integer() * 2).to_integer32()
+end
+function maybe(flag: Boolean): ?Integer16 do
+  if flag then result := 7i16 end
+end
+let c := create Cell.make(200u8, -300i16, 2000000000i32)
+print(c.b)
+print(c.s)
+print(c.w)
+print(Cell.Top)
+print(Cell.Low)
+c.bump(255u8)
+print(c.b)
+let other := create Cell.make(1u8, 2i16, 3i32)
+other.copy_from(c)
+print(other.b)
+print(other.s)
+print(other.w)
+print(type_of(other.b))
+if convert c.clone to d: Cell then
+  d.bump(1u8)
+  print(c.b)
+  print(d.b)
+end
+print(c = create Cell.make(55u8, -300i16, 2000000000i32))
+let cells: Set[Cell] := #{c, create Cell.make(55u8, -300i16, 2000000000i32)}
+print(cells.size)
+let a: Any := c.w
+print(type_of(a))
+if convert a to back: Integer32 then print(back.to_integer() + 1) end
+let bx := create Box[Integer16].make(-5i16)
+print(bx.item)
+print(type_of(bx.item))
+let ws: Array[Integer32] := [1i32, -2i32, 2147483647i32]
+ws.add(c.w)
+print(ws)
+print(ws.get(2).to_integer() + 1)
+let m: Map[Byte, String] := {200u8: \"x\"}
+print(m.get(c.b.bitwise_xor(255u8)))
+let total: Integer32 := 0i32
+[1i32, 2i32, 3i32].map(fn (x: Integer32): Integer32 do
+  total := (total + x).to_integer32()
+  result := x
+end)
+print(total)
+print(twice(-7i32))
+let o := maybe(true)
+if o /= nil then print(o.to_integer() + 1) end
+print(maybe(false))
+across [9u8, 255u8] as v do print(v.to_integer()) end")]
+      (is (= "200" (first lines)))
+      (is (some #{"\"Byte\""} lines))
+      (is (some #{"\"Integer32\""} lines))
+      (is (some #{"\"Integer16\""} lines)))))
+
+(deftest typed-routine-calls-test
+  (testing "Integer16/Integer32 pass unboxed through routine calls, overrides and closures"
+    (is (= ["-32768" "30" "-6" "200" "\"Integer16\"" "2147483647" "10"]
+           (both "deferred class Shape
+  feature
+    scale(k: Integer16): Integer32 deferred
+end
+class Square inherit Shape
+  create
+    make(s: Integer32) do side := s end
+  feature
+    side: Integer32
+    scale(k: Integer16): Integer32 do
+      result := (side.to_integer() * k.to_integer()).to_integer32()
+    end
+end
+class Twice inherit Shape
+  create
+    make(s: Integer32) do side := s end
+  feature
+    side: Integer32
+    scale(k: Integer16): Integer32 do
+      result := (2 * side.to_integer() * k.to_integer()).to_integer32()
+    end
+end
+function low(): Integer16 do result := -32768i16 end
+function echo(b: Byte): Byte do result := b end
+print(low())
+let shapes: Array[Shape] := [create Square.make(10i32), create Twice.make(-1i32)]
+print(shapes.get(0).scale(3i16))
+print(shapes.get(1).scale(3i16))
+print(echo(200u8))
+let f := fn (x: Integer16): Integer16 do result := x end
+print(type_of(f(4i16)))
+print(create Square.make(2147483647i32).scale(1i16))
+print(shapes.get(0).scale(1i16).bitwise_and(15i32))")))))
+
+(defn- method-interface-calls
+  "The interfaces method MNAME of the program class compiled from CODE calls
+   through (invokeinterface owners)."
+  [code mname]
+  (let [{:keys [program-class classes]} (file/compile-ast "sized_inline.nex" (p/ast code) {})
+        owners (atom [])]
+    (.accept (org.objectweb.asm.ClassReader. ^bytes (get classes program-class))
+             (proxy [org.objectweb.asm.ClassVisitor] [org.objectweb.asm.Opcodes/ASM9]
+               (visitMethod [_access name _desc _sig _exceptions]
+                 (when (= name mname)
+                   (proxy [org.objectweb.asm.MethodVisitor] [org.objectweb.asm.Opcodes/ASM9]
+                     (visitMethodInsn [_opcode owner _name _desc _itf]
+                       (swap! owners conj owner))))))
+             0)
+    @owners))
+
+(deftest sized-locals-are-ints-test
+  (let [calls (method-interface-calls "function hash(n: Integer): Integer32 do
+  let h: Integer32 := 17i32
+  from let i := 0 until i = n do
+    h := h.bitwise_xor(i.bitwise_and(255).to_integer32()).bitwise_rotate_left(5)
+    i := i + 1
+  end
+  result := h
+end
+print(hash(10))" "__method_hash$arity1$t")]
+    (testing "a loop on an Integer32 local neither wraps nor unwraps one"
+      (is (seq calls))
+      (is (not (some #{"clojure/lang/IFn$LO" "clojure/lang/IFn$OL"} calls)))
+      (testing "only the range check of to_integer32"
+        (is (some #{"clojure/lang/IFn$LL"} calls))))))

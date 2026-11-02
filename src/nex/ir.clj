@@ -11,8 +11,21 @@
   and code generation will live elsewhere."
   (:require [clojure.string :as str]))
 
+(def sized-jvm-types
+  "The IR JVM types of Byte (:u8), Integer16 (:i16) and Integer32 (:i32): a
+   JVM int on the operand stack and in a local, and a byte, short or int in a
+   field (see nex.compiler.jvm.descriptor/jvm-type->descriptor). Each is
+   boxed to its own tagged value (a Byte's Short, an Integer16's or
+   Integer32's wrapper), never to a Long, so the Nex type survives `Any`,
+   generics and collections."
+  #{:u8 :i16 :i32})
+
+(defn sized-jvm-type?
+  [t]
+  (contains? sized-jvm-types t))
+
 (def primitive-jvm-types
-  #{:int :long :double :boolean :char :void})
+  #{:int :long :double :boolean :char :void :u8 :i16 :i32})
 
 (defn object-jvm-type
   "Construct an object JVM type descriptor shape."

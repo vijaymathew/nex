@@ -16,11 +16,20 @@
   `bitwise_not`, `min` and `max` methods are now JVM instructions. So are
   the shift, rotate and bit methods when the count or bit index is a
   constant. Each used to be a call into the runtime with its numbers boxed.
-  A literal such as `31i32` is now made once, not each time it is used. In
-  tight loops, `Integer32` code went from about 30x slower than the same
-  code on `Integer` to about 3.5x, and summing an `Array[Byte]` is now as
-  fast as summing an `Array[Integer]`. A count that is not a constant, or is
-  out of range, still goes to the runtime and raises the same errors.
+  A literal such as `31i32` is now made once, not each time it is used. A
+  count that is not a constant, or is out of range, still goes to the
+  runtime and raises the same errors.
+
+  Their values are also now plain JVM numbers in variables, fields and
+  routine calls (a `Byte` argument or result stays a shared, cached box):
+  the tagged object that keeps a value's type is made only where one goes
+  into `Any`, a generic, a collection or a runtime call. In tight loops,
+  `Integer32` and `Integer16` code went from about 30x slower than the same
+  code on `Integer` to within about 15% of it, and `Byte` code is as fast
+  as `Integer` code.
+- **Fix: comparing a detachable `?Byte`, `?Integer16` or `?Integer32`**
+  with `nil` or with a value (`o /= nil`, `o = 7i16`) failed in compiled
+  code ("Used a value that is void").
 
 ## 0.6.7 - 2026-10-30
 

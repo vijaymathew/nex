@@ -102,6 +102,7 @@
   [jvm-type]
   (cond
     (= :int jvm-type) 0
+    (ir/sized-jvm-type? jvm-type) 0
     (= :long jvm-type) 0
     (= :double jvm-type) 0.0
     (= :boolean jvm-type) false
@@ -496,7 +497,11 @@
     (.visitLocalVariable mv
                          ^String (str name)
                          ^String (or descriptor
-                                     (desc/jvm-type->descriptor jvm-type))
+                                     ;; A sized local is a JVM int, whatever
+                                     ;; its field width.
+                                     (if (ir/sized-jvm-type? jvm-type)
+                                       "I"
+                                       (desc/jvm-type->descriptor jvm-type)))
                          nil
                          (or (get-in local-ranges [slot :start]) start-label)
                          (or (get-in local-ranges [slot :end]) end-label)
@@ -666,13 +671,9 @@
              (= "String" nex-type))
         (.visitLdcInsn mv "")
 
-        (and (= (ir/object-jvm-type "java/lang/Short") jvm-type)
-             (= "Byte" nex-type))
-        (emit-short-const! mv 0)
-
-        ;; Integer16 / Integer32 default to a wrapper holding 0.
-        (and (string? nex-type) (#{"Integer16" "Integer32"} nex-type))
-        (emit-sized-const! mv nex-type 0)
+        ;; A Byte, Integer16 or Integer32 field is a JVM byte/short/int.
+        (ir/sized-jvm-type? jvm-type)
+        (.visitInsn mv Opcodes/ICONST_0)
 
         :else
         (emit-const! mv {:value (class-default-value jvm-type) :jvm-type jvm-type}))
@@ -732,8 +733,12 @@
     (.visitMaxs mv 0 0)
     (.visitEnd mv)))
 
+(declare emit-sized-box! emit-sized-unbox!)
+
 (defn- emit-box!
   [^MethodVisitor mv jvm-type]
+  (when (ir/sized-jvm-type? jvm-type)
+    (emit-sized-box! mv jvm-type))
   (when-let [owner (desc/boxing-owner jvm-type)]
     (.visitMethodInsn mv
                       Opcodes/INVOKESTATIC
@@ -747,6 +752,9 @@
   (cond
     (= :void jvm-type)
     nil
+
+    (ir/sized-jvm-type? jvm-type)
+    (emit-sized-unbox! mv jvm-type)
 
     (= :int jvm-type)
     (do
@@ -809,6 +817,11 @@
     (= :int jvm-type)
     (.visitLdcInsn mv (int value))
 
+    ;; A Byte, Integer16 or Integer32 constant: a JVM int (a Byte literal's
+    ;; value is a Short).
+    (ir/sized-jvm-type? jvm-type)
+    (.visitLdcInsn mv (int (long value)))
+
     (= :long jvm-type)
     (.visitLdcInsn mv (long value))
 
@@ -835,7 +848,7 @@
 (defn- local-load-op
   [jvm-type]
   (cond
-    (#{:int :boolean :char} jvm-type) Opcodes/ILOAD
+    (#{:int :boolean :char :u8 :i16 :i32} jvm-type) Opcodes/ILOAD
     (= :long jvm-type) Opcodes/LLOAD
     (= :double jvm-type) Opcodes/DLOAD
     (ir/object-jvm-type? jvm-type) Opcodes/ALOAD
@@ -847,6 +860,18 @@
   (cond
     (= from-jvm-type to-jvm-type)
     nil
+
+    ;; A Byte, Integer16 or Integer32 is a JVM int: widened to a long for
+    ;; arithmetic, and the same int as a plain JVM int (a Java interop int).
+    (and (ir/sized-jvm-type? from-jvm-type) (= :long to-jvm-type))
+    (.visitInsn mv Opcodes/I2L)
+
+    (and (ir/sized-jvm-type? from-jvm-type) (= :int to-jvm-type))
+    nil
+
+    (and (ir/sized-jvm-type? to-jvm-type) (#{:long :int} from-jvm-type))
+    (throw (ex-info "A sized integer is made from an Integer only by a checked conversion"
+                    {:from-jvm-type from-jvm-type :to-jvm-type to-jvm-type}))
 
     (and (= :int from-jvm-type) (= :long to-jvm-type))
     (.visitInsn mv Opcodes/I2L)
@@ -919,7 +944,7 @@
 (defn- local-store-op
   [jvm-type]
   (cond
-    (#{:int :boolean :char} jvm-type) Opcodes/ISTORE
+    (#{:int :boolean :char :u8 :i16 :i32} jvm-type) Opcodes/ISTORE
     (= :long jvm-type) Opcodes/LSTORE
     (= :double jvm-type) Opcodes/DSTORE
     (ir/object-jvm-type? jvm-type) Opcodes/ASTORE
@@ -1161,12 +1186,23 @@
                                      (object-array [rt-var-handle "nex.compiler.jvm.runtime" fn-name]))])))
   (.visitTypeInsn mv Opcodes/CHECKCAST iface))
 
+(def ^:private sized-jvm-type-of
+  "Sized type name -> its IR JVM type (ir/sized-jvm-types)."
+  {"Byte" :u8 "Integer16" :i16 "Integer32" :i32})
+
+(def ^:private sized-nex-type-of
+  (into {} (map (fn [[k v]] [v k])) sized-jvm-type-of))
+
 (defn- emit-sized-unwrap!
   "Replace the Byte, Integer16 or Integer32 value on the stack, of JVM type
-   FROM, with its value as a long."
+   FROM, with its value as a long: a sized JVM int widened, or a boxed one
+   (a Short or a wrapper, from `Any`, a generic or a collection) unwrapped."
   [^MethodVisitor mv from]
   (cond
     (= :long from) nil
+
+    (#{:int :u8 :i16 :i32} from)
+    (.visitInsn mv Opcodes/I2L)
 
     (= short-jvm-type from)
     (do (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL "java/lang/Short" "shortValue" "()S" false)
@@ -1178,20 +1214,41 @@
         (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$OL" "invokePrim"
                           "(Ljava/lang/Object;)J" true))))
 
+(def ^:private sized-check-fns
+  "Sized type name -> the runtime function returning a long unchanged when it
+   is in the type's range, raising the conversion's error otherwise."
+  {"Byte" "check-byte" "Integer16" "check-int16" "Integer32" "check-int32"})
+
 (defn- emit-sized-wrap!
-  "Replace the long on the stack with the NEX-TYPE value holding it, raising
-   as the runtime's conversion does when out of range. Returns the result's
-   JVM type."
+  "Replace the long on the stack with the NEX-TYPE (Byte, Integer16 or
+   Integer32) value holding it, a JVM int, raising as the runtime's
+   conversion does when out of range. Returns the result's JVM type."
   [^MethodVisitor mv nex-type]
-  (emit-prim-fn! mv (get sized-wrap-fns nex-type) "clojure/lang/IFn$LO")
+  (emit-prim-fn! mv (get sized-check-fns nex-type) "clojure/lang/IFn$LL")
+  (.visitInsn mv Opcodes/DUP_X2)
+  (.visitInsn mv Opcodes/POP)
+  (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$LL" "invokePrim" "(J)J" true)
+  (.visitInsn mv Opcodes/L2I)
+  (get sized-jvm-type-of nex-type))
+
+(defn- emit-sized-box!
+  "Replace the sized JVM int on the stack, of JVM-TYPE, with its tagged
+   runtime value: a Byte's shared Short, or an Integer16's or Integer32's
+   wrapper."
+  [^MethodVisitor mv jvm-type]
+  (.visitInsn mv Opcodes/I2L)
+  (emit-prim-fn! mv (get sized-wrap-fns (get sized-nex-type-of jvm-type)) "clojure/lang/IFn$LO")
   (.visitInsn mv Opcodes/DUP_X2)
   (.visitInsn mv Opcodes/POP)
   (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$LO" "invokePrim"
-                    "(J)Ljava/lang/Object;" true)
-  (if (= "Byte" nex-type)
-    (do (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Short")
-        short-jvm-type)
-    (ir/object-jvm-type "java/lang/Object")))
+                    "(J)Ljava/lang/Object;" true))
+
+(defn- emit-sized-unbox!
+  "Replace the tagged value on the stack (see emit-sized-box!) with the
+   sized JVM int of JVM-TYPE it holds."
+  [^MethodVisitor mv _jvm-type]
+  (emit-sized-unwrap! mv (ir/object-jvm-type "java/lang/Object"))
+  (.visitInsn mv Opcodes/L2I))
 
 (defn- emit-sized-norm!
   "Reduce the long on the stack to NEX-TYPE's range by its low bits, as the
@@ -2127,11 +2184,20 @@
       (and (#{"make-int16" "make-int32"} helper) (= 1 (count args)))
       (let [nex-type (if (= "make-int16" helper) "Integer16" "Integer32")
             n (const-count (first args))]
-        (if n
-          (emit-sized-const! mv nex-type n)
-          (do (push-long! (first args))
-              (emit-sized-wrap! mv nex-type)))
-        (finish (ir/object-jvm-type "java/lang/Object")))
+        (finish
+         (cond
+           ;; A literal or default where an int is wanted: the int itself.
+           (and n (ir/sized-jvm-type? (:jvm-type expr)))
+           (do (.visitLdcInsn mv (int n))
+               (:jvm-type expr))
+
+           n
+           (do (emit-sized-const! mv nex-type n)
+               (ir/object-jvm-type "java/lang/Object"))
+
+           :else
+           (do (push-long! (first args))
+               (emit-sized-wrap! mv nex-type)))))
 
       (str/starts-with? (str helper) "builtin-method:")
       (when-let [[result-kind emit-op pushed] (sized-method-plan expr)]
@@ -2140,7 +2206,11 @@
         (finish (case result-kind
                   :long :long
                   :boolean :boolean
-                  (emit-sized-wrap! mv result-kind))))
+                  (if (unwrapped-sized-op expr)
+                    ;; A bitwise, min or max result is always in range.
+                    (do (.visitInsn mv Opcodes/L2I)
+                        (get sized-jvm-type-of result-kind))
+                    (emit-sized-wrap! mv result-kind)))))
 
       :else nil)))
 
@@ -3265,6 +3335,14 @@
   (emit-unbox-or-cast! mv (:jvm-type expr))
   (:jvm-type expr))
 
+(defn- emit-byte-field-mask!
+  "A Byte field is a signed JVM byte, which a load sign-extends: mask the
+   value back to 0..255."
+  [^MethodVisitor mv jvm-type]
+  (when (= :u8 jvm-type)
+    (.visitIntInsn mv Opcodes/SIPUSH 255)
+    (.visitInsn mv Opcodes/IAND)))
+
 (defn- emit-expr-field-get!
   [^MethodVisitor mv expr state-slot]
   (emit-expr! mv (:target expr) state-slot)
@@ -3274,6 +3352,7 @@
                    (:owner expr)
                    (:field expr)
                    (desc/jvm-type->descriptor (:jvm-type expr)))
+  (emit-byte-field-mask! mv (:jvm-type expr))
   (:jvm-type expr))
 
 (defn- emit-expr-static-field-get!
@@ -3283,6 +3362,7 @@
                    (:owner expr)
                    (:field expr)
                    (desc/jvm-type->descriptor (:jvm-type expr)))
+  (emit-byte-field-mask! mv (:jvm-type expr))
   (:jvm-type expr))
 
 (declare emit-expr-call-repl-fn-by-name!)
@@ -3373,7 +3453,10 @@
     Type/DOUBLE :double
     Type/BOOLEAN :boolean
     Type/CHAR :char
-    Type/INT :int
+    ;; A typed descriptor has an int or short only for an Integer32 or
+    ;; Integer16 (nex.lower/typed-descriptor-by-type).
+    Type/INT :i32
+    Type/SHORT :i16
     (ir/object-jvm-type (.getInternalName t))))
 
 (declare emit-expr-call-virtual-boxed!)
@@ -3708,7 +3791,10 @@
                              (when (and (ir/object-jvm-type? declared-left-type)
                                         (ir/object-jvm-type? declared-right-type))
                                (ir/object-jvm-type "java/lang/Object"))
-                             (when (= declared-left-type declared-right-type) declared-left-type))]
+                             (when (= declared-left-type declared-right-type) declared-left-type))
+            ;; Two values of one sized type (a `case` on one) compare as the
+            ;; JVM ints they are.
+            compare-type (if (ir/sized-jvm-type? compare-type) :int compare-type)]
         (when-not compare-type
           (throw (ex-info "Compare operands lowered to incompatible JVM types"
                           {:expr expr
@@ -3786,7 +3872,7 @@
 (defn- return-op
   [jvm-type]
   (cond
-    (#{:int :boolean :char} jvm-type) Opcodes/IRETURN
+    (#{:int :boolean :char :u8 :i16 :i32} jvm-type) Opcodes/IRETURN
     (= :long jvm-type) Opcodes/LRETURN
     (= :double jvm-type) Opcodes/DRETURN
     :else Opcodes/ARETURN))
