@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.8 - 2026-11-05
+
 - **Faster calls to free functions.** In a compiled program, a call to one
   of the program's own functions is now a direct JVM call, with `Integer`,
   `Real`, `Boolean` and `Char` arguments and results passed unboxed. It used
