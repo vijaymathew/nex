@@ -755,4 +755,46 @@ interfere with brace detection."
               "end")
             "\n"))))
 
+;; `extend' blocks (docs/proposals/open-features.md), laid out as
+;; `nex format' lays them out (test/nex/fmt_test.clj, extend-blocks).
+
+(ert-deftest nex-indent-extend-block-like-class ()
+  "An `extend' block's sections and routines indent like a class's."
+  (should (string=
+           (nex-test--reindent
+            "class A\nend\nextend A\nfeature\nsize(): Integer do\nresult := 1\nend\nend")
+           (string-join
+            '("class A"
+              "end"
+              "extend A"
+              "feature"
+              "  size(): Integer do"
+              "    result := 1"
+              "  end"
+              "end")
+            "\n"))))
+
+(ert-deftest nex-indent-extend-as-ordinary-name ()
+  "`extend' used as a variable name opens no block."
+  (should (string=
+           (nex-test--reindent "let extend := 3\nprint(extend)")
+           "let extend := 3\nprint(extend)")))
+
+(defun nex-test--face-at (text needle)
+  "The face at the first occurrence of NEEDLE in TEXT, fontified in nex-mode."
+  (with-temp-buffer
+    (nex-mode)
+    (insert text)
+    (font-lock-ensure)
+    (goto-char (point-min))
+    (search-forward needle)
+    (get-text-property (match-beginning 0) 'face)))
+
+(ert-deftest nex-highlight-extend ()
+  "`extend Target' highlights the keyword and the type; a variable named
+`extend' is not highlighted as a keyword."
+  (should (eq 'font-lock-keyword-face (nex-test--face-at "extend Shape\nfeature\nend\n" "extend")))
+  (should (eq 'font-lock-type-face (nex-test--face-at "extend Shape\nfeature\nend\n" "Shape")))
+  (should-not (eq 'font-lock-keyword-face (nex-test--face-at "let extend := 3\n" "extend"))))
+
 ;;; test-nex-mode.el ends here

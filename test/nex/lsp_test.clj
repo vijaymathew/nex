@@ -93,6 +93,28 @@
       (is (= {:start {:line 17 :character 9} :end {:line 17 :character 14}}
              (:selectionRange (nth syms 3)))))))
 
+(deftest the-outline-lists-extensions
+  (let [text (lines "class Shape"
+                    "feature"
+                    "  sides: Integer"
+                    "end"
+                    "extend Shape"
+                    "feature"
+                    "  area(): Real do"
+                    "    result := 1.0"
+                    "  end"
+                    "  edges: Integer do result := 0 end"
+                    "end")
+        syms (lsp/document-symbols (str/split text #"\n" -1) (nex.parser/ast text))]
+    (testing "a class and an extension written flush, as `nex format` writes them"
+      (is (= [["Shape" 5 0 3 [["sides" 8 2 2]]]
+              ["Shape" 5 4 10 [["area" 6 6 8] ["edges" 6 9 9]]]]
+             (outline syms))))
+    (is (= "extend" (:detail (second syms))))
+    (testing "the selection range is the target's name"
+      (is (= {:start {:line 4 :character 7} :end {:line 4 :character 12}}
+             (:selectionRange (second syms)))))))
+
 ;;
 ;; The protocol, end to end
 ;;

@@ -592,10 +592,11 @@ end
   to one class of a Java hierarchy only; adding it to `List` and `LinkedList`
   is an error. The proposal had imagined choosing among several by the
   receiver's runtime class, the most specific first. That needs a runtime type
-  test the compiled backend cannot express today (`convert` to a Java type is
-  never true), and choosing by static type on one backend and by runtime class
-  on the other would make them disagree. With one class per hierarchy the two
-  choices are always the same. Subclasses still get the ancestor's feature.
+  test in the generated code, and choosing by static type on one backend and by
+  runtime class on the other would make them disagree. With one class per
+  hierarchy the two choices are always the same. Subclasses still get the
+  ancestor's feature. (`convert` to a Java type, which did not work when this
+  was decided, now does; runtime selection could be built on it later.)
 - **Rules:**
   - no `deferred`: Java classes cannot be required to implement anything;
   - no generic parameters (`extend LinkedList [T]`): Nex does not write Java
@@ -618,10 +619,10 @@ Phase 2 limits, from Java interop as it is today rather than from extensions:
 - Nex has no Java subtyping: a `StringBuilder` cannot be assigned to a
   `CharSequence` variable, so a supertype's feature is reached through a
   subtype-typed receiver, or a value a Java method returns.
-- A Java method's result is typed `Any`, and cannot be narrowed to a Java type,
-  so a feature cannot return the receiver's class (`append(...)` chains).
-- Arithmetic on a Java method's result (`size() * 2`) fails on the compiled
-  backend, in an extension or anywhere else.
+- A Java method whose result is an object is typed `Any`, so a feature cannot
+  simply return the receiver's class (`append(...)` chains); the result can be
+  narrowed with `convert ... to b: StringBuilder`. Primitive and `String`
+  results have their Nex types (`size() * 2` is an `Integer`).
 
 Open questions:
 

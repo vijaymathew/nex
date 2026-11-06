@@ -175,6 +175,12 @@
     ;; Union type names (after "union" keyword)
     ("\\<union\\s-+\\([A-Z][a-zA-Z0-9_]*\\)" 1 font-lock-type-face)
 
+    ;; `extend Target' (docs/proposals/open-features.md).  `extend' is a soft
+    ;; keyword, so it is highlighted only before a type name at the start of a
+    ;; line, never as an ordinary name (`let extend := 3').
+    ("^\\(extend\\)\\s-+\\([A-Z][a-zA-Z0-9_]*\\)"
+     (1 font-lock-keyword-face) (2 font-lock-type-face))
+
     ;; Method/function definitions
     ("\\<\\([a-z_][a-z0-9_]*\\)\\s-*(" 1 font-lock-function-name-face)
 
@@ -489,6 +495,11 @@ the line after (absent inside an expression)."
                 (when (cdr stack) (setq stack (cdr stack))))
                ((null word))
                ((equal "class" word)
+                (push (nex-fmt--frame 'class at :c nil) stack))
+               ;; `extend Target' is laid out like a class.  A soft keyword:
+               ;; only at the top level, first on its line, before a name.
+               ((and (equal "extend" word) (= j 0) (eq 'top kind)
+                     (> n 1) (eq 'word (nex-fmt--kind (aref toks 1))))
                 (push (nex-fmt--frame 'class at :c nil) stack))
                ((and (equal "union" word) (member w0 '("union" "enum")))
                 (push (nex-fmt--frame 'union at :c (+ at nex-indent-offset)) stack))

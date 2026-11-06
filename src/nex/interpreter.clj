@@ -3239,10 +3239,15 @@
                          runtime-name))
         ;; `boolean`: a failed convert is false, never the nil an `and`/`or`
         ;; chain would otherwise yield.
+        ;; An imported Java class, when no Nex class has the name: a Java
+        ;; object has no Nex type name to compare, so test it as Java does.
+        java-class (when (and (string? target-name) (not (lookup-class-if-exists ctx target-name)))
+                     (bi/resolve-imported-java-class ctx target-name))
         ok? (boolean
              (and (some? v)
                   (string? target-name)
-                  (or (convert-compatible-runtime? ctx runtime-name target-name)
+                  (or (and java-class (instance? java-class v))
+                      (convert-compatible-runtime? ctx runtime-name target-name)
                       (convert-compatible-runtime? ctx runtime-base target-name))
                   ;; ...and the type arguments, when the target names them.
                   (generic-value-type-args-compatible?
