@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
+            [nex.extend :as extend]
             [nex.intern :as intern]
             [nex.lower :as lower]
             [nex.parser :as p]
@@ -109,15 +110,26 @@
   (let [{intern-classes :classes
          intern-functions :functions
          intern-imports :imports
-         intern-type-aliases :type-aliases} (intern/resolve-interned source-id ast)
+         intern-type-aliases :type-aliases
+         intern-extensions :extensions} (intern/resolve-interned source-id ast)
         merged-imports (merge-import-like-nodes intern-imports (:imports ast))
         merged (assoc ast
                       :imports merged-imports
                       :classes (vec (concat intern-classes (:classes ast)))
                       :functions (walker/qualify-interned-function-class-names
                                   (vec (concat intern-functions (:functions ast))))
-                      :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))]
+                      :type-aliases (vec (concat intern-type-aliases (:type-aliases ast)))
+                      :extensions (vec (concat intern-extensions (:extensions ast))))]
     (-> merged
+        ;; `extend` blocks join their target classes now that every class of
+        ;; the program is in one place (docs/proposals/open-features.md).
+        (as-> program
+              (try
+                (extend/apply-extensions program source-id)
+                ;; Left unapplied: the type checker applies the extensions
+                ;; again and reports the error as a type error.
+                (catch clojure.lang.ExceptionInfo e
+                  (if (:nex/extension-error (ex-data e)) program (throw e)))))
         walker/resolve-convert-aliases
         walker/inject-refinement-checks
         walker/resolve-qualified-function-calls)))

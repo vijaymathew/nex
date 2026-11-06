@@ -266,12 +266,12 @@
   (letfn [(resolve* [current-source current-program seen]
             (let [ctx {:debug-source current-source}]
               (reduce
-               (fn [{:keys [classes imports functions type-aliases seen]} {:keys [path class-name alias]}]
+               (fn [{:keys [classes imports functions type-aliases extensions seen]} {:keys [path class-name alias]}]
                  (let [file-path (find-intern-file ctx path class-name)
                        canonical (.getCanonicalPath (clojure.java.io/file file-path))]
                    (if (contains? seen canonical)
                      {:classes classes :imports imports :functions functions
-                      :type-aliases type-aliases :seen seen}
+                      :type-aliases type-aliases :extensions extensions :seen seen}
                      (let [file-ast (parse-interned-file file-path (slurp file-path))
                            nested (resolve* canonical file-ast (conj seen canonical))
                               ;; Classes/functions declared directly in this file are
@@ -288,6 +288,12 @@
                            direct-functions (stamp-qualified-names path canonical (:functions file-ast))
                            all-file-functions (concat direct-functions (:functions nested))
                            all-file-type-aliases (concat (:type-aliases file-ast) (:type-aliases nested))
+                              ;; `extend` blocks (docs/proposals/open-features.md),
+                              ;; nested modules' first, each stamped with its file
+                              ;; so a diagnostic about it can name that file.
+                           all-file-extensions (concat (:extensions nested)
+                                                       (map #(assoc % :source-file canonical)
+                                                            (:extensions file-ast)))
                               ;; Points at the *qualified* name (qualify-name path
                               ;; class-name), not the bare class-name — an unpathed
                               ;; intern makes this a no-op (qualify-name returns the
@@ -312,8 +318,9 @@
                         :imports (into imports all-file-imports)
                         :functions (into functions all-file-functions)
                         :type-aliases (into type-aliases (concat all-file-type-aliases alias-type-alias))
+                        :extensions (into extensions all-file-extensions)
                         :seen (:seen nested)}))))
-               {:classes [] :imports [] :functions [] :type-aliases [] :seen seen}
+               {:classes [] :imports [] :functions [] :type-aliases [] :extensions [] :seen seen}
                (:interns current-program))))]
     (resolve* source-id program seen-files)))
 
@@ -328,7 +335,7 @@
    (resolve-interned source-id program #{}))
   ([source-id program seen-files]
    (-> (resolve-interned* source-id program seen-files)
-       (select-keys [:classes :functions :imports :type-aliases])
+       (select-keys [:classes :functions :imports :type-aliases :extensions])
        (update :imports distinct))))
 
 (defn resolve-interned-classes

@@ -11,7 +11,7 @@ from anywhere in a program, including from a module that does not own the class:
 ```nex
 extend Shape
 feature
-  area: Real
+  area(): Real
     deferred
     ensure non_negative: result >= 0.0
     end
@@ -136,7 +136,7 @@ A deferred operation on a user hierarchy, with a contract:
 ```nex
 extend Shape
 feature
-  area: Real
+  area(): Real
     deferred
     ensure non_negative: result >= 0.0
     end
@@ -275,11 +275,14 @@ implementation is a compile error that names the heir, the feature, and where
 the feature was declared, and says how to fix it:
 
 ```
-error: Class 'Triangle' does not implement deferred feature 'area'
-  'area' is declared by `extend Shape` at shapes/area.nex:2.
-  Add `extend Triangle feature area: Real do ... end end`, give 'area' a
-  default body in `extend Shape`, or declare 'Triangle' deferred.
+Type error: Class 'Triangle' does not implement deferred feature 'area',
+declared by 'extend Shape' at shapes/area.nex:line 2. Add 'extend Triangle
+feature area ... end', give 'area' a default body in 'extend Shape', or
+declare 'Triangle' 'deferred'.
 ```
+
+(A deferred routine is written with parentheses, `area(): Real deferred`, as
+in a class; its implementations may drop them, `area: Real do ... end`.)
 
 Three patterns cover the cases where not every heir should implement an
 operation:
@@ -566,21 +569,24 @@ Phase 2 open questions:
 - Private helper features inside an extension.
 - Extending function types.
 
+## Decisions
+
+1. **Adopting an existing method: allowed.** If `Circle` already has its own
+   `area`, and a later `extend Shape` introduces `area`, `Circle.area` becomes a
+   redefinition of it, checked for conformance like any redefinition, and
+   inherits its contract.
+2. **Extensions that supply the same feature: a conflict.** A class gets each
+   feature (name and arity) from one place: its own body or one extension. Two
+   extensions giving the same class the same feature are rejected, whichever
+   modules they are in. Extensions on different classes of one hierarchy
+   (`extend Shape` and `extend Polygon` both giving `describe` a body) follow
+   the normal redefinition rule.
+
 ## Open questions
 
-1. **Adopting an existing method.** If `Circle` already has its own `area`, and
-   a later `extend Shape` introduces `area`, `Circle.area` becomes a redefinition
-   of it and inherits its contract. The recommendation is to allow this, checking
-   that the signatures conform, because that is how an existing method is adopted
-   into a new operation. The alternative is to reject it as surprising.
-2. **Extensions that override each other.** If `extend Shape` and
-   `extend Polygon` (with `Polygon inherit Shape`) both give `describe` a body,
-   the normal redefinition rule applies. Should the compiler also report when two
-   extensions from different modules redefine the same feature on the same
-   class? The recommendation is to report it as a conflict.
-3. **`deferred` on `Comparable`.** Allowing it would require every comparable
+1. **`deferred` on `Comparable`.** Allowing it would require every comparable
    built-in to implement the feature through an extension.
-4. **Tools.** How `nex doc` and the language server show extended features, for
+2. **Tools.** How `nex doc` and the language server show extended features, for
    example listing an extended `String.is_palindrome` in completions and docs
    for `String`, marked with its declaring module.
 

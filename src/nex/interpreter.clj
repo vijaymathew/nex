@@ -16,6 +16,7 @@
             [nex.types.reflect :as reflect]
             [nex.redeclare :as redeclare]
             [nex.contracts :as contracts]
+            [nex.extend :as extend]
             [nex.intern :as intern])
   (:import [clj_antlr ParseError]
            [java.lang.reflect Field]
@@ -461,7 +462,16 @@
                (atom {}))          ; evaluated class-constant cache (interning)
           ;; `declare type` aliases, name -> type expression, so a value's
           ;; zero value can see through one (alias-resolved-type).
-          ctx (assoc ctx :type-aliases (atom {}))]
+          ctx (assoc ctx
+                     :type-aliases (atom {})
+                     ;; `extend` blocks whose target class is not registered
+                     ;; yet: an interned module may extend a class the file
+                     ;; that interns it declares (see apply-extensions!).
+                     :pending-extensions (atom [])
+                     ;; Every `extend` block applied so far, so a class
+                     ;; registered again (a module interned by two others is
+                     ;; evaluated twice) gets its extensions back.
+                     :applied-extensions (atom []))]
       ;; Register built-in base classes
       (doseq [class-def (bootstrap/base-class-defs)]
         (register-class ctx class-def))
@@ -1822,9 +1832,88 @@
        ;; Return the class name that was registered
     intern-name))
 
+(defn- record-applied-extension!
+  [ctx ext]
+  (when-not (some #(= ext %) @(:applied-extensions ctx))
+    (swap! (:applied-extensions ctx) conj ext)))
+
+(defn- registered-class-keys
+  "Registry keys under which the class EXT extends is registered: its bare
+   and its qualified name (see register-qualified-classes!), both of which
+   must see the added features."
+  [ctx target]
+  (let [registry @(:classes ctx)
+        identity-of (fn [cd] (or (:qualified-name cd) (:name cd)))
+        ids (into #{} (keep (fn [[k cd]]
+                              (when (or (= k target) (= (:qualified-name cd) target))
+                                (identity-of cd))))
+                  registry)]
+    (keep (fn [[k cd]] (when (contains? ids (identity-of cd)) k)) registry)))
+
+(defn- extend-registered-class!
+  "Merge EXT into its already-registered target. False when the target is
+   not registered (yet)."
+  [ctx ext]
+  (let [ks (seq (registered-class-keys ctx (:target ext)))]
+    (doseq [k ks]
+      (swap! (:classes ctx) update k extend/merge-extension ext))
+    (when ks (record-applied-extension! ctx ext))
+    ;; A generic class's specializations were built from the old definition.
+    (when ks (reset! (:specialized-classes ctx) {}))
+    (boolean ks)))
+
+(defn- redesugar-registered-classes!
+  "Re-run the attribute-redeclaration desugaring over every registered class:
+   an extension may have given an ancestor a query that an heir registered
+   earlier answers with a field."
+  [ctx]
+  (doseq [[k cd] @(:classes ctx)]
+    (let [cd' (redeclare/desugar-class #(lookup-class-if-exists ctx %) cd)]
+      (when-not (identical? cd cd')
+        (swap! (:classes ctx) assoc k cd')))))
+
+(defn- extends-class?
+  [ext class-def]
+  (or (= (:target ext) (:name class-def))
+      (= (:target ext) (:qualified-name class-def))))
+
+(defn- apply-extensions!
+  "Apply a program's `extend` blocks (docs/proposals/open-features.md): those
+   whose target is among the program's own CLASSES are merged into it before
+   registration, the rest into the registered class, or kept pending until
+   it is registered. Extensions applied earlier to a class that CLASSES
+   declares again are merged into it again. Returns CLASSES with the merges
+   done."
+  [ctx classes extensions]
+  (let [earlier (filter (fn [ext] (some #(extends-class? ext %) classes))
+                        @(:applied-extensions ctx))]
+    (reduce (fn [classes ext]
+              (let [idxs (keep-indexed (fn [i c] (when (extends-class? ext c) i)) classes)]
+                (cond
+                  (seq idxs)
+                  (do (record-applied-extension! ctx ext)
+                      (reduce #(update %1 %2 extend/merge-extension ext) classes idxs))
+
+                  (extend-registered-class! ctx ext)
+                  classes
+
+                  :else
+                  (do (swap! (:pending-extensions ctx) conj ext) classes))))
+            (vec classes)
+            (distinct (concat earlier extensions)))))
+
+(defn- apply-pending-extensions!
+  "Merge every pending extension whose target is now registered. True when
+   any was."
+  [ctx]
+  (let [pending @(:pending-extensions ctx)
+        still (vec (remove #(extend-registered-class! ctx %) pending))]
+    (reset! (:pending-extensions ctx) still)
+    (not= (count still) (count pending))))
+
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes functions statements calls duplicate-functions
-               function-signature-conflicts type-aliases]}]
+               function-signature-conflicts type-aliases extensions]}]
   ;; Free-function names must be unique within a program (Definition §4.8). The
   ;; walker collapses duplicate definitions last-wins before they reach here, so
   ;; the authoritative interpreter must reject them explicitly — otherwise the
@@ -1860,10 +1949,16 @@
         (when (map? intern-node)
           (process-intern ctx intern-node)))
 
-      ;; Register all class definitions
-      (doseq [class-node (redeclare/desugar-classes classes #(lookup-class-if-exists ctx %))]
-        (when (map? class-node)
-          (register-class ctx class-node)))
+      ;; Register all class definitions, with the program's `extend` blocks
+      ;; merged into their targets first.
+      (let [classes (apply-extensions! ctx classes extensions)]
+        (doseq [class-node (redeclare/desugar-classes classes #(lookup-class-if-exists ctx %))]
+          (when (map? class-node)
+            (register-class ctx class-node)))
+        ;; `apply-pending-extensions!` first: it must run whether or not this
+        ;; program has extensions of its own.
+        (when (or (apply-pending-extensions! ctx) (seq extensions))
+          (redesugar-registered-classes! ctx)))
 
       ;; Register and instantiate functions
       (doseq [fn-node functions]
