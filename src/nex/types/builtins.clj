@@ -1055,7 +1055,7 @@
        (let [v (val x)]
          (when (= v min-value)
            (throw (ex-info (str type-name ".abs: " v " has no positive counterpart") {:value v :builtin-kind "Arithmetic_Overflow"})))
-         (wrap (Math/abs v))))
+         (wrap (Math/abs (long v)))))
      "min"               ^{:signatures [{:params [{:name "other" :type type-name}] :return-type type-name}]}
      (fn [x other & _] (wrap (min (val x) (val other))))
      "max"               ^{:signatures [{:params [{:name "other" :type type-name}] :return-type type-name}]}
@@ -1264,7 +1264,7 @@
    "to_integer"  ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [c & _] (->nex-integer (int c)))
    "is_whitespace" ^{:signatures [{:params [] :return-type "Boolean"}]}
-   (fn [c & _] (Character/isWhitespace c))
+   (fn [c & _] (Character/isWhitespace (char c)))
    "compare"     (fn [c other & _] (nex-compare c other))
    "hash"        (fn [c & _] (hash c))})
 
