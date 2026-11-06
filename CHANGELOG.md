@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.9 - 2026-11-06
+
 - **Open features: `extend`.** A class can be given new features from
   outside its declaration, in another module if need be:
 
