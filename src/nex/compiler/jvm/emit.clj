@@ -2350,9 +2350,30 @@
         (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$LLL" "invokePrim" "(JJ)J" true)
         :long))))
 
+(defn- emit-string-concat-2!
+  "String `+` EXPR (op:string-concat of two operands) as a call of the
+   runtime's string-concat-2 held as a constant, not looked up through its
+   Var, with the operands passed directly rather than in an array: the
+   general call cost several times the concatenation itself. Returns the
+   result's JVM type, or nil when EXPR is not that."
+  [^MethodVisitor mv expr state-slot]
+  (let [args (:args expr)]
+    (when (and (= "op:string-concat" (:helper expr)) (= 2 (count args)))
+      (emit-prim-fn! mv "string-concat-2" "clojure/lang/IFn")
+      (.visitVarInsn mv Opcodes/ALOAD state-slot)
+      (emit-boxed-expr! mv (first args) state-slot)
+      (emit-boxed-expr! mv (second args) state-slot)
+      (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn" "invoke"
+                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" true)
+      (if (= :void (:jvm-type expr))
+        (do (.visitInsn mv Opcodes/POP) :void)
+        (do (emit-unbox-or-cast! mv (:jvm-type expr))
+            (:jvm-type expr))))))
+
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
   (or (emit-prim-long-arith! mv expr state-slot)
+      (emit-string-concat-2! mv expr state-slot)
       (emit-sized-intrinsic! mv expr state-slot)
       (emit-byte-array-intrinsic! mv expr state-slot)
       (emit-numeric-intrinsic! mv expr state-slot)
@@ -2519,6 +2540,11 @@
       (emit-box! mv jvm-type))
     (ir/object-jvm-type "java/lang/Object")))
 
+(def ^:private scalar-nex-types
+  "Nex types whose values are never a collection (see
+   emit-boxed-expr-for-storage!)."
+  #{"String" "Integer" "Integer64" "Real" "Boolean" "Char" "Byte" "Integer16" "Integer32"})
+
 (defn- emit-boxed-expr-for-storage!
   "Like emit-boxed-expr!, but also runs the boxed value through the compiled
    backend's portable-value->compiled conversion before it is stored as an
@@ -2535,7 +2561,13 @@
    of value, so calling it here unconditionally is safe."
   [^MethodVisitor mv expr state-slot]
   (emit-boxed-expr! mv expr state-slot)
-  (emit-runtime-invoke-1! mv "portable-value->compiled"))
+  ;; A value statically typed as a built-in scalar can't be a portable map or
+  ;; set, so it needs no conversion: skipping it saves a runtime call for each
+  ;; String or Integer stored, which in a loop filling a map cost about as
+  ;; much as the map itself.
+  (when-not (or (contains? ir/primitive-jvm-types (:jvm-type expr))
+                (contains? scalar-nex-types (:nex-type expr)))
+    (emit-runtime-invoke-1! mv "portable-value->compiled")))
 
 (defn- emit-array-literal!
   [^MethodVisitor mv expr state-slot]

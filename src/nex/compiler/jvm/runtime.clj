@@ -2212,7 +2212,21 @@
 
 (defn string-concat
   [state args]
-  (apply str (map #(concat-string-value state %) args)))
+  (let [sb (StringBuilder.)]
+    (doseq [a args]
+      (.append sb (str (concat-string-value state a))))
+    (.toString sb)))
+
+(defn string-concat-2
+  "String `+`: what string-concat gives for [A B], without building a seq.
+   Compiled code calls it directly, not through its Var (see
+   nex.compiler.jvm.emit/emit-string-concat-2!)."
+  [state a b]
+  (let [x (if (string? a) a (concat-string-value state a))
+        y (if (string? b) b (concat-string-value state b))]
+    (if (and (string? x) (string? y))
+      (.concat ^String x ^String y)
+      (str x y))))
 
 (defn div-int
   [a b]
@@ -3091,12 +3105,17 @@
   ;; absent key, so it's `map-contains-key` that decides presence, not the
   ;; retrieved value. Mirrors the interpreter's identical fix in
   ;; nex.types.builtins's :Map "get".
+  ;; One lookup when the value isn't nil; only a nil needs the presence
+  ;; check to tell a stored nil from a missing key.
   [state m key]
-  (if (map-contains-key m key)
-    (if (rt/nex-map? m)
-      (rt/nex-map-get m key)
-      (hashmap-deep-get m key nil))
-    (bi/report-missing-map-key key)))
+  (if (rt/nex-map? m)
+    (let [v (rt/nex-map-get m key)]
+      (if (or (some? v) (rt/nex-map-contains-key m key))
+        v
+        (bi/report-missing-map-key key)))
+    (if (map-contains-key m key)
+      (hashmap-deep-get m key nil)
+      (bi/report-missing-map-key key))))
 
 (defn map-try-get
   [state m key default]
