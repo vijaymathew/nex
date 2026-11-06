@@ -342,9 +342,9 @@ Helpers an extension needs can be free functions.
 
 `String`, `Integer`, `Byte`, `Integer16`, `Integer32`, `Real`, `Char`,
 `Boolean`, `Array [T]`, `Map [K, V]`, `Set [T]`, `Map_Entry [K, V]`,
-`Min_Heap [T]`, `Task [T]`, `Channel [T]` and the atomic types can be extended.
-(`Console`, `Process` and `Program` cannot.) Because no class can inherit from
-them, there are no heirs to dispatch over:
+`Min_Heap [T]`, `Task [T]`, `Channel [T]`, the atomic types, and the system
+types `Console`, `Process` and `Program` can be extended. Because no class can
+inherit from them, there are no heirs to dispatch over:
 
 - `deferred` is rejected on a built-in target, because nothing could ever
   implement it.

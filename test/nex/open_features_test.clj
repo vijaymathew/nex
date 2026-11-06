@@ -257,8 +257,8 @@ end
     (is (str/includes? (error-message "extend Nope feature f(): Integer do result := 1 end end\n")
                        "Cannot extend unknown class 'Nope'")))
   (testing "a built-in type that cannot be extended"
-    (is (str/includes? (error-message "extend Console feature f(): Integer do result := 1 end end\n")
-                       "Extending built-in type 'Console' is not supported")))
+    (is (str/includes? (error-message "extend Cursor feature f(): Integer do result := 1 end end\n")
+                       "Extending built-in type 'Cursor' is not supported")))
   (testing "a generic target needs its generic parameters"
     (is (str/includes? (error-message "class Box [T]
   create make(v: T) do value := v end
@@ -572,6 +572,32 @@ extend Any feature tag: String do result := \"a\" end end
 extend String feature f: Integer do result := 2 end end
 " "already added by another extension"]]]
       (is (str/includes? (str (error-message code)) expected) code))))
+
+(deftest system-type-extensions-test
+  (testing "Console, Program and Process, self and an unstarted child"
+    (is (= ["== hi ==" "true" "\"self\"" "\"child\""]
+           (both "extend Console
+feature
+  banner(s: String) do print_line(\"== \" + s + \" ==\") end
+end
+
+extend Program
+feature
+  arg_count: Integer do result := arguments.length end
+end
+
+extend Process
+feature
+  kind: String do
+    if is_self then result := \"self\" else result := \"child\" end
+  end
+end
+
+console.banner(\"hi\")
+print(program.arg_count >= 0)
+print((create Process.self).kind)
+print((create Process.command(\"ls\")).kind)
+")))))
 
 (deftest builtin-extensions-in-modules-test
   (let [dir (doto (.toFile (java.nio.file.Files/createTempDirectory

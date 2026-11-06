@@ -190,7 +190,7 @@
   #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Task" "Channel"
     "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
-    "Any" "Comparable"})
+    "Any" "Comparable" "Console" "Process" "Program"})
 
 (def root-targets
   "The built-in types user classes inherit too: an extension of one reaches
