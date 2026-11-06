@@ -1,6 +1,7 @@
 (ns nex.walker
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
+            [nex.ast-walk :as aw]
             [nex.field-shadowing :as field-shadowing]))
 
 ;;
@@ -1183,9 +1184,7 @@
    resolve-qualified-function-calls), so a local in one function never
    blocks a qualified call elsewhere."
   [form]
-  (into #{}
-        (comp (filter map?) (keep :name))
-        (tree-seq coll? seq form)))
+  (into #{} (keep :name) (aw/maps form)))
 
 (defn- rewrite-qualified-calls
   "Postwalk FORM, rewriting each qualified call whose root is not in BOUND."
@@ -1261,9 +1260,9 @@
   `this.field := v` never needs this, since it names its field unambiguously."
   [body]
   (into #{}
-        (comp (filter #(and (map? %) (= :let (:type %))))
+        (comp (filter #(= :let (:type %)))
               (keep :name))
-        (tree-seq coll? seq body)))
+        (aw/maps body)))
 
 (defn- assign-target-field-name
   "The field name a narrowing assignment STMT writes, or nil."
@@ -1474,10 +1473,12 @@
     :provides #{"Http_Request" "Http_Server_Response"}}])
 
 (defn- program-nodes
-  "Every node of PROGRAM's statements, functions and classes, for the
-   implied-intern checks below, which share one walk of the tree."
+  "Every map and every string in PROGRAM's statements, functions and
+   classes, for the implied-intern checks below, which only test each one
+   for membership (so the order of the two kinds doesn't matter)."
   [program]
-  (vec (tree-seq coll? seq (select-keys program [:statements :functions :classes]))))
+  (let [parts (select-keys program [:statements :functions :classes])]
+    (into (aw/maps parts) (aw/strings parts))))
 
 (defn- add-implied-interns
   "Append an `:implied` intern to PROGRAM for each library in

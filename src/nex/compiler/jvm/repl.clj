@@ -1,6 +1,7 @@
 (ns nex.compiler.jvm.repl
   "Experimental compiled REPL execution path for a narrow expression subset."
   (:require [clojure.set :as set]
+            [nex.ast-walk :as aw]
             [nex.compiler.jvm.classloader :as loader]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
@@ -897,7 +898,7 @@
    field or parameter type, a `create` target, ... — other than its own.
    Over-approximate on purpose: an extra recompile is harmless."
   [class-def candidates]
-  (disj (into #{} (comp (filter string?) (filter candidates)) (tree-seq coll? seq class-def))
+  (disj (into #{} (filter candidates) (aw/strings class-def))
         (:name class-def)))
 
 (defn- dependent-session-classes

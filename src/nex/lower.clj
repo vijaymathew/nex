@@ -13,6 +13,7 @@
   Unsupported nodes fail fast with ex-info."
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
+            [nex.ast-walk :as aw]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.types.builtins :as bi]
             [nex.types.bootstrap :as bootstrap]
@@ -4215,8 +4216,8 @@
    enclosing scope) to ever see change."
   [stmts]
   (into #{}
-        (comp (filter map?) (filter #(= :assign (:type %))) (keep :target))
-        (tree-seq coll? seq stmts)))
+        (comp (filter #(= :assign (:type %))) (keep :target))
+        (aw/maps stmts)))
 
 (defn- closure-own-text
   "Everything FN-NODE's routine is written as: its body, its contract clauses
@@ -4242,18 +4243,16 @@
    finishes — guarantees the mutation already happened."
   [stmts]
   (into #{}
-        (comp (filter map?)
-              (filter #(contains? #{:anonymous-function :spawn} (:type %)))
+        (comp (filter #(contains? #{:anonymous-function :spawn} (:type %)))
               (mapcat (fn [fn-node]
                         (into []
-                              (comp (filter map?)
-                                    (mapcat (fn [n]
-                                              (case (:type n)
-                                                :identifier [(:name n)]
-                                                :assign [(:target n)]
-                                                nil))))
-                              (tree-seq coll? seq (closure-own-text fn-node))))))
-        (tree-seq coll? seq stmts)))
+                              (mapcat (fn [n]
+                                        (case (:type n)
+                                          :identifier [(:name n)]
+                                          :assign [(:target n)]
+                                          nil)))
+                              (aw/maps (closure-own-text fn-node))))))
+        (aw/maps stmts)))
 
 (defn- shadowed-anywhere-names
   "Every name declared more than once anywhere in STMTS — as a :let (at
@@ -4272,8 +4271,7 @@
    in place for that one name (no worse than before this fix), rather than
    emitting AST a shadowed occurrence cannot type-check against."
   [stmts]
-  (->> (tree-seq coll? seq stmts)
-       (filter map?)
+  (->> (aw/maps stmts)
        (keep (fn [n]
                (case (:type n)
                  :let (:name n)
@@ -4311,7 +4309,7 @@
       fn(x) do total := total + x end / ... / end` needs `total` boxed for
       the identical reason an unwrapped top-level `let total := 0` does.
       Without this case, box-target-names/names-touched-inside-closures
-      (both full tree-seqs, already scope-agnostic) correctly saw `total`
+      (both full-tree walks, already scope-agnostic) correctly saw `total`
       as reassigned-and-closed-over, but box-candidate-lets' own plain
       `filter` never found the :let itself to box — the same shape of gap
       as the :loop/:init case above, just for `do...end` instead. Recurses
@@ -4465,15 +4463,12 @@
    list."
   [node]
   (into #{}
-        (comp (filter map?)
-              (mapcat (fn [n]
-                        (cond
-                          (= :identifier (:type n)) [(:name n)]
-                          (and (= :call (:type n)) (nil? (:target n)) (:method n)) [(:method n)]
-                          :else nil))))
-        (tree-seq (fn [x] (and (coll? x) (not (and (map? x) (= :anonymous-function (:type x))))))
-                  seq
-                  node)))
+        (mapcat (fn [n]
+                  (cond
+                    (= :identifier (:type n)) [(:name n)]
+                    (and (= :call (:type n)) (nil? (:target n)) (:method n)) [(:method n)]
+                    :else nil)))
+        (aw/maps node #(not (and (map? %) (= :anonymous-function (:type %)))))))
 
 (defn- forward-boxed-closure-names
   "Names of STMTS' own direct closure-lets that are referenced (a bare

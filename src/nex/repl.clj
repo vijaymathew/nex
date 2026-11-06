@@ -4,6 +4,7 @@
             [nex.walker :as walker]
             [nex.predeclared :as predeclared]
             [nex.interpreter :as interp]
+            [nex.ast-walk :as aw]
             [nex.intern :as intern]
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as compiled-runtime]
@@ -1232,7 +1233,7 @@
                                        (when (or (string? t) (and (map? t) (:base-type t)))
                                          (type-expr-type-names t)))]
                       (some alias-names (concat from-keys from-param)))))
-                (tree-seq coll? seq ast))))))
+                (aw/maps ast))))))
 
 (defn- ast-needs-interpreter-fallback?
   [ctx ast]
@@ -1240,7 +1241,7 @@
       (let [top-nodes (concat (:statements ast)
                               (:calls ast)
                               (:functions ast))
-            nodes (tree-seq coll? seq top-nodes)]
+            nodes (aw/maps top-nodes)]
         (boolean
          (some (fn [node]
                  (or (nonbuiltin-array-sort? ctx node)
