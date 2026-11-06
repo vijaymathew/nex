@@ -169,12 +169,18 @@
   [session]
   (set (keys @(:compiled-classes session))))
 
+(def ^:private builtin-class-defs-cache
+  "The builtin classes, as builtin-class-defs returns them. They're fixed, so
+   they're built once rather than on each of the several calls per REPL input."
+  (delay
+   (let [base-classes (into {} (map (juxt :name identity)) (bootstrap/base-class-defs))
+         env (tc/make-type-env)]
+     (tc/register-builtin-methods env)
+     (vec (vals (merge base-classes @(:classes env)))))))
+
 (defn- builtin-class-defs
   []
-  (let [base-classes (into {} (map (juxt :name identity)) (bootstrap/base-class-defs))
-        env (tc/make-type-env)]
-    (tc/register-builtin-methods env)
-    (vals (merge base-classes @(:classes env)))))
+  @builtin-class-defs-cache)
 
 (defn- import-placeholder-classes
   [imports]
