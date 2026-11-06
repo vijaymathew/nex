@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [clojure.set :as set]
             [clojure.walk]
+            [nex.ast-walk :as aw]
             [nex.field-shadowing :as field-shadowing]
             [nex.fmt :as fmt]
             [nex.redeclare :as redeclare]
@@ -520,10 +521,8 @@
   "Names declared by a `let` anywhere in NODES, descending into closures only
    when INTO-CLOSURES?."
   [nodes into-closures?]
-  (->> (tree-seq #(and (coll? %) (or into-closures? (not (closure-node? %))))
-                 #(if (map? %) (vals %) (seq %))
-                 nodes)
-       (keep #(when (and (map? %) (= :let (:type %)) (string? (:name %))) (:name %)))
+  (->> (aw/maps nodes #(or into-closures? (not (closure-node? %))))
+       (keep #(when (and (= :let (:type %)) (string? (:name %))) (:name %)))
        set))
 
 (defn- assigned-names-in
@@ -2903,11 +2902,9 @@
    Each still binds its variable, as a ?S, for the rest of the scope."
   [condition]
   (let [guards (set (map :name (convert-guard-bindings condition)))]
-    (->> (tree-seq #(and (or (map? %) (sequential? %))
-                         (not= :anonymous-function (:type %)))
-                   #(if (map? %) (vals %) (seq %))
-                   condition)
-         (filter #(and (map? %) (= :convert (:type %))
+    (->> (aw/maps condition #(and (or (map? %) (sequential? %))
+                                  (not= :anonymous-function (:type %))))
+         (filter #(and (= :convert (:type %))
                        (not (contains? guards (:var-name %))))))))
 
 (defn- apply-condition-branch-refinement!
@@ -2971,11 +2968,9 @@
   "The `convert` and object-test (`?e as x`) nodes in a contract clause's
    CONDITION, outside any closure (which is checked as a routine of its own)."
   [condition]
-  (->> (tree-seq #(and (or (map? %) (sequential? %))
-                       (not= :anonymous-function (:type %)))
-                 #(if (map? %) (vals %) (seq %))
-                 condition)
-       (filter #(and (map? %) (#{:convert :attached-test} (:type %))
+  (->> (aw/maps condition #(and (or (map? %) (sequential? %))
+                                (not= :anonymous-function (:type %))))
+       (filter #(and (#{:convert :attached-test} (:type %))
                      (:var-name %) (not= "_" (:var-name %))))))
 
 (defn- check-contract-condition
@@ -5943,8 +5938,7 @@
    restores exactly that: check-let's own ordinary, unmodified handling,
    which correctly rejects a genuine forward reference to it."
   [stmts]
-  (->> (tree-seq coll? seq stmts)
-       (filter map?)
+  (->> (aw/maps stmts)
        (keep (fn [n]
                (case (:type n)
                  :let (:name n)
@@ -8750,8 +8744,8 @@
   "Every `let` node carrying a declared type anywhere within a body form,
    including lets nested in if/from/across blocks and anonymous functions."
   [form]
-  (->> (tree-seq coll? seq form)
-       (filter #(and (map? %) (some? (:var-type %))))))
+  (->> (aw/maps form)
+       (filter #(some? (:var-type %)))))
 
 (defn- anonymous-function-nodes
   "Every `fn(...) ... end` node anywhere within a body form, including ones
@@ -8763,8 +8757,8 @@
    member access it enables (or the first past one Any already tolerates)
    surfaces instead as a confusing downstream \"Undefined field ... on Any\"."
   [form]
-  (->> (tree-seq coll? seq form)
-       (filter #(and (map? %) (= :anonymous-function (:type %))))))
+  (->> (aw/maps form)
+       (filter #(= :anonymous-function (:type %)))))
 
 (defn collect-undefined-type-errors
   "Collect type annotations that name an undefined type, across every
@@ -8939,13 +8933,12 @@
    a `convert ... to s` binds. None of these read as globals."
   [body]
   (into #{}
-        (comp (filter map?)
-              (keep (fn [node]
-                      (case (:type node)
-                        :let (:name node)
-                        (:attached-test :convert) (:var-name node)
-                        nil))))
-        (tree-seq coll? seq body)))
+        (keep (fn [node]
+                (case (:type node)
+                  :let (:name node)
+                  (:attached-test :convert) (:var-name node)
+                  nil)))
+        (aw/maps body)))
 
 (defn- body-bound-names
   "Names that shadow a global within `body`: its params, the enclosing class's
@@ -8965,13 +8958,12 @@
                     (when (and (contains? globals nm)
                                (not (contains? bound nm)))
                       (vswap! refs conj nm)))]
-    (doseq [node (tree-seq coll? seq body)]
-      (when (map? node)
-        (cond
-          (and (= :call (:type node)) (string? (:target node)))
-          (consider! (:target node))
-          (= :identifier (:type node))
-          (consider! (:name node)))))
+    (doseq [node (aw/maps body)]
+      (cond
+        (and (= :call (:type node)) (string? (:target node)))
+        (consider! (:target node))
+        (= :identifier (:type node))
+        (consider! (:name node))))
     @refs))
 
 (defn- class-field-names
@@ -8986,7 +8978,7 @@
 (defn- call-and-create-nodes
   "Every :call and :create node found anywhere within BODY, at any depth."
   [body]
-  (into [] (filter #(and (map? %) (#{:call :create} (:type %)))) (tree-seq coll? seq body)))
+  (into [] (filter #(#{:call :create} (:type %))) (aw/maps body)))
 
 (defn- collect-callable-bodies
   "Index every callable body in the program — free functions plus class
@@ -9186,8 +9178,7 @@
                                 :when (and (= :field (:type m)) (:constant? m))]
                             (:value m)))
         deps (fn [cd]
-               (->> (mapcat #(tree-seq coll? seq %) (constant-values cd))
-                    (filter string?)
+               (->> (mapcat aw/strings (constant-values cd))
                     (distinct)
                     (mapcat (fn [x] (get by-bare (or (get fn-name->class x) x))))
                     (remove #(identical? % cd))))

@@ -317,6 +317,20 @@
                (:interns current-program))))]
     (resolve* source-id program seen-files)))
 
+(defn resolve-interned
+  "Everything intern declarations in PROGRAM bring into scope for static
+   analysis, from one walk: {:classes [...] :functions [...] :imports [...]
+   :type-aliases [...]}, each as resolve-interned-classes, -functions,
+   -imports and -type-aliases return it. A caller that needs more than one
+   of these should call this once: each of those four walks every interned
+   file again, parsing it again."
+  ([source-id program]
+   (resolve-interned source-id program #{}))
+  ([source-id program seen-files]
+   (-> (resolve-interned* source-id program seen-files)
+       (select-keys [:classes :functions :imports :type-aliases])
+       (update :imports distinct))))
+
 (defn resolve-interned-classes
   "Resolve intern declarations to the class ASTs they bring into scope for static analysis.
       Returns a flat sequence of class definitions, including recursively interned classes.
@@ -324,7 +338,7 @@
   ([source-id program]
    (resolve-interned-classes source-id program #{}))
   ([source-id program seen-files]
-   (:classes (resolve-interned* source-id program seen-files))))
+   (:classes (resolve-interned source-id program seen-files))))
 
 (defn resolve-interned-imports
   "Resolve intern declarations to the import declarations they bring into scope
@@ -333,7 +347,7 @@
   ([source-id program]
    (resolve-interned-imports source-id program #{}))
   ([source-id program seen-files]
-   (distinct (:imports (resolve-interned* source-id program seen-files)))))
+   (:imports (resolve-interned source-id program seen-files))))
 
 (defn resolve-interned-functions
   "Resolve intern declarations to the free-function definitions they bring into
@@ -344,7 +358,7 @@
   ([source-id program]
    (resolve-interned-functions source-id program #{}))
   ([source-id program seen-files]
-   (:functions (resolve-interned* source-id program seen-files))))
+   (:functions (resolve-interned source-id program seen-files))))
 
 (defn resolve-interned-type-aliases
   "Resolve intern declarations to the `declare type` aliases (including
@@ -359,4 +373,4 @@
   ([source-id program]
    (resolve-interned-type-aliases source-id program #{}))
   ([source-id program seen-files]
-   (:type-aliases (resolve-interned* source-id program seen-files))))
+   (:type-aliases (resolve-interned source-id program seen-files))))
