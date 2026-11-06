@@ -276,7 +276,7 @@ the feature was declared, and says how to fix it:
 
 ```
 Type error: Class 'Triangle' does not implement deferred feature 'area',
-declared by 'extend Shape' at shapes/area.nex:line 2. Add 'extend Triangle
+declared by 'extend Shape' at shapes/area.nex, line 2. Add 'extend Triangle
 feature area ... end', give 'area' a default body in 'extend Shape', or
 declare 'Triangle' 'deferred'.
 ```
@@ -501,13 +501,28 @@ Each of the three places that merge interns today calls the pass:
 
 ### REPL
 
-- An `extend` cell on a class with a Nex definition changes that class's
-  definition in the session's `class-asts`; `dependent-session-classes`
-  (`src/nex/compiler/jvm/repl.clj`) already recompiles a redefined class and the
-  classes that depend on it.
-- An `extend` cell on a built-in updates the session's extension table.
-- Objects created before the cell behave as they do after a class redefinition
-  in the REPL today.
+- An `extend` input whose target an earlier input (or the same one) declares is
+  folded into that class: the input becomes a redefinition of the class with
+  the features added (`fold-session-extensions`, `src/nex/repl.clj`). Both
+  backends then take it in as they take any class redefinition. On the compiled
+  backend, `dependent-session-classes` (`src/nex/compiler/jvm/repl.clj`)
+  recompiles the classes that depend on it.
+- The extensions of a module an input interns are applied with the module, to
+  its own classes or to the session's; interning the module again changes
+  nothing.
+- An input that interns a module is type-checked with the session, as a file's
+  interns are checked with the file. Otherwise a module adding a class to a
+  hierarchy another module extended could leave that class without a deferred
+  feature, unnoticed until the feature is called.
+- Coverage is checked for the classes an input declares or redefines, not for
+  heirs declared by earlier inputs, so `extend Shape feature area(): Real
+  deferred end` can come before the inputs that implement `area`. Calling an
+  unimplemented feature on such an heir is a runtime error.
+- Objects created before the input behave as they do after a class
+  redefinition in the REPL today: on the interpreter they see the new
+  features, while on the compiled backend they keep their old class.
+- An `extend` input on a built-in updates the session's extension table
+  (with built-in targets, not yet supported).
 
 ### Caches
 

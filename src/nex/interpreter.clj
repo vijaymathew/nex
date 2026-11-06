@@ -1805,7 +1805,13 @@
   (let [file-path (find-intern-file ctx path class-name)
            ;; Load and parse the external file
         file-content (slurp file-path)
-        file-ast (parse-interned-file file-path file-content)
+        ;; Its `extend` blocks carry the file, as nex.intern/resolve-interned*
+        ;; stamps them, so the same extension reached both ways (the REPL
+        ;; type-checks a module the interpreter has loaded) is one extension.
+        file-ast (update (parse-interned-file file-path file-content) :extensions
+                         (fn [exts]
+                           (let [canonical (.getCanonicalPath (clojure.java.io/file file-path))]
+                             (mapv #(assoc % :source-file canonical) exts))))
            ;; Interpret the file under ITS OWN :debug-source, not the
            ;; caller's — intern-search-roots (see its docstring) resolves a
            ;; NESTED intern relative to :debug-source's directory, so a bare

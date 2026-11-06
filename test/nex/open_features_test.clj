@@ -14,12 +14,17 @@
       class's own feature, add a feature another extension added, add state,
       or see the target's private features.
    5. Across modules: a program combining a module that adds an operation with
-      one that adds a variant must supply the missing implementation."
+      one that adds a variant must supply the missing implementation.
+   6. In the REPL, an `extend` input redefines its target class with the
+      features added, on both backends, and a module interned by an input is
+      checked with the session."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [nex.compiler.jvm.repl :as compiled-repl]
             [nex.eval :as e]
-            [nex.parser :as p]))
+            [nex.parser :as p]
+            [nex.repl :as repl]))
 
 (defn- run-file [path opts]
   (str/split-lines (str/trim-newline (with-out-str (e/eval-file path opts)))))
@@ -342,3 +347,104 @@ print((create Person.make(\"Ada\")).greeting)
   (let [ast (p/ast (str shapes area-extensions))]
     (is (= ["Shape" "Circle" "Rect"] (mapv :target (:extensions ast))))
     (is (empty? (filter #(= :extension (:type %)) (:statements ast))))))
+
+(defn- repl-session
+  "What each of INPUTS prints, run in order in one fresh REPL session on
+   BACKEND, type checking on."
+  [backend inputs]
+  (binding [repl/*type-checking-enabled* (atom true)
+            repl/*repl-var-types* (atom {})
+            repl/*repl-type-aliases* (atom {})
+            repl/*repl-backend* (atom backend)
+            repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
+    (let [ctx (repl/init-repl-context)]
+      (mapv #(str/trim (with-out-str (binding [*err* *out*] (repl/eval-code ctx %))))
+            inputs))))
+
+(defn- in-both-repls
+  "Run INPUTS in a compiled and in an interpreted REPL session, and call
+   CHECK with what each input printed, for each."
+  [inputs check]
+  (doseq [backend [:compiled :interpreter]]
+    (testing (name backend)
+      (check (repl-session backend inputs)))))
+
+(deftest repl-extensions-test
+  (testing "an extension of an earlier input's class, and of the class's parent"
+    (in-both-repls
+     ["deferred class Shape end"
+      "class Dot inherit Shape create make do end feature x: Integer do result := 1 end private feature secret: Integer do result := 9 end end"
+      "extend Dot feature twice(): Integer do result := x * 2 end end"
+      "print((create Dot.make).twice)"
+      "extend Dot feature twice(): Integer do result := 3 end end"
+      "extend Shape feature area(): Real deferred end"
+      "extend Dot feature area(): Real do result := 2.5 end end"
+      "let s: Shape := create Dot.make"
+      "print(s.area)"
+      "extend Dot feature peek(): Integer do result := secret end end"]
+     (fn [out]
+       (is (= "2" (nth out 3)))
+       (is (str/includes? (nth out 4) "already added by 'extend Dot'"))
+       (is (= "2.5" (nth out 8)))
+       (is (str/includes? (nth out 9) "`secret` is private to Dot")))))
+  (testing "a class and its extension in one input"
+    (in-both-repls
+     ["class Pt create make do end end extend Pt feature y(): Integer do result := 5 end end print((create Pt.make).y)"]
+     (fn [out]
+       (is (= "5" (last (str/split-lines (first out))))))))
+  (testing "an extension of a class not yet known"
+    (in-both-repls
+     ["extend Nowhere feature f(): Integer do result := 1 end end"]
+     (fn [out]
+       (is (str/includes? (first out) "Cannot extend unknown class 'Nowhere'"))))))
+
+(deftest repl-module-extensions-test
+  (let [dir (doto (.toFile (java.nio.file.Files/createTempDirectory
+                            "open_features_repl"
+                            (make-array java.nio.file.attribute.FileAttribute 0)))
+              (.deleteOnExit))
+        original (System/getProperty "nex.user.dir")]
+    (write-module! dir "Geometry.nex" shapes)
+    (write-module! dir "Areas.nex" (str "intern Geometry\n\n" area-extensions))
+    (write-module! dir "Triangles.nex" "intern Geometry
+
+class Triangle
+  inherit Shape
+  create make(b, h: Real) do base := b height := h end
+  feature
+    base: Real
+    height: Real
+end
+")
+    (write-module! dir "Greeting.nex" "extend Person
+feature
+  greeting: String do result := \"hello, \" + name end
+end
+")
+    (try
+      (System/setProperty "nex.user.dir" (.getPath dir))
+      (in-both-repls
+       ["class Person create make(n: String) do name := n end feature name: String end"
+        "intern Greeting"
+        "print((create Person.make(\"Ada\")).greeting)"
+        "intern Areas"
+        "intern Areas"
+        "print((create Circle.make(2.0)).area)"
+        "intern Triangles"
+        "intern Triangles\nextend Triangle feature area(): Real do result := base * height / 2.0 end end"
+        "print((create Triangle.make(2.0, 3.0)).area)"]
+       (fn [out]
+         (testing "a module extends a class an earlier input declared"
+           (is (= "\"hello, Ada\"" (nth out 2))))
+         (testing "interning a module with extensions again changes nothing"
+           (is (= "" (nth out 4)))
+           (is (= "12.0" (nth out 5))))
+         (testing "a module's class missing an extended deferred feature is rejected when interned"
+           (is (str/includes? (nth out 6) "Class 'Triangle' does not implement deferred feature 'area'"))
+           (is (str/includes? (nth out 6) "Areas.nex")))
+         (testing "the same input can intern it and supply the feature"
+           (is (= "3.0" (nth out 8))))))
+      (finally
+        (if original
+          (System/setProperty "nex.user.dir" original)
+          (System/clearProperty "nex.user.dir"))))))

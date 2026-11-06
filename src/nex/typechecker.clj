@@ -7929,7 +7929,7 @@
                                      (str "Class '" class-name "' does not implement deferred feature '"
                                           m-name "', declared by 'extend " target "'"
                                           (when line
-                                            (str " at " (when source-file (str source-file ":"))
+                                            (str " at " (when source-file (str source-file ", "))
                                                  "line " line))
                                           ". Add 'extend " class-name " feature " m-name
                                           " ... end', give '" m-name "' a default body in 'extend "
@@ -9541,12 +9541,18 @@
        ;; no known eager cross-dependency on registration order the way a
        ;; class constant's value does — undefined-type validation and global
        ;; registration have already completed for both passes by this point
-       ;; regardless. skip-body-names is bare-name-shaped (a REPL concern; see
-       ;; :skip-class-body-names), so it does not apply here — a small,
-       ;; accepted extra REPL re-check cost, not a correctness issue.
+       ;; regardless.
+         ;; skip-body-names (a REPL concern; see :skip-class-body-names) holds
+         ;; bare names; :true-name is the bare name
+         ;; under the qualified one, so a REPL input does not check again an
+         ;; interned class an earlier input checked. That matters beyond cost
+         ;; now that an `extend` block in another module can leave such a
+         ;; class short of a deferred feature: re-checking it with every input
+         ;; would fail every later input of the session.
          (doseq [class-def qualified-class-defs]
-           (with-source-file (:source-file class-def)
-             (fn [] (check-class env class-def))))
+           (when-not (contains? skip-body-names (:true-name class-def))
+             (with-source-file (:source-file class-def)
+               (fn [] (check-class env class-def)))))
 
        ;; Third pass: check the rest of the program's class bodies. Skipped
        ;; for an ambiguous bare name for the same reason as the first pass

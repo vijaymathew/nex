@@ -5,6 +5,7 @@
             [nex.compiler.jvm.classloader :as loader]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
+            [nex.extend :as extend]
             ;; Loaded for its side effect: installs the runtime's interpreter
             ;; adapter, since this REPL mixes compiled and interpreted values.
             [nex.compiler.jvm.interp-bridge]
@@ -517,11 +518,21 @@
         merged-type-aliases (vec (concat (vals @(:type-aliases session))
                                          intern-type-aliases
                                          (:type-aliases ast')))]
-    (assoc ast'
-           :imports merged-imports
-           :classes (vec (concat intern-classes (:classes ast')))
-           :functions (vec (concat intern-functions (:functions ast')))
-           :type-aliases merged-type-aliases)))
+    (-> ast'
+        (assoc :imports merged-imports
+               :classes (vec (concat intern-classes (:classes ast')))
+               :functions (vec (concat intern-functions (:functions ast')))
+               :type-aliases merged-type-aliases
+               ;; The `extend` blocks of the interned modules, and any of the
+               ;; input's own the REPL could not fold into a known class (see
+               ;; nex.repl/fold-session-extensions).
+               :extensions (vec (concat (:extensions resolved) (:extensions ast'))))
+        ;; A target among the classes above takes its extensions directly; one
+        ;; compiled by an earlier input is recompiled with them, unless it
+        ;; already has them (its module interned again).
+        (extend/apply-extensions source-id
+                                 {:lookup #(get @(:class-asts session) %)
+                                  :leave-unresolved? true}))))
 
 (defn- initial-eligibility-ctx
   [session ast]
