@@ -1263,6 +1263,8 @@
    (fn [c & _] (str/lower-case (str c)))
    "to_integer"  ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [c & _] (->nex-integer (int c)))
+   "is_whitespace" ^{:signatures [{:params [] :return-type "Boolean"}]}
+   (fn [c & _] (Character/isWhitespace c))
    "compare"     (fn [c other & _] (nex-compare c other))
    "hash"        (fn [c & _] (hash c))})
 
