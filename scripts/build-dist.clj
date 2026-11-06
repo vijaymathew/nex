@@ -1,7 +1,8 @@
 ;; Build the ahead-of-time compiled distribution that install.sh installs:
 ;;
 ;;   target/dist/nex.jar     every namespace under src/, AOT-compiled with
-;;                           direct linking, plus grammar/nexlang.g4
+;;                           direct linking, plus grammar/nexlang.g4 and the
+;;                           prebuilt grammar/nexlang.atn (nex.grammar-cache)
 ;;   target/dist/deps/*.jar  the runtime dependency jars
 ;;   target/dist/classpath   nex.jar then each dependency, one path per line,
 ;;                           relative to the install directory
@@ -58,7 +59,14 @@
       (doseq [f (file-seq classes-dir)
               :when (.isFile f)]
         (add-entry! out (str/replace (str (.relativize root (.toPath f))) "\\" "/") f))
-      (add-entry! out "grammar/nexlang.g4" (io/file "grammar/nexlang.g4")))))
+      (add-entry! out "grammar/nexlang.g4" (io/file "grammar/nexlang.g4"))
+      ;; The prebuilt lexer and parser nex.parser starts from, so a run need
+      ;; not have the ANTLR tool process the grammar (see nex.grammar-cache).
+      (let [atn (java.io.File/createTempFile "nexlang" ".atn")]
+        (try
+          ((requiring-resolve 'nex.grammar-cache/write!) "grammar/nexlang.g4" atn)
+          (add-entry! out "grammar/nexlang.atn" atn)
+          (finally (.delete atn)))))))
 
 (defn- dependency-jars
   "The jars on this JVM's classpath: the runtime dependencies from deps.edn."

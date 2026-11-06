@@ -1,6 +1,7 @@
 (ns nex.parser
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [nex.grammar-cache :as grammar-cache]
             [nex.walker :as walker]
             [clj-antlr.core :as antlr])
   (:import [clj_antlr ParseError]))
@@ -26,10 +27,31 @@
             (io/copy in out))
           (.getPath tmp-file))))))
 
+(defn- grammar-text
+  "The text of the grammar packaged-grammar-path would find, or nil."
+  []
+  (let [local-file (io/file "grammar/nexlang.g4")]
+    (cond
+      (.exists local-file) (slurp local-file :encoding "UTF-8")
+      :else (some-> (io/resource "grammar/nexlang.g4") (slurp :encoding "UTF-8")))))
+
+(defn- prebuilt-parser
+  "A parser built from grammar/nexlang.atn on the classpath (the release
+   build puts it in nex.jar; see nex.grammar-cache), when there is one made
+   from this grammar. nil otherwise, or if reading it fails, and then the
+   grammar is loaded through the ANTLR tool instead."
+  []
+  (try
+    (when-let [prebuilt (io/resource "grammar/nexlang.atn")]
+      (when-let [text (grammar-text)]
+        (some-> (grammar-cache/read-data prebuilt text) grammar-cache/parser)))
+    (catch Exception _ nil)))
+
 (def parser
-  (antlr/parser (or (packaged-grammar-path)
-                    (throw (ex-info "Could not locate grammar/nexlang.g4"
-                                    {:resource "grammar/nexlang.g4"})))))
+  (or (prebuilt-parser)
+      (antlr/parser (or (packaged-grammar-path)
+                        (throw (ex-info "Could not locate grammar/nexlang.g4"
+                                        {:resource "grammar/nexlang.g4"}))))))
 
 (defn shebang-line
   "The `#!` line that starts INPUT, as in `#!/usr/bin/env nex`, or nil."

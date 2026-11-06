@@ -291,6 +291,28 @@
   (when-let [entry (state-get-fn state name)]
     (registered-fn-callable state entry)))
 
+(def ^:private ^java.lang.ClassValue function-call-methods
+  "Per compiled function-value class: {arity -> the Method its callN compiles
+   to}. Looking the Method up (getDeclaredMethod) on every call cost more than
+   the call itself, and a sort or map calls the same function value millions
+   of times."
+  (proxy [java.lang.ClassValue] []
+    (computeValue [_] (java.util.concurrent.ConcurrentHashMap.))))
+
+(defn- function-call-method
+  ^Method [^Class cls arity]
+  (let [^java.util.concurrent.ConcurrentHashMap by-arity (.get function-call-methods cls)
+        k (Long/valueOf (long arity))]
+    (or (.get by-arity k)
+        (let [method (.getDeclaredMethod cls
+                                         (lowered-instance-method-name (str "call" arity) arity)
+                                         (into-array Class [nex.compiler.jvm.runtime.NexReplState
+                                                            (class (object-array 0))]))]
+          ;; Skips Method.invoke's access check on each call.
+          (.setAccessible method true)
+          (.putIfAbsent by-arity k method)
+          method))))
+
 (defn invoke-function-object
   [state target args]
   (when-not target
@@ -306,13 +328,30 @@
     (apply target args)
 
     :else
-    (let [^Class cls (.getClass target)
-          lowered-name (lowered-instance-method-name (str "call" (count args)) (count args))
-          ^Method method (.getDeclaredMethod cls
-                                             lowered-name
-                                             (into-array Class [nex.compiler.jvm.runtime.NexReplState
-                                                                (class (object-array 0))]))]
-      (invoke-reflective! method target (method-args state (object-array args))))))
+    (invoke-reflective! (function-call-method (class target) (count args))
+                        target
+                        (method-args state (object-array args)))))
+
+(defn- function-invoker-2
+  "A two-argument Clojure fn that calls function value F the way
+   invoke-function-object would, with the choice of how made once rather
+   than on every call: for a compiled function value, its callN Method is
+   found once and each call just fills a fresh two-slot argument array. For
+   a caller like Array.sort's comparator, called millions of times."
+  [state f]
+  (cond
+    (or (nil? f) (interp-object? f)) (fn [a b] (invoke-function-object state f [a b]))
+    (ifn? f) f
+    :else
+    ;; Looked up on the first call, not here, so a function value without a
+    ;; 2-argument call fails where invoke-function-object would (an empty
+    ;; sort never calls its comparator, so it doesn't fail at all).
+    (let [method (delay (function-call-method (class f) 2))]
+      (fn [a b]
+        (let [args (object-array 2)]
+          (aset args 0 a)
+          (aset args 1 b)
+          (invoke-reflective! @method f (method-args state args)))))))
 
 (defn- make-task
   [future]
@@ -2180,16 +2219,25 @@
   (int (rt/nex-int-div (long a) (long b))))
 
 (defn div-long
-  [a b]
-  (long (rt/nex-int-div (long a) (long b))))
+  "Integer `/`, on primitive longs (compiled code calls it unboxed; see
+   nex.compiler.jvm.emit/emit-prim-long-arith!). A zero divisor or
+   MIN_LONG / -1 goes to rt/nex-int-div, which raises Nex's error for it."
+  ^long [^long a ^long b]
+  (if (or (zero? b) (and (= a Long/MIN_VALUE) (= b -1)))
+    (long (rt/nex-int-div a b))
+    (quot a b)))
 
 (defn mod-int
   [a b]
   (int (rt/nex-int-mod (long a) (long b))))
 
 (defn mod-long
-  [a b]
-  (long (rt/nex-int-mod (long a) (long b))))
+  "Integer `%`, on primitive longs (see div-long). A zero divisor goes to
+   rt/nex-int-mod, which raises Nex's error for it."
+  ^long [^long a ^long b]
+  (if (zero? b)
+    (long (rt/nex-int-mod a b))
+    (rem a b)))
 
 (defn pow-int
   [a b]
@@ -3090,22 +3138,44 @@
 (def array-take-last rt/nex-array-take-last)
 (def array-drop-last rt/nex-array-drop-last)
 
+(defn- fast-compare-values
+  "A and B's order when both are Integers, both Reals, both Strings or both
+   Chars: what their own `compare` gives (nex-ordering-compare: < and > for
+   numbers, so a NaN orders equal to anything; compareTo for strings and
+   chars), without looking `compare` up by type and name for each pair.
+   nil for any other pair."
+  [a b]
+  (cond
+    (and (instance? Long a) (instance? Long b))
+    (let [x (long a) y (long b)] (cond (< x y) -1 (> x y) 1 :else 0))
+
+    (and (instance? Double a) (instance? Double b))
+    (let [x (double a) y (double b)] (cond (< x y) -1 (> x y) 1 :else 0))
+
+    (and (instance? String a) (instance? String b))
+    (Integer/signum (.compareTo ^String a ^String b))
+
+    (and (instance? Character a) (instance? Character b))
+    (Integer/signum (.compareTo ^Character a ^Character b))
+
+    :else nil))
+
 (defn array-sort
   ([state values]
-   (let [out (java.util.ArrayList. values)]
+   (let [out (java.util.ArrayList. ^java.util.Collection values)]
      (.sort out
             (reify java.util.Comparator
               (compare [_ a b]
-                (int (runtime-compare-values state a b)))))
+                (int (or (fast-compare-values a b)
+                         (runtime-compare-values state a b))))))
      out))
   ([state values comparator]
-   (let [out (java.util.ArrayList. values)]
+   (let [out (java.util.ArrayList. ^java.util.Collection values)
+         call (function-invoker-2 state comparator)]
      (.sort out
             (reify java.util.Comparator
               (compare [_ a b]
-                (let [result (if (fn? comparator)
-                               (comparator a b)
-                               (invoke-function-object state comparator [a b]))]
+                (let [result (call a b)]
                   (if (integer? result)
                     result
                     (throw (ex-info "Array.sort comparator must return Integer"
