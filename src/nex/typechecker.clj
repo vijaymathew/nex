@@ -8000,8 +8000,13 @@
              ;; exactly as legitimate, not a class that will never be
              ;; completed.
              (not (direct-function-value-class? class-def)))
-    (doseq [[m-name arity] (all-deferred-method-keys env class-name)]
-      (let [member (effective-method-member env class-name m-name arity)]
+    (doseq [[m-name arity] (all-deferred-method-keys env class-name)
+            ;; An interned class is checked under its qualified name too
+            ;; (`geometry.Triangle`); the message names it as source does,
+            ;; so the two checks report one error.
+            :let [class-name-shown (or (:true-name class-def) class-name)]]
+      (let [member (effective-method-member env class-name m-name arity)
+            class-name class-name-shown]
         (when (:declaration-only? member)
           (throw (ex-info (str "Class " class-name " does not implement deferred method " m-name)
                           {:error (type-error

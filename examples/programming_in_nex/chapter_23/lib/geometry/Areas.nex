@@ -1,0 +1,20 @@
+intern geometry/Shapes
+
+extend Shape
+feature
+  area(): Real
+    deferred
+    ensure
+      non_negative: result >= 0.0
+    end
+end
+
+extend Circle
+feature
+  area: Real do result := 3.14159 * radius * radius end
+end
+
+extend Rect
+feature
+  area: Real do result := width * height end
+end

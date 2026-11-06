@@ -1,0 +1,10 @@
+intern geometry/Shapes
+
+class Triangle
+inherit Shape
+create
+  make(b, h: Real) do base := b height := h end
+feature
+  base: Real
+  height: Real
+end

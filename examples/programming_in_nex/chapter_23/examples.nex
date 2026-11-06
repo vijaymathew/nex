@@ -6,7 +6,8 @@
 -- Account are shown with real content ("Suppose math/Counter.nex
 -- contains..."), so this directory has real lib/math/Counter.nex and
 -- lib/finance/{Transaction,Account}.nex companion files backing them,
--- exactly the way a real multi-file Nex project would.
+-- exactly the way a real multi-file Nex project would. The extension
+-- examples' shapes modules are lib/geometry/{Shapes,Areas,Triangles}.nex.
 
 intern math/Counter
 
@@ -36,3 +37,85 @@ account.add_entry(create Transaction.make("Paycheck", 2000.0))
 let report := create Ledger_Report
 report.print_balance(account)
 assert account.balance = 1995.5
+
+-- "Extending a Class from Another File": the extension adds a query to the
+-- library's Account (lib/finance/Account.nex, unchanged) from this file.
+extend Account
+feature
+  average_entry(): Real
+    require
+      has_entries: not entries.is_empty
+    do
+      result := balance / entries.length.to_real
+    end
+end
+
+let ada := create Account.make("Ada")
+ada.add_entry(create Transaction.make("salary", 3000.0))
+ada.add_entry(create Transaction.make("rent", -1200.0))
+print(ada.average_entry)                                   -- 900.0
+assert ada.average_entry = 900.0
+do
+  let empty := create Account.make("Bo")
+  print(empty.average_entry)
+rescue
+  print(exception.to_string)          -- the precondition the caller broke
+end
+
+-- "Adding an Operation to a Family of Classes": lib/geometry/Areas.nex adds a
+-- deferred `area` to lib/geometry/Shapes.nex's Shape and implements it for
+-- Circle and Rect; lib/geometry/Triangles.nex adds a Triangle heir. Interning
+-- both needs this glue extension, or the program is rejected.
+intern geometry/Areas
+intern geometry/Triangles
+
+extend Triangle
+feature
+  area: Real do result := base * height / 2.0 end
+end
+
+let shapes: Array[Shape] := [create Circle.make(1.0), create Triangle.make(4.0, 3.0)]
+across shapes as s do
+  print(s.area)                       -- 3.14159, then 6.0
+end
+assert shapes.get(1).area = 6.0
+
+-- "Extending Built-in Types".
+extend String
+feature
+  is_palindrome: Boolean do
+    let s := to_lower
+    result := true
+    from
+      let i := 0
+    until
+      i >= length / 2
+    do
+      if s.char_at(i) /= s.char_at(length - 1 - i) then
+        result := false
+      end
+      i := i + 1
+    end
+  end
+end
+
+print("Level".is_palindrome)          -- true
+print("Nex".is_palindrome)            -- false
+assert "Level".is_palindrome and not "Nex".is_palindrome
+
+extend Array [T -> Comparable]
+feature
+  maximum: T
+    require
+      not_empty: not is_empty
+    do
+      result := get(0)
+      across this as x do
+        if x > result then result := x end
+      end
+    end
+end
+
+print([3, 9, 4].maximum)                       -- 9
+print(["pear", "apple", "plum"].maximum)       -- "plum"
+assert [3, 9, 4].maximum = 9

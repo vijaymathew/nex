@@ -74,6 +74,10 @@
   Nex type.
 - **Fix: `compare` through a `Comparable`-typed value** failed on a user
   object in compiled code ("Method not found on type: compare").
+- **Fix: a missing deferred feature in a class of a path-qualified module**
+  (`intern geometry/Triangles`) was reported twice, once under the internal
+  name `geometry.Triangle`, whose suggested fix was not valid Nex. It is now
+  reported once, naming the class as the source does.
 - **Editors.** `nex format`, the Emacs mode and the VS Code extension lay
   out an `extend` block like a class and highlight `extend` and its target.
   `extend` is a soft keyword, so it remains an ordinary name elsewhere

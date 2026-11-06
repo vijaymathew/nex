@@ -1,0 +1,19 @@
+deferred class Shape
+end
+
+class Circle
+inherit Shape
+create
+  make(r: Real) do radius := r end
+feature
+  radius: Real
+end
+
+class Rect
+inherit Shape
+create
+  make(w, h: Real) do width := w height := h end
+feature
+  width: Real
+  height: Real
+end
