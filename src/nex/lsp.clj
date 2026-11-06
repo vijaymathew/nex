@@ -349,7 +349,9 @@
 (defn- block-end
   "The line (0-based) where the block starting on line START (0-based) ends:
    its `end` at the same indentation, else its last line before the next one
-   indented no deeper than it."
+   indented no deeper than it. A section of a class or extension (`feature`,
+   `create`, ...) written flush with its header, as `nex format` writes it,
+   is still in the block."
   [lines start]
   (let [indent (indent-of (nth lines start ""))]
     (loop [i (inc start) last-code start]
@@ -360,6 +362,9 @@
             (not (code-line? l)) (recur (inc i) last-code)
             (> (indent-of l) indent) (recur (inc i) i)
             (and (= (indent-of l) indent) (re-find #"^\s*end\b" l)) i
+            (and (= (indent-of l) indent)
+                 (re-find #"^\s*(feature|create|inherit|invariant|private|note)\b" l))
+            (recur (inc i) i)
             :else last-code))))))
 
 (defn- name-range
@@ -451,6 +456,13 @@
     (->> (concat
           (for [c classes :when (:dbg/line c)] (class-symbol lines c))
           (union-symbols lines classes)
+          ;; `extend Target` blocks (docs/proposals/open-features.md), each
+          ;; under its target's name with the features it adds.
+          (for [e (:extensions ast) :when (:dbg/line e)]
+            (make-symbol lines {:name (:target e) :kind :class :detail "extend"
+                                :line (:dbg/line e) :col (:dbg/col e) :block? true
+                                :children (keep #(member-symbol lines %)
+                                                (mapcat :members (:body e)))}))
           (for [f (:functions ast) :when (:dbg/line f)]
             (make-symbol lines {:name (:name f) :kind :function :detail (routine-detail f)
                                 :line (:dbg/line f) :col (:dbg/col f)

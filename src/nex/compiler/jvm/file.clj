@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.compiler.jvm.emit :as emit]
+            [nex.extend :as extend]
             [nex.intern :as intern]
             [nex.lower :as lower]
             [nex.parser :as p]
@@ -109,18 +110,40 @@
   (let [{intern-classes :classes
          intern-functions :functions
          intern-imports :imports
-         intern-type-aliases :type-aliases} (intern/resolve-interned source-id ast)
+         intern-type-aliases :type-aliases
+         intern-extensions :extensions} (intern/resolve-interned source-id ast)
         merged-imports (merge-import-like-nodes intern-imports (:imports ast))
         merged (assoc ast
                       :imports merged-imports
                       :classes (vec (concat intern-classes (:classes ast)))
                       :functions (walker/qualify-interned-function-class-names
                                   (vec (concat intern-functions (:functions ast))))
-                      :type-aliases (vec (concat intern-type-aliases (:type-aliases ast))))]
+                      :type-aliases (vec (concat intern-type-aliases (:type-aliases ast)))
+                      :extensions (vec (concat intern-extensions (:extensions ast))))]
     (-> merged
+        ;; `extend` blocks join their target classes now that every class of
+        ;; the program is in one place (docs/proposals/open-features.md).
+        (as-> program
+              (try
+                (extend/apply-extensions program source-id)
+                ;; Left unapplied: the type checker applies the extensions
+                ;; again and reports the error as a type error.
+                (catch clojure.lang.ExceptionInfo e
+                  (if (:nex/extension-error (ex-data e)) program (throw e)))))
         walker/resolve-convert-aliases
         walker/inject-refinement-checks
         walker/resolve-qualified-function-calls)))
+
+(defn- foreign-method-sources
+  "{JVM method name -> source file} for the lowered routines FN-NODES that
+   carry a :source-file of their own (see nex.lower/with-member-source-file):
+   each routine's method, and its typed body method `NAME$t`."
+  [fn-nodes]
+  (into {}
+        (for [{:keys [emitted-name source-file]} fn-nodes
+              :when (and emitted-name source-file)
+              n [emitted-name (str emitted-name "$t")]]
+          [n source-file])))
 
 (defn- debug-location
   [x]
@@ -286,7 +309,12 @@
                           (when-not (:success result)
                             (throw (ex-info "Type checking failed"
                                             {:errors (tc/format-type-errors result)})))
-                          (tc/apply-inferred-lambda-types module-ast (:lambda-types result))))
+                          (-> module-ast
+                              ;; Calls of a built-in type's extension features
+                              ;; become calls of the functions that implement
+                              ;; them (docs/proposals/open-features.md).
+                              (extend/rewrite-extension-calls (:extension-calls result))
+                              (tc/apply-inferred-lambda-types (:lambda-types result)))))
            prepared-ast (lower/prepare-program-for-closures
                          module-ast
                          {:classes (:classes module-ast)
@@ -387,6 +415,28 @@
                                              (:functions unit))}
                                       {:known-supers known-supers})])
                                   (:classes unit))))
+           ;; Routines written in another file than their class's (an
+           ;; `extend` block in another module, a free function of an
+           ;; interned module) move to companion classes of that file, so
+           ;; their stack frames name it (emit/split-foreign-methods).
+           split-info (into {(desc/binary-class-name program-internal-name)
+                             {:internal (desc/internal-class-name program-internal-name)
+                              :source source-id
+                              :foreign (foreign-method-sources (:functions unit))}}
+                            (map (fn [c]
+                                   [(desc/binary-class-name (:jvm-name c))
+                                    {:internal (:internal-name c)
+                                     :source (:source-file c)
+                                     :foreign (foreign-method-sources (:methods c))}]))
+                            (:classes unit))
+           class-bytes (into {}
+                             (mapcat (fn [[bin bytes]]
+                                       (if-let [{:keys [internal source foreign]} (get split-info bin)]
+                                         (map (fn [[iname b]] [(desc/binary-class-name iname) b])
+                                              (emit/split-foreign-methods bytes internal source foreign
+                                                                          {:known-supers known-supers}))
+                                         [[bin bytes]])))
+                             class-bytes)
            ;; The interfaces the classes implement and the call sites call
            ;; through (see nex.compiler.jvm.emit/*dispatch-keys*).
            class-bytes (into class-bytes

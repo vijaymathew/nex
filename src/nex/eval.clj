@@ -4,9 +4,11 @@
             [clojure.string :as str]
             [nex.parser :as parser]
             [nex.predeclared :as predeclared]
+            [nex.extend :as extend]
             [nex.intern :as intern]
             [nex.typechecker :as tc]
             [nex.types.runtime :as rt]
+            [nex.compiler.jvm.emit :as jvm-emit]
             [nex.compiler.jvm.file :as jvm-file]
             [nex.compiler.jvm.classloader :as loader]
             [nex.walker :as walker])
@@ -31,7 +33,12 @@
                         {:errors lines}))))
     ;; The checked program, with the interns merged in and every `fn` literal
     ;; given the types its context supplied (tc/apply-inferred-lambda-types).
-    {:module-ast (tc/apply-inferred-lambda-types module-ast (:lambda-types result))
+    {:module-ast (-> module-ast
+                     ;; Calls of a built-in type's extension features become
+                     ;; calls of the functions that implement them
+                     ;; (docs/proposals/open-features.md).
+                     (extend/rewrite-extension-calls (:extension-calls result))
+                     (tc/apply-inferred-lambda-types (:lambda-types result)))
      :lambda-types (:lambda-types result)}))
 
 (defn- run-interpreted
@@ -256,14 +263,17 @@
   "The Nex routine a compiled method belongs to, as the reader wrote it, or
    nil for top-level code and anything unrecognised."
   [class-name method]
-  (let [cls (last (str/split class-name #"\."))]
+  (let [;; A companion class holds routines of its class written in another
+        ;; file (nex.compiler.jvm.emit/split-foreign-methods); they are still
+        ;; that class's routines.
+        cls (str/replace (last (str/split class-name #"\.")) jvm-emit/companion-suffix-pattern "")]
     (cond
       (str/starts-with? cls "AnonymousFunction") "an anonymous function"
       :else
       (when-let [[_ kind name] (re-matches #"__(i?method|ctor)_(.+)\$arity\d+(?:\$t)?" method)]
         (cond
           (str/starts-with? name "$invariant") {:invariant-of cls}
-          (and (= cls "Program") (not= kind "ctor")) name
+          (and (= cls "Program") (not= kind "ctor")) (or (extend/extension-function-feature name) name)
           :else (str cls "." name))))))
 
 (defn- typed-wrapper-frame?
@@ -291,6 +301,20 @@
       {:file file
        :line (when (pos? (.getLineNumber fr)) (.getLineNumber fr))
        :routine (frame-routine (.getClassName fr) method)})))
+
+(defn- drop-forwarder-frames
+  "FRAMES (innermost first) without the frames of the methods that forward a
+   routine to its body in a companion class (see frame-routine): a frame with
+   no line, of the same routine as the frame just inside it."
+  [frames]
+  (when (seq frames)
+   (cons (first frames)
+        (keep (fn [[inner outer]]
+                (when-not (and (nil? (:line outer))
+                               (some? (:routine outer))
+                               (= (:routine outer) (:routine inner)))
+                  outer))
+              (partition 2 1 frames)))))
 
 (defn- collapse-repeats
   "Runs of identical frames — a recursion — as one frame with a :times count."
@@ -354,7 +378,7 @@
         ;; repeat count is only a lower bound.
         truncated? (>= (count (.getStackTrace t)) 1024)
         main-name (.getName (io/file main-file))
-        frames (collapse-repeats (nex-frames t main-name))
+        frames (collapse-repeats (drop-forwarder-frames (nex-frames t main-name)))
         place (fn [{:keys [file line]}]
                 (str "line " line (when (not= file main-name) (str " of " file))))
         in (fn [{:keys [routine]}] (when (string? routine) (str ", in " routine)))

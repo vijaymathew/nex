@@ -1591,7 +1591,8 @@
         interns (filter #(= :intern (:type %)) transformed)
         imports (filter #(= :import (:type %)) transformed)
         type-aliases (filter #(= :type-alias (:type %)) transformed)
-        statements (filter #(not (#{:class :union :function :intern :import :type-alias} (:type %))) transformed)
+        extensions (filter #(= :extension (:type %)) transformed)
+        statements (filter #(not (#{:class :union :function :intern :import :type-alias :extension} (:type %))) transformed)
         calls (filter #(= :call (:type %)) statements)
         function-classes (mapv :class-def functions)
         ;; `union` declarations desugar to a sealed parent + variant classes.
@@ -1605,6 +1606,7 @@
          :interns (vec interns)
          :type-aliases (vec type-aliases)
          :classes all-classes
+         :extensions (vec extensions)
          :functions (vec functions)
          :duplicate-functions duplicate-functions
          :duplicate-classes duplicate-classes
@@ -1706,6 +1708,62 @@
      :parents (when inherit-clause (transform-node inherit-clause))
      :body (walk-children class-body)
      :invariant (when invariant-clause (transform-node invariant-clause))}))
+
+(defn- extension-restriction-error
+  "Why MEMBER (a transformed feature member) or SECTION may not appear in an
+   `extend` block, or nil. An extension adds operations, never state or
+   structure (docs/proposals/open-features.md, \"Restrictions\")."
+  [target section member]
+  (let [where (str "an 'extend " target "' block")]
+    (cond
+      (= :private (get-in section [:visibility :type]))
+      (str "A private feature section is not allowed in " where
+           ". An extension sees and adds only public features; use a free "
+           "function for a helper.")
+
+      (and (= :field (:type member)) (:once? member))
+      (str "'once' feature '" (:name member) "' is not allowed in " where
+           ". A once feature needs per-object storage, which an extension "
+           "cannot add.")
+
+      (and (= :field (:type member)) (:constant? member))
+      (str "Constant '" (:name member) "' is not allowed in " where
+           ". An extension adds routines only.")
+
+      (= :field (:type member))
+      (str "Field '" (:name member) "' is not allowed in " where
+           ". An extension cannot change an object's layout; it adds routines "
+           "only. A query computed from existing features is written as "
+           "'" (:name member) "(): Type do ... end'."))))
+
+(defn- handle-extend-decl
+  [[_ extend-kw target-node & rest]]
+  ;; `extend` is a soft keyword: the grammar accepts any identifier here (see
+  ;; nexlang.g4), so the spelling is checked now.
+  (let [kw (token-text extend-kw)
+        target (let [[_ t] target-node]
+                 (if (sequential? t) (transform-node t) (token-text t)))]
+    (when-not (= kw "extend")
+      (throw (ex-info (str "Unexpected " (pr-str kw) " before a feature section")
+                      {:error (str "Expected 'extend' to add features to an existing class, got '"
+                                   kw "'. An extension is written, for example, "
+                                   "extend Shape feature area(): Real deferred end.")})))
+    (let [node-of (fn [tag] (first (filter #(and (sequential? %) (= tag (first %))) rest)))
+          generic-params (node-of :genericParams)
+          note-clause (node-of :noteClause)
+          sections (mapv transform-node
+                         (filter #(and (sequential? %) (= :featureSection (first %))) rest))]
+      (doseq [section sections
+              member (cons nil (:members section))]
+        (when-let [msg (extension-restriction-error target section member)]
+          (throw (ex-info msg (cond-> {:error msg}
+                                (:dbg/line member) (assoc :line (:dbg/line member)
+                                                          :column (:dbg/col member)))))))
+      {:type :extension
+       :target target
+       :generic-params (when generic-params (transform-node generic-params))
+       :note (when note-clause (transform-node note-clause))
+       :body sections})))
 
 (defn- handle-union-decl
   [[_ & parts]]
@@ -3264,6 +3322,7 @@
    :importStmt handle-import-stmt
    :classDecl handle-class-decl
    :unionDecl handle-union-decl
+   :extendDecl handle-extend-decl
    :functionDecl handle-local-function-decl
    :declareFunctionDecl handle-declare-function-decl
    :anonymousFunction handle-anonymous-function

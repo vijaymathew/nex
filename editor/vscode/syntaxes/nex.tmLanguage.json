@@ -177,6 +177,18 @@
     "declaration": {
       "patterns": [
         {
+          "comment": "`extend Target` (docs/proposals/open-features.md). `extend` is a soft keyword: highlighted only first on a line, before a type name, never as an ordinary name (`let extend := 3`).",
+          "match": "^(extend)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.class.nex"
+            },
+            "2": {
+              "name": "entity.name.type.class.nex"
+            }
+          }
+        },
+        {
           "match": "\\b((?:(?:deferred|sealed|enum)\\s+)*)(class|union)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {

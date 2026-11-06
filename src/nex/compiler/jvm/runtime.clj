@@ -1739,7 +1739,24 @@
                   "Any"))
             params))))
 
+(declare convert-value*)
+
+(defn- java-convert-value
+  "convert-value for a target that is an imported Java class, QUALIFIED-NAME:
+   true for an instance of it."
+  [value qualified-name]
+  (let [cls (try (Class/forName qualified-name false (.getContextClassLoader (Thread/currentThread)))
+                 (catch Throwable _ nil))
+        ok? (boolean (and cls (some? value) (instance? cls value)))]
+    (object-array [ok? (if ok? value nil)])))
+
 (defn convert-value
+  [state value target-type-name]
+  (if (and (string? target-type-name) (str/starts-with? target-type-name "java:"))
+    (java-convert-value value (subs target-type-name (count "java:")))
+    (convert-value* state value target-type-name)))
+
+(defn- convert-value*
   [state value target-type-name]
   (let [runtime-name (runtime-type-name state value)
         [target-type-name target-args] (split-target-type-name target-type-name)

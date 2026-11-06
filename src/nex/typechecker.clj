@@ -4,6 +4,7 @@
             [clojure.set :as set]
             [clojure.walk]
             [nex.ast-walk :as aw]
+            [nex.extend :as extend]
             [nex.field-shadowing :as field-shadowing]
             [nex.fmt :as fmt]
             [nex.redeclare :as redeclare]
@@ -1692,6 +1693,21 @@
 (declare feature-members)
 (declare public-member?)
 
+(def ^:dynamic *extension-body-of*
+  "While a routine added by an `extend` block is checked, the name of the
+   class it extends; nil otherwise. An extension is written by a client of
+   its target, not by the target's author, so its body gets a client's view:
+   no private features, and no field assignment
+   (docs/proposals/open-features.md, \"Visibility of the target's features\")."
+  nil)
+
+(defn- class-own-access?
+  "True when code running as CALLER-CLASS-NAME may use CN's class-private
+   powers (private features, field writes): CN's own code, but not an
+   extension's, even though an extension's body runs as its target class."
+  [caller-class-name cn]
+  (and (= caller-class-name cn) (nil? *extension-body-of*)))
+
 (defn lookup-class-method
   "Look up a method on a class and its parent chain"
   ([env class-name method-name]
@@ -1717,7 +1733,7 @@
                                               (feature-members class-def)))
                        own-method (when (and method-sig
                                              (or (nil? feature-member)
-                                                 (= caller-class-name cn)
+                                                 (class-own-access? caller-class-name cn)
                                                  (public-member? feature-member)))
                                   ;; Record where the routine was declared: an
                                   ;; inherited routine's signature is written in
@@ -1750,7 +1766,7 @@
                                              (feature-members class-def)))
                       own-method (when (and method-sig
                                             (or (nil? feature-member)
-                                                (= caller-class-name cn)
+                                                (class-own-access? caller-class-name cn)
                                                 (public-member? feature-member)))
                                    method-sig)]
                   (or own-method
@@ -1970,7 +1986,7 @@
                                (when (and (= (:type member) :field)
                                           (not (:constant? member))
                                           (= (:name member) field-name)
-                                          (or (= caller-class-name cn)
+                                          (or (class-own-access? caller-class-name cn)
                                               (public-member? member)))
                                  (assoc member :declaring-class cn)))
                              (feature-members class-def)))]
@@ -2007,7 +2023,7 @@
                  (keep (fn [m]
                          (when (and (= (:type m) :field)
                                     (not (:constant? m))
-                                    (or (= caller-class-name cn)
+                                    (or (class-own-access? caller-class-name cn)
                                         (public-member? m)))
                            (:name m)))
                        (feature-members class-def))
@@ -2042,7 +2058,7 @@
                 (concat
                  (remove #(or (str/starts-with? % "_") (str/starts-with? % "$")
                               (constructor? %)
-                              (and (not= caller-class-name cn) (private? %)))
+                              (and (not (class-own-access? caller-class-name cn)) (private? %)))
                          (registered-method-names env cn))
                  (mapcat (fn [{:keys [parent]}] (walk parent (conj visited cn)))
                          (:parents class-def))))))]
@@ -2101,6 +2117,20 @@
    like String has dozens, and the suggestion is what helps."
   12)
 
+(defn- extension-private-feature-message
+  "While an extension's routine is checked (see *extension-body-of*), the
+   error for NAME when it is a private feature of CLASS-NAME: the routine
+   cannot see it because an extension is a client, not because it is
+   missing. nil otherwise."
+  [env class-name name]
+  (when (and *extension-body-of* class-name)
+    (when-let [class-def (env-lookup-class env class-name)]
+      (when (some #(and (= name (:name %)) (not (public-member? %)))
+                  (feature-members class-def))
+        (str "`" name "` is private to " class-name ". The body of an 'extend "
+             *extension-body-of* "' block is a client of " class-name
+             " and sees only its public features.")))))
+
 (defn- undefined-field-message
   "The error for NAME, which is not a feature of CLASS-NAME. Names the class,
    suggests the feature most likely meant, and lists what the class has when
@@ -2113,7 +2143,9 @@
   ([env class-name name caller-class-name from-pattern]
    (undefined-field-message env class-name name caller-class-name from-pattern false))
   ([env class-name name caller-class-name from-pattern writing?]
-   (let [fields (visible-field-names env class-name caller-class-name)
+   (or
+    (extension-private-feature-message env class-name name)
+    (let [fields (visible-field-names env class-name caller-class-name)
          candidates (sort (distinct (concat fields
                                             (when-not (or writing? from-pattern)
                                               (visible-routine-names env class-name caller-class-name)))))
@@ -2128,13 +2160,17 @@
           (when from-pattern
             (str " In a pattern the name before `:` is a field of the variant;"
                  " to bind a field to a local named `" name "`, write"
-                 " `<field> as " name "`."))))))
+                 " `<field> as " name "`.")))))))
 
 (defn- field-write-error
   [field-name declaring-class]
   (type-error
-   (str "Cannot assign to field " field-name
-        " outside of class " declaring-class)))
+   (if *extension-body-of*
+     (str "Cannot assign to field " field-name " in an 'extend "
+          *extension-body-of* "' block. An extension is a client of "
+          declaring-class " and changes its state only by calling its routines.")
+     (str "Cannot assign to field " field-name
+          " outside of class " declaring-class))))
 
 (defn lookup-class-constant
   "Look up a constant on a class and its parent chain.
@@ -2149,7 +2185,7 @@
                                            (when (and (= (:type member) :field)
                                                       (:constant? member)
                                                       (= (:name member) constant-name)
-                                                      (or (not inherited?)
+                                                      (or (and (not inherited?) (nil? *extension-body-of*))
                                                           (public-member? member)))
                                              member))
                                          (feature-members class-def)))]
@@ -2246,7 +2282,7 @@
                   (doseq [member (feature-members class-def)]
                     (when (and (= (:type member) :field)
                                (not (:constant? member))
-                               (or (not inherited?)
+                               (or (and (not inherited?) (nil? *extension-body-of*))
                                    (public-member? member)))
                       (swap! (:field-names target-env) conj (:name member))
                       (env-add-var target-env (:name member)
@@ -2298,8 +2334,9 @@
             ;; readable top-level global (§7).
             (if-let [global-type (env-lookup-global env name)]
               global-type
-              (throw (ex-info (str "Undefined variable: " name)
-                              {:error (type-error (str "Undefined variable: " name))}))))))
+              (let [msg (or (extension-private-feature-message env current-class name)
+                            (str "Undefined variable: " name))]
+                (throw (ex-info msg {:error (type-error msg)})))))))
       (throw (ex-info (str "Undefined variable: " name)
                       {:error (type-error (str "Undefined variable: " name))})))))
 
@@ -3703,8 +3740,86 @@
                           {})
     (:return-type target-type)))
 
+(def ^:dynamic *extension-calls*
+  "While type-check runs, an IdentityHashMap from each call node that reaches
+   a feature of a built-in type's extension to the generated function that
+   implements it (see nex.extend/builtin-extension-functions), for the
+   compiled backend to rewrite into a call of the function
+   (nex.extend/rewrite-extension-calls). nil otherwise."
+  nil)
+
+(defn register-builtin-extension-methods!
+  "Register, as a method of its built-in type, the feature each generated
+   extension function in FUNCTIONS implements: its parameters after the
+   receiver, and the name of the function."
+  [env functions]
+  (doseq [f functions
+          :let [{:keys [type feature java-class]} (:builtin-extension f)]
+          :when type]
+    (let [sig {:params (vec (rest (:params f)))
+               :return-type (:return-type f)
+               :extension-fn (:name f)
+               :extension-constraints
+               (into {} (keep (fn [{:keys [name constraint]}]
+                                (when constraint
+                                  [(type-name-string name) (type-name-string constraint)])))
+                     (:generic-params f))}]
+      (env-add-method env type feature sig)
+      ;; A Java class's subtypes reach it by its qualified name (see
+      ;; java-extension-signature).
+      (when java-class
+        (env-add-method env java-class feature sig)))))
+
+(defn- java-extension-signature
+  "The signature of METHOD of ARGC that an extension of a Java supertype of
+   BASE-TYPE, an imported Java class, adds, or nil."
+  [env base-type method argc]
+  (when-let [qualified (some-> (env-lookup-class env base-type) :import)]
+    (when-let [cls (try (Class/forName qualified false (.getContextClassLoader (Thread/currentThread)))
+                        (catch Throwable _ nil))]
+      (some (fn [^Class c]
+              (let [sig (env-lookup-method env (.getName c) method argc)]
+                (when (:extension-fn sig) sig)))
+            (extend/java-supertypes cls)))))
+
+(defn- root-extension-signature
+  "The signature of METHOD of ARGC that an extension of Comparable (when
+   BASE-TYPE is comparable) or of Any adds, or nil: every value has the
+   features an extension gives Any, whatever its type."
+  [env base-type method argc]
+  (some (fn [root]
+          (when-let [sig (env-lookup-method env root method argc)]
+            (when (and (:extension-fn sig)
+                       (or (= root "Any")
+                           (and base-type (types-compatible? env base-type "Comparable"))))
+              sig)))
+        ["Comparable" "Any"]))
+
+(defn- check-extension-call!
+  "For CALL, which reaches the built-in extension feature METHOD-SIG
+   describes: check that the receiver's type arguments satisfy the
+   extension's constraints (`extend Array [T -> Comparable]`), and record the
+   call for the compiled backend."
+  [env call method-sig base-type target-type]
+  (let [constraints (:extension-constraints method-sig)]
+    (when (seq constraints)
+      (let [param-names (map #(type-name-string (:name %))
+                             (:generic-params (env-lookup-class env base-type)))
+            args (when (map? target-type) (or (:type-args target-type) (:generic-args target-type)))
+            bound (zipmap param-names args)]
+        (doseq [[gname constraint] constraints
+                :let [arg (get bound gname)]
+                :when arg]
+          (when-not (types-compatible? env arg constraint)
+            (let [msg (str "'" (:method call) "' is a feature of " base-type " [" gname " -> "
+                           constraint "] only, and " (display-type arg)
+                           " does not satisfy " constraint ".")]
+              (throw (ex-info msg {:error (type-error msg)}))))))))
+  (when-let [^java.util.IdentityHashMap calls *extension-calls*]
+    (.put calls call (:extension-fn method-sig))))
+
 (defn- check-general-target-call
-  [env {:keys [method args has-parens from-pattern from-across]}
+  [env {:keys [method args has-parens from-pattern from-across] :as call}
    {:keys [base-type type-map current-class class-target target-type with-java?]}]
   (let [class-def (env-lookup-class env base-type)]
     ;; Resolution order is what makes an override an override. The receiver's
@@ -3721,9 +3836,14 @@
     ;; keyed on the real base type rather than a fallback.
     (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
                             (lookup-class-method env base-type method (count args) current-class)
-                            (builtin-method-signature "Any" method (count args) type-map))]
-      (check-call-signature env method args method-sig
-                            (member-type-map env target-type type-map method-sig))
+                            (builtin-method-signature "Any" method (count args) type-map)
+                            (java-extension-signature env base-type method (count args))
+                            (root-extension-signature env base-type method (count args)))]
+      (do
+        (when (:extension-fn method-sig)
+          (check-extension-call! env call method-sig base-type target-type))
+        (check-call-signature env method args method-sig
+                              (member-type-map env target-type type-map method-sig)))
       (let [arg-types (mapv #(check-expression env %) args)]
         ;; A method not declared/inherited anywhere in the Nex chain may
         ;; still be a real, inherited (non-overridden) member of a Java
@@ -5861,7 +5981,7 @@
         ;; bare spelling of an inherited field silently bypassed it, letting
         ;; a subclass mutate a parent's field (and any contract or invariant
         ;; guarding it) without going through the parent's own routines.
-        (when-not (= current-class (:declaring-class field-member))
+        (when-not (class-own-access? current-class (:declaring-class field-member))
           (throw (ex-info (str "Cannot assign to field " target)
                           {:error (field-write-error target (:declaring-class field-member))}))))))
   (let [var-type (env-lookup-var env target)
@@ -6677,7 +6797,7 @@
     ;; `super.field := v` is rejected exactly like `this.field := v` for an
     ;; inherited field: writing is confined to the field's own declaring
     ;; class, with no explicit-receiver spelling exempted.
-    (when-not (= current-class (:declaring-class field-member))
+    (when-not (class-own-access? current-class (:declaring-class field-member))
       (throw (ex-info (str "Cannot assign to field " field-name)
                       {:error (field-write-error field-name (:declaring-class field-member))})))
     (when (any-into-concrete-without-convert? env field-type val-type)
@@ -7880,13 +8000,31 @@
              ;; exactly as legitimate, not a class that will never be
              ;; completed.
              (not (direct-function-value-class? class-def)))
-    (doseq [[m-name arity] (all-deferred-method-keys env class-name)]
-      (when (:declaration-only? (effective-method-member env class-name m-name arity))
-        (throw (ex-info (str "Class " class-name " does not implement deferred method " m-name)
-                        {:error (type-error
-                                 (str "Class '" class-name "' does not implement deferred method '"
-                                      m-name "'. Provide a body for '" m-name
-                                      "', or declare '" class-name "' itself 'deferred'."))}))))))
+    (doseq [[m-name arity] (all-deferred-method-keys env class-name)
+            ;; An interned class is checked under its qualified name too
+            ;; (`geometry.Triangle`); the message names it as source does,
+            ;; so the two checks report one error.
+            :let [class-name-shown (or (:true-name class-def) class-name)]]
+      (let [member (effective-method-member env class-name m-name arity)
+            class-name class-name-shown]
+        (when (:declaration-only? member)
+          (throw (ex-info (str "Class " class-name " does not implement deferred method " m-name)
+                          {:error (type-error
+                                   (if-let [{:keys [target source-file line]} (:extension member)]
+                                     ;; Declared by an `extend` block, possibly in a
+                                     ;; module this class's author never saw: say
+                                     ;; where, and how to supply it from outside.
+                                     (str "Class '" class-name "' does not implement deferred feature '"
+                                          m-name "', declared by 'extend " target "'"
+                                          (when line
+                                            (str " at " (when source-file (str source-file ", "))
+                                                 "line " line))
+                                          ". Add 'extend " class-name " feature " m-name
+                                          " ... end', give '" m-name "' a default body in 'extend "
+                                          target "', or declare '" class-name "' 'deferred'.")
+                                     (str "Class '" class-name "' does not implement deferred method '"
+                                          m-name "'. Provide a body for '" m-name
+                                          "', or declare '" class-name "' itself 'deferred'.")))})))))))
 
 (def ^:private builtin-protocol-classes
   "The builtin classes whose routines live only in the method table (their
@@ -8296,6 +8434,19 @@
                                        (str "Invariant must be Boolean, got "
                                             (display-type inv-type)))})))))))))
 
+(defn- with-extension-member
+  "Run F, checking MEMBER of class CLASS-NAME. A routine an `extend` block
+   added (see nex.extend) is checked with a client's view of its target (see
+   *extension-body-of*), and its errors name the file the extension is in,
+   which need not be its target's."
+  [class-name member f]
+  (if (:extension member)
+    (binding [*extension-body-of* class-name]
+      (if (:source-file member)
+        (with-source-file (:source-file member) f)
+        (f)))
+    (f)))
+
 (defn- check-class-sections!
   "Check each feature/constructor section: override conformance and bodies for
    methods, type annotations for non-constant fields, and every constructor."
@@ -8308,15 +8459,17 @@
           ;; Each routine is checked on its own (recovering): an error in
           ;; one does not stop the others being checked.
           (= (:type member) :method)
-          (recovering
-           (fn []
-             (with-type-error-location
-               member
-               (fn []
-                 (check-attribute-redeclaration env name parents member)
-                 (check-override-conformance class-env name parents member)
-                 (check-override-contracts env name parents member)))
-             (check-method class-env name member)))
+          (with-extension-member
+            name member
+            #(recovering
+              (fn []
+                (with-type-error-location
+                  member
+                  (fn []
+                    (check-attribute-redeclaration env name parents member)
+                    (check-override-conformance class-env name parents member)
+                    (check-override-contracts env name parents member)))
+                (check-method class-env name member))))
           (= (:type member) :field)
           (when-not (:constant? member)
             (recovering
@@ -9238,10 +9391,9 @@
       (pos? omitted) (conj (str "... and " omitted " more error" (when (> omitted 1) "s")
                                 " (use --max-errors to see more)")))))
 
-(defn check-program
-  "Type check a complete program.
-   opts may include :var-types - a map of {var-name => type} for pre-existing variables."
-  ([program] (check-program program {}))
+(defn- check-program*
+  "Type check a complete program whose extensions are applied (see
+   check-program)."
   ([{:keys [classes calls statements imports functions type-aliases duplicate-functions duplicate-classes
             function-signature-conflicts] :as program} opts]
    (binding [*strict-undefined-targets* (boolean (:strict-undefined-targets? opts))
@@ -9375,6 +9527,8 @@
            (env-add-var env (:name fn-def) (:class-name fn-def))
            (when (:qualified-name fn-def)
              (env-add-var env (:qualified-name fn-def) (:class-name fn-def))))
+         (register-builtin-extension-methods! env (concat (:builtin-extension-functions opts)
+                                                          normalized-functions))
 
        ;; (Registered before class collection: a class constant's value is
        ;; checked eagerly in collect-class-info and may call a free function.)
@@ -9477,12 +9631,18 @@
        ;; no known eager cross-dependency on registration order the way a
        ;; class constant's value does — undefined-type validation and global
        ;; registration have already completed for both passes by this point
-       ;; regardless. skip-body-names is bare-name-shaped (a REPL concern; see
-       ;; :skip-class-body-names), so it does not apply here — a small,
-       ;; accepted extra REPL re-check cost, not a correctness issue.
+       ;; regardless.
+         ;; skip-body-names (a REPL concern; see :skip-class-body-names) holds
+         ;; bare names; :true-name is the bare name
+         ;; under the qualified one, so a REPL input does not check again an
+         ;; interned class an earlier input checked. That matters beyond cost
+         ;; now that an `extend` block in another module can leave such a
+         ;; class short of a deferred feature: re-checking it with every input
+         ;; would fail every later input of the session.
          (doseq [class-def qualified-class-defs]
-           (with-source-file (:source-file class-def)
-             (fn [] (check-class env class-def))))
+           (when-not (contains? skip-body-names (:true-name class-def))
+             (with-source-file (:source-file class-def)
+               (fn [] (check-class env class-def)))))
 
        ;; Third pass: check the rest of the program's class bodies. Skipped
        ;; for an ambiguous bare name for the same reason as the first pass
@@ -9535,13 +9695,41 @@
             :errors [(type-error (str "Internal type checker error: " (ex-message e)))]
             :warnings (vec @(:warnings env))}))))))
 
+(defn- extension-type-error
+  "The TypeError for E, an extension nex.extend rejected."
+  [e]
+  (let [{:keys [error line column source-file]} (ex-data e)]
+    (error-with-source-file (type-error error line column) source-file)))
+
+(defn check-program
+  "Type check a complete program.
+   opts may include :var-types - a map of {var-name => type} for pre-existing variables.
+   The program's `extend` blocks are merged into their target classes first
+   (nex.extend/apply-extensions; a no-op when the caller already did)."
+  ([program] (check-program program {}))
+  ([program opts]
+   (let [applied (try
+                   (extend/apply-extensions program)
+                   (catch clojure.lang.ExceptionInfo e
+                     (if (:nex/extension-error (ex-data e))
+                       {::extension-error e}
+                       (throw e))))]
+     (if-let [e (::extension-error applied)]
+       {:success false
+        :errors [(extension-type-error e)]
+        :warnings []}
+       (check-program* applied opts)))))
+
 (defn type-check
   "Type check Nex code (entry point).
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([ast] (type-check ast {}))
   ([ast opts]
-   (binding [*inferred-lambda-types* (atom {})]
-     (assoc (check-program ast opts) :lambda-types @*inferred-lambda-types*))))
+   (binding [*inferred-lambda-types* (atom {})
+             *extension-calls* (java.util.IdentityHashMap.)]
+     (assoc (check-program ast opts)
+            :lambda-types @*inferred-lambda-types*
+            :extension-calls *extension-calls*))))
 
 (defn apply-inferred-lambda-types
   "AST with every `fn` literal named in LAMBDA-TYPES (type-check's
@@ -9613,6 +9801,7 @@
       (register-visible-generic-classes! env visible-classes visible-var-types)
       (doseq [fn-def normalized-functions]
         (env-add-var env (:name fn-def) (:class-name fn-def)))
+      (register-builtin-extension-methods! env normalized-functions)
       (doseq [[var-name var-type] visible-var-types]
         (env-add-var env var-name var-type))
       (when-let [current-class (:current-class opts)]

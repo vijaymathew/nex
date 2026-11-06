@@ -23,11 +23,16 @@ It changes:
 Every change is checked before any file is written: if a file no longer
 looks the way this script expects, it stops and changes nothing. Nothing is
 committed; the script prints the steps that follow.
+
+It does not build the VS Code package (editor/vscode/nex-<version>.vsix,
+which git ignores): the steps it prints include rebuilding it, and it names
+any package left over from an earlier version.
 """
 
 import argparse
 import datetime
 import difflib
+import glob
 import os
 import re
 import sys
@@ -127,6 +132,14 @@ def changelog(texts, new, date, allow_empty):
     return notes.strip()
 
 
+def stale_vsix(new):
+    """VS Code packages in editor/vscode built for a version other than NEW."""
+    return sorted(
+        os.path.relpath(p, ROOT)
+        for p in glob.glob(os.path.join(ROOT, "editor", "vscode", "nex-*.vsix"))
+        if os.path.basename(p) != f"nex-{new}.vsix")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Set a new Nex version everywhere and date the changelog.")
@@ -172,9 +185,16 @@ def main():
         print("  " + path)
     if not notes:
         print("\nThe changelog section for this release is empty.")
+    stale = stale_vsix(new)
+    if stale:
+        print("\nVS Code packages from an earlier version (remove them, or"
+              " `code --install-extension nex-*.vsix` may pick the wrong one):")
+        for path in stale:
+            print("  " + path)
     print(f"""
 Next:
   git diff                                   # check the changes
+  (cd editor/vscode && npm run package)      # builds editor/vscode/nex-{new}.vsix
   git commit -am "release v{new}"
   git tag v{new} && git push && git push origin v{new}
   gh release create v{new} --title "Nex {new}" --notes-file <(scripts/release.py --notes {new})

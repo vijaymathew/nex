@@ -7,7 +7,7 @@ grammar nexlang;
  */
 
 program
-    : (importStmt | internStmt | classDecl | unionDecl | declareTypeDecl | declareFunctionDecl | statement)* EOF
+    : (importStmt | internStmt | classDecl | unionDecl | extendDecl | declareTypeDecl | declareFunctionDecl | statement)* EOF
     ;
 
 importStmt
@@ -44,6 +44,30 @@ unionDecl
 
 unionVariant
     : IDENTIFIER ('(' paramList? ')')?
+    ;
+
+// Adds features to an existing class from outside its declaration
+// (docs/proposals/open-features.md): `extend Shape feature ... end`. The
+// walker merges the sections into the target class (see nex.extend).
+//
+// `extend` is a SOFT keyword, matched the same way as `alias` and `where`: a
+// plain IDENTIFIER whose spelling the walker checks, so `extend` stays usable
+// as an ordinary name. No statement can be followed by `feature`, so an
+// identifier, a type name and then `feature` can only begin this rule.
+extendDecl
+    : IDENTIFIER extendTarget genericParams?
+      noteClause?
+      featureSection+
+      END
+    ;
+
+extendTarget
+    : qualifiedName
+    | INTEGER_TYPE
+    | REAL_TYPE
+    | CHAR_TYPE
+    | BOOLEAN_TYPE
+    | STRING_TYPE
     ;
 
 // Reached through `statement`, so that it may be written inside a block too.

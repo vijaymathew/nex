@@ -5,6 +5,7 @@
             [nex.predeclared :as predeclared]
             [nex.interpreter :as interp]
             [nex.ast-walk :as aw]
+            [nex.extend :as extend]
             [nex.intern :as intern]
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as compiled-runtime]
@@ -1550,18 +1551,60 @@
                         (:type-aliases ast))]
     (swap! *repl-type-aliases* assoc (:name alias) alias)))
 
+(defn- session-builtin-extension-functions
+  "The functions earlier inputs' extensions of built-in types generated
+   (nex.extend/builtin-extension-functions), from whichever backend ran
+   them."
+  [ctx]
+  (->> (concat (filter :builtin-extension (vals @(:function-asts @*compiled-repl-session*)))
+               (some-> (:builtin-extension-fns ctx) deref vals))
+       (reduce (fn [m f] (assoc m (:name f) f)) {})
+       vals))
+
+(defn- fold-session-extensions
+  "AST with each `extend` block whose target this input or an earlier one
+   declares folded into that class (docs/proposals/open-features.md): an
+   extension of an earlier input's class becomes a redefinition of it, with
+   the features added, so both backends take it in through the REPL's
+   ordinary class redefinition. An extension of a class not known yet (one a
+   module interned by this input declares) stays in :extensions, for the
+   type checker and the backends to apply with the module."
+  [ctx source-id ast]
+  (if (empty? (:extensions ast))
+    ast
+    (extend/apply-extensions
+     ast source-id
+     {:lookup (fn [target]
+                (let [cd (get @(:classes ctx) target)]
+                  ;; Generated function classes are not user classes.
+                  (when (and (map? cd) (= :class (:type cd)))
+                    cd)))
+      :builtin-features (fn [target]
+                          (into #{} (comp (filter #(= target (get-in % [:builtin-extension :type])))
+                                          (map #(get-in % [:builtin-extension :feature])))
+                                (session-builtin-extension-functions ctx)))
+      ;; An earlier input's `import` may name the Java class extended.
+      :imports @(:imports ctx)
+      :leave-unresolved? true})))
+
 (defn- type-check-repl-input!
   "Type-check `ast` against the session so far (`ctx`'s previously defined
    classes/functions/imports plus everything interned), when type checking
    is on and there's actually something in `ast` worth checking. Throws
-   `ex-info` (after printing each error) on failure; otherwise returns the
-   types inferred for `fn` literals (tc/type-check's :lambda-types), or nil
-   when nothing was checked."
+   `ex-info` (after printing each error) on failure; otherwise returns
+   tc/type-check's result (its :lambda-types and :extension-calls are what
+   the caller needs), or nil when nothing was checked."
   [ctx ast source-id]
   (when (and @*type-checking-enabled*
              (= (:type ast) :program)
              (or (seq (:classes ast)) (seq (:functions ast))
-                 (seq (:statements ast)) (seq (:calls ast))))
+                 (seq (:statements ast)) (seq (:calls ast))
+                 (seq (:extensions ast))
+                 ;; What an interned module declares is checked with the
+                 ;; session, as a file's interns are with the file: an
+                 ;; `extend` block in one module can leave a class another
+                 ;; declares short of a deferred feature.
+                 (seq (:interns ast))))
     ;; Create an augmented AST that includes previously defined classes
     ;; so the type checker knows about them
     (let [prev-functions (vals @(:function-asts @*compiled-repl-session*))
@@ -1576,7 +1619,14 @@
                                          (not (contains? referenced-anonymous-class-names (:name %)))))
                                (vals @(:classes ctx)))
           {intern-classes :classes
-           intern-functions :functions} (intern/resolve-interned source-id ast)
+           intern-functions :functions
+           intern-extensions :extensions} (intern/resolve-interned source-id ast)
+          ;; A module interned again brings back its classes as first
+          ;; written; the session's own, possibly since extended (see
+          ;; fold-session-extensions), must win, as on the compiled backend
+          ;; (nex.compiler.jvm.repl/augment-ast-with-modules).
+          prev-class-names (set (map :name prev-classes))
+          intern-classes (remove #(contains? prev-class-names (:name %)) intern-classes)
           prev-imports @(:imports ctx)
           augmented-ast (cond
                           (and (seq prev-classes) (seq prev-imports) (seq intern-classes))
@@ -1615,7 +1665,11 @@
           ;; Make every type alias declared so far in the session visible to
           ;; the checker, not just any declared in the current input.
           augmented-ast (assoc augmented-ast
-                               :type-aliases (vec (vals @*repl-type-aliases*)))
+                               :type-aliases (vec (vals @*repl-type-aliases*))
+                               ;; What fold-session-extensions left, and the
+                               ;; `extend` blocks of the modules this input
+                               ;; interns; check-program applies them.
+                               :extensions (vec (concat intern-extensions (:extensions ast))))
           ;; Previously defined classes/functions are included above only so the
           ;; type checker can resolve references from the *current* input. Their
           ;; bodies must not be re-validated: redefining one class can legitimately
@@ -1631,12 +1685,16 @@
                                      set)
           result (tc/type-check augmented-ast
                                 {:var-types @*repl-var-types*
-                                 :skip-class-body-names skip-class-body-names})]
+                                 :skip-class-body-names skip-class-body-names
+                                 ;; An interpreted session keeps no function
+                                 ;; nodes the checker could read them from.
+                                 :builtin-extension-functions
+                                 (session-builtin-extension-functions ctx)})]
       (when-not (:success result)
         (doseq [line (tc/format-type-errors result)]
           (println line))
         (throw (ex-info "Type checking failed" {:errors (:errors result)})))
-      (:lambda-types result))))
+      result)))
 
 (defn- repl-log-path
   []
@@ -1916,8 +1974,13 @@
                ;; aliases; the current cell's are recorded further below.
                ast (inject-session-refinements ast @*repl-type-aliases*)]
            (sync-and-remember-type-aliases! exec-ctx source-id ast)
-           (let [ast (tc/apply-inferred-lambda-types
-                      ast (type-check-repl-input! ctx ast source-id))]
+           (let [ast (fold-session-extensions exec-ctx source-id ast)
+                 checked (type-check-repl-input! ctx ast source-id)
+                 ast (-> ast
+                         ;; Calls of a built-in type's extension features
+                         ;; become calls of the functions implementing them.
+                         (extend/rewrite-extension-calls (:extension-calls checked))
+                         (tc/apply-inferred-lambda-types (:lambda-types checked)))]
            (cond
              ;; Experimental compiled path for narrow expression-shaped program inputs.
              (and (= (:type ast) :program)

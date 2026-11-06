@@ -612,6 +612,12 @@
                                (if (> (count s) 1) (pop s) s))
                              (nil? word) stack
                              (= "class" word) (conj stack (open-frame :class at :c nil))
+                             ;; `extend Target` (a soft keyword, so only at the
+                             ;; top level and followed by a type name) is laid
+                             ;; out like a class.
+                             (and (= "extend" word) (zero? j) (= :top (:kind top))
+                                  (> n 1) (= :word (:kind (toks 1))))
+                             (conj stack (open-frame :class at :c nil))
                              (and (= "union" word) (#{"union" "enum"} w0))
                              (conj stack (open-frame :union at :c (+ at indent-size)))
                              (= "if" word) (if (and clause-line? (not seen-then?))

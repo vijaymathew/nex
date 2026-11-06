@@ -79,3 +79,36 @@ end
 
 let app := create Runtime_Report_App
 print(app.run())
+
+-- "Adding Features to a Java Class": an `extend` block gives every
+-- StringBuilder, and every java.util.List, a feature of our own.
+import java.lang.StringBuilder
+import java.util.LinkedList
+import java.util.List
+
+extend StringBuilder
+feature
+  is_blank: Boolean do result := length() = 0 end
+
+  add_line(s: String) do
+    append(s)
+    append("\n")
+  end
+end
+
+extend List
+feature
+  describe: String do result := "a list of " + size().to_string end
+end
+
+let sb: StringBuilder := create StringBuilder
+print(sb.is_blank)       -- true
+sb.add_line("first")
+print(sb.is_blank)       -- false
+assert not sb.is_blank
+
+let names: LinkedList := create LinkedList
+names.add("Ada")
+names.add("Bo")
+print(names.describe)    -- "a list of 2"
+assert names.describe = "a list of 2"

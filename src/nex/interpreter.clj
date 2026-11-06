@@ -16,6 +16,7 @@
             [nex.types.reflect :as reflect]
             [nex.redeclare :as redeclare]
             [nex.contracts :as contracts]
+            [nex.extend :as extend]
             [nex.intern :as intern])
   (:import [clj_antlr ParseError]
            [java.lang.reflect Field]
@@ -461,7 +462,19 @@
                (atom {}))          ; evaluated class-constant cache (interning)
           ;; `declare type` aliases, name -> type expression, so a value's
           ;; zero value can see through one (alias-resolved-type).
-          ctx (assoc ctx :type-aliases (atom {}))]
+          ctx (assoc ctx
+                     :type-aliases (atom {})
+                     ;; `extend` blocks whose target class is not registered
+                     ;; yet: an interned module may extend a class the file
+                     ;; that interns it declares (see apply-extensions!).
+                     :pending-extensions (atom [])
+                     ;; Every `extend` block applied so far, so a class
+                     ;; registered again (a module interned by two others is
+                     ;; evaluated twice) gets its extensions back.
+                     :applied-extensions (atom [])
+                     ;; [type feature arity] -> generated function node, for
+                     ;; the features extensions add to built-in types.
+                     :builtin-extension-fns (atom {}))]
       ;; Register built-in base classes
       (doseq [class-def (bootstrap/base-class-defs)]
         (register-class ctx class-def))
@@ -1730,7 +1743,45 @@
 (def builtin-type-methods bi/builtin-type-methods)
 (def builtin-type-method-return-type bi/builtin-type-method-return-type)
 (def get-type-name bi/get-type-name)
-(def call-builtin-method bi/call-builtin-method)
+(declare invoke-nex-object-call)
+
+(def ^:private comparable-builtin-types
+  #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "String"})
+
+(defn- builtin-extension-function
+  "The function object implementing METHOD of ARITY for VALUE, added by an
+   `extend` block of a built-in type (see nex.extend/builtin-extension-functions):
+   of VALUE's own built-in type, else of Comparable when VALUE is comparable,
+   else of Any. nil when there is none."
+  [ctx value method arity]
+  (when-let [table (some-> (:builtin-extension-fns ctx) deref not-empty)]
+    (let [object-class (when (nex-object? value) (:class-name value))
+          type-name (when-not object-class (some-> (bi/get-type-name value) name))
+          comparable? (if object-class
+                        (is-parent? ctx object-class "Comparable")
+                        (contains? comparable-builtin-types type-name))
+          java? (and (nil? object-class) (nil? type-name) (some? value))
+          fn-node (or (when type-name (get table [type-name method arity]))
+                      ;; A Java object: the extension of the nearest of its
+                      ;; classes and interfaces that has one.
+                      (when java?
+                        (some #(get table [(.getName ^Class %) method arity])
+                              (extend/java-supertypes (class value))))
+                      (when comparable? (get table ["Comparable" method arity]))
+                      (get table ["Any" method arity]))]
+      (when fn-node
+        (env-lookup (:globals ctx) (:name fn-node))))))
+
+(defn call-builtin-method
+  "Call METHOD on VALUE, a built-in value: one of its type's own features,
+   or one an extension added."
+  ([target value method args]
+   (bi/call-builtin-method target value method args))
+  ([ctx target value method args]
+   (if-let [f (and ctx (builtin-extension-function ctx value method (count args)))]
+     (invoke-nex-object-call ctx nil nil (str "call" (inc (count args))) f true
+                             (into [value] args))
+     (bi/call-builtin-method ctx target value method args))))
 ;;
 ;; Node Evaluators
 ;;
@@ -1795,7 +1846,13 @@
   (let [file-path (find-intern-file ctx path class-name)
            ;; Load and parse the external file
         file-content (slurp file-path)
-        file-ast (parse-interned-file file-path file-content)
+        ;; Its `extend` blocks carry the file, as nex.intern/resolve-interned*
+        ;; stamps them, so the same extension reached both ways (the REPL
+        ;; type-checks a module the interpreter has loaded) is one extension.
+        file-ast (update (parse-interned-file file-path file-content) :extensions
+                         (fn [exts]
+                           (let [canonical (.getCanonicalPath (clojure.java.io/file file-path))]
+                             (mapv #(assoc % :source-file canonical) exts))))
            ;; Interpret the file under ITS OWN :debug-source, not the
            ;; caller's — intern-search-roots (see its docstring) resolves a
            ;; NESTED intern relative to :debug-source's directory, so a bare
@@ -1822,9 +1879,108 @@
        ;; Return the class name that was registered
     intern-name))
 
+(defn- record-applied-extension!
+  [ctx ext]
+  (when-not (some #(= ext %) @(:applied-extensions ctx))
+    (swap! (:applied-extensions ctx) conj ext)))
+
+(defn- registered-class-keys
+  "Registry keys under which the class EXT extends is registered: its bare
+   and its qualified name (see register-qualified-classes!), both of which
+   must see the added features."
+  [ctx target]
+  (let [registry @(:classes ctx)
+        identity-of (fn [cd] (or (:qualified-name cd) (:name cd)))
+        ids (into #{} (keep (fn [[k cd]]
+                              (when (or (= k target) (= (:qualified-name cd) target))
+                                (identity-of cd))))
+                  registry)]
+    (keep (fn [[k cd]] (when (contains? ids (identity-of cd)) k)) registry)))
+
+(defn- extend-registered-class!
+  "Merge EXT into its already-registered target. False when the target is
+   not registered (yet)."
+  [ctx ext]
+  (let [ks (seq (registered-class-keys ctx (:target ext)))]
+    (doseq [k ks]
+      (swap! (:classes ctx) update k extend/merge-extension ext))
+    (when ks (record-applied-extension! ctx ext))
+    ;; A generic class's specializations were built from the old definition.
+    (when ks (reset! (:specialized-classes ctx) {}))
+    (boolean ks)))
+
+(defn- redesugar-registered-classes!
+  "Re-run the attribute-redeclaration desugaring over every registered class:
+   an extension may have given an ancestor a query that an heir registered
+   earlier answers with a field."
+  [ctx]
+  (doseq [[k cd] @(:classes ctx)]
+    (let [cd' (redeclare/desugar-class #(lookup-class-if-exists ctx %) cd)]
+      (when-not (identical? cd cd')
+        (swap! (:classes ctx) assoc k cd')))))
+
+(defn- extends-class?
+  [ext class-def]
+  (or (= (:target ext) (:name class-def))
+      (= (:target ext) (:qualified-name class-def))))
+
+(defn- apply-extensions!
+  "Apply a program's `extend` blocks (docs/proposals/open-features.md): those
+   whose target is among the program's own CLASSES are merged into it before
+   registration, the rest into the registered class, or kept pending until
+   it is registered. Extensions applied earlier to a class that CLASSES
+   declares again are merged into it again. Returns CLASSES with the merges
+   done."
+  [ctx classes extensions]
+  (let [earlier (filter (fn [ext] (some #(extends-class? ext %) classes))
+                        @(:applied-extensions ctx))
+        builtin-features (fn [target]
+                           (into #{} (comp (filter #(= target (:target %)))
+                                           (mapcat :body) (mapcat :members) (map :name))
+                                 extensions))]
+    (reduce (fn [classes ext]
+              (let [idxs (keep-indexed (fn [i c] (when (extends-class? ext c) i)) classes)]
+                (cond
+                  ;; As in nex.extend/apply-extensions: a built-in type's
+                  ;; name, unless this program declares a class of that name.
+                  (and (empty? idxs) (extend/builtin-target? (:target ext)))
+                  (do (doseq [f (extend/builtin-extension-functions
+                                 ext (builtin-features (:target ext)))]
+                        (eval-node ctx f))
+                      classes)
+
+                  ;; An imported Java class (phase 2 of the proposal).
+                  (and (empty? idxs) (extend/java-target-class-name @(:imports ctx) (:target ext)))
+                  (do (doseq [f (extend/java-extension-functions
+                                 ext (extend/java-target-class-name @(:imports ctx) (:target ext))
+                                 (builtin-features (:target ext)))]
+                        (eval-node ctx f))
+                      classes)
+
+                  (seq idxs)
+                  (do (record-applied-extension! ctx ext)
+                      (reduce #(update %1 %2 extend/merge-extension ext) classes idxs))
+
+                  (extend-registered-class! ctx ext)
+                  classes
+
+                  :else
+                  (do (swap! (:pending-extensions ctx) conj ext) classes))))
+            (vec classes)
+            (distinct (concat earlier extensions)))))
+
+(defn- apply-pending-extensions!
+  "Merge every pending extension whose target is now registered. True when
+   any was."
+  [ctx]
+  (let [pending @(:pending-extensions ctx)
+        still (vec (remove #(extend-registered-class! ctx %) pending))]
+    (reset! (:pending-extensions ctx) still)
+    (not= (count still) (count pending))))
+
 (defmethod eval-node :program
   [ctx {:keys [imports interns classes functions statements calls duplicate-functions
-               function-signature-conflicts type-aliases]}]
+               function-signature-conflicts type-aliases extensions]}]
   ;; Free-function names must be unique within a program (Definition §4.8). The
   ;; walker collapses duplicate definitions last-wins before they reach here, so
   ;; the authoritative interpreter must reject them explicitly — otherwise the
@@ -1860,10 +2016,16 @@
         (when (map? intern-node)
           (process-intern ctx intern-node)))
 
-      ;; Register all class definitions
-      (doseq [class-node (redeclare/desugar-classes classes #(lookup-class-if-exists ctx %))]
-        (when (map? class-node)
-          (register-class ctx class-node)))
+      ;; Register all class definitions, with the program's `extend` blocks
+      ;; merged into their targets first.
+      (let [classes (apply-extensions! ctx classes extensions)]
+        (doseq [class-node (redeclare/desugar-classes classes #(lookup-class-if-exists ctx %))]
+          (when (map? class-node)
+            (register-class ctx class-node)))
+        ;; `apply-pending-extensions!` first: it must run whether or not this
+        ;; program has extensions of its own.
+        (when (or (apply-pending-extensions! ctx) (seq extensions))
+          (redesugar-registered-classes! ctx)))
 
       ;; Register and instantiate functions
       (doseq [fn-node functions]
@@ -1886,7 +2048,15 @@
   nil)
 
 (defmethod eval-node :function
-  [ctx {:keys [name class-def class-name]}]
+  [ctx {:keys [name class-def class-name builtin-extension] :as fn-node}]
+  ;; A function an `extend` block of a built-in type generated: calls of the
+  ;; feature it implements reach it through call-builtin-method.
+  (when-let [{:keys [type feature arity java-class]} builtin-extension]
+    (when-let [table (:builtin-extension-fns ctx)]
+      (swap! table assoc [type feature arity] fn-node)
+      ;; A Java object is looked up by its classes' qualified names.
+      (when java-class
+        (swap! table assoc [java-class feature arity] fn-node))))
   ;; Register the generated function class and create a global instance
   (register-class ctx class-def)
   (let [obj (make-object class-name {})]
@@ -2427,8 +2597,15 @@
             field-val
             (throw (ex-info (str "Method not found: " method)
                             {:object obj :method method})))))
-      (if (get-in builtin-type-methods [:Any method])
+      (cond
+        (get-in builtin-type-methods [:Any method])
         (call-builtin-method ctx (or target-name target) obj method arg-values)
+
+        ;; A feature an extension of Any or Comparable adds.
+        (builtin-extension-function ctx obj method (count arg-values))
+        (call-builtin-method ctx (or target-name target) obj method arg-values)
+
+        :else
         (throw (ex-info (str "Method not found: " method)
                         {:object obj :method method}))))))
 
@@ -2484,7 +2661,11 @@
                              :class-name compiled-class-name}))
             (runtime-resolve-call-user-method ctx obj method arg-values)))
         (runtime-resolve-call-user-method ctx obj method arg-values))
-      (java-call-method ctx obj method arg-values))))
+      (if-let [f (builtin-extension-function ctx obj method (count arg-values))]
+        ;; A feature an extension of the object's Java class adds.
+        (invoke-nex-object-call ctx nil nil (str "call" (inc (count arg-values))) f true
+                                (into [obj] arg-values))
+        (java-call-method ctx obj method arg-values)))))
 
 (defn- eval-call-with-target
   [ctx {:keys [target method has-parens]} arg-values]
@@ -3058,10 +3239,15 @@
                          runtime-name))
         ;; `boolean`: a failed convert is false, never the nil an `and`/`or`
         ;; chain would otherwise yield.
+        ;; An imported Java class, when no Nex class has the name: a Java
+        ;; object has no Nex type name to compare, so test it as Java does.
+        java-class (when (and (string? target-name) (not (lookup-class-if-exists ctx target-name)))
+                     (bi/resolve-imported-java-class ctx target-name))
         ok? (boolean
              (and (some? v)
                   (string? target-name)
-                  (or (convert-compatible-runtime? ctx runtime-name target-name)
+                  (or (and java-class (instance? java-class v))
+                      (convert-compatible-runtime? ctx runtime-name target-name)
                       (convert-compatible-runtime? ctx runtime-base target-name))
                   ;; ...and the type arguments, when the target names them.
                   (generic-value-type-args-compatible?

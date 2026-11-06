@@ -364,3 +364,25 @@
 (deftest refuses-what-does-not-parse
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Failed to format"
                         (fmt/format-code "if a then\nprint(1)\n"))))
+
+(deftest extend-blocks
+  (testing "an `extend` block is laid out like a class"
+    (formats-to (lines "class A"
+                       "end"
+                       "extend A"
+                       "feature"
+                       "size(): Integer do"
+                       "result := 1"
+                       "end"
+                       "end")
+                (lines "class A"
+                       "end"
+                       "extend A"
+                       "feature"
+                       "  size(): Integer do"
+                       "    result := 1"
+                       "  end"
+                       "end")))
+  (testing "`extend` as an ordinary name is left alone"
+    (formats-to (lines "let extend := 3" "print(extend)")
+                (lines "let extend := 3" "print(extend)"))))

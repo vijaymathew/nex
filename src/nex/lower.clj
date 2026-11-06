@@ -1205,6 +1205,41 @@
    "http_server_stop" "Void"
    "http_server_is_running" "Boolean"})
 
+(declare infer-type-or-any resolve-java-class-by-name)
+
+(def ^:private java-primitive-return-nex-types
+  "The Nex type of a Java method's primitive (or String) result, as the
+   reflective call returns it: clojure.lang.Reflector/prepRet widens an int
+   to a long and a float to a double, which are Nex Integer and Real."
+  {Integer/TYPE "Integer" Long/TYPE "Integer" Short/TYPE "Integer" Byte/TYPE "Integer"
+   Double/TYPE "Real" Float/TYPE "Real" Boolean/TYPE "Boolean" Character/TYPE "Char"
+   String "String"})
+
+(defn- java-call-return-type
+  "The Nex type of EXPR, a call of a method of an imported Java class on
+   TARGET-EXPR, when every public instance method of that name and arity
+   returns the same primitive (or String) type; nil otherwise. Without it the
+   call types as Any, and arithmetic on its result (`xs.size() * 2`) has no
+   JVM type to emit."
+  [env expr target-expr]
+  (when (and target-expr (:method expr))
+    (let [base (base-type-name (infer-type-or-any env target-expr))
+          class-def (get (visible-class-map env) base)]
+      (when (and (string? base)
+                 (or (nil? class-def) (:import class-def))
+                 (imported-java-qualified-name env base))
+        (when-let [^Class cls (resolve-java-class-by-name env base)]
+          (let [argc (count (:args expr))
+                returns (->> (.getMethods cls)
+                             (filter (fn [^java.lang.reflect.Method m]
+                                       (and (= (.getName m) (:method expr))
+                                            (= (.getParameterCount m) argc)
+                                            (not (java.lang.reflect.Modifier/isStatic (.getModifiers m))))))
+                             (map #(java-primitive-return-nex-types (.getReturnType ^java.lang.reflect.Method %)))
+                             distinct)]
+            (when (and (= 1 (count returns)) (first returns))
+              (first returns))))))))
+
 (defn- infer-call-type
   [env expr]
   (let [raw-target (:target expr)
@@ -1270,7 +1305,8 @@
          (some-> (or (class-method-def (current-class-def env) (:method expr) (count (:args expr)))
                      (inherited-method-def env (current-class-def env) (:method expr) (count (:args expr))))
                  function-return-type)))
-      (infer-target-call-type env expr class-target-name across-item-type target-expr))))
+      (or (java-call-return-type env expr target-expr)
+          (infer-target-call-type env expr class-target-name across-item-type target-expr)))))
 
 (defn- env-add-local
   [env name nex-type]
@@ -2812,7 +2848,18 @@
         target-type (or runtime-target-type target-type)
         target-name (if (map? target-type) (:base-type target-type) target-type)
         type-args (when (map? target-type) (seq (generic-type-args target-type)))
-        target-runtime (if (and type-args
+        ;; An imported Java class: the runtime tests it with instanceof
+        ;; (nex.compiler.jvm.runtime/convert-value), not by Nex type name,
+        ;; which a Java object has none of.
+        java-target (when (and (string? target-name)
+                               ;; An import's placeholder class (:import) is
+                               ;; the Java class itself, not a Nex one.
+                               (let [cd (get (visible-class-map env) target-name)]
+                                 (or (nil? cd) (:import cd))))
+                      (imported-java-qualified-name env target-name))
+        target-runtime (if java-target
+                         (ir/const-node (str "java:" java-target) "String" (string-jvm-type))
+                       (if (and type-args
                                 (string? target-name)
                                 (not (contains? (:generic-param-names env) target-name)))
                          ;; `Some[String]`: name the type arguments too, so the
@@ -2832,7 +2879,7 @@
                                              "]")
                                         "String"
                                         (string-jvm-type))
-                         (runtime-type-token-ir env target-type))
+                         (runtime-type-token-ir env target-type)))
         binding (or (lookup-convert-binding env var-name)
                     (throw (ex-info "convert binding must exist before lowering expression"
                                     {:expr expr
@@ -6879,6 +6926,12 @@
                  (and (= base-type "Any") (:with-java? env))
                  (str "builtin-or-java:" method)
 
+                 ;; A `Comparable` may be a user object, whose `compare` the
+                 ;; builtin table knows nothing of; the user-method helper
+                 ;; dispatches on the runtime value, builtin values included.
+                 (= base-type "Comparable")
+                 (str "user-method:" method)
+
                  :else
                  (str "builtin-method:" base-type ":" method))]
     (ir/call-runtime-node helper
@@ -9013,6 +9066,15 @@
                                                            params))))))))))]
       (vec (shims class-def own-ctor-names #{(:name class-def)})))))
 
+(defn- with-member-source-file
+  "FN-NODE, lowered from METHOD-DEF, carrying METHOD-DEF's :source-file: set
+   only on a routine an `extend` block in another file added to its class.
+   The emitter moves such a routine into a class of that file
+   (nex.compiler.jvm.emit/split-foreign-methods)."
+  [fn-node method-def]
+  (cond-> fn-node
+    (:source-file method-def) (assoc :source-file (:source-file method-def))))
+
 (defn- lower-own-methods
   "Each routine the class declares. In a class whose hierarchy declares an
    invariant, a routine with a body is emitted as its unchecked twin (see
@@ -9037,8 +9099,8 @@
                                                     (effective-method-contracts env class-def method-def)
                                                     extra)))]
                  (if (or (not twins?) deferred?)
-                   [(lower {})]
-                   [(lower {:unchecked-twin? true})
+                   [(with-member-source-file (lower {}) method-def)]
+                   [(with-member-source-file (lower {:unchecked-twin? true}) method-def)
                           (forwarding-method-node env class-meta class-name compiled-classes
                                                   {:source-class class-name
                                                    :carrier-path []
@@ -9153,7 +9215,9 @@
     {:name class-name
      :jvm-name (:jvm-name class-meta)
      :internal-name (:internal-name class-meta)
-     :source-file (:source-file opts)
+     ;; A class from an interned module names its own file, not the entry
+     ;; file, so a stack frame in one of its routines does too.
+     :source-file (or (:source-file class-def) (:source-file opts))
      :deferred? (boolean (:deferred? class-def))
      :parents (resolve-parent-metas env class-def)
      :composition-fields (mapv (fn [{:keys [nex-name internal-name composition-field deferred?]}]
@@ -9379,7 +9443,9 @@
                                                                                 :visible-classes visible-classes
                                                                                 :compiled-classes (:compiled-classes opts)))]
                                              ;; Direct calls need its typed static method.
-                                             (cond-> fn-node
+                                             ;; A function from an interned module keeps
+                                             ;; its file (see with-member-source-file).
+                                             (cond-> (with-member-source-file fn-node %)
                                                (and *direct-free-functions*
                                                     (:typed-descriptor fn-node)
                                                     (not (:deferred? fn-node)))
