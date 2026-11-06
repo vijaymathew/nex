@@ -483,6 +483,9 @@
 (defn- augment-ast-with-modules
   [session source-id ast]
   (let [ast' (normalize-program-ast ast)
+        ;; One walk of the interns for all four parts below: each
+        ;; intern/resolve-interned-* parses every interned file again.
+        resolved (intern/resolve-interned source-id ast')
         ;; A module's classes/functions never change within a session, and
         ;; `intern` is idempotent — re-running it (directly, or transitively
         ;; because a different module also interns it) just brings the same
@@ -494,13 +497,13 @@
         ;; They stay visible for typechecking/lowering regardless, via
         ;; `@(:class-asts session)`/`@(:function-asts session)`.
         intern-classes (remove #(contains? @(:class-asts session) (:name %))
-                               (intern/resolve-interned-classes source-id ast'))
+                               (:classes resolved))
         ;; A module's free functions come into scope alongside its classes; the
         ;; cell that runs the `intern` must carry them so remember-top-level-ast!
         ;; records them for later cells (the file path does the same).
         intern-functions (remove #(contains? @(:function-asts session) (:name %))
-                                 (intern/resolve-interned-functions source-id ast'))
-        intern-imports (intern/resolve-interned-imports source-id ast')
+                                 (:functions resolved))
+        intern-imports (:imports resolved)
         merged-imports (merge-import-like-nodes
                         (merge-import-like-nodes @(:import-asts session) intern-imports)
                         (:imports ast'))
@@ -509,7 +512,7 @@
         ;; — carried forward the same way class-asts/function-asts are, so a
         ;; later cell that only *uses* the alias (declared by an earlier cell)
         ;; still sees it.
-        intern-type-aliases (intern/resolve-interned-type-aliases source-id ast')
+        intern-type-aliases (:type-aliases resolved)
         merged-type-aliases (vec (concat (vals @(:type-aliases session))
                                          intern-type-aliases
                                          (:type-aliases ast')))]

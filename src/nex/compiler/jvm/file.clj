@@ -106,10 +106,10 @@
      *bare*, still-ambiguous reference, at that call site, not the whole
      program merely for having interned both."
   [source-id ast]
-  (let [intern-classes (intern/resolve-interned-classes source-id ast)
-        intern-functions (intern/resolve-interned-functions source-id ast)
-        intern-imports (intern/resolve-interned-imports source-id ast)
-        intern-type-aliases (intern/resolve-interned-type-aliases source-id ast)
+  (let [{intern-classes :classes
+         intern-functions :functions
+         intern-imports :imports
+         intern-type-aliases :type-aliases} (intern/resolve-interned source-id ast)
         merged-imports (merge-import-like-nodes intern-imports (:imports ast))
         merged (assoc ast
                       :imports merged-imports

@@ -2078,6 +2078,34 @@
       (conj init-stmts
             (ir/loop-node [] done-node loop-body)))]))
 
+(def ^:private visible-class-map-cache
+  "The last result of visible-class-map, with the values it was built from:
+   [classes compiled-classes type-aliases type-alias-generic-params result].
+   All four are immutable, so the same objects mean the same result."
+  (atom (vec (repeat 5 ::none))))
+
+(defn- build-visible-class-map
+  "visible-class-map without the cache."
+  [env]
+  (let [by-bare-name (into {} (map (juxt :name identity) (:classes env)))
+        by-qualified-name (into {}
+                                (comp (filter :qualified-name)
+                                      (map (juxt :qualified-name identity)))
+                                (:classes env))
+        by-qualified-name-from-compiled (into {}
+                                              (keep (fn [[qn meta]]
+                                                      (when (and (:class-def meta)
+                                                                 (not (contains? by-qualified-name qn)))
+                                                        [qn (:class-def meta)])))
+                                              (:compiled-classes env))
+        base (merge by-bare-name by-qualified-name by-qualified-name-from-compiled)]
+    (reduce-kv (fn [m alias-name _]
+                 (if-let [class-def (get base (resolve-type-alias alias-name))]
+                   (assoc m alias-name class-def)
+                   m))
+               base
+               *type-aliases*)))
+
 (defn- visible-class-map
   "Name -> class-def, including every name an `intern ... as` alias resolves
    to. An aliased intern registers only a `*type-aliases*` entry pointing at
@@ -2102,24 +2130,18 @@
    embeds each class-def alongside its JVM identity
    (`nex.compiler.jvm.file/class-metadata-entry`) for exactly this recovery."
   [env]
-  (let [by-bare-name (into {} (map (juxt :name identity) (:classes env)))
-        by-qualified-name (into {}
-                                (comp (filter :qualified-name)
-                                      (map (juxt :qualified-name identity)))
-                                (:classes env))
-        by-qualified-name-from-compiled (into {}
-                                              (keep (fn [[qn meta]]
-                                                      (when (and (:class-def meta)
-                                                                 (not (contains? by-qualified-name qn)))
-                                                        [qn (:class-def meta)])))
-                                              (:compiled-classes env))
-        base (merge by-bare-name by-qualified-name by-qualified-name-from-compiled)]
-    (reduce-kv (fn [m alias-name _]
-                 (if-let [class-def (get base (resolve-type-alias alias-name))]
-                   (assoc m alias-name class-def)
-                   m))
-               base
-               *type-aliases*)))
+  (let [classes (:classes env)
+        compiled-classes (:compiled-classes env)
+        aliases *type-aliases*
+        alias-generic-params *type-alias-generic-params*
+        [c cc a agp cached] @visible-class-map-cache]
+    (if (and (identical? classes c) (identical? compiled-classes cc)
+             (identical? aliases a) (identical? alias-generic-params agp))
+      cached
+      (let [result (build-visible-class-map env)]
+        (reset! visible-class-map-cache
+                [classes compiled-classes aliases alias-generic-params result])
+        result))))
 
 (defn- class-declares-invariant-in-hierarchy?
   "Whether `class-name` or any ancestor resolvable in `class-map` (name ->
@@ -4582,88 +4604,91 @@
    handled below), or inside an if/case/match clause body, is deliberately
    left out of scope, same as :loop's own :init special-case already was
    before this — see direct-let-declarations for the full rationale."
-  [ctx local-types stmts]
-  (let [candidates (box-candidate-lets stmts)]
-    (if (empty? candidates)
-      stmts
-      (let [boxed-names (set (keys candidates))
-            box-wrap (fn [s t]
-                       (assoc s
-                              :var-type {:base-type closure-mut-box-class-name :type-args [t]}
-                              :value {:type :create
-                                      :class-name closure-mut-box-class-name
-                                      :generic-args [t]
-                                      :constructor "make"
-                                      :args [(:value s)]}))
-            ;; One :let (top-level, nested one level into a top-level
-            ;; :loop's own :init, or nested into a :scoped-block's own
-            ;; :body — see direct-let-declarations) threaded through the
-            ;; same lt/acc update either kind gets when it is a plain
-            ;; statement: box-typed and recorded when it is a boxing
-            ;; candidate, otherwise just folded into lt so a LATER boxed
-            ;; let's initializer can still resolve its type.
-            thread-let (fn [[lt acc] s]
-                         (if (contains? candidates (:name s))
-                           (let [t (box-let-type ctx lt s)]
-                             [(assoc lt (:name s) t) (assoc acc (:name s) t)])
-                           [(assoc lt (:name s) (or (:var-type s) (infer-prepass-type ctx lt (:value s)))) acc]))
-            ;; Types are resolved against the ORIGINAL (pre-rewrite) lets,
-            ;; threading local-types forward exactly like the ordinary
-            ;; closure-rewrite :let case does, so a later boxed let's own
-            ;; initializer can still refer to an earlier one's declared
-            ;; type. A named (not anonymous) fn so the :scoped-block branch
-            ;; below can recurse into a nested scoped-block's own :body,
-            ;; keeping this in sync with direct-let-declarations' own
-            ;; recursive descent.
-            thread-stmts (fn thread-stmts [[lt acc] ss]
-                           (reduce (fn [[lt acc] s]
-                                     (cond
-                                       (and (map? s) (= :let (:type s)) (:name s))
-                                       (thread-let [lt acc] s)
-
-                                       (and (map? s) (= :loop (:type s)))
-                                       (reduce (fn [state init-let]
-                                                 (if (and (map? init-let) (= :let (:type init-let)) (:name init-let))
-                                                   (thread-let state init-let)
-                                                   state))
-                                               [lt acc]
-                                               (:init s))
-
-                                       (and (map? s) (= :scoped-block (:type s)))
-                                       (thread-stmts [lt acc] (:body s))
-
-                                       :else [lt acc]))
-                                   [lt acc]
-                                   ss))
-            box-types (second (thread-stmts [local-types {}] stmts))
-            rewritten (rewrite-boxed-references boxed-names stmts)
-            ;; The actual :let -> Closure_Mut_Box rewrite, mirroring
-            ;; thread-stmts' own shape exactly (including its recursive
-            ;; :scoped-block case) so every candidate thread-stmts typed
-            ;; gets box-wrapped in place — one level (:init) into a :loop,
-            ;; or arbitrarily many levels (:body) into a :scoped-block —
-            ;; and nowhere else.
-            rewrite-stmts (fn rewrite-stmts [ss]
-                            (mapv (fn [s]
+  ([ctx local-types stmts]
+   (box-mutable-closure-captures ctx local-types stmts (box-candidate-lets stmts)))
+  ([ctx local-types stmts candidates]
+   ;; CANDIDATES is (box-candidate-lets STMTS), for a caller that already
+   ;; has it: computing it walks the whole of STMTS three times.
+   (if (empty? candidates)
+     stmts
+     (let [boxed-names (set (keys candidates))
+           box-wrap (fn [s t]
+                      (assoc s
+                             :var-type {:base-type closure-mut-box-class-name :type-args [t]}
+                             :value {:type :create
+                                     :class-name closure-mut-box-class-name
+                                     :generic-args [t]
+                                     :constructor "make"
+                                     :args [(:value s)]}))
+           ;; One :let (top-level, nested one level into a top-level
+           ;; :loop's own :init, or nested into a :scoped-block's own
+           ;; :body — see direct-let-declarations) threaded through the
+           ;; same lt/acc update either kind gets when it is a plain
+           ;; statement: box-typed and recorded when it is a boxing
+           ;; candidate, otherwise just folded into lt so a LATER boxed
+           ;; let's initializer can still resolve its type.
+           thread-let (fn [[lt acc] s]
+                        (if (contains? candidates (:name s))
+                          (let [t (box-let-type ctx lt s)]
+                            [(assoc lt (:name s) t) (assoc acc (:name s) t)])
+                          [(assoc lt (:name s) (or (:var-type s) (infer-prepass-type ctx lt (:value s)))) acc]))
+           ;; Types are resolved against the ORIGINAL (pre-rewrite) lets,
+           ;; threading local-types forward exactly like the ordinary
+           ;; closure-rewrite :let case does, so a later boxed let's own
+           ;; initializer can still refer to an earlier one's declared
+           ;; type. A named (not anonymous) fn so the :scoped-block branch
+           ;; below can recurse into a nested scoped-block's own :body,
+           ;; keeping this in sync with direct-let-declarations' own
+           ;; recursive descent.
+           thread-stmts (fn thread-stmts [[lt acc] ss]
+                          (reduce (fn [[lt acc] s]
                                     (cond
-                                      (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
-                                      (box-wrap s (get box-types (:name s)))
+                                      (and (map? s) (= :let (:type s)) (:name s))
+                                      (thread-let [lt acc] s)
 
                                       (and (map? s) (= :loop (:type s)))
-                                      (assoc s :init
-                                             (mapv (fn [init-let]
-                                                     (if (and (map? init-let) (= :let (:type init-let))
-                                                              (contains? boxed-names (:name init-let)))
-                                                       (box-wrap init-let (get box-types (:name init-let)))
-                                                       init-let))
-                                                   (:init s)))
+                                      (reduce (fn [state init-let]
+                                                (if (and (map? init-let) (= :let (:type init-let)) (:name init-let))
+                                                  (thread-let state init-let)
+                                                  state))
+                                              [lt acc]
+                                              (:init s))
 
                                       (and (map? s) (= :scoped-block (:type s)))
-                                      (assoc s :body (rewrite-stmts (:body s)))
+                                      (thread-stmts [lt acc] (:body s))
 
-                                      :else s))
-                                  ss))]
-        (rewrite-stmts rewritten)))))
+                                      :else [lt acc]))
+                                  [lt acc]
+                                  ss))
+           box-types (second (thread-stmts [local-types {}] stmts))
+           rewritten (rewrite-boxed-references boxed-names stmts)
+           ;; The actual :let -> Closure_Mut_Box rewrite, mirroring
+           ;; thread-stmts' own shape exactly (including its recursive
+           ;; :scoped-block case) so every candidate thread-stmts typed
+           ;; gets box-wrapped in place — one level (:init) into a :loop,
+           ;; or arbitrarily many levels (:body) into a :scoped-block —
+           ;; and nowhere else.
+           rewrite-stmts (fn rewrite-stmts [ss]
+                           (mapv (fn [s]
+                                   (cond
+                                     (and (map? s) (= :let (:type s)) (contains? boxed-names (:name s)))
+                                     (box-wrap s (get box-types (:name s)))
+
+                                     (and (map? s) (= :loop (:type s)))
+                                     (assoc s :init
+                                            (mapv (fn [init-let]
+                                                    (if (and (map? init-let) (= :let (:type init-let))
+                                                             (contains? boxed-names (:name init-let)))
+                                                      (box-wrap init-let (get box-types (:name init-let)))
+                                                      init-let))
+                                                  (:init s)))
+
+                                     (and (map? s) (= :scoped-block (:type s)))
+                                     (assoc s :body (rewrite-stmts (:body s)))
+
+                                     :else s))
+                                 ss))]
+       (rewrite-stmts rewritten)))))
 
 (defn prepare-program-for-closures
   [program opts]
@@ -4693,7 +4718,7 @@
                             stmts)
                     candidates (box-candidate-lets stmts)]
                 (when (seq candidates) (reset! any-boxed? true))
-                (box-mutable-closure-captures ctx local-types stmts)))
+                (box-mutable-closure-captures ctx local-types stmts candidates)))
         boxed-functions (mapv (fn [f]
                                 (update f :body #(box (initial-var-types (:params f)) %)))
                               (:functions program))
