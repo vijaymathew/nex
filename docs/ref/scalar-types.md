@@ -384,6 +384,7 @@ A `Char` literal is `#` followed by either a letter/symbol (`#a`, `#Z`, `#!`), o
 | `to_string` | none | `String` | Convert to one-character string. |
 | `to_upper` | none | `Char` | Uppercase character. |
 | `to_lower` | none | `Char` | Lowercase character. |
+| `is_whitespace` | none | `Boolean` | Check if this is a Unicode space character. |
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |
 

@@ -115,3 +115,25 @@ print(xs.tail.call0().tail.call0().rest.first)")))))
                  (or (type-error "let f := fn(x: Integer): Integer do result := x * 2 end\nprint(f(\"s\"))") "")))
     (is (re-find #"expects 1 arguments, got 2"
                  (or (type-error "let f := fn(x: Integer): Integer do result := x * 2 end\nprint(f(1, 2))") "")))))
+
+(deftest only-function-objects-are-callable-test
+  (testing "a class with callN that inherits Function can be called"
+    (is (= ["100"]
+           (both "class Times_Ten
+inherit Function
+feature
+  call1(a: Integer): Integer do result := a * 10 end
+end
+let f := create Times_Ten
+print(f(10))
+"))))
+  (testing "a class with callN that does not inherit Function cannot be called"
+    (let [err (type-error "class Times_Ten
+feature
+  call1(a: Integer): Integer do result := a * 10 end
+end
+let f := create Times_Ten
+print(f(10))
+")]
+      (is (some? err))
+      (is (str/includes? err "not callable")))))

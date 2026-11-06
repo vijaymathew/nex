@@ -4428,6 +4428,17 @@
         call-name (str "call" (count args))
         method-sig (env-lookup-method env base-type call-name (count args))
         class-def (env-lookup-class env base-type)]
+    ;; Call syntax `f(args)` is for Function values only. A class that merely
+    ;; defines a `callN` method, without inheriting Function, is not callable
+    ;; this way, matching types-compatible?, which also refuses it as a
+    ;; Function value.
+    (when (and class-def
+               (string? base-type)
+               (not (class-subtype? env base-type "Function")))
+      (let [msg (str "`" method "` is a " base-type
+                     ", which is not callable; a class must inherit Function"
+                     " to be called like a function")]
+        (throw (ex-info msg {:error (type-error msg)}))))
     (when-not method-sig
       (let [call-arities (env-call-method-arities env base-type)]
         (if (= 1 (count call-arities))
@@ -8646,8 +8657,9 @@
                                    (range 1 (inc n)))
                      :return-type "Any"})))
 
-(defn register-builtin-methods
-  "Register method signatures for built-in types."
+(defn- register-builtin-methods*
+  "Register method signatures for built-in types, one by one. See
+   register-builtin-methods, which reuses this function's result."
   [env]
   (register-any-protocol! env)
   (register-comparable-protocol! env)
@@ -8673,6 +8685,26 @@
   (register-atomic-reference-methods! env)
   (register-channel-methods! env)
   (register-function-call-methods! env))
+
+(def ^:private builtin-registrations
+  "The classes and method signatures register-builtin-methods* adds to an
+   empty env. They're the same every time, and it only adds, never reads."
+  (delay (let [env (make-type-env)]
+           (register-builtin-methods* env)
+           {:classes @(:classes env) :methods @(:methods env)})))
+
+(defn register-builtin-methods
+  "Register method signatures for built-in types. A fresh type env is made
+   for every expression the lowering pass infers a type for, so these are
+   computed once and merged in rather than registered one by one each time.
+   The result is the same: like env-add-class and env-add-method, a builtin
+   replaces a class, or a method signature of the same arity, that ENV
+   already has under its name."
+  [env]
+  (let [{:keys [classes methods]} @builtin-registrations]
+    (swap! (:classes env) merge classes)
+    ;; class -> method -> arity -> signature
+    (swap! (:methods env) #(merge-with (partial merge-with merge) % methods))))
 
 ;;
 ;; Undefined-type validation

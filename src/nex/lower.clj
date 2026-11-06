@@ -92,24 +92,31 @@
             qualified-name))
         (:imports env)))
 
+(def ^:private builtin-class-defs-cache
+  "The builtin classes, as builtin-class-defs returns them. They're fixed, so
+   they're built once: the lowering pass asks for them for every program and
+   REPL input, several times."
+  (delay
+   (let [interp-builtins (into {}
+                               (map (fn [class-def] [(:name class-def) class-def]))
+                               (concat [(bootstrap/build-any-base-class)
+                                        (bootstrap/build-function-base-class)
+                                        (bootstrap/build-iterable-base-class)
+                                        (bootstrap/build-cursor-base-class)
+                                        (bootstrap/build-comparable-base-class)]
+                                       (map bootstrap/build-builtin-scalar-class
+                                            ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))
+         env (tc/make-type-env)]
+     (tc/register-builtin-methods env)
+     ;; The typechecker registers Iterable and Cursor by signature only; the
+     ;; bootstrap definitions carry the bodies (Cursor's own `cursor`) that a
+     ;; heir inherits, so those two come from the bootstrap.
+     (vec (vals (merge interp-builtins @(:classes env)
+                       (select-keys interp-builtins ["Iterable" "Cursor"])))))))
+
 (defn- builtin-class-defs
   []
-  (let [interp-builtins (into {}
-                              (map (fn [class-def] [(:name class-def) class-def]))
-                              (concat [(bootstrap/build-any-base-class)
-                                       (bootstrap/build-function-base-class)
-                                       (bootstrap/build-iterable-base-class)
-                                       (bootstrap/build-cursor-base-class)
-                                       (bootstrap/build-comparable-base-class)]
-                                      (map bootstrap/build-builtin-scalar-class
-                                           ["String" "Integer" "Byte" "Integer16" "Integer32" "Real" "Boolean" "Char"])))
-        env (tc/make-type-env)]
-    (tc/register-builtin-methods env)
-    ;; The typechecker registers Iterable and Cursor by signature only; the
-    ;; bootstrap definitions carry the bodies (Cursor's own `cursor`) that a
-    ;; heir inherits, so those two come from the bootstrap.
-    (vals (merge interp-builtins @(:classes env)
-                 (select-keys interp-builtins ["Iterable" "Cursor"])))))
+  @builtin-class-defs-cache)
 
 (defn- class-generic-params
   "Generic parameters (`{:name .. :constraint ..}`) in scope inside CLASS-DEF:

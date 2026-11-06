@@ -77,6 +77,23 @@ declare type IntPair = Array[Integer]
 | `call0` | none | `Any` | Invocation protocol for nullary function-like values. |
 | `call1..call32` | `arg1..argN: Any` | `Any` | Invocation protocol for values that accept up to 32 arguments. |
 
+A class of your own becomes a function value by inheriting `Function` and
+defining the `callN` methods it supports. Its objects can then be called with
+`f(...)` and passed wherever a `Function` is expected. A class that defines
+`callN` without inheriting `Function` is not callable: `f(...)` on it is a type
+error.
+
+```nex
+class Times_Ten
+inherit Function
+feature
+  call1(a: Integer): Integer do result := a * 10 end
+end
+
+let f := create Times_Ten
+print(f(10))   -- 100
+```
+
 ## `Iterable[T]` (deferred)
 
 Anything whose elements can be walked. `across` traverses any `Iterable`, and a

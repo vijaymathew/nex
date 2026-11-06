@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Only `Function` objects can be called like functions.** `f(...)` on an
+  object whose class defines `call1` (or another `callN`) but does not
+  inherit `Function` is now a type error. It used to be allowed, even though
+  such an object was already refused wherever a `Function` value was
+  expected. Add `inherit Function` to the class to make it callable.
+
 ## 0.6.8 - 2026-11-05
 
 - **Faster calls to free functions.** In a compiled program, a call to one
