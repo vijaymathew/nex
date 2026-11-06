@@ -16,6 +16,7 @@
    type checking. It is idempotent: applied extensions move from
    `:extensions` to `:applied-extensions`."
   (:require [clojure.string :as str]
+            [clojure.walk :as walk]
             [nex.types.bootstrap :as bootstrap]
             [nex.types.builtins :as bi]))
 
@@ -171,6 +172,251 @@
   [target]
   (contains? builtin-target-names target))
 
+;; ---------------------------------------------------------------------------
+;; Built-in targets
+;;
+;; A built-in value is a plain JVM value whose features come from a fixed table
+;; (nex.types.builtins/builtin-type-methods): there is no class definition to
+;; merge into. Each feature of an extension of one becomes a generated free
+;; function, `__ext_<Type>_<feature>_<arity>`, whose first parameter `__this`
+;; is the receiver; `this`, and the type's features named without a receiver,
+;; are rewritten to it. The function node carries :builtin-extension, which
+;; the type checker reads to register the feature on the type (and to record
+;; the calls that reach it, which the compiled backend rewrites into calls of
+;; the function), and the interpreter reads to dispatch to it.
+
+(def ^:private extendable-builtins
+  "The built-in types an extension may target."
+  #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
+    "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Task" "Channel"
+    "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
+    "Any" "Comparable"})
+
+(def root-targets
+  "The built-in types user classes inherit too: an extension of one reaches
+   user objects as well as built-in values."
+  #{"Any" "Comparable"})
+
+(def ^:private builtin-generic-params
+  "The generic parameter names of the generic built-ins, as their method
+   signatures use them."
+  {"Array" ["T"] "Set" ["T"] "Min_Heap" ["T"] "Task" ["T"] "Channel" ["T"]
+   "Atomic_Reference" ["T"] "Map" ["K" "V"] "Map_Entry" ["K" "V"]})
+
+(def this-param
+  "The name the receiver of a built-in extension's feature is bound to."
+  "__this")
+
+(defn- builtin-method-names
+  [type-name]
+  (cond-> (into #{} (map key) (get bi/builtin-type-methods (keyword type-name)))
+    (= "Comparable" type-name) (conj "compare")))
+
+(defn extension-function-name
+  [type-name feature arity]
+  (str "__ext_" type-name "_" feature "_" arity))
+
+(defn- member-arity [member] (count (:params member)))
+
+(defn- check-builtin-extension!
+  [ext]
+  (let [target (:target ext)
+        expected (get builtin-generic-params target)
+        given (map generic-param-name (:generic-params ext))]
+    (when-not (contains? extendable-builtins target)
+      (throw (extension-error (str "Extending built-in type '" target "' is not supported.")
+                              ext ext)))
+    (cond
+      (and (seq expected) (empty? given))
+      (throw (extension-error
+              (str "'" target "' is generic. Write its generic parameters in the extension: 'extend "
+                   target " [" (str/join ", " expected) "]'.")
+              ext ext))
+
+      (and (empty? expected) (seq given))
+      (throw (extension-error
+              (str "'" target "' is not generic, so 'extend " target "' takes no generic parameters.")
+              ext ext))
+
+      (not= (vec expected) (vec given))
+      (throw (extension-error
+              (str "An extension of '" target "' uses its own generic parameter names: write 'extend "
+                   target " [" (str/join ", " expected) "]'.")
+              ext ext)))
+    (doseq [section (:body ext)
+            member (:members section)]
+      (when (:declaration-only? member)
+        (throw (extension-error
+                (str "Feature '" (:name member) "' of 'extend " target "' cannot be deferred: no "
+                     "class inherits from a built-in type, so nothing could implement it.")
+                member ext)))
+      (when (or (contains? (builtin-method-names target) (:name member))
+                (contains? (builtin-method-names "Any") (:name member)))
+        (throw (extension-error
+                (str "'" target "' already has feature '" (:name member)
+                     "'. An extension cannot replace a built-in feature; give the extension's "
+                     "feature another name.")
+                member ext))))))
+
+(defn- this-identifier
+  [node]
+  (merge {:type :identifier :name this-param} (select-keys node [:dbg/line :dbg/col])))
+
+(defn- bound-names
+  "Names a routine body binds: its parameters, its locals (an `across`
+   loop's variable is one), and the parameters of the functions it makes."
+  [member]
+  (let [names (volatile! (into #{} (map :name) (:params member)))]
+    (walk/postwalk (fn [n]
+                     (when (map? n)
+                       (case (:type n)
+                         :let (vswap! names conj (:name n))
+                         :anonymous-function (vswap! names into (map :name) (:params n))
+                         nil))
+                     n)
+                   [(:body member) (:require member) (:ensure member) (:rescue member)])
+    @names))
+
+(defn- receiver-rewrite
+  "FORM with `this`, and every feature of FEATURES used without a receiver,
+   given the receiver `__this`."
+  [features form]
+  (walk/prewalk
+   (fn [n]
+     (if-not (map? n)
+       n
+       (case (:type n)
+         :this (this-identifier n)
+         :identifier (if (contains? features (:name n))
+                       (merge {:type :call :target (this-identifier n) :method (:name n)
+                               :args [] :has-parens false}
+                              (select-keys n [:dbg/line :dbg/col]))
+                       n)
+         :call (let [t (:target n)]
+                 (cond
+                   (and (nil? t) (contains? features (:method n)))
+                   (assoc n :target (this-identifier n))
+
+                   ;; `to_upper.trim`: a receiver named by a bare name is
+                   ;; held as a string. A feature's name cannot be a local's
+                   ;; (see bound-names), so it is the feature.
+                   (and (string? t) (contains? features t))
+                   (assoc n :target (merge {:type :call :target (this-identifier n) :method t
+                                            :args [] :has-parens false}
+                                           (select-keys n [:dbg/line :dbg/col])))
+
+                   :else n))
+         n)))
+   form))
+
+(defn builtin-extension-functions
+  "The generated function nodes for EXT, an extension of a built-in type.
+   EXTRA-FEATURES are the names of the type's other extension features in
+   the program, which a body may use without a receiver too."
+  ([ext] (builtin-extension-functions ext #{}))
+  ([ext extra-features]
+   (check-builtin-extension! ext)
+   (let [target (:target ext)
+         gparams (:generic-params ext)
+         this-type (if (seq gparams)
+                     {:base-type target :type-args (mapv generic-param-name gparams)}
+                     target)
+         members (mapcat :members (:body ext))
+         features (into (into (builtin-method-names target) (builtin-method-names "Any"))
+                        (concat extra-features (map :name members)))
+         info (extension-info ext)]
+     (vec
+      (for [member members]
+        (let [_ (when-let [hidden (first (filter features (bound-names member)))]
+                  (throw (extension-error
+                          (str "'" hidden "' in feature '" (:name member) "' of 'extend " target
+                               "' would hide feature '" hidden "' of " target
+                               ". Give the local or parameter another name.")
+                          member ext)))
+              arity (member-arity member)
+              fn-name (extension-function-name target (:name member) arity)
+              rw (partial receiver-rewrite features)
+              params (into [{:name this-param :type this-type}] (:params member))
+              body (rw (:body member))
+              pos (select-keys member [:dbg/line :dbg/col])
+              method-def (merge {:type :method
+                                 :name (str "call" (count params))
+                                 ;; Messages name the feature, not the function.
+                                 :function-name (str target "." (:name member))
+                                 :params params
+                                 :return-type (:return-type member)
+                                 :declaration-only? false
+                                 :note (:note member)
+                                 :require (rw (:require member))
+                                 :body body
+                                 :ensure (rw (:ensure member))
+                                 :rescue (rw (:rescue member))
+                                 :extension info}
+                                pos)
+              class-def {:type :class
+                         :name (str fn-name "_Function")
+                         :generic-params gparams
+                         :note nil
+                         :parents [{:parent "Function"}]
+                         :body [{:type :feature-section
+                                 :visibility {:type :public}
+                                 :members [method-def]}]
+                         :invariant nil}]
+          (cond-> {:type :function
+                   :name fn-name
+                   :class-name (:name class-def)
+                   :generic-params gparams
+                   :declaration-only? false
+                   :params params
+                   :return-type (:return-type member)
+                   :body body
+                   :class-def class-def
+                   :builtin-extension {:type target
+                                       :feature (:name member)
+                                       :arity arity
+                                       :info info}}
+            (:source-file ext) (assoc :source-file (:source-file ext)))))))))
+
+(defn- check-no-root-feature-clash!
+  "Reject a class declaring a feature an extension of `Any` or `Comparable`
+   adds. A call of such a feature is resolved to the extension's function
+   statically on the compiled backend, so a class's own version could not
+   take over from it as a redefinition does."
+  [classes root-fns]
+  (let [added (into {} (map (fn [f] (let [{:keys [type feature arity]} (:builtin-extension f)]
+                                      [[feature arity] type])))
+                    root-fns)]
+    (when (seq added)
+      (doseq [c classes
+              :when (not-any? #(= "Function" (:parent %)) (:parents c))
+              member (feature-members c)
+              :when (not (:extension member))
+              :let [root (get added (member-key member))]
+              :when root]
+        (throw (extension-error
+                (str "Class '" (:name c) "' declares feature '" (:name member) "', which "
+                     "'extend " root "' also adds to every " (if (= "Any" root) "value" "comparable value")
+                     ". Rename one of them: an extension of " root " cannot be redefined by a class.")
+                member nil))))))
+
+(defn rewrite-extension-calls
+  "AST with each call node in CALLS (an IdentityHashMap from the call node to
+   the name of the generated function it reaches; see the type checker's
+   :extension-calls) made a call of that function, its receiver first."
+  [ast ^java.util.IdentityHashMap calls]
+  (if (or (nil? calls) (.isEmpty calls))
+    ast
+    (walk/prewalk
+     (fn [n]
+       (if-let [fn-name (and (map? n) (.get calls n))]
+         (let [target (:target n)
+               receiver (if (string? target) {:type :identifier :name target} target)]
+           (merge (dissoc n :target)
+                  {:type :call :target nil :method fn-name
+                   :args (into [receiver] (:args n)) :has-parens true}))
+         n))
+     ast)))
+
 (defn- target-indices
   "Indices in CLASSES of the class EXT extends, by bare or qualified name."
   [classes target]
@@ -198,14 +444,24 @@
      to :classes, as a redefinition of that class; when it already holds the
      extension (a module interned again), it is left alone.
    - :leave-unresolved?, to keep an extension whose target is found nowhere
-     in :extensions instead of throwing, for a later stage to apply."
+     in :extensions instead of throwing, for a later stage to apply.
+   - :builtin-features, a function from a built-in type's name to the names
+     of the features earlier inputs' extensions gave it, which a body may use
+     without a receiver."
   ([program] (apply-extensions program nil nil))
   ([program entry-source-file] (apply-extensions program entry-source-file nil))
-  ([program entry-source-file {:keys [lookup leave-unresolved?]}]
+  ([program entry-source-file {:keys [lookup leave-unresolved?] :as opts}]
    (let [exts (:extensions program)]
      (if (empty? exts)
        program
-       (let [{:keys [classes left applied]}
+       (let [;; Every built-in type's extension features, by type: a body may
+             ;; use any of them without a receiver.
+             builtin-features (reduce (fn [m ext]
+                                        (update m (:target ext) (fnil into #{})
+                                                (map :name (mapcat :members (:body ext)))))
+                                      {}
+                                      exts)
+             {:keys [classes functions left applied]}
              (reduce
               (fn [{:keys [classes] :as acc} ext]
                 (let [target (:target ext)
@@ -224,6 +480,24 @@
                                  (str/replace (first (sort identities)) "." "/")
                                  "'.")
                             ext ext))
+
+                    (and (empty? idxs) (builtin-target? target))
+                    (let [fns (builtin-extension-functions
+                               ext (into (get builtin-features target #{})
+                                         (when-let [earlier (:builtin-features opts)]
+                                           (earlier target))))]
+                      (doseq [f fns]
+                        (when (some #(= (:name f) (:name %)) (:functions acc))
+                          (let [{:keys [type feature]} (:builtin-extension f)]
+                            (throw (extension-error
+                                    (str "Feature '" feature "' of " type " is already added by "
+                                         "another extension. A type can be given a feature by "
+                                         "one extension only.")
+                                    ext ext)))))
+                      (-> acc
+                          (update :functions into fns)
+                          (update :classes into (map :class-def fns))
+                          (update :applied conj ext)))
 
                     (seq idxs)
                     (-> acc
@@ -246,9 +520,13 @@
 
                     :else
                     (throw (unknown-target-error ext)))))
-              {:classes (vec (:classes program)) :left [] :applied []}
+              {:classes (vec (:classes program)) :functions [] :left [] :applied []}
               exts)]
+         (check-no-root-feature-clash!
+          classes
+          (filter #(contains? root-targets (get-in % [:builtin-extension :type])) functions))
          (assoc program
                 :classes classes
+                :functions (into (vec (:functions program)) functions)
                 :extensions left
                 :applied-extensions (into (vec (:applied-extensions program)) applied)))))))

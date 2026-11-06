@@ -1551,6 +1551,16 @@
                         (:type-aliases ast))]
     (swap! *repl-type-aliases* assoc (:name alias) alias)))
 
+(defn- session-builtin-extension-functions
+  "The functions earlier inputs' extensions of built-in types generated
+   (nex.extend/builtin-extension-functions), from whichever backend ran
+   them."
+  [ctx]
+  (->> (concat (filter :builtin-extension (vals @(:function-asts @*compiled-repl-session*)))
+               (some-> (:builtin-extension-fns ctx) deref vals))
+       (reduce (fn [m f] (assoc m (:name f) f)) {})
+       vals))
+
 (defn- fold-session-extensions
   "AST with each `extend` block whose target this input or an earlier one
    declares folded into that class (docs/proposals/open-features.md): an
@@ -1569,15 +1579,19 @@
                   ;; Generated function classes are not user classes.
                   (when (and (map? cd) (= :class (:type cd)))
                     cd)))
+      :builtin-features (fn [target]
+                          (into #{} (comp (filter #(= target (get-in % [:builtin-extension :type])))
+                                          (map #(get-in % [:builtin-extension :feature])))
+                                (session-builtin-extension-functions ctx)))
       :leave-unresolved? true})))
 
 (defn- type-check-repl-input!
   "Type-check `ast` against the session so far (`ctx`'s previously defined
    classes/functions/imports plus everything interned), when type checking
    is on and there's actually something in `ast` worth checking. Throws
-   `ex-info` (after printing each error) on failure; otherwise returns the
-   types inferred for `fn` literals (tc/type-check's :lambda-types), or nil
-   when nothing was checked."
+   `ex-info` (after printing each error) on failure; otherwise returns
+   tc/type-check's result (its :lambda-types and :extension-calls are what
+   the caller needs), or nil when nothing was checked."
   [ctx ast source-id]
   (when (and @*type-checking-enabled*
              (= (:type ast) :program)
@@ -1669,12 +1683,16 @@
                                      set)
           result (tc/type-check augmented-ast
                                 {:var-types @*repl-var-types*
-                                 :skip-class-body-names skip-class-body-names})]
+                                 :skip-class-body-names skip-class-body-names
+                                 ;; An interpreted session keeps no function
+                                 ;; nodes the checker could read them from.
+                                 :builtin-extension-functions
+                                 (session-builtin-extension-functions ctx)})]
       (when-not (:success result)
         (doseq [line (tc/format-type-errors result)]
           (println line))
         (throw (ex-info "Type checking failed" {:errors (:errors result)})))
-      (:lambda-types result))))
+      result)))
 
 (defn- repl-log-path
   []
@@ -1955,8 +1973,12 @@
                ast (inject-session-refinements ast @*repl-type-aliases*)]
            (sync-and-remember-type-aliases! exec-ctx source-id ast)
            (let [ast (fold-session-extensions exec-ctx source-id ast)
-                 ast (tc/apply-inferred-lambda-types
-                      ast (type-check-repl-input! ctx ast source-id))]
+                 checked (type-check-repl-input! ctx ast source-id)
+                 ast (-> ast
+                         ;; Calls of a built-in type's extension features
+                         ;; become calls of the functions implementing them.
+                         (extend/rewrite-extension-calls (:extension-calls checked))
+                         (tc/apply-inferred-lambda-types (:lambda-types checked)))]
            (cond
              ;; Experimental compiled path for narrow expression-shaped program inputs.
              (and (= (:type ast) :program)

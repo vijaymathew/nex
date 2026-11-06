@@ -3740,8 +3740,70 @@
                           {})
     (:return-type target-type)))
 
+(def ^:dynamic *extension-calls*
+  "While type-check runs, an IdentityHashMap from each call node that reaches
+   a feature of a built-in type's extension to the generated function that
+   implements it (see nex.extend/builtin-extension-functions), for the
+   compiled backend to rewrite into a call of the function
+   (nex.extend/rewrite-extension-calls). nil otherwise."
+  nil)
+
+(defn register-builtin-extension-methods!
+  "Register, as a method of its built-in type, the feature each generated
+   extension function in FUNCTIONS implements: its parameters after the
+   receiver, and the name of the function."
+  [env functions]
+  (doseq [f functions
+          :let [{:keys [type feature]} (:builtin-extension f)]
+          :when type]
+    (env-add-method env type feature
+                    {:params (vec (rest (:params f)))
+                     :return-type (:return-type f)
+                     :extension-fn (:name f)
+                     :extension-constraints
+                     (into {} (keep (fn [{:keys [name constraint]}]
+                                      (when constraint
+                                        [(type-name-string name) (type-name-string constraint)])))
+                           (:generic-params f))})))
+
+(defn- root-extension-signature
+  "The signature of METHOD of ARGC that an extension of Comparable (when
+   BASE-TYPE is comparable) or of Any adds, or nil: every value has the
+   features an extension gives Any, whatever its type."
+  [env base-type method argc]
+  (some (fn [root]
+          (when-let [sig (env-lookup-method env root method argc)]
+            (when (and (:extension-fn sig)
+                       (or (= root "Any")
+                           (and base-type (types-compatible? env base-type "Comparable"))))
+              sig)))
+        ["Comparable" "Any"]))
+
+(defn- check-extension-call!
+  "For CALL, which reaches the built-in extension feature METHOD-SIG
+   describes: check that the receiver's type arguments satisfy the
+   extension's constraints (`extend Array [T -> Comparable]`), and record the
+   call for the compiled backend."
+  [env call method-sig base-type target-type]
+  (let [constraints (:extension-constraints method-sig)]
+    (when (seq constraints)
+      (let [param-names (map #(type-name-string (:name %))
+                             (:generic-params (env-lookup-class env base-type)))
+            args (when (map? target-type) (or (:type-args target-type) (:generic-args target-type)))
+            bound (zipmap param-names args)]
+        (doseq [[gname constraint] constraints
+                :let [arg (get bound gname)]
+                :when arg]
+          (when-not (types-compatible? env arg constraint)
+            (let [msg (str "'" (:method call) "' is a feature of " base-type " [" gname " -> "
+                           constraint "] only, and " (display-type arg)
+                           " does not satisfy " constraint ".")]
+              (throw (ex-info msg {:error (type-error msg)}))))))))
+  (when-let [^java.util.IdentityHashMap calls *extension-calls*]
+    (.put calls call (:extension-fn method-sig))))
+
 (defn- check-general-target-call
-  [env {:keys [method args has-parens from-pattern from-across]}
+  [env {:keys [method args has-parens from-pattern from-across] :as call}
    {:keys [base-type type-map current-class class-target target-type with-java?]}]
   (let [class-def (env-lookup-class env base-type)]
     ;; Resolution order is what makes an override an override. The receiver's
@@ -3758,9 +3820,13 @@
     ;; keyed on the real base type rather than a fallback.
     (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
                             (lookup-class-method env base-type method (count args) current-class)
-                            (builtin-method-signature "Any" method (count args) type-map))]
-      (check-call-signature env method args method-sig
-                            (member-type-map env target-type type-map method-sig))
+                            (builtin-method-signature "Any" method (count args) type-map)
+                            (root-extension-signature env base-type method (count args)))]
+      (do
+        (when (:extension-fn method-sig)
+          (check-extension-call! env call method-sig base-type target-type))
+        (check-call-signature env method args method-sig
+                              (member-type-map env target-type type-map method-sig)))
       (let [arg-types (mapv #(check-expression env %) args)]
         ;; A method not declared/inherited anywhere in the Nex chain may
         ;; still be a real, inherited (non-overridden) member of a Java
@@ -9439,6 +9505,8 @@
            (env-add-var env (:name fn-def) (:class-name fn-def))
            (when (:qualified-name fn-def)
              (env-add-var env (:qualified-name fn-def) (:class-name fn-def))))
+         (register-builtin-extension-methods! env (concat (:builtin-extension-functions opts)
+                                                          normalized-functions))
 
        ;; (Registered before class collection: a class constant's value is
        ;; checked eagerly in collect-class-info and may call a free function.)
@@ -9635,8 +9703,11 @@
    opts may include :var-types - a map of {var-name => type} for pre-existing variables."
   ([ast] (type-check ast {}))
   ([ast opts]
-   (binding [*inferred-lambda-types* (atom {})]
-     (assoc (check-program ast opts) :lambda-types @*inferred-lambda-types*))))
+   (binding [*inferred-lambda-types* (atom {})
+             *extension-calls* (java.util.IdentityHashMap.)]
+     (assoc (check-program ast opts)
+            :lambda-types @*inferred-lambda-types*
+            :extension-calls *extension-calls*))))
 
 (defn apply-inferred-lambda-types
   "AST with every `fn` literal named in LAMBDA-TYPES (type-check's
@@ -9708,6 +9779,7 @@
       (register-visible-generic-classes! env visible-classes visible-var-types)
       (doseq [fn-def normalized-functions]
         (env-add-var env (:name fn-def) (:class-name fn-def)))
+      (register-builtin-extension-methods! env normalized-functions)
       (doseq [[var-name var-type] visible-var-types]
         (env-add-var env var-name var-type))
       (when-let [current-class (:current-class opts)]

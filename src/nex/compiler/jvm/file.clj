@@ -298,7 +298,12 @@
                           (when-not (:success result)
                             (throw (ex-info "Type checking failed"
                                             {:errors (tc/format-type-errors result)})))
-                          (tc/apply-inferred-lambda-types module-ast (:lambda-types result))))
+                          (-> module-ast
+                              ;; Calls of a built-in type's extension features
+                              ;; become calls of the functions that implement
+                              ;; them (docs/proposals/open-features.md).
+                              (extend/rewrite-extension-calls (:extension-calls result))
+                              (tc/apply-inferred-lambda-types (:lambda-types result)))))
            prepared-ast (lower/prepare-program-for-closures
                          module-ast
                          {:classes (:classes module-ast)

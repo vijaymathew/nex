@@ -17,7 +17,11 @@
       one that adds a variant must supply the missing implementation.
    6. In the REPL, an `extend` input redefines its target class with the
       features added, on both backends, and a module interned by an input is
-      checked with the session."
+      checked with the session.
+   7. Built-in types: an extension's features become generated functions,
+      reached from calls on the type's values on both backends, `this` and
+      the type's own features usable in their bodies; extensions of Any and
+      Comparable reach user objects too."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -252,9 +256,9 @@ end
   (testing "an unknown target"
     (is (str/includes? (error-message "extend Nope feature f(): Integer do result := 1 end end\n")
                        "Cannot extend unknown class 'Nope'")))
-  (testing "built-in targets are not supported yet"
-    (is (str/includes? (error-message "extend String feature f(): Integer do result := 1 end end\n")
-                       "Extending built-in type 'String' is not supported yet")))
+  (testing "a built-in type that cannot be extended"
+    (is (str/includes? (error-message "extend Console feature f(): Integer do result := 1 end end\n")
+                       "Extending built-in type 'Console' is not supported")))
   (testing "a generic target needs its generic parameters"
     (is (str/includes? (error-message "class Box [T]
   create make(v: T) do value := v end
@@ -448,3 +452,180 @@ end
         (if original
           (System/setProperty "nex.user.dir" original)
           (System/clearProperty "nex.user.dir"))))))
+
+(def ^:private builtin-extensions
+  "extend String
+feature
+  is_palindrome: Boolean do
+    let s := to_lower
+    result := true
+    from let i := 0 until i >= length / 2 do
+      if s.char_at(i) /= s.char_at(length - 1 - i) then result := false end
+      i := i + 1
+    end
+  end
+
+  shout(n: Integer): String
+    require positive: n > 0
+    do
+      result := to_upper
+      from let i := 1 until i >= n do
+        result := result + \"!\"
+        i := i + 1
+      end
+    end
+end
+
+extend Integer
+feature
+  squared: Integer do result := this * this end
+  is_even_square: Boolean do result := squared % 2 = 0 end
+end
+
+extend Array [T -> Comparable]
+feature
+  maximum: T
+    require non_empty: not is_empty
+    do
+      result := get(0)
+      across this as x do
+        if x > result then result := x end
+      end
+    end
+end
+")
+
+(deftest builtin-extensions-test
+  (testing "features of String, Integer and a constrained Array"
+    (is (= ["true" "false" "\"HEY!!\"" "49" "true" "9" "\"c\""]
+           (both (str builtin-extensions
+                      "print(\"Level\".is_palindrome)
+print(\"abc\".is_palindrome)
+print(\"hey\".shout(3))
+print(7.squared)
+print(4.is_even_square)
+print([3, 9, 4].maximum)
+print([\"b\", \"c\", \"a\"].maximum)
+")))))
+  (testing "a precondition of a built-in extension's feature"
+    (is (= ["\"Precondition violation: positive\""]
+           (both (str builtin-extensions
+                      "do print(\"x\".shout(0)) rescue print(exception.to_string) end\n")))))
+  (testing "Any and Comparable reach built-in values and user objects"
+    (is (= ["\"[5]\"" "\"[Dog Rex]\"" "\"[Dog Fido]\"" "true" "false" "true"]
+           (both "class Dog
+  create make(n: String) do name := n end
+  feature
+    name: String
+    to_string: String do result := \"Dog \" + name end
+end
+
+class Money
+  inherit Comparable
+  create make(c: Integer) do cents := c end
+  feature
+    cents: Integer
+    compare(a: Any): Integer do
+      if convert a to m: Money then result := cents - m.cents else result := 0 end
+    end
+end
+
+extend Any
+feature
+  bracketed: String do result := \"[\" + to_string + \"]\" end
+end
+
+extend Comparable
+feature
+  is_between(lo, hi: Any): Boolean do result := compare(lo) >= 0 and compare(hi) <= 0 end
+end
+
+print(5.bracketed)
+print((create Dog.make(\"Rex\")).bracketed)
+let x: Any := create Dog.make(\"Fido\")
+print(x.bracketed)
+print(5.is_between(1, 10))
+print(\"m\".is_between(\"a\", \"f\"))
+print((create Money.make(50)).is_between(create Money.make(10), create Money.make(100)))
+"))))
+  (testing "errors"
+    (doseq [[code expected]
+            [["extend String feature length: Integer do result := 1 end end\n"
+              "'String' already has feature 'length'"]
+             ["extend String feature f(): Integer deferred end\n"
+              "cannot be deferred"]
+             ["extend Array feature f: Integer do result := 1 end end\n"
+              "Write its generic parameters in the extension: 'extend Array [T]'"]
+             ["extend Array [E] feature f: Integer do result := 1 end end\n"
+              "write 'extend Array [T]'"]
+             ["class Dog create make do end end
+extend Array [T -> Comparable] feature first_one: T do result := get(0) end end
+let ds: Array[Dog] := [create Dog.make]
+print(ds.first_one)
+" "'first_one' is a feature of Array [T -> Comparable] only, and Dog does not satisfy Comparable"]
+             ["extend String feature f: Integer do let length := 1 result := length end end\n"
+              "would hide feature 'length' of String"]
+             ["class Dog create make do end feature tag: String do result := \"d\" end end
+extend Any feature tag: String do result := \"a\" end end
+" "Class 'Dog' declares feature 'tag', which 'extend Any' also adds"]
+             ["extend String feature f: Integer do result := 1 end end
+extend String feature f: Integer do result := 2 end end
+" "already added by another extension"]]]
+      (is (str/includes? (str (error-message code)) expected) code))))
+
+(deftest builtin-extensions-in-modules-test
+  (let [dir (doto (.toFile (java.nio.file.Files/createTempDirectory
+                            "open_features_builtin"
+                            (make-array java.nio.file.attribute.FileAttribute 0)))
+              (.deleteOnExit))]
+    (write-module! dir "Strings.nex" "extend String
+feature
+  exclaim: String do result := this + \"!\" end
+end
+")
+    (write-module! dir "Loud.nex" "intern Strings
+extend String
+feature
+  loud: String do result := to_upper.exclaim end
+end
+")
+    (let [main (write-module! dir "main.nex" "intern Loud
+intern Strings
+print(\"hi\".loud)
+print(\"ok\".exclaim)
+")
+          compiled (run-file main {})]
+      (is (= ["\"HI!\"" "\"ok!\""] compiled))
+      (is (= compiled (run-file main {:interpret? true}))))))
+
+(deftest repl-builtin-extensions-test
+  (in-both-repls
+   ["extend Integer feature squared: Integer do result := this * this end end"
+    "print(7.squared)"
+    "let n := 5"
+    "print(n.squared + 1)"
+    "extend String feature twice: String do result := this + this end end print(\"ab\".twice)"
+    "extend Integer feature cubed: Integer do result := squared * this end end"
+    "print(3.cubed)"]
+   (fn [out]
+     (is (= "49" (nth out 1)))
+     (is (= "26" (nth out 3)))
+     (is (= "\"abab\"" (last (str/split-lines (nth out 4)))))
+     (is (= "27" (nth out 6))))))
+
+(deftest comparable-receiver-test
+  (testing "`compare` through a Comparable-typed receiver reaches a user object on the compiled backend"
+    (is (= ["2" "-1"]
+           (both "class Money
+  inherit Comparable
+  create make(c: Integer) do cents := c end
+  feature
+    cents: Integer
+    compare(a: Any): Integer do
+      if convert a to m: Money then result := cents - m.cents else result := 0 end
+    end
+end
+function cmp(x: Comparable, y: Any): Integer do result := x.compare(y) end
+print(cmp(create Money.make(5), create Money.make(3)))
+print(cmp(4, 9))
+")))))

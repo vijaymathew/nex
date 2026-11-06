@@ -340,15 +340,22 @@ Helpers an extension needs can be free functions.
 
 ### Concrete built-ins
 
-`String`, `Integer`, `Integer64`, `Real`, `Decimal`, `Char`, `Boolean`, `Byte`,
-`Array [T]`, `Map [K, V]`, `Set [T]` and the other built-in value types are
-extended the same way. Because no class can inherit from them, there are no
-heirs to dispatch over:
+`String`, `Integer`, `Byte`, `Integer16`, `Integer32`, `Real`, `Char`,
+`Boolean`, `Array [T]`, `Map [K, V]`, `Set [T]`, `Map_Entry [K, V]`,
+`Min_Heap [T]`, `Task [T]`, `Channel [T]` and the atomic types can be extended.
+(`Console`, `Process` and `Program` cannot.) Because no class can inherit from
+them, there are no heirs to dispatch over:
 
-- `deferred` is rejected on a concrete built-in target, because nothing could
-  ever implement it.
-- Each extended feature compiles to a function whose first parameter is the
-  receiver, bound as `this` in the body.
+- `deferred` is rejected on a built-in target, because nothing could ever
+  implement it.
+- Each extended feature becomes a generated function,
+  `__ext_<Type>_<feature>_<arity>`, whose first parameter `__this` is the
+  receiver (`nex.extend/builtin-extension-functions`).
+- In the body, `this` is the receiver, and the type's features (its own, `Any`'s,
+  and those its extensions add) may be used without a receiver, as in a class:
+  `to_lower`, `get(0)`, `squared`. To keep that unambiguous, a local or
+  parameter may not have the name of one of those features, just as a local
+  may not hide a field in a class.
 - `this` cannot be reassigned. `Integer` and `String` are values, so an
   extension cannot change the receiver itself, but it may call mutating built-in
   features on it (`this.add(x)` on an `Array`).
@@ -360,28 +367,34 @@ heirs to dispatch over:
 An extension on `Real` does **not** apply to `Integer` values. In Nex, an
 `Integer` passed where a `Real` is expected is converted, not treated as a
 subtype at runtime (`numeric-subtype-runtime?`, `src/nex/types/typeinfo.clj`).
-Extend each numeric type that needs the feature. The type checker should report
-`i.f` on an `Integer` where only `extend Real` declares `f`, with a hint to add
-`extend Integer`.
+Extend each numeric type that needs the feature. (A hint to add `extend Integer`
+when only `extend Real` declares a feature is not implemented yet.)
 
 ### `Any` and `Comparable`
 
 `Any` is the root of every class, and user classes inherit `Comparable`. An
-extension on either reaches both kinds of value: built-in values through the
-extension table, and user objects through `Any`'s or `Comparable`'s definition.
+extension on either reaches both kinds of value: `5.bracketed` and
+`dog.bracketed` both run `extend Any`'s `bracketed`.
 
-In version 1 an extension on `Any` or `Comparable` must give a body. `deferred`
-on `Any` would require every type in the program, including every built-in, to
-implement the feature. Whether `deferred` on `Comparable` is useful enough to
-allow is an [open question](#open-questions).
+- An extension on `Any` or `Comparable` must give a body. `deferred` on `Any`
+  would require every type in the program, including every built-in, to
+  implement the feature. Whether `deferred` on `Comparable` is useful enough to
+  allow is an [open question](#open-questions).
+- **A class cannot redefine such a feature.** A class declaring a feature that an
+  extension of `Any` or `Comparable` adds is a compile error. On the compiled
+  backend a call of the feature is resolved to the extension's function
+  statically, so a class's own version could not take over as a redefinition
+  does. Making it redefinable needs dynamic dispatch on the receiver, and is
+  left for later.
 
 ### Generic built-ins
 
-`extend Array [T]` declares `T` for the extension's bodies. A constraint
-(`extend Array [T -> Comparable]`) makes the extension's features available only
-on arrays whose element type satisfies it; calling `maximum` on an
-`Array [Shape]` that is not `Comparable` is a type error. The constraint must be
-a plain type name, as for constrained generics today.
+`extend Array [T]` declares `T` for the extension's bodies, with the type's own
+parameter names (`Map [K, V]`). A constraint (`extend Array [T -> Comparable]`)
+makes the extension's features available only on arrays whose element type
+satisfies it; calling `maximum` on an `Array [Dog]` whose `Dog` is not
+`Comparable` is a type error. The constraint must be a plain type name, as for
+constrained generics today.
 
 ## How this solves the expression problem
 
@@ -476,9 +489,11 @@ Each of the three places that merge interns today calls the pass:
 - Targets with a Nex definition need nothing new: `lookup-method-with-inheritance`
   walks class definitions, which now contain the extended features, and already
   combines inherited contracts.
-- Built-in targets: `call-builtin-method` (`src/nex/types/builtins.clj`) checks
-  the extension table after the type's own method table and before the `Any`
-  defaults.
+- Built-in targets: evaluating a generated function records it in the context's
+  extension table, by type, feature and arity. `call-builtin-method` checks the
+  table, for the value's own type, then `Comparable` when the value is
+  comparable, then `Any`. A user object reaches `Any`'s and `Comparable`'s
+  extension features the same way when its class has no such feature.
 
 ### JVM backend
 
@@ -487,12 +502,12 @@ Each of the three places that merge interns today calls the pass:
   (`nex/dispatch/F_<name>$<arity>`, `dispatch-interface-name` in
   `src/nex/compiler/jvm/emit.clj`). An extended method is emitted like any other,
   so the class implements that interface.
-- Built-in targets: a call whose receiver's static type is a built-in compiles to
-  a direct static call of the generated function. This is cheaper than the
-  generic built-in call path that `def-builtin-method-wrapper`
-  (`src/nex/compiler/jvm/runtime.clj`) falls back to. Calls whose receiver type
-  is known only at runtime (for example through `T -> Comparable`) reach the
-  extension table through `bi/call-builtin-method`.
+- Built-in targets: the type checker registers each generated function's feature
+  as a method of its type, and records every call that resolves to one
+  (`:extension-calls` of `tc/type-check`). Before lowering, those calls are
+  rewritten into ordinary calls of the generated functions, receiver first
+  (`nex.extend/rewrite-extension-calls`), so lowering sees only function calls.
+  There is no runtime table on this backend.
 - **Known issue: source positions.** The JVM records one source file per class,
   so a stack frame inside an extended method would name the class's file with
   the extension's line numbers. Extended methods need their own source mapping,

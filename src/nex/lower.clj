@@ -6879,6 +6879,12 @@
                  (and (= base-type "Any") (:with-java? env))
                  (str "builtin-or-java:" method)
 
+                 ;; A `Comparable` may be a user object, whose `compare` the
+                 ;; builtin table knows nothing of; the user-method helper
+                 ;; dispatches on the runtime value, builtin values included.
+                 (= base-type "Comparable")
+                 (str "user-method:" method)
+
                  :else
                  (str "builtin-method:" base-type ":" method))]
     (ir/call-runtime-node helper

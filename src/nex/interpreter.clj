@@ -471,7 +471,10 @@
                      ;; Every `extend` block applied so far, so a class
                      ;; registered again (a module interned by two others is
                      ;; evaluated twice) gets its extensions back.
-                     :applied-extensions (atom []))]
+                     :applied-extensions (atom [])
+                     ;; [type feature arity] -> generated function node, for
+                     ;; the features extensions add to built-in types.
+                     :builtin-extension-fns (atom {}))]
       ;; Register built-in base classes
       (doseq [class-def (bootstrap/base-class-defs)]
         (register-class ctx class-def))
@@ -1740,7 +1743,39 @@
 (def builtin-type-methods bi/builtin-type-methods)
 (def builtin-type-method-return-type bi/builtin-type-method-return-type)
 (def get-type-name bi/get-type-name)
-(def call-builtin-method bi/call-builtin-method)
+(declare invoke-nex-object-call)
+
+(def ^:private comparable-builtin-types
+  #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "String"})
+
+(defn- builtin-extension-function
+  "The function object implementing METHOD of ARITY for VALUE, added by an
+   `extend` block of a built-in type (see nex.extend/builtin-extension-functions):
+   of VALUE's own built-in type, else of Comparable when VALUE is comparable,
+   else of Any. nil when there is none."
+  [ctx value method arity]
+  (when-let [table (some-> (:builtin-extension-fns ctx) deref not-empty)]
+    (let [object-class (when (nex-object? value) (:class-name value))
+          type-name (when-not object-class (some-> (bi/get-type-name value) name))
+          comparable? (if object-class
+                        (is-parent? ctx object-class "Comparable")
+                        (contains? comparable-builtin-types type-name))
+          fn-node (or (when type-name (get table [type-name method arity]))
+                      (when comparable? (get table ["Comparable" method arity]))
+                      (get table ["Any" method arity]))]
+      (when fn-node
+        (env-lookup (:globals ctx) (:name fn-node))))))
+
+(defn call-builtin-method
+  "Call METHOD on VALUE, a built-in value: one of its type's own features,
+   or one an extension added."
+  ([target value method args]
+   (bi/call-builtin-method target value method args))
+  ([ctx target value method args]
+   (if-let [f (and ctx (builtin-extension-function ctx value method (count args)))]
+     (invoke-nex-object-call ctx nil nil (str "call" (inc (count args))) f true
+                             (into [value] args))
+     (bi/call-builtin-method ctx target value method args))))
 ;;
 ;; Node Evaluators
 ;;
@@ -1892,10 +1927,22 @@
    done."
   [ctx classes extensions]
   (let [earlier (filter (fn [ext] (some #(extends-class? ext %) classes))
-                        @(:applied-extensions ctx))]
+                        @(:applied-extensions ctx))
+        builtin-features (fn [target]
+                           (into #{} (comp (filter #(= target (:target %)))
+                                           (mapcat :body) (mapcat :members) (map :name))
+                                 extensions))]
     (reduce (fn [classes ext]
               (let [idxs (keep-indexed (fn [i c] (when (extends-class? ext c) i)) classes)]
                 (cond
+                  ;; As in nex.extend/apply-extensions: a built-in type's
+                  ;; name, unless this program declares a class of that name.
+                  (and (empty? idxs) (extend/builtin-target? (:target ext)))
+                  (do (doseq [f (extend/builtin-extension-functions
+                                 ext (builtin-features (:target ext)))]
+                        (eval-node ctx f))
+                      classes)
+
                   (seq idxs)
                   (do (record-applied-extension! ctx ext)
                       (reduce #(update %1 %2 extend/merge-extension ext) classes idxs))
@@ -1987,7 +2034,12 @@
   nil)
 
 (defmethod eval-node :function
-  [ctx {:keys [name class-def class-name]}]
+  [ctx {:keys [name class-def class-name builtin-extension] :as fn-node}]
+  ;; A function an `extend` block of a built-in type generated: calls of the
+  ;; feature it implements reach it through call-builtin-method.
+  (when-let [{:keys [type feature arity]} builtin-extension]
+    (when-let [table (:builtin-extension-fns ctx)]
+      (swap! table assoc [type feature arity] fn-node)))
   ;; Register the generated function class and create a global instance
   (register-class ctx class-def)
   (let [obj (make-object class-name {})]
@@ -2528,8 +2580,15 @@
             field-val
             (throw (ex-info (str "Method not found: " method)
                             {:object obj :method method})))))
-      (if (get-in builtin-type-methods [:Any method])
+      (cond
+        (get-in builtin-type-methods [:Any method])
         (call-builtin-method ctx (or target-name target) obj method arg-values)
+
+        ;; A feature an extension of Any or Comparable adds.
+        (builtin-extension-function ctx obj method (count arg-values))
+        (call-builtin-method ctx (or target-name target) obj method arg-values)
+
+        :else
         (throw (ex-info (str "Method not found: " method)
                         {:object obj :method method}))))))
 
