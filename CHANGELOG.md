@@ -2,6 +2,86 @@
 
 ## Unreleased
 
+- **Open features: `extend`.** A class can be given new features from
+  outside its declaration, in another module if need be:
+
+  ```nex
+  extend Shape
+  feature
+    area(): Real
+      deferred
+      ensure non_negative: result >= 0.0
+      end
+  end
+
+  extend Circle
+  feature
+    area: Real do result := 3.14159 * radius * radius end
+  end
+  ```
+
+  Callers write `s.area` as for any feature, and calls dispatch on the
+  object's class. An extension's contracts are inherited by every
+  implementation, and the class invariant is checked around extended
+  routines. A `deferred` feature must be implemented by every concrete heir
+  in the program. A heir with none is a compile error that names the
+  extension and its file, so a program combining a module that adds an
+  operation with one that adds a class gets told exactly what is missing. A
+  default body lets heirs skip it. An extension adds routines only (no
+  fields, constructors or invariants), sees only its target's public
+  features, and cannot replace a feature the class already has. Two
+  extensions cannot add the same feature. See
+  `docs/proposals/open-features.md`.
+- **Extending built-in types.** `String`, `Integer` and the other numeric
+  types, `Char`, `Boolean`, `Array [T]`, `Map [K, V]`, `Set [T]`, `Task`,
+  `Channel`, the atomic types, `Console`, `Process` and `Program` can be
+  extended: `extend String feature is_palindrome: Boolean do ... end end`
+  makes `"Level".is_palindrome` work. In the body, `this` is the value and
+  the type's own features can be used without `this.`. A constraint limits
+  an extension to some type arguments: `extend Array [T -> Comparable]`
+  gives `maximum` to arrays of comparable values only. Extensions of `Any`
+  and `Comparable` reach every value, user objects included. A class cannot
+  redefine a feature added this way.
+- **Extending Java classes and interfaces.** After `import
+  java.lang.StringBuilder`, `extend StringBuilder feature ... end` adds
+  features to it, and the class's methods can be called in the body
+  without `this.`. A subclass, or a class implementing an extended
+  interface (`extend List`), has the feature too. A feature may be added to
+  only one class of a Java hierarchy, and cannot replace one of the class's
+  methods. The Java classes that hold Nex's own values (`ArrayList`,
+  `HashMap`, `String`, ...) cannot be extended; the error says which Nex
+  type to extend instead.
+- **`extend` in the REPL.** An `extend` input adds the features to a class
+  an earlier input declared, on both backends. A module the input interns
+  may extend classes of the session too.
+- **The REPL type-checks inputs that only intern modules.** An input such as
+  `intern geometry/Shapes` used to run without checking what the module
+  declares. It is now checked with the session, as `nex file.nex` checks a
+  file's interns. Interning a large library may take a little longer.
+- **Error traces name the right file.** A runtime error in a class or free
+  function of an interned module now says which file it is in, `at line 6
+  of Geometry.nex, in Circle.check_me`. It used to give only the line, with
+  nothing to say it was not in the main file. A routine an extension adds,
+  and closures inside either, report the extension's file. A jar run with
+  `java -jar` shows the same files in its stack traces.
+- **Fix: `convert` to a Java class** (`convert a to b: StringBuilder`) was
+  never true, on either backend. It now tests the object as Java does: a
+  subclass or an implementing class matches, and a Nex `String` is a
+  `java.lang.CharSequence`.
+- **Fix: arithmetic on a Java method's result** (`xs.size() * 2`) stopped
+  the compiler with "Unsupported binary opcode emission". A Java method
+  returning a number, `boolean`, `char` or `String` now gives the matching
+  Nex type.
+- **Fix: `compare` through a `Comparable`-typed value** failed on a user
+  object in compiled code ("Method not found on type: compare").
+- **Editors.** `nex format`, the Emacs mode and the VS Code extension lay
+  out an `extend` block like a class and highlight `extend` and its target.
+  `extend` is a soft keyword, so it remains an ordinary name elsewhere
+  (`let extend := 3`). The outline lists each `extend` block with its
+  features. A class written in the formatter's style, with `feature` flush
+  with `class`, is now outlined as one block; its outline entry used to stop
+  at the first section.
+
 - **Only `Function` objects can be called like functions.** `f(...)` on an
   object whose class defines `call1` (or another `callN`) but does not
   inherit `Function` is now a type error. It used to be allowed, even though
