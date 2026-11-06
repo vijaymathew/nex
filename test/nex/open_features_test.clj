@@ -655,3 +655,68 @@ function cmp(x: Comparable, y: Any): Integer do result := x.compare(y) end
 print(cmp(create Money.make(5), create Money.make(3)))
 print(cmp(4, 9))
 ")))))
+
+(deftest stack-trace-source-files-test
+  ;; The JVM records one source file per class. A routine an `extend` block
+  ;; in another file adds to a class, a free function of an interned module
+  ;; and a closure in either are compiled into a companion class of their
+  ;; own file (nex.compiler.jvm.emit/split-foreign-methods), so a runtime
+  ;; error's trace names the file the code is in.
+  (let [dir (doto (.toFile (java.nio.file.Files/createTempDirectory
+                            "open_features_trace"
+                            (make-array java.nio.file.attribute.FileAttribute 0)))
+              (.deleteOnExit))
+        trace (fn [main-text]
+                (let [main (write-module! dir "main.nex" main-text)]
+                  (with-out-str (e/run-file main {}))))]
+    (write-module! dir "Geometry.nex" "class Circle
+  create make(r: Real) do radius := r end
+  feature
+    radius: Real
+    check_me do
+      raise \"in class body\"
+    end
+end
+")
+    (write-module! dir "Areas.nex" "intern Geometry
+
+-- padding
+
+extend Circle
+feature
+  area: Real do
+    raise \"in extension\"
+  end
+  blow: Integer do
+    let f := fn (x: Integer): Integer do raise \"inside closure\" end
+    result := f(1)
+  end
+end
+
+function helper(n: Integer): Integer do
+  raise \"in module function\"
+end
+
+extend String
+feature
+  boom: Integer do raise \"in string ext\" end
+end
+")
+    (testing "a routine an extension in another file adds"
+      (let [out (trace "intern Areas\nprint((create Circle.make(1.0)).area)\n")]
+        (is (str/includes? out "at line 8 of Areas.nex, in Circle.area") out)
+        (is (not (str/includes? out "$Src")) out)
+        (is (not (str/includes? out "  in Circle.area")) "no frame for the forwarding method")))
+    (testing "a routine of an interned class"
+      (is (str/includes? (trace "intern Areas\n(create Circle.make(1.0)).check_me\n")
+                         "at line 6 of Geometry.nex, in Circle.check_me")))
+    (testing "a closure in an extension's routine"
+      (let [out (trace "intern Areas\nprint((create Circle.make(1.0)).blow)\n")]
+        (is (str/includes? out "at line 11 of Areas.nex, in an anonymous function") out)
+        (is (str/includes? out "called from line 12 of Areas.nex, in Circle.blow") out)))
+    (testing "a free function of an interned module"
+      (is (str/includes? (trace "intern Areas\nprint(helper(1))\n")
+                         "at line 17 of Areas.nex, in helper")))
+    (testing "a built-in type's extension feature, named as the reader wrote it"
+      (is (str/includes? (trace "intern Areas\nprint(\"x\".boom)\n")
+                         "at line 22 of Areas.nex, in String.boom")))))

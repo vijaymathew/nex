@@ -17,6 +17,7 @@
    `:extensions` to `:applied-extensions`."
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
+            [nex.ast-walk :as aw]
             [nex.types.bootstrap :as bootstrap]
             [nex.types.builtins :as bi]))
 
@@ -141,7 +142,9 @@
                       (or (:source-file ext) entry-source-file))
         tag (fn [member]
               (cond-> (assoc member :extension info)
-                member-file (assoc :source-file member-file)))]
+                member-file (-> (assoc :source-file member-file)
+                                ;; Its closures are classes of their own.
+                                (aw/stamp-closure-source-file member-file))))]
     (reduce (fn [cd section]
               (let [section' (-> section
                                  (assoc :extension info)
@@ -178,7 +181,7 @@
 ;; A built-in value is a plain JVM value whose features come from a fixed table
 ;; (nex.types.builtins/builtin-type-methods): there is no class definition to
 ;; merge into. Each feature of an extension of one becomes a generated free
-;; function, `__ext_<Type>_<feature>_<arity>`, whose first parameter `__this`
+;; function, `__ext_<Type>__<feature>__<arity>`, whose first parameter `__this`
 ;; is the receiver; `this`, and the type's features named without a receiver,
 ;; are rewritten to it. The function node carries :builtin-extension, which
 ;; the type checker reads to register the feature on the type (and to record
@@ -213,8 +216,17 @@
     (= "Comparable" type-name) (conj "compare")))
 
 (defn extension-function-name
+  "The name of the function generated for FEATURE of ARITY of the built-in
+   TYPE-NAME. `__` separates the parts, since a type's name may hold `_`
+   (Map_Entry); see extension-function-feature."
   [type-name feature arity]
-  (str "__ext_" type-name "_" feature "_" arity))
+  (str "__ext_" type-name "__" feature "__" arity))
+
+(defn extension-function-feature
+  "\"Type.feature\" for FN-NAME, a name extension-function-name made, or nil."
+  [fn-name]
+  (when-let [[_ t f] (re-matches #"__ext_(.+?)__(.+)__\d+" (str fn-name))]
+    (str t "." f)))
 
 (defn- member-arity [member] (count (:params member)))
 
@@ -375,7 +387,8 @@
                                        :feature (:name member)
                                        :arity arity
                                        :info info}}
-            (:source-file ext) (assoc :source-file (:source-file ext)))))))))
+            (:source-file ext) (-> (assoc :source-file (:source-file ext))
+                                   (aw/stamp-closure-source-file (:source-file ext))))))))))
 
 (defn- check-no-root-feature-clash!
   "Reject a class declaring a feature an extension of `Any` or `Comparable`
@@ -529,4 +542,8 @@
                 :classes classes
                 :functions (into (vec (:functions program)) functions)
                 :extensions left
-                :applied-extensions (into (vec (:applied-extensions program)) applied)))))))
+                ;; Where each was, not its body: later passes walk the whole
+                ;; program, and must find each routine once, in its class.
+                :applied-extensions (into (vec (:applied-extensions program))
+                                          (map #(select-keys % [:target :source-file :dbg/line :dbg/col]))
+                                          applied)))))))

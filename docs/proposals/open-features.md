@@ -349,7 +349,7 @@ inherit from them, there are no heirs to dispatch over:
 - `deferred` is rejected on a built-in target, because nothing could ever
   implement it.
 - Each extended feature becomes a generated function,
-  `__ext_<Type>_<feature>_<arity>`, whose first parameter `__this` is the
+  `__ext_<Type>__<feature>__<arity>`, whose first parameter `__this` is the
   receiver (`nex.extend/builtin-extension-functions`).
 - In the body, `this` is the receiver, and the type's features (its own, `Any`'s,
   and those its extensions add) may be used without a receiver, as in a class:
@@ -508,11 +508,22 @@ Each of the three places that merge interns today calls the pass:
   rewritten into ordinary calls of the generated functions, receiver first
   (`nex.extend/rewrite-extension-calls`), so lowering sees only function calls.
   There is no runtime table on this backend.
-- **Known issue: source positions.** The JVM records one source file per class,
-  so a stack frame inside an extended method would name the class's file with
-  the extension's line numbers. Extended methods need their own source mapping,
-  for example a generated line table or a per-method source attribute in the
-  emitted debug information.
+- **Source positions.** The JVM records one source file per class, and a stack
+  frame names the file of its method's class. A routine an `extend` block in
+  another file adds to a class is therefore moved, after emission, into a
+  companion class `<Class>$Src<N>` whose source file is the extension's: a
+  static method taking the object first, which the class's own same-named
+  method forwards to (`split-foreign-methods`, `src/nex/compiler/jvm/emit.clj`).
+  Dispatch and call sites are unchanged, and the body moves as is, since an
+  instance method's `this` and arguments occupy the same local slots as the
+  static method's. The same applies to free functions of interned modules,
+  which are compiled into the program's class, and to closures in either,
+  whose classes take their file from the code they are written in. `nex`'s
+  error trace reports a companion's frames as its class's routine
+  (`in Circle.area`) and skips the forwarder's frame; a raw JVM trace (a jar run
+  directly) shows the companion with the right file and line. (Compiling an
+  interned module's classes with their own file, rather than the entry file's,
+  came with this: before it, a frame in any interned class named no file.)
 
 ### REPL
 

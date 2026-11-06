@@ -9,6 +9,7 @@
    to use it."
   (:require [clojure.java.io]
             [clojure.string :as str]
+            [nex.ast-walk :as aw]
             [nex.parser :as parser])
   (:import [clj_antlr ParseError]))
 
@@ -226,6 +227,8 @@
   (let [sibling-names (into #{} (keep :name) defs)]
     (mapv #(-> %
                (assoc :qualified-name (qualify-name path (:name %)) :source-file source-file)
+               ;; Its closures are compiled as classes of their own.
+               (aw/stamp-closure-source-file source-file)
                (qualify-constant-sibling-refs path sibling-names))
           defs)))
 

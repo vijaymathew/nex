@@ -9019,6 +9019,15 @@
                                                            params))))))))))]
       (vec (shims class-def own-ctor-names #{(:name class-def)})))))
 
+(defn- with-member-source-file
+  "FN-NODE, lowered from METHOD-DEF, carrying METHOD-DEF's :source-file: set
+   only on a routine an `extend` block in another file added to its class.
+   The emitter moves such a routine into a class of that file
+   (nex.compiler.jvm.emit/split-foreign-methods)."
+  [fn-node method-def]
+  (cond-> fn-node
+    (:source-file method-def) (assoc :source-file (:source-file method-def))))
+
 (defn- lower-own-methods
   "Each routine the class declares. In a class whose hierarchy declares an
    invariant, a routine with a body is emitted as its unchecked twin (see
@@ -9043,8 +9052,8 @@
                                                     (effective-method-contracts env class-def method-def)
                                                     extra)))]
                  (if (or (not twins?) deferred?)
-                   [(lower {})]
-                   [(lower {:unchecked-twin? true})
+                   [(with-member-source-file (lower {}) method-def)]
+                   [(with-member-source-file (lower {:unchecked-twin? true}) method-def)
                           (forwarding-method-node env class-meta class-name compiled-classes
                                                   {:source-class class-name
                                                    :carrier-path []
@@ -9159,7 +9168,9 @@
     {:name class-name
      :jvm-name (:jvm-name class-meta)
      :internal-name (:internal-name class-meta)
-     :source-file (:source-file opts)
+     ;; A class from an interned module names its own file, not the entry
+     ;; file, so a stack frame in one of its routines does too.
+     :source-file (or (:source-file class-def) (:source-file opts))
      :deferred? (boolean (:deferred? class-def))
      :parents (resolve-parent-metas env class-def)
      :composition-fields (mapv (fn [{:keys [nex-name internal-name composition-field deferred?]}]
@@ -9385,7 +9396,9 @@
                                                                                 :visible-classes visible-classes
                                                                                 :compiled-classes (:compiled-classes opts)))]
                                              ;; Direct calls need its typed static method.
-                                             (cond-> fn-node
+                                             ;; A function from an interned module keeps
+                                             ;; its file (see with-member-source-file).
+                                             (cond-> (with-member-source-file fn-node %)
                                                (and *direct-free-functions*
                                                     (:typed-descriptor fn-node)
                                                     (not (:deferred? fn-node)))

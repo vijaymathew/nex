@@ -15,7 +15,7 @@
             [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir]
             [nex.types.builtins :as bi])
-  (:import [org.objectweb.asm ClassWriter Label MethodVisitor Opcodes Type]))
+  (:import [org.objectweb.asm ClassReader ClassVisitor ClassWriter Label MethodVisitor Opcodes Type]))
 
 (def ^:private class-version Opcodes/V17)
 (def ^:private repl-state-internal-name "nex/compiler/jvm/runtime/NexReplState")
@@ -4991,3 +4991,82 @@
   ([launcher-spec] (compile-launcher->bytes launcher-spec {}))
   ([launcher-spec opts]
    (emit-class (launcher-class-spec launcher-spec) opts)))
+
+;; ---------------------------------------------------------------------------
+;; Methods from another source file
+;;
+;; The JVM records one SourceFile per class, so a stack frame names the file
+;; of the class its method is in. A class may hold methods written in another
+;; file, though: the routines an `extend` block in another module adds to it
+;; (docs/proposals/open-features.md), or the program's free functions from an
+;; interned module. Each such method moves to a companion class,
+;; `<Class>$Src<N>`, whose SourceFile is that file, as a static method taking
+;; the object first; the class keeps a same-named method forwarding to it, so
+;; dispatch and every call site are unchanged. A static method's arguments,
+;; and an instance method's `this` and arguments, occupy the same local slots
+;; in both forms, so the body moves unchanged.
+
+(def companion-suffix-pattern
+  "Matches the suffix that names a companion class (see split-foreign-methods)."
+  #"\$Src\d+$")
+
+(defn- emit-companion-forwarder!
+  [^ClassWriter cw access name desc companion companion-desc]
+  (let [^MethodVisitor mv (.visitMethod cw access name desc nil nil)
+        static? (pos? (bit-and access Opcodes/ACC_STATIC))]
+    (.visitCode mv)
+    (loop [[^Type t & more] (cond->> (seq (Type/getArgumentTypes ^String desc))
+                              (not static?) (cons (Type/getObjectType "java/lang/Object")))
+           slot 0]
+      (when t
+        (.visitVarInsn mv (.getOpcode t Opcodes/ILOAD) slot)
+        (recur more (+ slot (.getSize t)))))
+    (.visitMethodInsn mv Opcodes/INVOKESTATIC companion name companion-desc false)
+    (.visitInsn mv (.getOpcode (Type/getReturnType ^String desc) Opcodes/IRETURN))
+    (.visitMaxs mv 0 0)
+    (.visitEnd mv)))
+
+(defn split-foreign-methods
+  "CLASS-BYTES, the class INTERNAL-NAME compiled from SOURCE-FILE, as
+   {internal name -> bytes}: itself, and a companion class for each other
+   file FOREIGN ({JVM method name -> source file}) names, holding that file's
+   methods. Just the class itself when FOREIGN names no other file."
+  [^bytes class-bytes internal-name source-file foreign {:keys [known-supers]}]
+  (let [own (source-file-name source-file)
+        foreign (into {} (keep (fn [[m f]]
+                                 (let [n (source-file-name f)]
+                                   (when (and n (not= n own)) [m n]))))
+                      foreign)]
+    (if (empty? foreign)
+      {internal-name class-bytes}
+      (let [files (vec (distinct (vals foreign)))
+            companions (into {}
+                             (map-indexed
+                              (fn [i f]
+                                (let [cname (str internal-name "$Src" (inc i))
+                                      cw (make-class-writer known-supers)]
+                                  (.visit cw class-version
+                                          (+ Opcodes/ACC_PUBLIC Opcodes/ACC_SUPER Opcodes/ACC_SYNTHETIC)
+                                          cname nil "java/lang/Object" nil)
+                                  (.visitSource cw f nil)
+                                  [f {:name cname :writer cw}])))
+                             files)
+            owner (make-class-writer known-supers)
+            visitor (proxy [ClassVisitor] [Opcodes/ASM9 owner]
+                      (visitMethod [access name desc signature exceptions]
+                        (if-let [{cname :name ^ClassWriter cw :writer} (some-> (get foreign name) companions)]
+                          (let [static? (pos? (bit-and access Opcodes/ACC_STATIC))
+                                cdesc (if static? desc (str "(L" internal-name ";" (subs desc 1)))]
+                            (emit-companion-forwarder! owner access name desc cname cdesc)
+                            ;; The body, read on into the companion.
+                            (.visitMethod cw
+                                          (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC
+                                             (bit-and access Opcodes/ACC_SYNTHETIC))
+                                          name cdesc signature exceptions))
+                          (proxy-super visitMethod access name desc signature exceptions))))]
+        (.accept (ClassReader. class-bytes) visitor ClassReader/SKIP_FRAMES)
+        (into {internal-name (.toByteArray owner)}
+              (map (fn [{cname :name ^ClassWriter cw :writer}]
+                     (.visitEnd cw)
+                     [cname (.toByteArray cw)]))
+              (vals companions))))))
