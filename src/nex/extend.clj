@@ -321,6 +321,8 @@
          n)))
    form))
 
+(declare generate-extension-functions)
+
 (defn builtin-extension-functions
   "The generated function nodes for EXT, an extension of a built-in type.
    EXTRA-FEATURES are the names of the type's other extension features in
@@ -328,14 +330,21 @@
   ([ext] (builtin-extension-functions ext #{}))
   ([ext extra-features]
    (check-builtin-extension! ext)
-   (let [target (:target ext)
-         gparams (:generic-params ext)
+   (let [target (:target ext)]
+     (generate-extension-functions
+      ext target
+      (into (into (builtin-method-names target) (builtin-method-names "Any"))
+            (concat extra-features (map :name (mapcat :members (:body ext)))))))))
+
+(defn- generate-extension-functions
+  "The function nodes for EXT's features on TARGET, whose features FEATURES
+   a body may use without a receiver."
+  [ext target features]
+  (let [gparams (:generic-params ext)
          this-type (if (seq gparams)
                      {:base-type target :type-args (mapv generic-param-name gparams)}
                      target)
          members (mapcat :members (:body ext))
-         features (into (into (builtin-method-names target) (builtin-method-names "Any"))
-                        (concat extra-features (map :name members)))
          info (extension-info ext)]
      (vec
       (for [member members]
@@ -388,7 +397,7 @@
                                        :arity arity
                                        :info info}}
             (:source-file ext) (-> (assoc :source-file (:source-file ext))
-                                   (aw/stamp-closure-source-file (:source-file ext))))))))))
+                                   (aw/stamp-closure-source-file (:source-file ext)))))))))
 
 (defn- check-no-root-feature-clash!
   "Reject a class declaring a feature an extension of `Any` or `Comparable`
@@ -411,6 +420,125 @@
                      "'extend " root "' also adds to every " (if (= "Any" root) "value" "comparable value")
                      ". Rename one of them: an extension of " root " cannot be redefined by a class.")
                 member nil))))))
+
+;; ---------------------------------------------------------------------------
+;; Java targets (phase 2)
+;;
+;; An imported Java class is extended the way a built-in type is: each
+;; feature becomes a generated function taking the receiver first, which
+;; calls whose receiver's static type is the class (or a Java subclass of it)
+;; reach. A feature may be added to one class of a Java hierarchy only, so the
+;; static choice the compiled backend makes and the runtime one the
+;; interpreter makes are always the same class's.
+
+(def ^:private java-representation-classes
+  "Java classes that are the runtime form of a Nex built-in value, with the
+   Nex type to extend instead."
+  {"java.util.ArrayList" "Array" "java.util.HashMap" "Map" "java.util.LinkedHashSet" "Set"
+   "java.lang.String" "String" "java.lang.Long" "Integer" "java.lang.Integer" "Integer32"
+   "java.lang.Short" "Integer16" "java.lang.Double" "Real" "java.lang.Character" "Char"
+   "java.lang.Boolean" "Boolean"})
+
+(defn java-target-class-name
+  "The qualified name of the Java class TARGET names through IMPORTS (import
+   nodes), or nil."
+  [imports target]
+  (some (fn [{:keys [qualified-name source]}]
+          (when (and qualified-name (nil? source)
+                     (= target (last (str/split qualified-name #"\."))))
+            qualified-name))
+        imports))
+
+(defn- java-class
+  ^Class [qualified-name]
+  (try (Class/forName qualified-name false (.getContextClassLoader (Thread/currentThread)))
+       (catch Throwable _ nil)))
+
+(defn- java-public-methods
+  "#{[name arity]} of CLS's public methods, inherited ones included."
+  [^Class cls]
+  (into #{} (map (fn [^java.lang.reflect.Method m] [(.getName m) (.getParameterCount m)]))
+        (.getMethods cls)))
+
+(defn java-supertypes
+  "CLS and every class and interface it extends or implements, nearest
+   first: its superclass chain, then the interfaces of each, breadth first."
+  [^Class cls]
+  (loop [queue (conj clojure.lang.PersistentQueue/EMPTY cls) seen #{} out []]
+    (if-let [^Class c (peek queue)]
+      (if (contains? seen c)
+        (recur (pop queue) seen out)
+        (recur (into (pop queue) (cond-> (vec (.getInterfaces c))
+                                   (.getSuperclass c) (->> (cons (.getSuperclass c)) vec)))
+               (conj seen c)
+               (conj out c)))
+      out)))
+
+(defn- check-java-extension!
+  [ext qualified-name ^Class cls]
+  (let [target (:target ext)]
+    (when (= "java.lang.Object" qualified-name)
+      (throw (extension-error
+              "Every value is a java.lang.Object, Nex's own included. Extend Any instead."
+              ext ext)))
+    (when-let [nex-type (get java-representation-classes qualified-name)]
+      (throw (extension-error
+              (str "'" qualified-name "' is how Nex represents " nex-type " values, so extending it "
+                   "would change " nex-type " too. Extend " nex-type " instead.")
+              ext ext)))
+    (when-not cls
+      (throw (extension-error (str "Cannot find Java class '" qualified-name "' to extend.") ext ext)))
+    (when (seq (:generic-params ext))
+      (throw (extension-error
+              (str "An extension of the Java class '" target "' takes no generic parameters.")
+              ext ext)))
+    (let [own (java-public-methods cls)]
+      (doseq [section (:body ext)
+              member (:members section)]
+        (when (:declaration-only? member)
+          (throw (extension-error
+                  (str "Feature '" (:name member) "' of 'extend " target "' cannot be deferred: "
+                       "Java classes cannot be made to implement it.")
+                  member ext)))
+        (when (contains? own [(:name member) (member-arity member)])
+          (throw (extension-error
+                  (str "Java class '" qualified-name "' already has a public method '" (:name member)
+                       "' taking " (member-arity member) " argument(s). An extension cannot replace it; "
+                       "give the extension's feature another name.")
+                  member ext)))))))
+
+(defn java-extension-functions
+  "The generated function nodes for EXT, an extension of the imported Java
+   class QUALIFIED-NAME (see builtin-extension-functions). EXTRA-FEATURES as
+   there."
+  [ext qualified-name extra-features]
+  (let [cls (java-class qualified-name)
+        _ (check-java-extension! ext qualified-name cls)
+        features (into (into #{} (map first) (java-public-methods cls))
+                       (concat extra-features (map :name (mapcat :members (:body ext)))))]
+    (mapv #(assoc-in % [:builtin-extension :java-class] qualified-name)
+          (generate-extension-functions ext (:target ext) features))))
+
+(defn- check-one-class-per-java-hierarchy!
+  "Reject a feature added to two classes of one Java hierarchy: the compiled
+   backend would choose between them by a value's static type and the
+   interpreter by its runtime class, which can differ."
+  [functions]
+  (let [java-fns (filter #(get-in % [:builtin-extension :java-class]) functions)]
+    (doseq [[_ fs] (group-by (juxt #(get-in % [:builtin-extension :feature])
+                                   #(get-in % [:builtin-extension :arity]))
+                             java-fns)
+            [a b] (for [a fs b fs :when (not= a b)] [a b])
+            :let [ca (java-class (get-in a [:builtin-extension :java-class]))
+                  cb (java-class (get-in b [:builtin-extension :java-class]))]
+            :when (and ca cb (.isAssignableFrom ca cb))]
+      (let [{:keys [feature]} (:builtin-extension a)]
+        (throw (extension-error
+                (str "Feature '" feature "' is added to both '" (.getName ca) "' and its subtype '"
+                     (.getName cb) "'. A feature may be added to one class of a Java hierarchy "
+                     "only; subtypes of that class have it too.")
+                {:dbg/line (get-in b [:builtin-extension :info :line])}
+                {:source-file (get-in b [:builtin-extension :info :source-file])}))))))
 
 (defn rewrite-extension-calls
   "AST with each call node in CALLS (an IdentityHashMap from the call node to
@@ -443,7 +571,11 @@
       (extension-error (str "Extending built-in type '" target "' is not supported yet. "
                             "Only classes declared in Nex can be extended for now.")
                        ext ext)
-      (extension-error (str "Cannot extend unknown class '" target "'.") ext ext))))
+      (extension-error (str "Cannot extend unknown class '" target "'."
+                            (when (re-matches #"[A-Z]\w*" target)
+                              (str " If it is a Java class, import it first: 'import <package>."
+                                   target "'.")))
+                       ext ext))))
 
 (defn apply-extensions
   "PROGRAM with every extension in :extensions merged into its target among
@@ -460,14 +592,17 @@
      in :extensions instead of throwing, for a later stage to apply.
    - :builtin-features, a function from a built-in type's name to the names
      of the features earlier inputs' extensions gave it, which a body may use
-     without a receiver."
+     without a receiver.
+   - :imports, import nodes of earlier inputs, through which a target may
+     name a Java class."
   ([program] (apply-extensions program nil nil))
   ([program entry-source-file] (apply-extensions program entry-source-file nil))
   ([program entry-source-file {:keys [lookup leave-unresolved?] :as opts}]
    (let [exts (:extensions program)]
      (if (empty? exts)
        program
-       (let [;; Every built-in type's extension features, by type: a body may
+       (let [imports (concat (:imports program) (:imports opts))
+             ;; Every built-in type's extension features, by type: a body may
              ;; use any of them without a receiver.
              builtin-features (reduce (fn [m ext]
                                         (update m (:target ext) (fnil into #{})
@@ -494,11 +629,15 @@
                                  "'.")
                             ext ext))
 
-                    (and (empty? idxs) (builtin-target? target))
-                    (let [fns (builtin-extension-functions
-                               ext (into (get builtin-features target #{})
-                                         (when-let [earlier (:builtin-features opts)]
-                                           (earlier target))))]
+                    (or (and (empty? idxs) (builtin-target? target))
+                        (and (empty? idxs) (java-target-class-name imports target)))
+                    (let [extra (into (get builtin-features target #{})
+                                      (when-let [earlier (:builtin-features opts)]
+                                        (earlier target)))
+                          fns (if (builtin-target? target)
+                                (builtin-extension-functions ext extra)
+                                (java-extension-functions
+                                 ext (java-target-class-name imports target) extra))]
                       (doseq [f fns]
                         (when (some #(= (:name f) (:name %)) (:functions acc))
                           (let [{:keys [type feature]} (:builtin-extension f)]
@@ -535,6 +674,7 @@
                     (throw (unknown-target-error ext)))))
               {:classes (vec (:classes program)) :functions [] :left [] :applied []}
               exts)]
+         (check-one-class-per-java-hierarchy! (concat (:functions program) functions))
          (check-no-root-feature-clash!
           classes
           (filter #(contains? root-targets (get-in % [:builtin-extension :type])) functions))

@@ -1583,6 +1583,8 @@
                           (into #{} (comp (filter #(= target (get-in % [:builtin-extension :type])))
                                           (map #(get-in % [:builtin-extension :feature])))
                                 (session-builtin-extension-functions ctx)))
+      ;; An earlier input's `import` may name the Java class extended.
+      :imports @(:imports ctx)
       :leave-unresolved? true})))
 
 (defn- type-check-repl-input!

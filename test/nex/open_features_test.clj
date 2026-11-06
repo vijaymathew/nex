@@ -720,3 +720,94 @@ end
     (testing "a built-in type's extension feature, named as the reader wrote it"
       (is (str/includes? (trace "intern Areas\nprint(\"x\".boom)\n")
                          "at line 22 of Areas.nex, in String.boom")))))
+
+(def ^:private java-extensions
+  "import java.lang.StringBuilder
+import java.util.LinkedList
+import java.util.List
+
+extend StringBuilder
+feature
+  shout(s: String) do
+    append(s.to_upper)
+    this.append(\"!\")
+  end
+  is_blank: Boolean do result := length() = 0 end
+end
+
+extend List
+feature
+  describe: String do result := \"list of \" + size().to_string end
+end
+")
+
+(deftest java-extensions-test
+  (testing "a Java class's features, its methods used without `this`, and an interface's
+            feature reached through a class implementing it"
+    (is (= ["true" "\"HEY!\"" "false" "\"list of 2\""]
+           (both (str java-extensions
+                      "let sb: StringBuilder := create StringBuilder
+print(sb.is_blank)
+sb.shout(\"hey\")
+print(sb.toString())
+print(sb.is_blank)
+
+let ll: LinkedList := create LinkedList
+ll.add(\"a\")
+ll.add(\"b\")
+print(ll.describe)
+")))))
+  (testing "errors"
+    (doseq [[code expected]
+            [["import java.util.ArrayList\nextend ArrayList feature f: Integer do result := 1 end end\n"
+              "is how Nex represents Array values"]
+             ["import java.lang.Object\nextend Object feature f: Integer do result := 1 end end\n"
+              "Extend Any instead"]
+             ["import java.lang.StringBuilder\nextend StringBuilder feature length: Integer do result := 1 end end\n"
+              "already has a public method 'length' taking 0 argument(s)"]
+             ["import java.lang.StringBuilder\nextend StringBuilder feature f(): Integer deferred end\n"
+              "cannot be deferred"]
+             ["import java.util.LinkedList\nextend LinkedList [T] feature f: Integer do result := 1 end end\n"
+              "takes no generic parameters"]
+             ["import java.util.LinkedList
+import java.util.List
+extend List feature f: Integer do result := 1 end end
+extend LinkedList feature f: Integer do result := 2 end end
+" "A feature may be added to one class of a Java hierarchy only"]
+             ["extend StringBuilder feature f: Integer do result := 1 end end\n"
+              "If it is a Java class, import it first"]
+             ["import java.util.Nope\nextend Nope feature f: Integer do result := 1 end end\n"
+              "Cannot find Java class 'java.util.Nope'"]]]
+      (is (str/includes? (str (error-message code)) expected) code))))
+
+(deftest java-extensions-in-modules-test
+  (let [dir (doto (.toFile (java.nio.file.Files/createTempDirectory
+                            "open_features_java"
+                            (make-array java.nio.file.attribute.FileAttribute 0)))
+              (.deleteOnExit))]
+    (write-module! dir "Builders.nex" "import java.lang.StringBuilder
+extend StringBuilder
+feature
+  is_blank: Boolean do result := length() = 0 end
+end
+")
+    (let [main (write-module! dir "main.nex" "intern Builders
+import java.lang.StringBuilder
+let sb: StringBuilder := create StringBuilder
+print(sb.is_blank)
+")
+          compiled (run-file main {})]
+      (is (= ["true"] compiled))
+      (is (= compiled (run-file main {:interpret? true}))))))
+
+(deftest repl-java-extensions-test
+  (in-both-repls
+   ["import java.lang.StringBuilder"
+    "extend StringBuilder feature is_blank: Boolean do result := length() = 0 end end"
+    "let sb: StringBuilder := create StringBuilder"
+    "print(sb.is_blank)"
+    "sb.append(\"x\")"
+    "print(sb.is_blank)"]
+   (fn [out]
+     (is (= "true" (nth out 3)))
+     (is (= "false" (nth out 5))))))

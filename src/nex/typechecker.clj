@@ -3754,17 +3754,33 @@
    receiver, and the name of the function."
   [env functions]
   (doseq [f functions
-          :let [{:keys [type feature]} (:builtin-extension f)]
+          :let [{:keys [type feature java-class]} (:builtin-extension f)]
           :when type]
-    (env-add-method env type feature
-                    {:params (vec (rest (:params f)))
-                     :return-type (:return-type f)
-                     :extension-fn (:name f)
-                     :extension-constraints
-                     (into {} (keep (fn [{:keys [name constraint]}]
-                                      (when constraint
-                                        [(type-name-string name) (type-name-string constraint)])))
-                           (:generic-params f))})))
+    (let [sig {:params (vec (rest (:params f)))
+               :return-type (:return-type f)
+               :extension-fn (:name f)
+               :extension-constraints
+               (into {} (keep (fn [{:keys [name constraint]}]
+                                (when constraint
+                                  [(type-name-string name) (type-name-string constraint)])))
+                     (:generic-params f))}]
+      (env-add-method env type feature sig)
+      ;; A Java class's subtypes reach it by its qualified name (see
+      ;; java-extension-signature).
+      (when java-class
+        (env-add-method env java-class feature sig)))))
+
+(defn- java-extension-signature
+  "The signature of METHOD of ARGC that an extension of a Java supertype of
+   BASE-TYPE, an imported Java class, adds, or nil."
+  [env base-type method argc]
+  (when-let [qualified (some-> (env-lookup-class env base-type) :import)]
+    (when-let [cls (try (Class/forName qualified false (.getContextClassLoader (Thread/currentThread)))
+                        (catch Throwable _ nil))]
+      (some (fn [^Class c]
+              (let [sig (env-lookup-method env (.getName c) method argc)]
+                (when (:extension-fn sig) sig)))
+            (extend/java-supertypes cls)))))
 
 (defn- root-extension-signature
   "The signature of METHOD of ARGC that an extension of Comparable (when
@@ -3821,6 +3837,7 @@
     (if-let [method-sig (or (builtin-method-signature base-type method (count args) type-map)
                             (lookup-class-method env base-type method (count args) current-class)
                             (builtin-method-signature "Any" method (count args) type-map)
+                            (java-extension-signature env base-type method (count args))
                             (root-extension-signature env base-type method (count args)))]
       (do
         (when (:extension-fn method-sig)

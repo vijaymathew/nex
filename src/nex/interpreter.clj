@@ -1760,7 +1760,13 @@
           comparable? (if object-class
                         (is-parent? ctx object-class "Comparable")
                         (contains? comparable-builtin-types type-name))
+          java? (and (nil? object-class) (nil? type-name) (some? value))
           fn-node (or (when type-name (get table [type-name method arity]))
+                      ;; A Java object: the extension of the nearest of its
+                      ;; classes and interfaces that has one.
+                      (when java?
+                        (some #(get table [(.getName ^Class %) method arity])
+                              (extend/java-supertypes (class value))))
                       (when comparable? (get table ["Comparable" method arity]))
                       (get table ["Any" method arity]))]
       (when fn-node
@@ -1943,6 +1949,14 @@
                         (eval-node ctx f))
                       classes)
 
+                  ;; An imported Java class (phase 2 of the proposal).
+                  (and (empty? idxs) (extend/java-target-class-name @(:imports ctx) (:target ext)))
+                  (do (doseq [f (extend/java-extension-functions
+                                 ext (extend/java-target-class-name @(:imports ctx) (:target ext))
+                                 (builtin-features (:target ext)))]
+                        (eval-node ctx f))
+                      classes)
+
                   (seq idxs)
                   (do (record-applied-extension! ctx ext)
                       (reduce #(update %1 %2 extend/merge-extension ext) classes idxs))
@@ -2037,9 +2051,12 @@
   [ctx {:keys [name class-def class-name builtin-extension] :as fn-node}]
   ;; A function an `extend` block of a built-in type generated: calls of the
   ;; feature it implements reach it through call-builtin-method.
-  (when-let [{:keys [type feature arity]} builtin-extension]
+  (when-let [{:keys [type feature arity java-class]} builtin-extension]
     (when-let [table (:builtin-extension-fns ctx)]
-      (swap! table assoc [type feature arity] fn-node)))
+      (swap! table assoc [type feature arity] fn-node)
+      ;; A Java object is looked up by its classes' qualified names.
+      (when java-class
+        (swap! table assoc [java-class feature arity] fn-node))))
   ;; Register the generated function class and create a global instance
   (register-class ctx class-def)
   (let [obj (make-object class-name {})]
@@ -2644,7 +2661,11 @@
                              :class-name compiled-class-name}))
             (runtime-resolve-call-user-method ctx obj method arg-values)))
         (runtime-resolve-call-user-method ctx obj method arg-values))
-      (java-call-method ctx obj method arg-values))))
+      (if-let [f (builtin-extension-function ctx obj method (count arg-values))]
+        ;; A feature an extension of the object's Java class adds.
+        (invoke-nex-object-call ctx nil nil (str "call" (inc (count arg-values))) f true
+                                (into [obj] arg-values))
+        (java-call-method ctx obj method arg-values)))))
 
 (defn- eval-call-with-target
   [ctx {:keys [target method has-parens]} arg-values]

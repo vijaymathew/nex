@@ -558,48 +558,76 @@ program that extends it.
 
 ## Phase 2: Java classes
 
-Imported Java classes (`import java.util.ArrayList`) have no Nex definition, and
-their bytecode cannot be changed. Phase 2 extends them the way Kotlin and C# do,
-with **static extensions**, built on the version 1 built-in path:
+Imported Java classes have no Nex definition, and their bytecode cannot be
+changed. Phase 2 extends them the way Kotlin and C# do, with **static
+extensions**, built on the version 1 built-in path:
 
 ```nex
-import java.util.ArrayList
+import java.lang.StringBuilder
+import java.util.List
 
-extend ArrayList
+extend StringBuilder
 feature
-  is_blank: Boolean do result := this.isEmpty() end
+  is_blank: Boolean do result := length() = 0 end
+end
+
+extend List
+feature
+  describe: String do result := "list of " + size().to_string end
 end
 ```
 
-- Each extended feature compiles to a function taking the receiver first, and is
-  recorded in the extension table keyed by Java class.
-- A call whose receiver's static type is the Java class compiles to a direct call
-  of that function.
-- **Runtime selection.** When several classes in one Java hierarchy are extended
-  with the same feature (`AbstractList` and `ArrayList`), the generated helper
-  tests the receiver's runtime class and picks the most specific extension. A
-  Java subclass that was never extended gets the nearest extended ancestor's
-  version. In the interpreter, the extension table is checked before reflective
-  calls (`invoke-method`, `src/nex/types/reflect.clj`).
+- The target names the class through an `import`, as any reference to it does.
+  Classes and interfaces (`List`) can both be extended.
+- Each feature becomes a generated function taking the receiver first
+  (`nex.extend/java-extension-functions`), exactly as for a built-in type. In
+  the body, `this` is the receiver and the class's public methods may be called
+  without one (`length()`); a local may not have the name of one of them.
+- **Static choice.** On the compiled backend, a call reaches the extension of
+  its receiver's static type, or, when that type is a Java class with no such
+  feature, of the nearest of its supertypes that has one (a reflective walk of
+  its superclasses and interfaces, at compile time). The interpreter walks the
+  receiver's runtime class the same way.
+- **Decision: one class per hierarchy.** A feature (name and arity) may be added
+  to one class of a Java hierarchy only; adding it to `List` and `LinkedList`
+  is an error. The proposal had imagined choosing among several by the
+  receiver's runtime class, the most specific first. That needs a runtime type
+  test the compiled backend cannot express today (`convert` to a Java type is
+  never true), and choosing by static type on one backend and by runtime class
+  on the other would make them disagree. With one class per hierarchy the two
+  choices are always the same. Subclasses still get the ancestor's feature.
 - **Rules:**
-  - no `deferred`: Java subclasses cannot be required to implement anything,
-    so every Java extension needs a body;
-  - `require` and `ensure` are checked in the generated helper;
-  - there are no invariants to check, because Java classes have none;
-  - bodies see only the Java class's public members;
-  - a public Java method with the same name and arity is a compile error,
-    so a Java method is never silently shadowed.
+  - no `deferred`: Java classes cannot be required to implement anything;
+  - no generic parameters (`extend LinkedList [T]`): Nex does not write Java
+    types with type arguments;
+  - `require` and `ensure` are checked, as for any routine; there are no
+    invariants, because Java classes have none;
+  - a public Java method with the same name and arity, inherited ones
+    included, is a compile error, so a Java method is never silently shadowed;
+  - the Java classes that are the runtime form of Nex values (`ArrayList`,
+    `HashMap`, `LinkedHashSet`, `String`, the boxed numbers) cannot be extended,
+    since that would change the Nex type too: the error says which Nex type to
+    extend instead. `java.lang.Object` cannot either; `extend Any` reaches every
+    value.
 - **Already covered by version 1:** a Nex class that inherits a Java class
   (`class My_Thread inherit Thread`) has a Nex definition, so extending it takes
   the class path.
 
-Phase 2 open questions:
+Phase 2 limits, from Java interop as it is today rather than from extensions:
+
+- Nex has no Java subtyping: a `StringBuilder` cannot be assigned to a
+  `CharSequence` variable, so a supertype's feature is reached through a
+  subtype-typed receiver, or a value a Java method returns.
+- A Java method's result is typed `Any`, and cannot be narrowed to a Java type,
+  so a feature cannot return the receiver's class (`append(...)` chains).
+- Arithmetic on a Java method's result (`size() * 2`) fails on the compiled
+  backend, in an extension or anywhere else.
+
+Open questions:
 
 - How to treat extensions that differ from a Java overload only in parameter
   types.
-- Whether Java interfaces can be targets (`extend List`), and how runtime
-  selection orders an interface against a class.
-- How generic Java types are written and checked (`extend ArrayList [T]`).
+- How generic Java types would be written and checked, once Nex can write them.
 
 ## Non-goals
 
