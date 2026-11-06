@@ -2219,16 +2219,25 @@
   (int (rt/nex-int-div (long a) (long b))))
 
 (defn div-long
-  [a b]
-  (long (rt/nex-int-div (long a) (long b))))
+  "Integer `/`, on primitive longs (compiled code calls it unboxed; see
+   nex.compiler.jvm.emit/emit-prim-long-arith!). A zero divisor or
+   MIN_LONG / -1 goes to rt/nex-int-div, which raises Nex's error for it."
+  ^long [^long a ^long b]
+  (if (or (zero? b) (and (= a Long/MIN_VALUE) (= b -1)))
+    (long (rt/nex-int-div a b))
+    (quot a b)))
 
 (defn mod-int
   [a b]
   (int (rt/nex-int-mod (long a) (long b))))
 
 (defn mod-long
-  [a b]
-  (long (rt/nex-int-mod (long a) (long b))))
+  "Integer `%`, on primitive longs (see div-long). A zero divisor goes to
+   rt/nex-int-mod, which raises Nex's error for it."
+  ^long [^long a ^long b]
+  (if (zero? b)
+    (long (rt/nex-int-mod a b))
+    (rem a b)))
 
 (defn pow-int
   [a b]

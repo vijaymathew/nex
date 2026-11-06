@@ -2328,9 +2328,32 @@
 
 (declare emit-direct-runtime-helper-call*)
 
+(def ^:private prim-long-arith-fns
+  "Integer `/` and `%` helper -> the runtime function computing it on two
+   primitive longs (an IFn$LLL), raising Nex's errors as the boxed call did."
+  {"op:div-long" "div-long" "op:mod-long" "mod-long"})
+
+(defn- emit-prim-long-arith!
+  "Integer `/` or `%` EXPR on two unboxed long operands, as an unboxed call
+   of its runtime function (IFn$LLL invokePrim), which the JIT can inline:
+   the boxed call through its Var cost more than the arithmetic in a loop.
+   Returns :long, or nil when EXPR is not that."
+  [^MethodVisitor mv expr state-slot]
+  (when-let [fn-name (get prim-long-arith-fns (:helper expr))]
+    (let [args (:args expr)]
+      (when (and (= :long (:jvm-type expr))
+                 (= 2 (count args))
+                 (every? #(= :long (:jvm-type %)) args))
+        (emit-prim-fn! mv fn-name "clojure/lang/IFn$LLL")
+        (doseq [arg args]
+          (emit-value-coerce! mv (emit-expr! mv arg state-slot) :long))
+        (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$LLL" "invokePrim" "(JJ)J" true)
+        :long))))
+
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
-  (or (emit-sized-intrinsic! mv expr state-slot)
+  (or (emit-prim-long-arith! mv expr state-slot)
+      (emit-sized-intrinsic! mv expr state-slot)
       (emit-byte-array-intrinsic! mv expr state-slot)
       (emit-numeric-intrinsic! mv expr state-slot)
       (emit-direct-runtime-helper-call* mv expr state-slot)))
