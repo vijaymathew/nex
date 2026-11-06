@@ -4428,6 +4428,17 @@
         call-name (str "call" (count args))
         method-sig (env-lookup-method env base-type call-name (count args))
         class-def (env-lookup-class env base-type)]
+    ;; Call syntax `f(args)` is for Function values only. A class that merely
+    ;; defines a `callN` method, without inheriting Function, is not callable
+    ;; this way, matching types-compatible?, which also refuses it as a
+    ;; Function value.
+    (when (and class-def
+               (string? base-type)
+               (not (class-subtype? env base-type "Function")))
+      (let [msg (str "`" method "` is a " base-type
+                     ", which is not callable; a class must inherit Function"
+                     " to be called like a function")]
+        (throw (ex-info msg {:error (type-error msg)}))))
     (when-not method-sig
       (let [call-arities (env-call-method-arities env base-type)]
         (if (= 1 (count call-arities))
