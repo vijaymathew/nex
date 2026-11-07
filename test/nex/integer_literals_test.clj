@@ -105,31 +105,33 @@ end")
 end")]
       (is (= ["16"] output)))))
 
-(deftest negative-literal-method-call-targets-negated-value
-  (testing "-7.abs calls abs on -7, not -(7.abs)"
+(deftest minus-before-a-literal-method-call-negates-the-call
+  (testing "-7.abs is -(7.abs): the minus is an operator, and calls bind tighter"
     (let [ast (p/ast "class Test
   feature
     demo() do
       print(-7.abs)
-      print(-3.14.to_string)
     end
 end")
-          print-calls (-> ast :classes first :body first :members first :body)]
-      ;; -7.abs should parse as (-7).abs: a :call with a negated :integer target
-      (is (= :call (-> print-calls first :args first :type)))
-      (is (= :integer (-> print-calls first :args first :target :type)))
-      (is (= -7 (-> print-calls first :args first :target :value)))
-      (is (= "abs" (-> print-calls first :args first :method)))))
-  (testing "-7.abs returns 7 and -7.to_string returns the string for -7 at runtime"
+          arg (-> ast :classes first :body first :members first :body first :args first)]
+      (is (= :unary (:type arg)))
+      (is (= "-" (:operator arg)))
+      (is (= :call (-> arg :expr :type)))
+      (is (= 7 (-> arg :expr :target :value)))
+      (is (= "abs" (-> arg :expr :method)))))
+  (testing "-7.abs and -(7.abs) give -7, and (-7).abs gives 7"
     (let [output (execute-method-output "class Test
   feature
     demo() do
       print(-7.abs)
-      print(-7.to_string)
+      print(-(7.abs))
+      print((-7).abs)
+      print(-2.5.abs)
     end
 end")]
-      ;; abs returns integer 7 (no quotes), to_string returns string "-7" (print shows with quotes)
-      (is (= ["7" "\"-7\""] output)))))
+      (is (= ["-7" "-7" "7" "-2.5"] output))))
+  (testing "-7.to_string is a type error: minus on a String"
+    (is (not (:success (tc/type-check (p/ast "print(-7.to_string)")))))))
 
 ;; Integer.to_string(base) is the inverse of the 0b/0o/0x literal syntax
 ;; tested above: formats a value back into base 2, 8, 10, or 16.

@@ -8,7 +8,7 @@ assert 10 / 3 = 3
 assert 7 / 2 = 3
 assert 10 % 3 = 1
 assert 7 % 2 = 1
-assert -7.abs = 7
+assert (-7).abs = 7
 assert 3.max(8) = 8
 assert 3.min(8) = 3
 assert 5.bitwise_left_shift(1) = 10
@@ -22,7 +22,7 @@ assert 10.0 / 3.0 = 3.3333333333333335
 assert 7.0 / 2.0 = 3.5
 assert 3.6.round = 4
 assert 3.2.round = 3
-assert -3.5.abs = 3.5
+assert (-3.5).abs = 3.5
 assert 1.2.max(4.7) = 4.7
 
 let x := 10

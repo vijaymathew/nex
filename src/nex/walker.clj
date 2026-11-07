@@ -209,36 +209,48 @@
                    target-pos (assoc :nex/target-pos target-pos)))
       call)))
 
-(defn- negate-sized-literal
-  "-5i16 is one Integer16 literal, not a negation of one (arithmetic on a sized
-   type promotes to Integer). Returns the negated literal, or nil for any other
-   node."
-  [node]
-  (when (#{:int16 :int32} (:type node))
-    (update node :value -)))
+(defn- raw-tag [node]
+  (when (sequential? node) (first node)))
 
-(defn- negate-numeric-call-chain
-  "When a unary minus wraps a method call chain rooted at a numeric literal,
-  restructures so the literal is negated and the call chain is preserved.
-  Returns nil if the base is not a numeric literal (don't restructure)."
+(defn- minus-against-sized-literal?
+  "True when the raw operand of a unary minus starts with an i16 or i32
+   constant written right after the minus: `-5i16`, `-5i16.abs()`. Then the
+   minus is part of the constant. A parenthesised operand, `-(5i16)`, does not
+   count, and neither does any other constant: `-7.abs()` is `-(7.abs())`."
+  [operand]
+  (let [postfix (if (= :postfix (raw-tag operand))
+                  operand
+                  (when (and (#{:unary :postfixExpr} (raw-tag operand))
+                             (= :postfix (raw-tag (second operand))))
+                    (second operand)))
+        primary (second postfix)
+        literal (when (= :primary (raw-tag primary)) (second primary))
+        constant (when (= :literal (raw-tag literal)) (second literal))]
+    (boolean (#{:int16Literal :int32Literal} (raw-tag constant)))))
+
+(defn- negate-sized-chain-root
+  "Negates the i16/i32 constant at the root of NODE, which is that constant or
+   a call chain starting with it. Returns nil if there is no such root."
   [node]
   (cond
     (#{:int16 :int32} (:type node))
-    (negate-sized-literal node)
+    (update node :value -)
 
-    (#{:integer :real} (:type node))
-    (let [negated (update node :value -)]
-      ;; Keep the transfer-safe :value-str (added for integer literals) in sync
-      ;; with the negated :value, or eval would read the stale positive string.
-      (if (:value-str negated)
-        (assoc negated :value-str (str (:value negated)))
-        negated))
-
-    (and (map? node) (= :call (:type node)) (map? (:target node)))
-    (when-let [negated-target (negate-numeric-call-chain (:target node))]
+    (and (= :call (:type node)) (map? (:target node)))
+    (when-let [negated-target (negate-sized-chain-root (:target node))]
       (assoc node :target negated-target))
 
     :else nil))
+
+(defn- unary-minus-node
+  "The AST for `-` applied to the raw OPERAND."
+  [operand]
+  (let [transformed (transform-node operand)]
+    (or (when (minus-against-sized-literal? operand)
+          (negate-sized-chain-root transformed))
+        {:type :unary
+         :operator "-"
+         :expr transformed})))
 
 (defn- desugar-safe-call [call-node]
   (if (and (:safe? call-node)
@@ -2930,14 +2942,7 @@
   [[_ first-child & rest-children]]
   (cond
     (= first-child "-")
-    (let [transformed (transform-node (first rest-children))]
-      (if-let [restructured (or (negate-sized-literal transformed)
-                                (and (= :call (:type transformed))
-                                     (negate-numeric-call-chain transformed)))]
-        restructured
-        {:type :unary
-         :operator "-"
-         :expr transformed}))
+    (unary-minus-node (first rest-children))
     (= first-child "not")
     {:type :unary
      :operator "not"
@@ -2954,14 +2959,7 @@
 
 (defn- handle-unary-minus
   [[_ _minus expr]]
-  (let [transformed (transform-node expr)]
-    (if-let [restructured (or (negate-sized-literal transformed)
-                              (and (= :call (:type transformed))
-                                   (negate-numeric-call-chain transformed)))]
-      restructured
-      {:type :unary
-       :operator "-"
-       :expr transformed})))
+  (unary-minus-node expr))
 
 (defn- handle-unary-not
   [[_ _not expr]]

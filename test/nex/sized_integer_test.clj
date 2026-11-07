@@ -11,6 +11,7 @@
    `Integer64` is only another spelling of `Integer`."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.walk]
             [nex.eval :as e]
             [nex.fmt :as fmt]
             [nex.interpreter :as interp]
@@ -323,6 +324,38 @@ print(-a)
 print(-a - 1)")))
     (is (nil? (type-errors "let a: Integer16 := -5i16")))
     (is (some? (type-errors "let a: Integer16 := 5i16\nlet b: Integer16 := -a")))))
+
+(deftest minus-folds-only-when-written-against-the-constant
+  (testing "a parenthesised sized constant is negated by the operator, giving an Integer"
+    (is (= ["\"Integer\"" "-5" "\"Integer\"" "32768" "\"Integer\"" "-5" "5" "\"Integer\"" "-5"]
+           (both "print(type_of(-(5i16)))
+print(-(5i16))
+print(type_of(-(-32768i16)))
+print(-(-32768i16))
+print(type_of(-(5i32)))
+print(-(5i16).abs())
+print(-(-5i16))
+print(type_of(-(-5i16)))
+print(-(5i16.abs()))"))))
+  (testing "the type checker agrees"
+    (is (nil? (type-errors "let a: Integer := -(5i16)\nlet b: Integer := -(-32768i16)")))
+    (is (some? (type-errors "let a: Integer16 := -(5i16)")))))
+
+(defn- without-positions
+  "AST with its source line and column keys removed, so two spellings of one
+   program compare equal."
+  [ast]
+  (clojure.walk/postwalk
+   (fn [x] (if (map? x) (into {} (remove (fn [[k _]] (= "dbg" (namespace k)))) x) x))
+   ast))
+
+(deftest formatting-keeps-the-meaning-of-minus
+  (testing "nex format does not turn -(5i16) into the constant -5i16, nor -(-x) into a comment"
+    (doseq [src ["let a := -(5i16)" "let a := -(5i16.abs())" "let a := -(-5i16)"
+                 "let x := 1\nlet a := -(-x)"]]
+      (let [formatted (fmt/format-code src)]
+        (is (= (without-positions (p/ast src)) (without-positions (p/ast formatted)))
+            (str "formatted as: " formatted))))))
 
 (deftest sized-closures-detachable-generics-and-tasks
   (is (= ["700" "nil" "9" "\"07\"" "8"]
