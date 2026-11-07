@@ -1493,44 +1493,13 @@
 (defn apply-binary-op
   "Apply a binary operator to two values."
   [op left right]
-  ;; Arithmetic on a Byte / Integer16 / Integer32 promotes to Integer: unwrap the
-  ;; tag first. Comparison and equality keep the tag (they are same-type only).
-  (let [arith? (contains? #{"+" "-" "*" "/" "^" "%"} op)
-        left (if arith? (rt/sized->long left) left)
-        right (if arith? (rt/sized->long right) right)]
+  (if (contains? #{"+" "-" "*" "/" "^" "%"} op)
+    ;; Arithmetic dispatches on representation; see rt/nex-arithmetic, which
+    ;; the compiled backend shares for operands it can't type statically.
+    ;; Comparison and equality keep a Byte/Integer16/Integer32's tag (they
+    ;; are same-type only).
+    (rt/nex-arithmetic op left right)
    (case op
-    ;; Arithmetic dispatches on representation: Integer op Integer stays Integer
-    ;; (64-bit checked — Clojure long on the JVM, BigInt on JS); any Real operand
-    ;; promotes both to Real. On JS, BigInt and number cannot be mixed in a raw
-    ;; operator, so the promotion is explicit (->nex-real).
-    "+" (cond
-          (or (string? left) (string? right))
-          (throw (ex-info "String concatenation requires evaluation context"
-                          {:operator op :left left :right right}))
-          (and (nex-integer? left) (nex-integer? right)) (nex-int-add left right)
-          :else (+ (->nex-real left) (->nex-real right)))
-    "-" (if (and (nex-integer? left) (nex-integer? right))
-          (nex-int-sub left right)
-          (- (->nex-real left) (->nex-real right)))
-    "*" (if (and (nex-integer? left) (nex-integer? right))
-          (nex-int-mul left right)
-          (* (->nex-real left) (->nex-real right)))
-    ;; Integer division by zero raises (there is no integer result); Real
-    ;; division follows IEEE-754: x/0.0 -> +/-Infinity, 0.0/0.0 -> NaN.
-    ;; NOTE (JVM): clojure.core// on *boxed* doubles routes through Numbers.divide,
-    ;; which raises on a zero divisor — only primitive doubles yield IEEE Inf/NaN,
-    ;; so the :clj Real branch divides primitives.
-    "/" (if (and (nex-integer? left) (nex-integer? right))
-          (nex-int-div left right)
-          (/ (double left) (double right)))
-    "^" (if (and (nex-integer? left) (nex-integer? right))
-          (nex-int-pow left right)
-          (Math/pow (->nex-real left) (->nex-real right)))
-    ;; Same asymmetry for remainder: integral % 0 raises, Real % 0.0 is IEEE NaN.
-    ;; Both are truncated (sign of the dividend), matching LREM/DREM and JS %.
-    "%" (if (and (nex-integer? left) (nex-integer? right))
-          (nex-int-mod left right)
-          (nex-real-rem (->nex-real left) (->nex-real right)))
     ;; Structural, not host, equality: the portable map is a record wrapping an
     ;; atom, so Clojure's `=` compares that atom by identity and two equal maps
     ;; never compared equal — including a map nested inside an array. Objects

@@ -2284,6 +2284,23 @@
       (.append sb (str (concat-string-value state a))))
     (.toString sb)))
 
+(declare string-concat-2)
+
+(defn dynamic-arithmetic
+  "Arithmetic operator OP on two values whose types are known only at run
+   time (an operand of type Any, as a Java call's result inside `with
+   \"java\"` is), as the interpreter does it: `+` on a string concatenates,
+   anything else is rt/nex-arithmetic, which both backends share."
+  [state op a b]
+  (if (and (= "+" op) (or (string? a) (string? b)))
+    (string-concat-2 state a b)
+    (rt/nex-arithmetic op a b)))
+
+(def dynamic-negate
+  "Unary minus on a value whose type is known only at run time, as the
+   interpreter does it."
+  rt/nex-negate)
+
 (defn string-concat-2
   "String `+`: what string-concat gives for [A B], without building a seq.
    Compiled code calls it directly, not through its Var (see
