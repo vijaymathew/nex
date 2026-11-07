@@ -245,6 +245,19 @@
    (its `__container__`/`__outer__` getters, below)."
   "nex/compiler/jvm/runtime/NexCarrier")
 
+(def ^:private call2-interface
+  "nex.compiler.jvm.runtime/NexCall2, which a class with a concrete
+   two-argument call2 implements so the runtime can call it directly."
+  "nex/compiler/jvm/runtime/NexCall2")
+
+(defn- has-call2-method?
+  [lowered-class]
+  ;; Every concrete method in :methods is emitted as a public instance
+  ;; method with the standard routine descriptor (user-class-spec), which is
+  ;; NexCall2's.
+  (some #(and (not (:deferred? %)) (= "__method_call2$arity2" (:emitted-name %)))
+        (:methods lowered-class)))
+
 (defn- has-invariant-method?
   [lowered-class]
   (some #(and (not (:deferred? %)) (= "__method_$invariant$arity0" (:emitted-name %)))
@@ -290,6 +303,8 @@
                                   (class-dispatch-keys class-spec))
                              (when (has-invariant-method? class-spec)
                                [invariant-interface])
+                             (when (has-call2-method? class-spec)
+                               [call2-interface])
                              [carrier-interface]))
     :flags Opcodes/ACC_PUBLIC
     :fields (vec
@@ -2372,9 +2387,28 @@
         (do (emit-unbox-or-cast! mv (:jvm-type expr))
             (:jvm-type expr))))))
 
+(defn- emit-integer-compare!
+  "`a.compare(b)` on two unboxed Integers as Long.compare, which gives -1, 0
+   or 1 as Integer's compare does. Both operands must be longs: a Real
+   argument goes to the runtime, which compares it as a Real. Returns :long,
+   or nil when EXPR is not that."
+  [^MethodVisitor mv expr state-slot]
+  (let [args (:args expr)]
+    (when (and (= "builtin-method:Integer:compare" (:helper expr))
+               (= 2 (count args))
+               (every? #(= :long (:jvm-type %)) args)
+               (not= :void (:jvm-type expr)))
+      (doseq [arg args]
+        (emit-value-coerce! mv (emit-expr! mv arg state-slot) :long))
+      (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Long" "compare" "(JJ)I" false)
+      (.visitInsn mv Opcodes/I2L)
+      (emit-value-coerce! mv :long (:jvm-type expr))
+      (:jvm-type expr))))
+
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
   (or (emit-prim-long-arith! mv expr state-slot)
+      (emit-integer-compare! mv expr state-slot)
       (emit-string-concat-2! mv expr state-slot)
       (emit-sized-intrinsic! mv expr state-slot)
       (emit-byte-array-intrinsic! mv expr state-slot)
