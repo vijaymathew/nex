@@ -167,3 +167,66 @@ print(apply1(create Times_Ten, 3))
 let s := create Sum3
 print(s(1, 2, 3))
 ")))))
+
+(deftest typed-function-value-calls-test
+  (testing "calls of function values whose static type gives a typed call:
+            closures of each scalar type, a mixed signature, a procedure, an
+            alias, a Function subclass, a function passed by name, a closure
+            whose signature differs from its variable's type, a detachable
+            result, a curried call, the call1 spelling, and a raise"
+    (is (= ["2" "3.0" "false" "#q" "4" "\"s=3.5\"" "11" "12" "9" "42" "\"pos\"" "nil"
+            "30" "6" "4" "3" "10" "\"raised\"" "33"]
+           (both "class Times_Ten
+inherit Function
+feature
+  call1(a: Integer): Integer do result := a * 10 end
+end
+declare type Transformer = Function(n: Integer): Integer
+function double_it(n: Integer): Integer do result := n * 2 end
+function apply1(g: Function(x: Integer): Integer, x: Integer): Integer do result := g(x) end
+function adder(n: Integer): Function(y: Integer): Integer do
+  result := fn (y: Integer): Integer do result := y + n end
+end
+let fi := fn (x: Integer): Integer do result := x + 1 end
+let fr := fn (x: Real): Real do result := x * 2.0 end
+let fb := fn (b: Boolean): Boolean do result := not b end
+let fc := fn (c: Char): Char do result := c end
+let fs := fn (s: String): Integer do result := s.length end
+let mixed := fn (a: Integer, b: Real, c: String): String do result := c + (a.to_real + b).to_string end
+let total := 0
+let proc := fn (x: Integer) do total := total + x end
+let t: Transformer := fn (n: Integer): Integer do result := n * 3 end
+let loose: Function(x: Integer): Any := fn (x: Integer): Integer do result := x - 1 end
+let wide: Function(x: Integer): Integer := fn (x: Any): Integer do result := 42 end
+let maybe := fn (x: Integer): ?String do if x > 0 then result := \"pos\" else result := nil end end
+let raiser := fn (x: Integer): Integer do raise \"boom\" end
+function try_raise(): String do
+  result := raiser(1).to_string
+rescue
+  result := \"raised\"
+end
+print(fi(1))
+print(fr(1.5))
+print(fb(true))
+print(fc(#q))
+print(fs(\"abcd\"))
+print(mixed(1, 2.5, \"s=\"))
+proc(5)
+proc(6)
+print(total)
+print(t(4))
+print(loose(10))
+print(wide(10))
+print(maybe(1))
+print(maybe(-1))
+print(apply1(create Times_Ten, 3))
+print(apply1(double_it, 3))
+print(apply1(fi, 3))
+print(adder(1)(2))
+print(fi.call1(9))
+print(try_raise())
+let fns: Array[Function(x: Integer): Integer] := [fi, double_it, create Times_Ten, t]
+let acc := 0
+across fns as g do acc := acc + g(2) end
+print(acc)
+")))))
