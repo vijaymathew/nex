@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-07
+
 - **Unary minus keeps the type of a signed operand.** `-a` on an `Integer16`
   or `Integer32` is now of the same type, not an `Integer`, and negating the
   minimum raises `Arithmetic_Overflow`, as `abs` does. On a `Byte` it still
