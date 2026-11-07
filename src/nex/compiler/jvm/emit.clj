@@ -245,18 +245,16 @@
    (its `__container__`/`__outer__` getters, below)."
   "nex/compiler/jvm/runtime/NexCarrier")
 
-(def ^:private call2-interface
-  "nex.compiler.jvm.runtime/NexCall2, which a class with a concrete
-   two-argument call2 implements so the runtime can call it directly."
-  "nex/compiler/jvm/runtime/NexCall2")
-
-(defn- has-call2-method?
+(defn- call-interfaces
+  "nex.compiler.jvm.runtime/NexCall0..NexCall3 for each concrete callN of
+   that arity the class has, so the runtime can call it directly. Every
+   concrete method in :methods is emitted as a public instance method with
+   the standard routine descriptor (user-class-spec), which is theirs."
   [lowered-class]
-  ;; Every concrete method in :methods is emitted as a public instance
-  ;; method with the standard routine descriptor (user-class-spec), which is
-  ;; NexCall2's.
-  (some #(and (not (:deferred? %)) (= "__method_call2$arity2" (:emitted-name %)))
-        (:methods lowered-class)))
+  (let [names (into #{} (comp (remove :deferred?) (map :emitted-name)) (:methods lowered-class))]
+    (for [n (range 4)
+          :when (contains? names (str "__method_call" n "$arity" n))]
+      (str "nex/compiler/jvm/runtime/NexCall" n))))
 
 (defn- has-invariant-method?
   [lowered-class]
@@ -303,8 +301,7 @@
                                   (class-dispatch-keys class-spec))
                              (when (has-invariant-method? class-spec)
                                [invariant-interface])
-                             (when (has-call2-method? class-spec)
-                               [call2-interface])
+                             (call-interfaces class-spec)
                              [carrier-interface]))
     :flags Opcodes/ACC_PUBLIC
     :fields (vec

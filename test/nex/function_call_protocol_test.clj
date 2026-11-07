@@ -137,3 +137,33 @@ print(f(10))
 ")]
       (is (some? err))
       (is (str/includes? err "not callable")))))
+
+(deftest function-values-of-each-arity-test
+  (testing "closures of 0 to 4 parameters and Function subclasses with call1
+            and call3, called directly and through a parameter"
+    (is (= ["7" "8" "9" "10" "14" "30" "6"]
+           (both "class Times_Ten
+inherit Function
+feature
+  call1(a: Integer): Integer do result := a * 10 end
+end
+class Sum3
+inherit Function
+feature
+  call3(a, b, c: Integer): Integer do result := a + b + c end
+end
+function apply1(g: Function(x: Integer): Integer, x: Integer): Integer do result := g(x) end
+let f0 := fn (): Integer do result := 7 end
+let f1 := fn (x: Integer): Integer do result := x + 1 end
+let f2 := fn (x, y: Integer): Integer do result := x + y end
+let f3 := fn (x, y, z: Integer): Integer do result := x + y + z end
+let f4 := fn (w, x, y, z: Integer): Integer do result := w + x + y + z end
+print(f0())
+print(f1(7))
+print(f2(4, 5))
+print(f3(2, 3, 5))
+print(f4(2, 3, 4, 5))
+print(apply1(create Times_Ten, 3))
+let s := create Sum3
+print(s(1, 2, 3))
+")))))

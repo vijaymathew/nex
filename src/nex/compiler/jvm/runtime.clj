@@ -149,13 +149,26 @@
   (^Object __method_$invariant$arity0 [^nex.compiler.jvm.runtime.NexReplState state
                                        ^"[Ljava.lang.Object;" args]))
 
+;; NexCall0..NexCall3 are implemented by every compiled class with a concrete
+;; `callN` of that arity (a `fn` of N parameters, or a class inheriting
+;; Function that defines one), whose method each names, so the runtime calls
+;; a function value directly rather than by reflection: calling a closure
+;; (`f(x)`), Array.sort's comparator or fold's step that way cost several
+;; times the call itself.
+(definterface NexCall0
+  (^Object __method_call0$arity0 [^nex.compiler.jvm.runtime.NexReplState state
+                                  ^"[Ljava.lang.Object;" args]))
+
+(definterface NexCall1
+  (^Object __method_call1$arity1 [^nex.compiler.jvm.runtime.NexReplState state
+                                  ^"[Ljava.lang.Object;" args]))
+
 (definterface NexCall2
-  ;; Implemented by every compiled class with a concrete two-argument `call2`
-  ;; (a two-argument `fn`, or a class inheriting Function that defines one),
-  ;; whose method this is, so the runtime calls a function value it is given
-  ;; (Array.sort's comparator, fold's step) directly rather than by
-  ;; reflection: a reflective call cost several times the comparison itself.
   (^Object __method_call2$arity2 [^nex.compiler.jvm.runtime.NexReplState state
+                                  ^"[Ljava.lang.Object;" args]))
+
+(definterface NexCall3
+  (^Object __method_call3$arity3 [^nex.compiler.jvm.runtime.NexReplState state
                                   ^"[Ljava.lang.Object;" args]))
 
 (definterface NexCarrier
@@ -322,6 +335,8 @@
           (.putIfAbsent by-arity k method)
           method))))
 
+(def ^:private ^Class object-array-class (class (object-array 0)))
+
 (defn invoke-function-object
   [state target args]
   (when-not target
@@ -336,13 +351,21 @@
     (ifn? target)
     (apply target args)
 
-    (and (instance? NexCall2 target) (= 2 (count args)))
-    (.__method_call2$arity2 ^NexCall2 target state (object-array args))
-
     :else
-    (invoke-reflective! (function-call-method (class target) (count args))
-                        target
-                        (method-args state (object-array args)))))
+    ;; Compiled code passes ARGS as a fresh Object[] (emit-expr-call-function!),
+    ;; used as it is: counting and copying it through Clojure's seq functions
+    ;; cost more than the call. Other callers pass a vector.
+    (let [^objects arr (if (instance? object-array-class args) args (object-array args))
+          n (alength arr)]
+      (cond
+        (and (= 1 n) (instance? NexCall1 target)) (.__method_call1$arity1 ^NexCall1 target state arr)
+        (and (= 2 n) (instance? NexCall2 target)) (.__method_call2$arity2 ^NexCall2 target state arr)
+        (and (= 0 n) (instance? NexCall0 target)) (.__method_call0$arity0 ^NexCall0 target state arr)
+        (and (= 3 n) (instance? NexCall3 target)) (.__method_call3$arity3 ^NexCall3 target state arr)
+        :else
+        (invoke-reflective! (function-call-method (class target) n)
+                            target
+                            (method-args state arr))))))
 
 (defn- function-invoker-2
   "A two-argument Clojure fn that calls function value F the way
