@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+## 0.7.1 - 2026-11-07
+
+- **Calling a closure is about 12 times faster in compiled code.** When a
+  function value's type is a known signature (`let f := fn (x: Integer):
+  Integer do ... end`, or a parameter typed `Function(x: Integer): Integer`),
+  `f(x)` calls the closure's compiled method directly, its arguments and
+  result unboxed. 20 million calls went from about 1.2 s to 0.1 s, as fast as
+  Java. A function value of another kind (a function passed by name, a
+  closure whose declared types differ from its variable's) is called as
+  before.
+- **Function values are called without reflection.** A closure, or a class
+  inheriting `Function`, with a `call0` to `call3` is called through a fixed
+  interface wherever the runtime calls it: `Array.sort`'s comparator,
+  `fold`, `map`, `filter` and the rest. `fold` and `map` with a closure are
+  about 25% faster.
+- **Sorting with a comparator is nearly twice as fast.** On top of the
+  above, `a.compare(b)` on two `Integer`s compiles to a JVM instruction.
+  Sorting 2 million integers with a comparator went from about 2.6 s to
+  1.45 s, close to Java's time.
+- **Fix: arithmetic on a value from Java inside `with "java"`.** An operand
+  whose type is only known at run time, such as `System.nanoTime() /
+  1000000`, stopped the compiler with "Unsupported binary opcode emission".
+  `+`, `-`, `*`, `/`, `%`, `^` and unary minus on such a value are now done at
+  run time, exactly as the interpreter does them: Integer or Real arithmetic
+  by what the values are, with Nex's errors for a zero divisor, and `+`
+  concatenating when one side is a string. (0.6.9 fixed this only for Java
+  methods whose return type is known.)
+- **Benchmarks.** `benchmarks/` has the same twelve programs in Nex, Java,
+  Python and Clojure: startup, recursion, an integer loop, sorting, a
+  string-keyed map, string concatenation, and function, method, polymorphic
+  and closure calls. `python3 benchmarks/run.py` runs them and reports each
+  language's time as a multiple of Java's, for the whole run and for the
+  work alone. `benchmarks/README.md` has the results.
+
 ## 0.7.0 - 2026-11-07
 
 - **Unary minus keeps the type of a signed operand.** `-a` on an `Integer16`
@@ -109,6 +143,38 @@
   inherit `Function` is now a type error. It used to be allowed, even though
   such an object was already refused wherever a `Function` value was
   expected. Add `inherit Function` to the class to make it callable.
+- **`Char.is_whitespace`** tells whether a character is whitespace: space,
+  tab, newline, return, and the other Unicode spaces except the
+  non-breaking ones, as Java's `Character.isWhitespace` decides. It works on
+  both backends.
+- **`nex` starts about a quarter faster.** A release now ships the grammar's
+  lexer and parser prebuilt, so a run no longer has the ANTLR tool read and
+  analyse `nexlang.g4` first, which took about 0.25 s. An empty program went
+  from about 0.8 s to 0.6 s. A source checkout still builds the parser from
+  the grammar.
+- **Checking and compiling a program is 2 to 5 times faster.** A module a
+  program interns is parsed once rather than four times; the walks over a
+  program's syntax tree, which the parser, type checker and compiler make
+  many of, are about 80 times faster; and the type checker's signatures of
+  the built-in types, and the compiler's list of built-in classes, are built
+  once instead of for every expression. Checking, compiling and running a
+  program that interns four modules went from 1.1 s to 0.23 s, and a small
+  one from 0.19 s to 0.08 s (in a JVM already running, so without startup).
+- **The REPL answers an input about 4 times faster**, from the same changes:
+  about 7 ms for a simple input, from 29 ms.
+- **Sorting is much faster in compiled code.** `sort()` compares Integers,
+  Reals, Strings and Chars directly, and a comparator is called without
+  looking it up again on every comparison. Sorting 2 million integers went
+  from about 15 s to 1.7 s, or from 55 s to 2.8 s with a comparator.
+- **Integer `/` and `%` are about 8 times faster in compiled code.** They
+  were calls into the runtime with both numbers boxed. An integer loop of 50
+  million iterations went from about 1.7 s to 0.2 s, as fast as Java. A zero
+  divisor and `MIN / -1` raise the same errors as before.
+- **String `+` is about 5 times faster in compiled code**, and maps with
+  string keys about 3.5 times: a value stored in a collection is no longer
+  converted when its type shows it needs none, and `Map.get` looks a key up
+  once instead of twice. 500,000 puts and gets with keys built by `+` went
+  from about 0.44 s to 0.12 s.
 
 ## 0.6.8 - 2026-11-05
 
