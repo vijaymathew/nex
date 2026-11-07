@@ -19,7 +19,8 @@ Each number is a language's time as a multiple of Java's: **1.0x** is as fast
 as Java, 2.0x takes twice as long, 0.5x half as long. The fastest language in
 each row is in bold. Measured on 2026-11-07, 5 runs each (median), on an Intel
 Core i5-1135G7 (4 cores, 8 threads, 15 GB RAM) running Linux Mint 22.2, with
-Nex 0.7.0, OpenJDK 25.0.4.1, Python 3.12.3 and Clojure 1.12.4.
+Nex built from `main` after 0.7.0 (the changes listed under Unreleased in
+`CHANGELOG.md`), OpenJDK 25.0.4.1, Python 3.12.3 and Clojure 1.12.4.
 
 ### The work itself
 
@@ -30,28 +31,29 @@ parentheses is the work's own time.
 
 | benchmark | nex | java | python | clojure |
 |---|--:|--:|--:|--:|
-| fib | 3.4x (119 ms) | **1.0x (36 ms)** | 30x (1.06 s) | 1.4x (51 ms) |
-| loop | 1.3x (196 ms) | **1.0x (154 ms)** | 22x (3.40 s) | 1.1x (173 ms) |
-| sort | **0.9x (765 ms)** | 1.0x (866 ms) | 6.3x (5.48 s) | 1.0x (881 ms) |
-| sort_natural | **1.0x (828 ms)** | 1.0x (850 ms) | 1.8x (1.54 s) | 1.0x (890 ms) |
-| map | 2.1x (298 ms) | **1.0x (143 ms)** | 2.2x (308 ms) | 3.2x (461 ms) |
-| concat | 2.8x (223 ms) | **1.0x (80 ms)** | 7.8x (628 ms) | 5.1x (408 ms) |
-| call_function | 1.3x (87 ms) | **1.0x (65 ms)** | 22x (1.42 s) | 1.2x (78 ms) |
-| call_method | 1.6x (103 ms) | **1.0x (64 ms)** | 29x (1.85 s) | 1.3x (85 ms) |
-| call_poly2 | 1.6x (130 ms) | **1.0x (82 ms)** | 29x (2.36 s) | 1.6x (133 ms) |
-| call_poly4 | 1.5x (179 ms) | **1.0x (121 ms)** | 20x (2.40 s) | 3.6x (432 ms) |
-| call_closure | 1.4x (106 ms) | **1.0x (78 ms)** | 20x (1.57 s) | 1.2x (90 ms) |
+| fib | 2.1x (76 ms) | **1.0x (36 ms)** | 30x (1.06 s) | 1.3x (48 ms) |
+| loop | 1.3x (202 ms) | **1.0x (152 ms)** | 22x (3.27 s) | 1.1x (174 ms) |
+| sort | **0.8x (763 ms)** | 1.0x (908 ms) | 6.8x (6.17 s) | 1.0x (938 ms) |
+| sort_natural | 1.0x (895 ms) | **1.0x (883 ms)** | 1.8x (1.59 s) | 1.1x (983 ms) |
+| map | 2.2x (320 ms) | **1.0x (145 ms)** | 2.1x (307 ms) | 3.5x (506 ms) |
+| concat | 2.8x (228 ms) | **1.0x (80 ms)** | 8.3x (670 ms) | 5.5x (442 ms) |
+| call_function | 1.4x (96 ms) | **1.0x (70 ms)** | 23x (1.61 s) | 1.3x (89 ms) |
+| call_method | 1.5x (102 ms) | **1.0x (68 ms)** | 27x (1.82 s) | 1.3x (88 ms) |
+| call_poly2 | 1.6x (147 ms) | **1.0x (91 ms)** | 29x (2.63 s) | 1.7x (153 ms) |
+| call_poly4 | 1.7x (198 ms) | **1.0x (119 ms)** | 23x (2.72 s) | 3.5x (421 ms) |
+| call_closure | 1.5x (126 ms) | **1.0x (84 ms)** | 20x (1.64 s) | 1.1x (94 ms) |
 
-- **Nex runs within 0.9–1.6x of Java** on loops, sorting, and function,
-  method, polymorphic and closure calls. On those it is 7–30x faster than
+- **Nex runs within 0.8–1.7x of Java** on loops, sorting, and function,
+  method, polymorphic and closure calls. On those it is 8–18x faster than
   Python, except natural-order sorting, where Python's built-in sort keeps it
   to 1.8x.
-- **Its weakest spots** are `fib` (3.4x), whose deep recursion is slower to
-  warm up than Java's, and building strings (`concat`, 2.8x; `map`, 2.1x,
-  since its keys are built with `+`). It is level with Python on `map` and
-  nearly 3x faster on `concat`.
-- **Against Clojure**, Nex is within about 0.3x on most benchmarks, faster on
-  strings, maps and polymorphic calls over four classes, and slower on `fib`.
+- **Its weakest spots** are `fib` (2.1x), whose deep recursion takes longer to
+  warm up than Java's, and building strings: `concat` (2.8x), and `map`
+  (2.2x), whose keys are built with `+`. It is level with Python on `map` and
+  about 3x faster on `concat`.
+- **Against Clojure**, Nex is within about 0.4x on most benchmarks, faster on
+  strings, maps and polymorphic calls over four classes, and slower on `fib`
+  and closure calls.
 
 ### The whole run
 
@@ -61,18 +63,18 @@ script.
 
 | benchmark | nex | java | python | clojure |
 |---|--:|--:|--:|--:|
-| startup | 35x (635 ms) | 1.0x (18 ms) | **0.5x (10 ms)** | 42x (759 ms) |
-| fib | 14x | **1.0x** | 19x | 14x |
-| loop | 4.9x | **1.0x** | 20x | 5.2x |
-| sort | 1.7x | **1.0x** | 6.1x | 1.9x |
-| sort_natural | 1.8x | **1.0x** | 1.8x | 1.9x |
-| map | 5.7x | **1.0x** | 1.8x | 7.3x |
-| concat | 9.1x | **1.0x** | 6.0x | 11x |
-| call_function | 9.3x | **1.0x** | 17x | 10x |
-| call_method | 10.0x | **1.0x** | 22x | 10.0x |
-| call_poly2 | 8.7x | **1.0x** | 23x | 8.9x |
-| call_poly4 | 6.2x | **1.0x** | 17x | 8.3x |
-| call_closure | 7.9x | **1.0x** | 16x | 8.5x |
+| startup | 36x (634 ms) | 1.0x (17 ms) | **0.6x (10 ms)** | 41x (709 ms) |
+| fib | 13x | **1.0x** | 19x | 14x |
+| loop | 5.1x | **1.0x** | 19x | 5.7x |
+| sort | 1.6x | **1.0x** | 6.6x | 1.9x |
+| sort_natural | 1.8x | **1.0x** | 1.8x | 2.0x |
+| map | 6.2x | **1.0x** | 1.8x | 7.6x |
+| concat | 9.2x | **1.0x** | 6.4x | 13x |
+| call_function | 8.9x | **1.0x** | 18x | 11x |
+| call_method | 9.9x | **1.0x** | 21x | 11x |
+| call_poly2 | 9.5x | **1.0x** | 23x | 9.7x |
+| call_poly4 | 6.8x | **1.0x** | 19x | 9.0x |
+| call_closure | 8.5x | **1.0x** | 15x | 9.0x |
 
 Nex and Clojure each start a JVM and load a runtime before running anything,
 which takes about 0.6–0.8 s here against 10–20 ms for Python and Java. For
