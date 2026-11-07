@@ -11,6 +11,7 @@
    `Integer64` is only another spelling of `Integer`."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.walk]
             [nex.eval :as e]
             [nex.fmt :as fmt]
             [nex.interpreter :as interp]
@@ -96,7 +97,6 @@
 (deftest sized-arithmetic-promotes-to-integer
   (is (nil? (type-errors "let a: Integer16 := 5i16\nlet i: Integer := a + a")))
   (is (nil? (type-errors "let a: Integer32 := 5i32\nlet i: Integer := a * 2 - a / 2 + a % 2")))
-  (is (nil? (type-errors "let a: Integer32 := 5i32\nlet i: Integer := -a")))
   (is (nil? (type-errors "let a: Integer16 := 5i16\nlet r: Real := a + 1.5")))
   (is (nil? (type-errors "let a: Integer16 := 5i16\nlet b: Integer32 := 6i32\nlet i: Integer := a + b")))
   (is (some? (type-errors "let a: Integer16 := 5i16\nlet c: Integer16 := a + a"))
@@ -184,7 +184,7 @@ print(i64 + 1)"))))
   (is (raises-on-both? "let n: Integer := -70000\nprint(n.to_integer16())" "-32768..32767"))
   (is (raises-on-both? "let n: Integer := 2147483648\nprint(n.to_integer32())" "-2147483648..2147483647"))
   (is (raises-on-both? "print(70000i32.to_integer16())" "-32768..32767"))
-  (is (raises-on-both? "print(-1i16.to_byte())" "0..255"))
+  (is (raises-on-both? "print((-1i16).to_byte())" "0..255"))
   (is (raises-on-both? "print(300i32.to_byte())" "0..255"))
   (is (= ["-32768" "32767" "255" "7" "-7" "200" "200"]
          (both "let n: Integer := -32768
@@ -255,7 +255,7 @@ print(1i16 < 2i16)
 print(3i32 <= 2i32)"))))
 
 (deftest sized-fields-defaults-results-and-functions
-  (is (= ["0" "0" "0" "0" "42" "5" "-2147483648"]
+  (is (= ["0" "0" "0" "0" "42" "-5" "-2147483648"]
          (both "class Box
   feature
     a: Integer16
@@ -312,17 +312,67 @@ print(-3i16 * 3i32)
 print(5i16 / 2 - 1i32 + 1.0 * 0.5 - 1.0)
 print(-2i32)"))))
 
-(deftest negative-literals-fold-into-the-literal
-  (testing "-5i16 is one Integer16 literal, so a method chain hangs off the negative value"
-    (is (= ["5" "-32768" "\"Integer16\"" "-5" "-6"]
-           (both "print(-5i16.abs())
-print(-32768i16)
-print(type_of(-1i16))
-let a: Integer16 := 5i16
+(deftest unary-minus-keeps-the-signed-type
+  (testing "-x on an Integer16 or Integer32 is of the same type; on a Byte it is an Integer"
+    (is (= ["\"Integer16\"" "-5" "\"Integer32\"" "-7" "-6" "\"Integer\"" "\"Integer16\"" "-5"
+            "\"Integer16\"" "5"]
+           (both "let a: Integer16 := 5i16
+print(type_of(-a))
 print(-a)
-print(-a - 1)")))
-    (is (nil? (type-errors "let a: Integer16 := -5i16")))
-    (is (some? (type-errors "let a: Integer16 := 5i16\nlet b: Integer16 := -a")))))
+let d: Integer32 := 7i32
+print(type_of(-d))
+print(-d)
+print(-a - 1)
+print(type_of(-5u8))
+print(type_of(-(5i16)))
+print(-(5i16))
+print(type_of(-(-5i16)))
+print(-(-5i16))"))))
+  (testing "the type checker agrees"
+    (is (nil? (type-errors "let a: Integer16 := 5i16\nlet b: Integer16 := -a")))
+    (is (nil? (type-errors "let a: Integer32 := 5i32\nlet b: Integer32 := -a")))
+    (is (nil? (type-errors "let a: Integer16 := -(5i16)")))
+    (is (some? (type-errors "let a: Integer16 := 5i16\nlet i: Integer := -a")))
+    (is (some? (type-errors "let b: Byte := 5u8\nlet c: Byte := -b"))))
+  (testing "negating the minimum raises, as abs does"
+    (is (raises-on-both? "let a := -32768i16\nprint(-a)" "no positive counterpart"))
+    (is (raises-on-both? "let a := -2147483648i32\nprint(-a)" "no positive counterpart"))
+    (is (raises-on-both? "print(-(-32768i16))" "no positive counterpart"))))
+
+(deftest minus-is-part-of-a-bare-constant-only
+  (testing "-5i16 is one constant, so its type's minimum can be written"
+    (is (= ["-32768" "-2147483648" "\"Integer16\"" "-9223372036854775808"]
+           (both "print(-32768i16)
+print(-2147483648i32)
+print(type_of(-1i16))
+print(-9223372036854775808)")))
+    (is (nil? (type-errors "let a: Integer16 := -5i16"))))
+  (testing "a call binds tighter than the minus, whatever the constant"
+    (is (= ["-5" "\"Integer16\"" "-5" "-5" "-5"]
+           (both "print(-5i16.abs())
+print(type_of(-5i16.abs()))
+print(-(5i16).abs())
+print(-(5i16.abs()))
+print(-5.abs())"))))
+  (testing "one past the maximum is a constant only right after a minus"
+    (is (some? (type-errors "print(-(32768i16))")))
+    (is (some? (type-errors "print(-32768i16.abs())")))))
+
+(defn- without-positions
+  "AST with its source line and column keys removed, so two spellings of one
+   program compare equal."
+  [ast]
+  (clojure.walk/postwalk
+   (fn [x] (if (map? x) (into {} (remove (fn [[k _]] (= "dbg" (namespace k)))) x) x))
+   ast))
+
+(deftest formatting-keeps-the-meaning-of-minus
+  (testing "nex format does not turn -(5i16) into the constant -5i16, nor -(-x) into a comment"
+    (doseq [src ["let a := -(5i16)" "let a := -(5i16.abs())" "let a := -(-5i16)"
+                 "let x := 1\nlet a := -(-x)"]]
+      (let [formatted (fmt/format-code src)]
+        (is (= (without-positions (p/ast src)) (without-positions (p/ast formatted)))
+            (str "formatted as: " formatted))))))
 
 (deftest sized-closures-detachable-generics-and-tasks
   (is (= ["700" "nil" "9" "\"07\"" "8"]

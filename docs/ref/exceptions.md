@@ -106,7 +106,7 @@ Each inherits `Exception` and adds no features of its own, except
 | Class | Raised by | Example message |
 |---|---|---|
 | `Division_by_Zero` | integer `/` or `%` by zero | `Division by zero` |
-| `Arithmetic_Overflow` | an `Integer` result outside the 64-bit range; `abs` of a fixed-width minimum | `Arithmetic overflow` |
+| `Arithmetic_Overflow` | an `Integer` result outside the 64-bit range; `abs` or unary minus of a signed fixed-width minimum | `Arithmetic overflow` |
 | `Void_Access` | a call or field access on `nil` | `Used a value that is void (nil)` |
 | `Index_Out_Of_Bounds` | an `Array` or `String` position outside its range (`get`, `char_at`, …) | `Index 5 out of bounds for length 1` |
 | `Conversion_Error` | a conversion out of a fixed-width type's range (`to_byte`, `to_integer16`, …), a string that is not a number (`to_integer`, `to_real`), bytes that are not UTF-8 (`String.from_bytes`) | `Byte value must be in range 0..255, got 300` |

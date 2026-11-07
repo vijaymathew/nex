@@ -1458,6 +1458,8 @@
    "op:pow-double"                           ["pow-double" [:b0 :b1]]
    "op:sized->integer"                       ["sized->integer" [:b0]]
    "make-int16"                              ["make-int16" [:b0]]
+   "op:neg-int16"                            ["neg-int16" [:b0]]
+   "op:neg-int32"                            ["neg-int32" [:b0]]
    "make-int32"                              ["make-int32" [:b0]]
    "spawn-function-object"                   ["spawn-function-object" [:state :b0]]
    "function-value-for-name"                 ["function-value-for-name" [:state :b0]]

@@ -780,9 +780,9 @@
 (defn- infer-type-unary
   [env expr]
   (case (:operator expr)
-    ;; -x on a sized type promotes to Integer, matching check-unary-op.
+    ;; Matches check-unary-op: Integer16/Integer32 keep their type, Byte gives Integer.
     "-" (let [t (infer-type env (:expr expr))]
-          (if (contains? tc/sized-integer-types (base-type-name (resolve-type-alias t))) "Integer" t))
+          (when t (tc/unary-minus-result-type (base-type-name (resolve-type-alias t)) t)))
     "not" "Boolean"
     nil))
 
@@ -5329,17 +5329,32 @@
                               op)
                          left-ir right-ir nex-type jvm-type)))))
 
+(def ^:private signed-sized-negation
+  "Signed fixed-width type -> [negation helper, wrapping helper]. Unary minus
+   keeps these types: the value is negated as a long (raising for the
+   minimum) and wrapped back."
+  {"Integer16" ["op:neg-int16" "make-int16"]
+   "Integer32" ["op:neg-int32" "make-int32"]})
+
 (defn- lower-expr-unary
   [env expr]
-  (let [operand-ir (unwrap-sized-ir (lower-expression env (:expr expr)))
+  (let [operand-ir (lower-expression env (:expr expr))
         nex-type (infer-type env expr)
-        jvm-type (resolve-jvm-type env nex-type)]
-    (ir/unary-node (get {"-" :neg
-                         "not" :not}
-                        (:operator expr))
-                   operand-ir
-                   nex-type
-                   jvm-type)))
+        jvm-type (resolve-jvm-type env nex-type)
+        operand-type (resolve-type-alias (:nex-type operand-ir))
+        [negate wrap] (when (and (= "-" (:operator expr))
+                                 (not (and (map? operand-type) (:detachable operand-type))))
+                        (get signed-sized-negation (base-type-name operand-type)))]
+    (if negate
+      (ir/call-runtime-node wrap
+                            [(ir/call-runtime-node negate [(unwrap-sized-ir operand-ir)] "Integer" :long)]
+                            nex-type jvm-type)
+      (ir/unary-node (get {"-" :neg
+                           "not" :not}
+                          (:operator expr))
+                     (unwrap-sized-ir operand-ir)
+                     nex-type
+                     jvm-type))))
 
 (defn- lower-expr-if
   [env expr]

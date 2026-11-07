@@ -88,6 +88,7 @@
 
 (declare format-expression)
 
+
 (defn- operand
   "EXPR as an operand that needs at least precedence MIN, in parentheses if
    it binds more loosely."
@@ -183,8 +184,18 @@
                 (str (operand (:left expr) (if right-assoc? (inc level) level))
                      " " op " "
                      (operand (:right expr) (if right-assoc? level (inc level)))))
-      :unary (let [op (:operator expr)]
-               (str op (when (= "not" op) " ") (operand (:expr expr) unary-precedence)))
+      :unary (let [op (:operator expr)
+                   text (operand (:expr expr) unary-precedence)]
+               (str op (when (= "not" op) " ")
+                    ;; After `-`, parenthesise a bare integer constant (`-5i16`
+                    ;; would read as one negative constant, and `-(32768i16)`,
+                    ;; out of range, would become valid) and an operand
+                    ;; starting with a minus (`--` starts a comment).
+                    (if (and (= "-" op)
+                             (or (str/starts-with? text "-")
+                                 (#{:integer :int16 :int32} (:type (:expr expr)))))
+                      (str "(" text ")")
+                      text)))
       :when (str "when " (format-expression (:condition expr))
                  " then " (format-expression (:consequent expr))
                  " else " (format-expression (:alternative expr))
