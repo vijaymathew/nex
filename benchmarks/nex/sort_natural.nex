@@ -1,0 +1,32 @@
+-- Sorting by natural order: 2M pseudo-random integers.
+import java.lang.System
+
+-- The work's own time, in microseconds, from the JVM's monotonic clock.
+function clock_us(): Integer do
+  let t: Integer := 0
+  with "java" do
+    t := System.nanoTime()
+  end
+  result := t / 1000
+end
+
+function run(n: Integer): Integer do
+  let xs: Array[Integer] := []
+  let seed := 12345
+  from let i := 0 until i = n do
+    seed := (seed * 1103515245 + 12345) % 2147483648
+    xs.add(seed)
+    i := i + 1
+  end
+  let ys := xs.sort()
+  let total := 0
+  across ys as y do total := (total + y) % 1000003 end
+  result := total
+end
+
+clock_us() -- warm the clock up before timing
+let t0 := clock_us()
+let r := run(2000000)
+let t1 := clock_us()
+print(r)
+print(t1 - t0)
