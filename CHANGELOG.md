@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.1 - 2026-11-07
+
 - **Calling a closure is about 12 times faster in compiled code.** When a
   function value's type is a known signature (`let f := fn (x: Integer):
   Integer do ... end`, or a parameter typed `Function(x: Integer): Integer`),
