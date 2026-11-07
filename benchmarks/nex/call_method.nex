@@ -3,11 +3,9 @@ import java.lang.System
 
 -- The work's own time, in microseconds, from the JVM's monotonic clock.
 function clock_us(): Integer do
-  let t: Integer := 0
   with "java" do
-    t := System.nanoTime()
+    result := System.nanoTime() / 1000
   end
-  result := t / 1000
 end
 
 class Counter
