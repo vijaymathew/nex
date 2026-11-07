@@ -1,0 +1,22 @@
+-- Recursive calls: fib(35).
+import java.lang.System
+
+-- The work's own time, in microseconds, from the JVM's monotonic clock.
+function clock_us(): Integer do
+  let t: Integer := 0
+  with "java" do
+    t := System.nanoTime()
+  end
+  result := t / 1000
+end
+
+function fib(n: Integer): Integer do
+  if n < 2 then result := n else result := fib(n - 1) + fib(n - 2) end
+end
+
+clock_us() -- warm the clock up before timing
+let t0 := clock_us()
+let r := fib(35)
+let t1 := clock_us()
+print(r)
+print(t1 - t0)

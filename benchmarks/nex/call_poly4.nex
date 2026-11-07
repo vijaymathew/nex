@@ -1,0 +1,52 @@
+-- Polymorphic calls of a deferred method over 4 classes: 20M.
+import java.lang.System
+
+-- The work's own time, in microseconds, from the JVM's monotonic clock.
+function clock_us(): Integer do
+  let t: Integer := 0
+  with "java" do
+    t := System.nanoTime()
+  end
+  result := t / 1000
+end
+
+deferred class Shape
+  feature
+    value(x: Integer): Integer deferred
+end
+class S1
+  inherit Shape
+  feature
+    value(x: Integer): Integer do result := x + 1 end
+end
+class S2
+  inherit Shape
+  feature
+    value(x: Integer): Integer do result := x + 2 end
+end
+class S3
+  inherit Shape
+  feature
+    value(x: Integer): Integer do result := x + 3 end
+end
+class S4
+  inherit Shape
+  feature
+    value(x: Integer): Integer do result := x + 4 end
+end
+function run(n: Integer): Integer do
+  let shapes: Array[Shape] := [create S1, create S2, create S3, create S4]
+  let total := 0
+  from let i := 0 until i = n do
+    total := (total + shapes.get(i % 4).value(i)) % 1000003
+    i := i + 1
+  end
+  result := total
+end
+
+clock_us() -- warm the clock up before timing
+let t0 := clock_us()
+let r := run(20000000)
+let t1 := clock_us()
+print(r)
+print(t1 - t0)

@@ -51,3 +51,29 @@ print([\"kiwi\", \"pear\", \"fig\"].sort(fn (a, b: String): Integer do result :=
 let empty: Array[Integer] := []
 print(empty.sort(fn (a, b: Integer): Integer do result := a.compare(b) end))
 ")))))
+
+(deftest comparator-call-paths-test
+  (testing "a Function subclass with call2, a function passed by name, fold's
+            step, a Real comparison, and an error raised by a comparator"
+    (is (= ["[1, 3, 5, 9]" "[9, 5, 3, 1]" "18" "[0.5, 1.5, 2.5]" "\"raised\""]
+           (both "class Ascending
+inherit Function
+feature
+  call2(a, b: Integer): Integer do result := a.compare(b) end
+end
+function descending(a, b: Integer): Integer do result := b.compare(a) end
+print([3, 9, 1, 5].sort(create Ascending))
+print([3, 9, 1, 5].sort(descending))
+print([3, 9, 1, 5].fold(0, fn (acc, x: Integer): Integer do result := acc + x end))
+print([2.5, 0.5, 1.5].sort(fn (a, b: Real): Integer do result := a.compare(b) end))
+function guarded(xs: Array[Integer]): String do
+  let ys := xs.sort(fn (a, b: Integer): Integer do
+    if a = 9 then raise \"bad element\" end
+    result := a.compare(b)
+  end)
+  result := ys.to_string
+rescue
+  result := \"raised\"
+end
+print(guarded([3, 9, 1, 5]))
+")))))

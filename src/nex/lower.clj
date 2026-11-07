@@ -6037,6 +6037,30 @@
                                                         nex-type
                                                         jvm-type))))))
 
+(defn- function-value-call-node
+  "A call of function value TARGET-IR with ARG-IRS. When TARGET-IR's static
+   type is a Function type of that arity, the node carries the typed
+   descriptor a closure of exactly that signature compiles its callN to
+   (typed-method-descriptor, as for the closure itself), so the emitter can
+   call such a closure's typed method directly, unboxed (see
+   nex.compiler.jvm.emit/emit-typed-function-call!). Any other value it is
+   given at run time is called as before."
+  [target-ir arg-irs nex-type jvm-type]
+  (let [t (resolve-type-alias (:nex-type target-ir))
+        params (when (and (map? t) (= "Function" (:base-type t))) (:param-types t))]
+    (cond-> (ir/call-function-node target-ir arg-irs nex-type jvm-type)
+      (and (sequential? params) (= (count params) (count arg-irs)))
+      (assoc :typed-descriptor
+             (typed-method-descriptor
+              {:params (mapv (fn [p]
+                               ;; A named parameter is {:name :type}; a
+                               ;; positional one is the type itself.
+                               {:type (if (and (map? p) (contains? p :type) (not (contains? p :base-type)))
+                                        (:type p)
+                                        p)})
+                             params)
+               :return-type (:return-type t)})))))
+
 (defn- lower-call-without-target
   "A call with no receiver: an implicit call on `this` inside the currently
    executing method, a Function-valued local invoked as `f(...)`, the
@@ -6052,11 +6076,11 @@
     (function-object-call? env (:method expr) (count (:args expr)))
     (let [nex-type (infer-type env expr)
           jvm-type (resolve-jvm-type env nex-type)]
-      (ir/call-function-node (lower-expression env {:type :identifier
-                                                    :name (:method expr)})
-                             arg-irs
-                             nex-type
-                             jvm-type))
+      (function-value-call-node (lower-expression env {:type :identifier
+                                                       :name (:method expr)})
+                                arg-irs
+                                nex-type
+                                jvm-type))
 
     (#{"await_all" "await_any"} (:method expr))
     (let [nex-type (infer-type env expr)
@@ -7021,7 +7045,7 @@
                (= (:method expr) (str "call" (count (:args expr))))))
       (let [nex-type (or (:return-type target-type) "Any")
             jvm-type (resolve-jvm-type env nex-type)]
-        (ir/call-function-node (lower-expression env target-expr) arg-irs nex-type jvm-type))
+        (function-value-call-node (lower-expression env target-expr) arg-irs nex-type jvm-type))
 
       java-static-owner
       (lower-java-static-owner-call env expr java-static-owner arg-irs)

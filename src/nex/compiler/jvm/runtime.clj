@@ -149,6 +149,28 @@
   (^Object __method_$invariant$arity0 [^nex.compiler.jvm.runtime.NexReplState state
                                        ^"[Ljava.lang.Object;" args]))
 
+;; NexCall0..NexCall3 are implemented by every compiled class with a concrete
+;; `callN` of that arity (a `fn` of N parameters, or a class inheriting
+;; Function that defines one), whose method each names, so the runtime calls
+;; a function value directly rather than by reflection: calling a closure
+;; (`f(x)`), Array.sort's comparator or fold's step that way cost several
+;; times the call itself.
+(definterface NexCall0
+  (^Object __method_call0$arity0 [^nex.compiler.jvm.runtime.NexReplState state
+                                  ^"[Ljava.lang.Object;" args]))
+
+(definterface NexCall1
+  (^Object __method_call1$arity1 [^nex.compiler.jvm.runtime.NexReplState state
+                                  ^"[Ljava.lang.Object;" args]))
+
+(definterface NexCall2
+  (^Object __method_call2$arity2 [^nex.compiler.jvm.runtime.NexReplState state
+                                  ^"[Ljava.lang.Object;" args]))
+
+(definterface NexCall3
+  (^Object __method_call3$arity3 [^nex.compiler.jvm.runtime.NexReplState state
+                                  ^"[Ljava.lang.Object;" args]))
+
 (definterface NexCarrier
   ;; Implemented by every compiled user class: its `__container__` (the object
   ;; it is a composition carrier of, one level up, or nil) and `__outer__`
@@ -313,6 +335,8 @@
           (.putIfAbsent by-arity k method)
           method))))
 
+(def ^:private ^Class object-array-class (class (object-array 0)))
+
 (defn invoke-function-object
   [state target args]
   (when-not target
@@ -328,9 +352,20 @@
     (apply target args)
 
     :else
-    (invoke-reflective! (function-call-method (class target) (count args))
-                        target
-                        (method-args state (object-array args)))))
+    ;; Compiled code passes ARGS as a fresh Object[] (emit-expr-call-function!),
+    ;; used as it is: counting and copying it through Clojure's seq functions
+    ;; cost more than the call. Other callers pass a vector.
+    (let [^objects arr (if (instance? object-array-class args) args (object-array args))
+          n (alength arr)]
+      (cond
+        (and (= 1 n) (instance? NexCall1 target)) (.__method_call1$arity1 ^NexCall1 target state arr)
+        (and (= 2 n) (instance? NexCall2 target)) (.__method_call2$arity2 ^NexCall2 target state arr)
+        (and (= 0 n) (instance? NexCall0 target)) (.__method_call0$arity0 ^NexCall0 target state arr)
+        (and (= 3 n) (instance? NexCall3 target)) (.__method_call3$arity3 ^NexCall3 target state arr)
+        :else
+        (invoke-reflective! (function-call-method (class target) n)
+                            target
+                            (method-args state arr))))))
 
 (defn- function-invoker-2
   "A two-argument Clojure fn that calls function value F the way
@@ -342,16 +377,31 @@
   (cond
     (or (nil? f) (interp-object? f)) (fn [a b] (invoke-function-object state f [a b]))
     (ifn? f) f
+
+    (instance? NexCall2 f)
+    (fn [a b]
+      (let [args (object-array 2)]
+        (aset args 0 a)
+        (aset args 1 b)
+        (.__method_call2$arity2 ^NexCall2 f state args)))
+
     :else
     ;; Looked up on the first call, not here, so a function value without a
     ;; 2-argument call fails where invoke-function-object would (an empty
     ;; sort never calls its comparator, so it doesn't fail at all).
-    (let [method (delay (function-call-method (class f) 2))]
+    ;; A one-slot array rather than a delay: dereferencing a delay on each
+    ;; call cost about a sixth of a comparator sort. Two threads racing to
+    ;; fill it store the same Method.
+    (let [cache (object-array 1)]
       (fn [a b]
-        (let [args (object-array 2)]
+        (let [method (or (aget cache 0)
+                         (let [m (function-call-method (class f) 2)]
+                           (aset cache 0 m)
+                           m))
+              args (object-array 2)]
           (aset args 0 a)
           (aset args 1 b)
-          (invoke-reflective! @method f (method-args state args)))))))
+          (invoke-reflective! method f (method-args state args)))))))
 
 (defn- make-task
   [future]

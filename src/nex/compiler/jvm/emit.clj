@@ -245,6 +245,17 @@
    (its `__container__`/`__outer__` getters, below)."
   "nex/compiler/jvm/runtime/NexCarrier")
 
+(defn- call-interfaces
+  "nex.compiler.jvm.runtime/NexCall0..NexCall3 for each concrete callN of
+   that arity the class has, so the runtime can call it directly. Every
+   concrete method in :methods is emitted as a public instance method with
+   the standard routine descriptor (user-class-spec), which is theirs."
+  [lowered-class]
+  (let [names (into #{} (comp (remove :deferred?) (map :emitted-name)) (:methods lowered-class))]
+    (for [n (range 4)
+          :when (contains? names (str "__method_call" n "$arity" n))]
+      (str "nex/compiler/jvm/runtime/NexCall" n))))
+
 (defn- has-invariant-method?
   [lowered-class]
   (some #(and (not (:deferred? %)) (= "__method_$invariant$arity0" (:emitted-name %)))
@@ -290,6 +301,7 @@
                                   (class-dispatch-keys class-spec))
                              (when (has-invariant-method? class-spec)
                                [invariant-interface])
+                             (call-interfaces class-spec)
                              [carrier-interface]))
     :flags Opcodes/ACC_PUBLIC
     :fields (vec
@@ -2372,9 +2384,28 @@
         (do (emit-unbox-or-cast! mv (:jvm-type expr))
             (:jvm-type expr))))))
 
+(defn- emit-integer-compare!
+  "`a.compare(b)` on two unboxed Integers as Long.compare, which gives -1, 0
+   or 1 as Integer's compare does. Both operands must be longs: a Real
+   argument goes to the runtime, which compares it as a Real. Returns :long,
+   or nil when EXPR is not that."
+  [^MethodVisitor mv expr state-slot]
+  (let [args (:args expr)]
+    (when (and (= "builtin-method:Integer:compare" (:helper expr))
+               (= 2 (count args))
+               (every? #(= :long (:jvm-type %)) args)
+               (not= :void (:jvm-type expr)))
+      (doseq [arg args]
+        (emit-value-coerce! mv (emit-expr! mv arg state-slot) :long))
+      (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Long" "compare" "(JJ)I" false)
+      (.visitInsn mv Opcodes/I2L)
+      (emit-value-coerce! mv :long (:jvm-type expr))
+      (:jvm-type expr))))
+
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
   (or (emit-prim-long-arith! mv expr state-slot)
+      (emit-integer-compare! mv expr state-slot)
       (emit-string-concat-2! mv expr state-slot)
       (emit-sized-intrinsic! mv expr state-slot)
       (emit-byte-array-intrinsic! mv expr state-slot)
@@ -3597,7 +3628,84 @@
     (ir/object-jvm-type "java/lang/Object")
     (:jvm-type expr)))
 
+(defn- emit-typed-function-call!
+  "A call of a function value whose static type gives it a typed descriptor
+   (:typed-descriptor, see nex.lower/function-value-call-node), when scratch
+   locals are at hand. The target and each argument, converted to the typed
+   parameter's type, are evaluated once into scratch locals, in the order
+   the boxed call evaluates them. When the target implements callN's T
+   interface for that descriptor (a closure of exactly that signature, or a
+   class inheriting Function that defines such a callN), the call is to its
+   typed method, the arguments and result unboxed, which the JIT can inline.
+   Anything else (a function passed by name, an interpreter object, a
+   closure of another signature) goes to the runtime's
+   invoke-function-object as before. Returns the result's JVM type."
+  [^MethodVisitor mv expr state-slot]
+  (let [target-ir (:target expr)
+        arg-irs (:args expr)
+        arity (count arg-irs)
+        method-name (str "call" arity)
+        typed-desc (:typed-descriptor expr)
+        code (typed-dispatch-code typed-desc)
+        t-iface (dispatch-interface-name "T" method-name arity code)
+        param-types (map descriptor-jvm-type (rest (Type/getArgumentTypes ^String typed-desc)))
+        return-type (descriptor-jvm-type (Type/getReturnType ^String typed-desc))
+        void? (= :void (:jvm-type expr))
+        boxed (Label.)
+        end (Label.)
+        target-slot (alloc-scratch! (ir/object-jvm-type "java/lang/Object"))
+        arg-slots (mapv alloc-scratch! param-types)]
+    (note-dispatch-key! ["T" method-name arity code])
+    (emit-boxed-expr! mv target-ir state-slot)
+    (.visitVarInsn mv Opcodes/ASTORE target-slot)
+    (doseq [[arg t slot] (map vector arg-irs param-types arg-slots)]
+      (emit-value-coerce! mv (emit-expr! mv arg state-slot) t)
+      (.visitVarInsn mv (local-store-op t) slot))
+    ;; The typed call.
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitTypeInsn mv Opcodes/INSTANCEOF t-iface)
+    (.visitJumpInsn mv Opcodes/IFEQ boxed)
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitTypeInsn mv Opcodes/CHECKCAST t-iface)
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (doseq [[t slot] (map vector param-types arg-slots)]
+      (.visitVarInsn mv (local-load-op t) slot))
+    (.visitMethodInsn mv Opcodes/INVOKEINTERFACE t-iface
+                      (str "__method_" method-name "$arity" arity "$t") typed-desc true)
+    (if void?
+      (.visitInsn mv (if (#{:long :double} return-type) Opcodes/POP2 Opcodes/POP))
+      (emit-value-coerce! mv return-type (:jvm-type expr)))
+    (.visitJumpInsn mv Opcodes/GOTO end)
+    ;; Boxed: the runtime, as emit-expr-call-function! calls it.
+    (.visitLabel mv boxed)
+    (emit-runtime-var! mv "invoke-function-object")
+    (.visitVarInsn mv Opcodes/ALOAD state-slot)
+    (.visitVarInsn mv Opcodes/ALOAD target-slot)
+    (.visitLdcInsn mv (int arity))
+    (.visitTypeInsn mv Opcodes/ANEWARRAY "java/lang/Object")
+    (doseq [[i t slot] (map vector (range) param-types arg-slots)]
+      (.visitInsn mv Opcodes/DUP)
+      (.visitLdcInsn mv (int i))
+      (.visitVarInsn mv (local-load-op t) slot)
+      (emit-value-coerce! mv t (ir/object-jvm-type "java/lang/Object"))
+      (.visitInsn mv Opcodes/AASTORE))
+    (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL var-internal-name "invoke"
+                      "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" false)
+    (if void?
+      (.visitInsn mv Opcodes/POP)
+      (emit-unbox-or-cast! mv (:jvm-type expr)))
+    (.visitLabel mv end)
+    (if void? :void (:jvm-type expr))))
+
+(declare emit-boxed-function-call!)
+
 (defn- emit-expr-call-function!
+  [^MethodVisitor mv expr state-slot]
+  (if (and (:typed-descriptor expr) *scratch-slot*)
+    (emit-typed-function-call! mv expr state-slot)
+    (emit-boxed-function-call! mv expr state-slot)))
+
+(defn- emit-boxed-function-call!
   [^MethodVisitor mv expr state-slot]
   (emit-runtime-var! mv "invoke-function-object")
   (.visitVarInsn mv Opcodes/ALOAD state-slot)

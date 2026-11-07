@@ -1,0 +1,32 @@
+-- A string-keyed map: 500k keys built with +, put, then each read back.
+import java.lang.System
+
+-- The work's own time, in microseconds, from the JVM's monotonic clock.
+function clock_us(): Integer do
+  let t: Integer := 0
+  with "java" do
+    t := System.nanoTime()
+  end
+  result := t / 1000
+end
+
+function run(n: Integer): Integer do
+  let m: Map[String, Integer] := {}
+  from let i := 0 until i = n do
+    m.put("k" + i.to_string, i)
+    i := i + 1
+  end
+  let total := 0
+  from let i := 0 until i = n do
+    total := (total + m.get("k" + i.to_string)) % 1000003
+    i := i + 1
+  end
+  result := total
+end
+
+clock_us() -- warm the clock up before timing
+let t0 := clock_us()
+let r := run(500000)
+let t1 := clock_us()
+print(r)
+print(t1 - t0)
