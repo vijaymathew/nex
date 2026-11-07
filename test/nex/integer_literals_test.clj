@@ -33,8 +33,8 @@ end")
       (is (= 255 (-> lets (nth 2) :value :value)))
       (is (= 1000000 (-> lets (nth 3) :value :value))))))
 
-(deftest negative-prefixed-integers-work-via-unary-minus
-  (testing "sign remains outside the integer token"
+(deftest negative-prefixed-integers-fold-into-the-constant
+  (testing "a minus written before a constant folds into it"
     (let [ast (p/ast "class Test
   feature
     demo() do
@@ -49,7 +49,10 @@ end")
       print(-0b11)
     end
 end")]
-      (is (= :unary (-> ast :classes first :body first :members first :body first :args first :type)))
+      ;; Minus keeps an Integer an Integer, so the walker folds it into the constant.
+      (is (= {:type :integer :value -16}
+             (select-keys (-> ast :classes first :body first :members first :body first :args first)
+                          [:type :value])))
       (is (= ["-16" "-3"] output)))))
 
 (deftest prefixed-integers-typecheck-cleanly

@@ -484,6 +484,34 @@
     (instance? Short v) (long v)
     :else v))
 
+(defn- negate-checked
+  "-V for a TYPE-NAME value V; raises Arithmetic_Overflow for MIN-VALUE, which
+   has no positive counterpart in the type."
+  ^long [type-name ^long min-value ^long v]
+  (when (== v min-value)
+    (throw (ex-info (str type-name " negation: " v " has no positive counterpart")
+                    {:value v :builtin-kind "Arithmetic_Overflow"})))
+  (- v))
+
+(defn negate-int16
+  "-V for the value V of an Integer16, as a long."
+  ^long [^long v]
+  (negate-checked "Integer16" -32768 v))
+
+(defn negate-int32
+  "-V for the value V of an Integer32, as a long."
+  ^long [^long v]
+  (negate-checked "Integer32" -2147483648 v))
+
+(defn nex-negate
+  "Unary minus. It keeps the type of an Integer16 or Integer32; a Byte, never
+   negative, gives an Integer."
+  [v]
+  (cond
+    (instance? NexInt16 v) (NexInt16. (negate-int16 (.v ^NexInt16 v)))
+    (instance? NexInt32 v) (NexInt32. (negate-int32 (.v ^NexInt32 v)))
+    :else (- (sized->long v))))
+
 ;; Primitive-typed versions of the conversions above, for compiled code. A
 ;; `^long` parameter or result makes each function implement one of Clojure's
 ;; primitive interfaces (IFn$OL, IFn$LO), which compiled code calls with an

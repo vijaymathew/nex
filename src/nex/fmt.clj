@@ -88,13 +88,6 @@
 
 (declare format-expression)
 
-(defn- sized-literal-root?
-  "True when EXPR is an i16/i32 constant or a call chain starting with one."
-  [expr]
-  (cond
-    (#{:int16 :int32} (:type expr)) true
-    (and (= :call (:type expr)) (map? (:target expr))) (recur (:target expr))
-    :else false))
 
 (defn- operand
   "EXPR as an operand that needs at least precedence MIN, in parentheses if
@@ -194,12 +187,13 @@
       :unary (let [op (:operator expr)
                    text (operand (:expr expr) unary-precedence)]
                (str op (when (= "not" op) " ")
-                    ;; After `-`, parenthesise an operand starting with an i16/i32
-                    ;; constant (`-5i16` would read as one constant) or with a
-                    ;; minus (`--` starts a comment).
+                    ;; After `-`, parenthesise a bare integer constant (`-5i16`
+                    ;; would read as one negative constant, and `-(32768i16)`,
+                    ;; out of range, would become valid) and an operand
+                    ;; starting with a minus (`--` starts a comment).
                     (if (and (= "-" op)
                              (or (str/starts-with? text "-")
-                                 (sized-literal-root? (:expr expr))))
+                                 (#{:integer :int16 :int32} (:type (:expr expr)))))
                       (str "(" text ")")
                       text)))
       :when (str "when " (format-expression (:condition expr))

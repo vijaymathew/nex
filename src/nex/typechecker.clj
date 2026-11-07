@@ -616,6 +616,14 @@
    and none converts to another (or to Integer) implicitly."
   #{"Byte" "Integer16" "Integer32"})
 
+(defn unary-minus-result-type
+  "The type of `-x` where x has type OPERAND-TYPE (BASE-NAME once normalised).
+   Unary minus keeps the type of a signed operand, so an Integer16 stays an
+   Integer16 (negating the minimum raises). A Byte, never negative, gives an
+   Integer."
+  [base-name operand-type]
+  (if (= "Byte" base-name) "Integer" operand-type))
+
 (def builtin-types
   #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
     "Array" "Map" "Set" "Map_Entry" "Min_Heap" "Atomic_Integer" "Atomic_Integer64" "Atomic_Boolean" "Atomic_Reference"
@@ -2600,9 +2608,7 @@
         operand-type (check-expression env operand-node)]
     (case operator
       "-" (if (is-numeric-type? operand-type)
-            ;; -x on a sized type promotes to Integer (a negative literal such as
-            ;; `-5i16` is folded into the literal by the walker, so it never gets here).
-            (if (contains? sized-integer-types (normalize-type operand-type)) "Integer" operand-type)
+            (unary-minus-result-type (normalize-type operand-type) operand-type)
             (throw (ex-info "Unary minus requires numeric operand"
                             {:error (type-error
                                      (str "Unary minus requires numeric operand, got "

@@ -83,7 +83,8 @@ print(text) -- "héllo"
 everywhere (`let n: Integer64 := 5` and `let m: Integer := n` both typecheck). The
 fixed-width siblings are `Integer16`, `Integer32` and `Byte`, below.
 Arithmetic is *checked*: `+`, `-`, `*`, unary `-`, and `^` raise on overflow, and
-`/` and `%` raise on a zero divisor.
+`/` and `%` raise on a zero divisor. The least `Integer` is written
+`-9223372036854775808`: a literal one past the maximum is allowed right after a minus.
 
 Bitwise operations use 32-bit integer semantics. Bit index `0` is the least-significant
 bit. For method calls on integer literals, wrap the literal in parentheses:
@@ -217,18 +218,21 @@ way `Integer` is related to `Real`.
   converts to another without a call, in either direction. `let b: Integer32 := a` where
   `a` is an `Integer16` is a type error; write `a.to_integer32()`.
 - **Literals.** An integer literal with an `i16` or `i32` suffix: `300i16`, `0xFFFFi32`,
-  `1_000i32`. A negative one is written with a leading `-` and is a single literal of
-  that type: `-5i16` is an `Integer16`, and `-32768i16` is valid. (Elsewhere `-x` on a
-  sized variable promotes to `Integer`, like any arithmetic.) An unsuffixed literal is
-  an `Integer`, so `let a: Integer16 := 5` is a type error; write `5i16`. A literal
-  outside the type's range is rejected.
+  `1_000i32`. Unary minus keeps the type, so `-5i16` is an `Integer16`. A literal
+  outside the type's range is rejected, except that one past the maximum is allowed
+  right after a minus, so the minimum can be written: `-32768i16` is valid, but
+  `32768i16` and `-(32768i16)` are not. A call binds tighter than the minus:
+  `-5i16.abs()` is `-(5i16.abs())`, which is `-5i16`. An unsuffixed literal is an
+  `Integer`, so `let a: Integer16 := 5` is a type error; write `5i16`.
 - **Conversions.** Narrowing is checked: `n.to_integer16()`, `n.to_integer32()` and
   `n.to_byte()` raise unless the value fits. Widening (`Byte` to `Integer16`/`Integer32`,
   `Integer16` to `Integer32`) also uses these methods and always succeeds. `x.to_integer()`
   gives the `Integer`.
-- **Arithmetic** (`+ - * / % ^`, unary `-` on a variable) promotes to `Integer`, so the
-  result of `a + a` is an `Integer` and cannot overflow the narrow type; narrow it back
-  with `(a + a).to_integer16()`. Mixing with `Real` promotes to `Real`.
+- **Arithmetic** (`+ - * / % ^`) promotes to `Integer`, so the result of `a + a` is an
+  `Integer` and cannot overflow the narrow type; narrow it back with
+  `(a + a).to_integer16()`. Mixing with `Real` promotes to `Real`.
+- **Unary minus** keeps the type: `-a` is an `Integer16` when `a` is. Negating the
+  minimum raises `Arithmetic_Overflow`, as `abs` does.
 - **Comparison** (`= /= < <= > >=`) is between two values of the same type. Comparing
   across types needs a conversion first. `a.equals(x)` is true only when `x` has the same
   type and value.

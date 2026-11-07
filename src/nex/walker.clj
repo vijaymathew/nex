@@ -105,14 +105,18 @@
     (or (get special-char-codes v) 0)
     v))
 
-(defn- parse-integer-literal [token]
-  (let [clean (str/replace token "_" "")
-        [radix digits] (cond
-                         (str/starts-with? clean "0b") [2 (subs clean 2)]
-                         (str/starts-with? clean "0o") [8 (subs clean 2)]
-                         (str/starts-with? clean "0x") [16 (subs clean 2)]
-                         :else [10 clean])]
-    (Long/parseLong digits radix)))
+(defn- parse-integer-literal
+  "The value of an integer literal TOKEN, negated when NEGATIVE? (so that the
+   minimum Integer, whose magnitude is out of range, can be read)."
+  ([token] (parse-integer-literal token false))
+  ([token negative?]
+   (let [clean (str/replace token "_" "")
+         [radix digits] (cond
+                          (str/starts-with? clean "0b") [2 (subs clean 2)]
+                          (str/starts-with? clean "0o") [8 (subs clean 2)]
+                          (str/starts-with? clean "0x") [16 (subs clean 2)]
+                          :else [10 clean])]
+     (Long/parseLong (str (when negative? "-") digits) radix))))
 
 (defn- codepoint->string [cp]
   (String/valueOf (Character/toChars cp)))
@@ -212,45 +216,45 @@
 (defn- raw-tag [node]
   (when (sequential? node) (first node)))
 
-(defn- minus-against-sized-literal?
-  "True when the raw operand of a unary minus starts with an i16 or i32
-   constant written right after the minus: `-5i16`, `-5i16.abs()`. Then the
-   minus is part of the constant. A parenthesised operand, `-(5i16)`, does not
-   count, and neither does any other constant: `-7.abs()` is `-(7.abs())`."
+(defn- bare-integer-constant
+  "The raw integer, i16 or i32 literal when the raw operand of a unary minus is
+   just that constant, written right after the minus with no parentheses and
+   no call after it: the 5i16 of `-5i16`. nil otherwise."
   [operand]
   (let [postfix (if (= :postfix (raw-tag operand))
                   operand
                   (when (and (#{:unary :postfixExpr} (raw-tag operand))
                              (= :postfix (raw-tag (second operand))))
                     (second operand)))
-        primary (second postfix)
+        primary (when (= 2 (count postfix)) (second postfix))
         literal (when (= :primary (raw-tag primary)) (second primary))
         constant (when (= :literal (raw-tag literal)) (second literal))]
-    (boolean (#{:int16Literal :int32Literal} (raw-tag constant)))))
+    (when (#{:integerLiteral :int16Literal :int32Literal} (raw-tag constant))
+      constant)))
 
-(defn- negate-sized-chain-root
-  "Negates the i16/i32 constant at the root of NODE, which is that constant or
-   a call chain starting with it. Returns nil if there is no such root."
-  [node]
-  (cond
-    (#{:int16 :int32} (:type node))
-    (update node :value -)
-
-    (and (= :call (:type node)) (map? (:target node)))
-    (when-let [negated-target (negate-sized-chain-root (:target node))]
-      (assoc node :target negated-target))
-
-    :else nil))
+(defn- negative-constant
+  "The negated constant for `-` written right before the raw integer, i16 or
+   i32 literal CONSTANT. Unary minus keeps the type of these operands, so this
+   is the value `-` would give; folding it lets the minimum of each type be
+   written, though its magnitude is one past the maximum (Definition 2.2)."
+  [[tag text :as constant]]
+  (if (= :integerLiteral tag)
+    (let [v (try (parse-integer-literal text true)
+                 (catch NumberFormatException _
+                   (throw (ex-info (str "Integer literal out of range "
+                                        Long/MIN_VALUE ".." Long/MAX_VALUE ": -" text)
+                                   {:literal (str "-" text)}))))]
+      {:type :integer :value v :value-str (str v)})
+    (update (transform-node constant) :value -)))
 
 (defn- unary-minus-node
   "The AST for `-` applied to the raw OPERAND."
   [operand]
-  (let [transformed (transform-node operand)]
-    (or (when (minus-against-sized-literal? operand)
-          (negate-sized-chain-root transformed))
-        {:type :unary
-         :operator "-"
-         :expr transformed})))
+  (if-let [constant (bare-integer-constant operand)]
+    (negative-constant constant)
+    {:type :unary
+     :operator "-"
+     :expr (transform-node operand)}))
 
 (defn- desugar-safe-call [call-node]
   (if (and (:safe? call-node)
@@ -3139,7 +3143,7 @@
 
 (defn- handle-sized-int-literal
   "A signed fixed-width literal such as 300i16. The walker accepts up to 2^(bits-1)
-   so that `-32768i16` can be written: the negation fold in handle-unary makes it
+   so that `-32768i16` can be written: negative-constant folds the minus in, making it
    in range, and the typechecker rejects a positive 32768i16."
   [value node-type bits]
   (let [text (subs value 0 (- (count value) 3))

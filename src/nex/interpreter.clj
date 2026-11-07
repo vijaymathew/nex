@@ -1675,7 +1675,7 @@
   "Apply a unary operator to a value."
   [op value]
   (case op
-    "-" (- (rt/sized->long value))
+    "-" (rt/nex-negate value)
     "not" (not value)
     (throw (ex-info (str "Unknown unary operator: " op)
                     {:operator op}))))

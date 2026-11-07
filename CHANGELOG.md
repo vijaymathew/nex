@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Unary minus keeps the type of a signed operand.** `-a` on an `Integer16`
+  or `Integer32` is now of the same type, not an `Integer`, and negating the
+  minimum raises `Arithmetic_Overflow`, as `abs` does. On a `Byte` it still
+  gives an `Integer`. Code that relied on `-a` being an `Integer` needs
+  `(-a).to_integer()`.
+- **A call binds tighter than a minus before a literal**, as for any operand:
+  `-7.abs` is now `-(7.abs)`, which is -7, and `-5i16.abs()` is `-5i16`. Write
+  `(-7).abs` for 7. Parentheses also stop a minus from being folded into a
+  constant, so `-(-32768i16)` now raises instead of being read as the
+  out-of-range constant `32768i16`.
+- **The least `Integer` can be written** as `-9223372036854775808`: a literal
+  one past its type's maximum is allowed right after a minus.
+- `nex format` no longer prints `-(-x)` as `--x`, which starts a comment.
+
 ## 0.6.9 - 2026-11-06
 
 - **Open features: `extend`.** A class can be given new features from

@@ -106,7 +106,8 @@ let mask: Byte := 0xFFu8        -- bases and `_` work as usual
 ```
 
 An unsuffixed literal is always an `Integer`, so `let b: Byte := 200` is a type error.
-A leading `-` is part of a signed literal: `-5i16` is an `Integer16`.
+Unary minus keeps the type of a signed operand, so `-5i16` is an `Integer16`, and
+`-32768i16` (the minimum) can be written although `32768i16` is out of range.
 
 None of `Integer`, `Integer16`, `Integer32` and `Byte` converts to another on its own.
 Convert with a method; narrowing raises if the value does not fit:
@@ -118,7 +119,7 @@ let bb: Byte := n.to_byte()            -- raises: 300 is not in 0..255
 let back: Integer := s.to_integer()
 ```
 
-Arithmetic on any of them gives an `Integer`, so it cannot overflow the narrow type;
+Binary arithmetic on any of them gives an `Integer`, so it cannot overflow the narrow type;
 narrow the result again if you need to: `(s + s).to_integer16()`. Comparison and `=`
 are between two values of the same type.
 

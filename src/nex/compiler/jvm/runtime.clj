@@ -2286,6 +2286,17 @@
 (def make-int16 rt/->nex-int16)
 (def make-int32 rt/->nex-int32)
 
+(defn neg-int16
+  "Unary minus on the value of an Integer16, as a long (wrapped back by
+   make-int16); raises for the minimum."
+  ^long [^long v]
+  (rt/negate-int16 v))
+
+(defn neg-int32
+  "Unary minus on the value of an Integer32, as a long; raises for the minimum."
+  ^long [^long v]
+  (rt/negate-int32 v))
+
 ;; The primitive-typed conversions compiled code calls through Clojure's
 ;; IFn$OL / IFn$LO interfaces (nex.compiler.jvm.emit/emit-sized-unwrap! and
 ;; emit-sized-wrap!). Each Var holds the function object itself, so it keeps
@@ -3463,6 +3474,12 @@
 
    "make-int16"
    (fn [_state args] (make-int16 (first args)))
+
+   "op:neg-int16"
+   (fn [_state args] (neg-int16 (long (first args))))
+
+   "op:neg-int32"
+   (fn [_state args] (neg-int32 (long (first args))))
 
    "make-int32"
    (fn [_state args] (make-int32 (first args)))
