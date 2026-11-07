@@ -728,6 +728,44 @@
           acc'
           (recur acc' (nex-int-mul b b) e'))))))
 
+(defn nex-arithmetic
+  "Arithmetic operator OP (\"+\" \"-\" \"*\" \"/\" \"%\" \"^\") on two values,
+   chosen by what they are at run time: two Integers give Integer arithmetic
+   (checked; `/` and `%` raise on a zero divisor), and any Real operand makes
+   it Real arithmetic. A Byte, Integer16 or Integer32 counts as an Integer.
+   The one implementation both backends use: the interpreter for every
+   arithmetic operator (nex.interpreter/apply-binary-op), the compiled
+   backend for one it can't type statically (an operand of type Any, as a
+   Java call's result inside `with \"java\"` is). String `+` is handled by
+   each backend before this, since it needs the value's to_string."
+  [op left right]
+  (let [left (sized->long left)
+        right (sized->long right)
+        ints? (and (nex-integer? left) (nex-integer? right))]
+    (case op
+      ;; Any Real operand promotes both to Real. On JS, BigInt and number
+      ;; cannot be mixed in a raw operator, so the promotion is explicit
+      ;; (->nex-real).
+      "+" (cond
+            (or (string? left) (string? right))
+            (throw (ex-info "String concatenation requires evaluation context"
+                            {:operator op :left left :right right}))
+            ints? (nex-int-add left right)
+            :else (+ (->nex-real left) (->nex-real right)))
+      "-" (if ints? (nex-int-sub left right) (- (->nex-real left) (->nex-real right)))
+      "*" (if ints? (nex-int-mul left right) (* (->nex-real left) (->nex-real right)))
+      ;; Integer division by zero raises (there is no integer result); Real
+      ;; division follows IEEE-754: x/0.0 -> +/-Infinity, 0.0/0.0 -> NaN.
+      ;; NOTE (JVM): clojure.core// on *boxed* doubles routes through
+      ;; Numbers.divide, which raises on a zero divisor — only primitive
+      ;; doubles yield IEEE Inf/NaN, so the Real branch divides primitives.
+      "/" (if ints? (nex-int-div left right) (/ (double left) (double right)))
+      "^" (if ints? (nex-int-pow left right) (Math/pow (->nex-real left) (->nex-real right)))
+      ;; Same asymmetry for remainder: integral % 0 raises, Real % 0.0 is IEEE
+      ;; NaN. Both are truncated (sign of the dividend), matching LREM/DREM and
+      ;; JS %.
+      "%" (if ints? (nex-int-mod left right) (nex-real-rem (->nex-real left) (->nex-real right))))))
+
 (defn nex-console-print [msg] (print msg))
 (defn nex-console-println [msg] (println msg))
 (defn nex-console-error [msg] (binding [*out* *err*] (println msg)))

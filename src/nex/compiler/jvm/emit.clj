@@ -1467,6 +1467,8 @@
    "op:mod-long"                             ["mod-long" [:b0 :b1]]
    "op:pow-int"                              ["pow-int" [:b0 :b1]]
    "op:pow-long"                             ["pow-long" [:b0 :b1]]
+   "op:dynamic-arithmetic"                   ["dynamic-arithmetic" [:state :b0 :b1 :b2]]
+   "op:dynamic-negate"                       ["dynamic-negate" [:b0]]
    "op:pow-double"                           ["pow-double" [:b0 :b1]]
    "op:sized->integer"                       ["sized->integer" [:b0]]
    "make-int16"                              ["make-int16" [:b0]]

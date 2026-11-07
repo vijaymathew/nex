@@ -5282,6 +5282,23 @@
         (and (= "+" op) (= "String" nex-type))
         (ir/call-runtime-node "op:string-concat" [left-ir right-ir] nex-type jvm-type)
 
+        ;; An operand of type Any (a Java call's result inside `with "java"`)
+        ;; leaves the operation's kind to run time: the runtime does it as
+        ;; the interpreter does (Integer or Real arithmetic by what the
+        ;; values are, `+` on a string concatenating). There is no JVM
+        ;; instruction for arithmetic on an Object, and the static result
+        ;; type can't be trusted either: `1 + s`, with `s` a Java String,
+        ;; infers as Integer from its left side. So the result is Any, which
+        ;; whatever uses it converts as it does any value from Java.
+        (and (#{"+" "-" "*" "/" "%" "^"} op)
+             (or (= "Any" (resolve-type-alias (:nex-type left-ir)))
+                 (= "Any" (resolve-type-alias (:nex-type right-ir)))))
+        (ir/call-runtime-node "op:dynamic-arithmetic"
+                              [(ir/const-node op "String" (ir/object-jvm-type "java/lang/String"))
+                               left-ir right-ir]
+                              "Any"
+                              (ir/object-jvm-type "java/lang/Object"))
+
         (= "^" op)
         (ir/call-runtime-node (case jvm-type
                                 :int "op:pow-int"
@@ -5345,10 +5362,17 @@
         [negate wrap] (when (and (= "-" (:operator expr))
                                  (not (and (map? operand-type) (:detachable operand-type))))
                         (get signed-sized-negation (base-type-name operand-type)))]
-    (if negate
+    (cond
+      negate
       (ir/call-runtime-node wrap
                             [(ir/call-runtime-node negate [(unwrap-sized-ir operand-ir)] "Integer" :long)]
                             nex-type jvm-type)
+
+      ;; Minus on a value of type Any, as for binary arithmetic above.
+      (and (= "-" (:operator expr)) (= "Any" operand-type))
+      (ir/call-runtime-node "op:dynamic-negate" [operand-ir] nex-type jvm-type)
+
+      :else
       (ir/unary-node (get {"-" :neg
                            "not" :not}
                           (:operator expr))
