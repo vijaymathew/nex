@@ -1,0 +1,252 @@
+-- Constraint Propagation (SICP section 3.3.5)
+--
+-- A network of constraints and connectors. A connector holds a value (or
+-- holds nothing). A constraint links connectors and, whenever one of them
+-- gets a value, works out whatever values it can for the others. Values can
+-- also be forgotten, which retracts everything deduced from them.
+--
+-- SICP builds connectors and constraints as closures that answer messages
+-- ('has-value?, 'I-have-a-value, ...). Here they are classes: a deferred
+-- Constraint with process_new_value and process_forget_value, and a
+-- Connector that tells its constraints when its value changes.
+--
+-- Run:  nex examples/constraint_propagation.nex
+
+-- Who set a connector's value. Either a constraint or the user.
+deferred class Informant
+end
+
+class User
+inherit Informant
+end
+
+deferred class Constraint
+inherit Informant
+feature
+  -- One of my connectors has a new value.
+  process_new_value() deferred
+
+  -- One of my connectors lost its value.
+  process_forget_value() deferred
+end
+
+class Connector
+create
+  make() do
+    constraints := []
+  end
+
+feature
+  value: Real
+  informant: ?Informant
+  constraints: Array[Constraint]
+
+  has_value(): Boolean do
+    result := informant /= nil
+  end
+
+  -- Set the value on behalf of `setter`. A connector that already holds a
+  -- different value reports a contradiction.
+  set_value(new_value: Real, setter: Informant) do
+    if not has_value then
+      value := new_value
+      informant := setter
+      inform_all_except(setter, fn (c: Constraint) do c.process_new_value() end)
+    elseif value /= new_value then
+      raise "Contradiction " + value.to_string + " " + new_value.to_string
+    end
+  end
+
+  -- Forget the value, but only if `retractor` is the one who set it.
+  forget_value(retractor: Informant) do
+    if informant == retractor then
+      informant := nil
+      inform_all_except(retractor, fn (c: Constraint) do c.process_forget_value() end)
+    end
+  end
+
+  connect(new_constraint: Constraint) do
+    if not constraints.any(fn (c) => c == new_constraint) then
+      -- At the front, like SICP's cons, so the newest constraint hears first.
+      constraints.add_at(0, new_constraint)
+    end
+    if has_value then
+      new_constraint.process_new_value()
+    end
+  end
+
+private feature
+  -- SICP's for-each-except.
+  inform_all_except(skip: Informant, action: Function(c: Constraint)) do
+    across constraints as c do
+      if c != skip then action(c) end
+    end
+  end
+end
+
+-- a1 + a2 = sum
+class Adder
+inherit Constraint
+create
+  make(x, y, total: Connector) do
+    a1 := x
+    a2 := y
+    sum := total
+    a1.connect(this)
+    a2.connect(this)
+    sum.connect(this)
+  end
+
+feature
+  a1: Connector
+  a2: Connector
+  sum: Connector
+
+  process_new_value() do
+    if a1.has_value and a2.has_value then
+      sum.set_value(a1.value + a2.value, this)
+    elseif a1.has_value and sum.has_value then
+      a2.set_value(sum.value - a1.value, this)
+    elseif a2.has_value and sum.has_value then
+      a1.set_value(sum.value - a2.value, this)
+    end
+  end
+
+  process_forget_value() do
+    sum.forget_value(this)
+    a1.forget_value(this)
+    a2.forget_value(this)
+    process_new_value()
+  end
+end
+
+-- m1 * m2 = product
+class Multiplier
+inherit Constraint
+create
+  make(x, y, total: Connector) do
+    m1 := x
+    m2 := y
+    product := total
+    m1.connect(this)
+    m2.connect(this)
+    product.connect(this)
+  end
+
+feature
+  m1: Connector
+  m2: Connector
+  product: Connector
+
+  process_new_value() do
+    if (m1.has_value and m1.value = 0.0) or (m2.has_value and m2.value = 0.0) then
+      product.set_value(0.0, this)
+    elseif m1.has_value and m2.has_value then
+      product.set_value(m1.value * m2.value, this)
+    elseif product.has_value and m1.has_value then
+      m2.set_value(product.value / m1.value, this)
+    elseif product.has_value and m2.has_value then
+      m1.set_value(product.value / m2.value, this)
+    end
+  end
+
+  process_forget_value() do
+    product.forget_value(this)
+    m1.forget_value(this)
+    m2.forget_value(this)
+    process_new_value()
+  end
+end
+
+-- Fixes a connector to a value for good.
+class Constant
+inherit Constraint
+create
+  make(v: Real, c: Connector) do
+    connector := c
+    connector.connect(this)
+    connector.set_value(v, this)
+  end
+
+feature
+  connector: Connector
+
+  process_new_value() do
+    raise "Unknown request -- CONSTANT process_new_value"
+  end
+
+  process_forget_value() do
+    raise "Unknown request -- CONSTANT process_forget_value"
+  end
+end
+
+-- Prints a message whenever its connector is set or forgotten.
+class Probe
+inherit Constraint
+create
+  make(label: String, c: Connector) do
+    name := label
+    connector := c
+    connector.connect(this)
+  end
+
+feature
+  name: String
+  connector: Connector
+
+  process_new_value() do
+    show(connector.value.to_string)
+  end
+
+  process_forget_value() do
+    show("?")
+  end
+
+private feature
+  show(v: String) do
+    console.print_line("Probe: " + name + " = " + v)
+  end
+end
+
+-- 9C = 5(F - 32), built from two multipliers, an adder and three constants.
+function celsius_fahrenheit_converter(c, f: Connector) do
+  let u := create Connector.make
+  let v := create Connector.make
+  let w := create Connector.make
+  let x := create Connector.make
+  let y := create Connector.make
+  create Multiplier.make(c, w, u)
+  create Multiplier.make(v, x, u)
+  create Adder.make(v, y, f)
+  create Constant.make(9.0, w)
+  create Constant.make(5.0, x)
+  create Constant.make(32.0, y)
+end
+
+function main() do
+  let user := create User
+  let c := create Connector.make
+  let f := create Connector.make
+  celsius_fahrenheit_converter(c, f)
+
+  create Probe.make("Celsius temp", c)
+  create Probe.make("Fahrenheit temp", f)
+
+  console.print_line("(set-value! C 25 'user)")
+  c.set_value(25.0, user)
+
+  console.print_line("(set-value! F 212 'user)")
+  do
+    f.set_value(212.0, user)
+  rescue
+    console.print_line("Error! " + exception.to_string)
+  end
+
+  console.print_line("(forget-value! C 'user)")
+  c.forget_value(user)
+
+  console.print_line("(set-value! F 212 'user)")
+  f.set_value(212.0, user)
+end
+
+main()

@@ -54,6 +54,8 @@ read one is to run it alongside the source.
 
 - **stack.nex** — a generic array-backed stack with full contracts
 - **apl.nex** — array-oriented operations in the APL style
+- **constraint_propagation.nex** — SICP 3.3.5: a network of constraints and
+  connectors that converts Celsius to Fahrenheit in either direction
 
 ## Library and tooling
 
