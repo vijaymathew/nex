@@ -4,7 +4,9 @@
    compiled backends. Extracted from nex.interpreter (backend-alignment
    Stage D); scheduling (spawn) stays with each engine."
   (:require [nex.types.runtime :as rt])
-  (:import [java.util.concurrent CompletableFuture ExecutionException TimeUnit TimeoutException CancellationException]))
+  (:import [java.util.concurrent CompletableFuture ExecutionException ExecutorService Executors
+            ThreadFactory TimeUnit TimeoutException CancellationException]
+           [java.util.concurrent.atomic AtomicLong]))
 
 (def nex-array-from rt/nex-array-from)
 
@@ -34,6 +36,40 @@
 
 (defn queue-pop [q]
   [(peek q) (pop q)])
+
+(defn- daemon-thread-pool
+  "Unbounded pool of daemon threads, so tasks still running when the program
+   ends don't keep the JVM alive."
+  ^ExecutorService []
+  (let [n (AtomicLong.)]
+    (Executors/newCachedThreadPool
+     (reify ThreadFactory
+       (newThread [_ r]
+         (doto (Thread. ^Runnable r (str "nex-task-" (.incrementAndGet n)))
+           (.setDaemon true)))))))
+
+(defn- virtual-thread-executor
+  "One virtual thread per task (Java 21+), or nil on an older JVM. Looked up
+   reflectively because Nex still runs on Java 17."
+  ^ExecutorService []
+  (try
+    (.invoke (.getMethod Executors "newVirtualThreadPerTaskExecutor" (make-array Class 0))
+             nil (object-array 0))
+    (catch Exception _ nil)))
+
+(defonce ^{:doc "Executor that runs spawned tasks. Tasks often block (channels, sleep, IO),
+   so they must not share the JVM's common pool: it has about one thread per
+   core, and a few blocked tasks there stall every other task."}
+  task-executor
+  (delay (or (virtual-thread-executor) (daemon-thread-pool))))
+
+(defn run-task-async
+  "A CompletableFuture running F (a no-arg fn) on the task executor."
+  ^CompletableFuture [f]
+  (CompletableFuture/supplyAsync
+   (reify java.util.function.Supplier
+     (get [_] (f)))
+   ^ExecutorService @task-executor))
 
 (defn make-task [future]
   {:nex-builtin-type :Task

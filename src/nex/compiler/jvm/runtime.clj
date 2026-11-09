@@ -790,10 +790,7 @@
 (defn spawn-function-object
   [state fn-obj]
   (make-task
-   (CompletableFuture/supplyAsync
-    (reify java.util.function.Supplier
-      (get [_]
-        (invoke-function-object state fn-obj []))))))
+   (conc/run-task-async #(invoke-function-object state fn-obj []))))
 
 (defn task-await-all
   [tasks]
