@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+## 0.7.2 - 2026-11-09
+
+- **Every constructor must call a constructor of each parent that has
+  one.** If a parent has constructors, declared or inherited, each
+  constructor of the heir must run one of them: `P.make(...)`,
+  `super.make(...)`, or through another constructor of the heir that it
+  delegates to with `this.k(...)`. A call on the parent that is not a
+  constructor (`P.show()`) does not count. A class that declares no
+  constructors of its own can inherit them from at most one parent; with two
+  or more parents that have constructors, it must declare one that calls a
+  constructor of each. Before, a heir only had to call a parent's constructor
+  when the parent had a field that needed attaching. Code that skipped a
+  parent's constructor now fails to type-check, with an error naming the
+  parent and suggesting the call.
+- **Only scalars, `Array`, `Map` and `Set` fields start with a value.** A
+  scalar field starts at its zero value, and an `Array`, `Map` or `Set` field
+  as an empty collection (`[]`, `{}`, `#{}`). Every other non-optional field
+  must be assigned by each constructor. Fields typed `Console`, `Task`,
+  `Any` or a function type were exempt, so they could be left `nil` and fail
+  when first used (compiled, a `Console` field was `nil`; the interpreter
+  quietly created one). Assign such a field, or make it optional (`?T`). The
+  error now names the class, and points at the constructor.
+- **Names that two parents declare separately are ambiguous on the heir.**
+  When `class C inherit A, B` gets members with the same name and number of
+  arguments from both parents, and they are unrelated (each parent declared
+  its own, rather than both inheriting one from a common ancestor), `C` still
+  inherits both, and each parent's code keeps using its own. But a bare `x`
+  or `this.x` in `C`, `c.x` or `c.m()` on a value of type `C`, `C.K` and
+  `create C.make(...)` are rejected as ambiguous, in `C`'s heirs too. Before,
+  they silently meant the first parent's. Inside `C` or a heir, write `A.x`
+  or `B.x`. A client can use the object as an `A` or a `B`, or `C` can expose
+  the one it means through a feature of its own. Declaring the member in `C`
+  settles it. Members reached twice from a shared ancestor, two `deferred`
+  routines (they join into one), and `private` members are never ambiguous.
+- **`once` cannot be put on a constant.** `once k: Integer = 5` used to be
+  accepted and meant nothing, since a constant can never be assigned. It is
+  now a parse error; `once` is for fields.
+- **`spawn` runs tasks on their own threads, not the JVM's shared pool.**
+  Compiled `spawn` used the common pool, which has about one thread per core,
+  so a few tasks blocked on a channel, `sleep` or IO stalled every other task:
+  50 tasks waiting on a channel for a later task to send never finished.
+  Tasks now get a virtual thread each on Java 21 and later, and a thread from
+  a growing pool on Java 17. 10,000 tasks that each sleep for 200 ms finish in
+  about the time of an empty program. A task still running when the program
+  ends does not keep it alive, as before.
+
 ## 0.7.1 - 2026-11-07
 
 - **Calling a closure is about 12 times faster in compiled code.** When a
