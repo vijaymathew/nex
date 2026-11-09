@@ -46,7 +46,7 @@ end
 class Child
 inherit Base
 create
-  make do end
+  make do Base.make end
 feature
   label(): String do result := \"child\" end
   tag(x: Integer): String do result := \"child\" + x.to_string end
@@ -70,14 +70,14 @@ end
 class B
 inherit A
 create
-  make do end
+  make do A.make end
 feature
   intro do greet() print(\"B says \" + name()) end
 end
 class C
 inherit B
 create
-  make do end
+  make do B.make end
 feature
   name(): String do result := \"C\" end
 end
@@ -135,7 +135,7 @@ end
 class Long_Counter
 inherit Counter
 create
-  make do end
+  make do Counter.make end
 feature
   limit(): Integer do result := 7 end
 end
@@ -165,7 +165,7 @@ end
 class Child
 inherit Base
 create
-  make do end
+  make do Base.make end
 feature
   step(): String do result := \"child step \" + a.to_string + \" \" + b.to_string end
 end
@@ -184,7 +184,7 @@ end
 class Child
 inherit Base
 create
-  make do end
+  make do Base.make end
 feature
   label(): String do result := \"child+\" + super.label() end
   both do print(label()) print(Base.label()) end

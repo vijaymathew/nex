@@ -118,7 +118,12 @@ create
       window_open := false
       title := "Nex Canvas"
       input := create Canvas_Input.make()
-      new_images()
+      with "java" do
+        offscreen := BufferedImage.new(w, h, BufferedImage.TYPE_INT_RGB)
+        onscreen := BufferedImage.new(w, h, BufferedImage.TYPE_INT_RGB)
+        graphics := offscreen.createGraphics()
+      end
+      prepare_graphics()
     ensure
       sized: width = w and height = h
     end
@@ -203,12 +208,13 @@ feature
 
   -- Whether this canvas currently has a window on screen.
   is_window_open(): Boolean do
+    result := false
     if window_open then
-      with "java" do
-        result := frame.isDisplayable()
+      if ?frame as f then
+        with "java" do
+          result := f.isDisplayable()
+        end
       end
-    else
-      result := false
     end
   end
 
@@ -417,10 +423,12 @@ feature
       width := w
       height := h
       new_images()
-      if window_open then
-        with "java" do
-          label.setIcon(ImageIcon.new(displayed()))
-          frame.pack()
+      if ?label as l then
+        if ?frame as f then
+          with "java" do
+            l.setIcon(ImageIcon.new(displayed()))
+            f.pack()
+          end
         end
       end
     ensure
@@ -434,7 +442,11 @@ feature
         -- The window keeps showing what is there now until the next `show`.
         with "java" do
           offscreen.copyData(onscreen.getRaster())
-          label.setIcon(ImageIcon.new(onscreen))
+        end
+        if ?label as l then
+          with "java" do
+            l.setIcon(ImageIcon.new(onscreen))
+          end
         end
       end
     end
@@ -445,9 +457,9 @@ feature
   disable_double_buffering() do
     if is_double_buffered then
       is_double_buffered := false
-      if window_open then
+      if ?label as l then
         with "java" do
-          label.setIcon(ImageIcon.new(offscreen))
+          l.setIcon(ImageIcon.new(offscreen))
         end
       end
     end
@@ -458,9 +470,9 @@ feature
   -- Set the title of the canvas's window, now or for when it opens.
   set_title(t: String) do
     title := t
-    if window_open then
+    if ?frame as f then
       with "java" do
-        frame.setTitle(t)
+        f.setTitle(t)
       end
     end
   ensure
@@ -564,8 +576,9 @@ private feature
   -- With double buffering, the image the window displays; `show` copies
   -- offscreen into it. Without, the window displays offscreen itself.
   onscreen: Any
-  frame: Any
-  label: Any
+  -- The window and the label showing the image, once a window is opened.
+  frame: ?Any
+  label: ?Any
   window_open: Boolean
 
   new_images() do
@@ -573,6 +586,14 @@ private feature
       offscreen := BufferedImage.new(width, height, BufferedImage.TYPE_INT_RGB)
       onscreen := BufferedImage.new(width, height, BufferedImage.TYPE_INT_RGB)
       graphics := offscreen.createGraphics()
+    end
+    prepare_graphics()
+  end
+
+  -- Antialiasing, a white background, and the current pen and font, on
+  -- freshly made images.
+  prepare_graphics() do
+    with "java" do
       graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
       graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
       graphics.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
@@ -588,19 +609,21 @@ private feature
 
   open_window() do
     with "java" do
-      frame := JFrame.new(title)
-      label := JLabel.new(ImageIcon.new(displayed()))
-      frame.getContentPane().add(label)
-      frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE)
-      frame.setResizable(false)
-      frame.pack()
-      frame.setLocationRelativeTo(nil)
-      label.addMouseListener(input)
-      label.addMouseMotionListener(input)
-      frame.addKeyListener(input)
-      frame.addWindowFocusListener(input)
-      frame.setVisible(true)
-      frame.requestFocus()
+      let f := JFrame.new(title)
+      let l := JLabel.new(ImageIcon.new(displayed()))
+      f.getContentPane().add(l)
+      f.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE)
+      f.setResizable(false)
+      f.pack()
+      f.setLocationRelativeTo(nil)
+      l.addMouseListener(input)
+      l.addMouseMotionListener(input)
+      f.addKeyListener(input)
+      f.addWindowFocusListener(input)
+      f.setVisible(true)
+      f.requestFocus()
+      frame := f
+      label := l
     end
     window_open := true
   end
@@ -617,7 +640,11 @@ private feature
       if is_double_buffered then
         offscreen.copyData(onscreen.getRaster())
       end
-      label.repaint()
+    end
+    if ?label as l then
+      with "java" do
+        l.repaint()
+      end
     end
   end
 
@@ -625,9 +652,11 @@ private feature
   -- it at once. Asking for a repaint is enough, since the window shows the
   -- image drawn on; Swing merges requests that come faster than it paints.
   drawn() do
-    if not is_double_buffered and window_open then
-      with "java" do
-        label.repaint()
+    if not is_double_buffered then
+      if ?label as l then
+        with "java" do
+          l.repaint()
+        end
       end
     end
   end

@@ -139,8 +139,6 @@ end
 
 class Parent
 inherit Grandparent
-create
-  init(v: Integer) do super.init(v) end
 end
 
 class Child

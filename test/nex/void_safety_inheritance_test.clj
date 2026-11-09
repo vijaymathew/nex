@@ -78,7 +78,7 @@ create
 end
 let c := create C.make
 print(c.a)"))]
-      (is (some #(re-find #"must call a constructor of B" %) errs)
+      (is (some #(re-find #"must call a constructor of its parent 'B'" %) errs)
           (pr-str errs))
       ;; The message has to name the field: the constructor looks complete, and
       ;; what is missing is inherited from somewhere else in the file.
@@ -131,7 +131,7 @@ create
 end
 let d := create D.make
 print(d.a.i)"))))
-    (is (some #(re-find #"must call a constructor of C" %)
+    (is (some #(re-find #"must call a constructor of its parent 'C'" %)
               (type-errors (str base "class C inherit B
 create
   make(v: Integer) do B.make(create A.make(v)) end
@@ -144,7 +144,8 @@ let d := create D.make
 print(d.a.i)"))))))
 
 (deftest detachable-inherited-field-needs-no-chaining
-  (testing "a `?A` field may be void, so a subclass need not initialize it"
+  (testing "a `?A` field may be void, so a subclass of a parent without
+            constructors need not initialize it"
     (is (= ["nil"] (output "class A
 feature
   i: Integer
@@ -153,8 +154,6 @@ end
 class B
 feature
   a: ?A
-create
-  make() do end
 end
 
 class C inherit B
@@ -165,12 +164,11 @@ let c := create C.make
 print(c.a)")))))
 
 (deftest builtin-typed-inherited-field-needs-no-chaining
-  (testing "a scalar field has a zero value, so it does not force chaining"
+  (testing "a scalar field has a zero value, so it does not force chaining
+            when the parent has no constructors"
     (is (= ["0"] (output "class B
 feature
   n: Integer
-create
-  make() do end
 end
 
 class C inherit B
@@ -179,6 +177,66 @@ create
 end
 let c := create C.make
 print(c.n)")))))
+
+(deftest a-parent-with-constructors-must-be-constructed
+  (testing "even when none of its fields needs attaching (Definition §4.9,
+            Parent construction)"
+    (let [errs (type-errors "class B
+feature
+  n: Integer
+create
+  make() do n := 1 end
+end
+
+class C inherit B
+create
+  make() do end
+end
+let c := create C.make
+print(c.n)")]
+      (is (some #(re-find #"must call a constructor of its parent 'B'" %) errs)
+          (pr-str errs))))
+  (testing "a call on the parent that is not a constructor does not count"
+    (is (some #(re-find #"must call a constructor of its parent 'B'" %)
+              (type-errors "class B
+feature
+  n: Integer
+  show() do end
+create
+  make() do n := 1 end
+end
+
+class C inherit B
+create
+  make() do B.show() end
+end")))))
+
+(deftest every-parent-with-constructors-must-be-constructed
+  (let [parents "class A
+create
+  make() do end
+end
+class B
+create
+  make() do end
+end
+"]
+    (testing "each one, not just the first"
+      (is (some #(re-find #"must call a constructor of its parent 'B'" %)
+                (type-errors (str parents "class C inherit A, B
+create
+  make() do A.make() end
+end")))))
+    (testing "the call may be in a constructor this one delegates to"
+      (is (empty? (type-errors (str parents "class C inherit A, B
+create
+  make() do this.both() end
+  both() do A.make() B.make() end
+end")))))
+    (testing "a class with no constructors of its own cannot inherit both"
+      (is (some #(re-find #"Declare a constructor in 'C'" %)
+                (type-errors (str parents "class C inherit A, B
+end")))))))
 
 (deftest parent-call-inside-control-flow-counts
   (testing "the parent constructor call is found wherever the body may run it"
@@ -195,6 +253,30 @@ create
 end
 let c := create C.make(3)
 print(c.a.i)"))))))
+
+(deftest basis-class-fields-must-be-attached
+  (testing "Console, Task, Any and function-typed fields have no initial value"
+    (doseq [t ["Console" "Task[Integer]" "Any" "Function(Integer): Integer"]]
+      (is (some #(re-find #"must initialize attachable fields: f" %)
+                (type-errors (str "class K
+feature
+  f: " t "
+create
+  make() do end
+end")))
+          t)))
+  (testing "scalars, Array, Map, Set and optional fields do"
+    (is (empty? (type-errors "class K
+feature
+  n: Integer
+  s: String
+  a: Array[Integer]
+  m: Map[String, Integer]
+  t: Set[Integer]
+  c: ?Console
+create
+  make() do end
+end")))))
 
 (deftest own-attachable-field-check-still-applies
   (testing "the pre-existing own-field requirement is unchanged"

@@ -40,7 +40,7 @@ end
 class Dog
 inherit Animal
 create
-  make do end
+  make do Animal.make() end
 end
 class Box [T]
 create

@@ -2321,17 +2321,24 @@
       {:base-type base-name :type-args explicit-generic-args})
     base-name))
 
+(declare check-ambiguous-member!)
+
 (defn check-identifier
   "Check the type of an identifier"
   [env {:keys [name explicit-generic-args] :as expr}]
   (if-let [var-type (when-let [vt (env-lookup-var env name)]
                       (resolve-explicit-generic-args env vt explicit-generic-args))]
-    (if (and (env-var-non-nil? env name)
+    (do
+     (when-let [current-class (and (field-var? env name)
+                                   (env-lookup-var env "__current_class__"))]
+       (check-ambiguous-member! env current-class [:feature name 0]))
+     (if (and (env-var-non-nil? env name)
              (detachable-type? var-type))
       (attachable-type var-type)
-      var-type)
+      var-type))
     (if-let [current-class (env-lookup-var env "__current_class__")]
-      (if-let [field-type (lookup-class-field env current-class name)]
+      (if-let [field-type (do (check-ambiguous-member! env current-class [:feature name 0])
+                              (lookup-class-field env current-class name))]
         ;; A field is never narrowed by a nil check (see env-var-non-nil?).
         field-type
         (if-let [constant (lookup-class-constant env current-class name)]
@@ -4034,11 +4041,32 @@
       (fail! (str target-name "." method "(...) is not reachable here: " target-name
                   " is not an ancestor of " current-class)))))
 
+(defn- reject-ambiguous-target-member!
+  "An unqualified use of a name the receiver's class inherits ambiguously
+   (Definition §4.9): the bare target of `x.m()` written in such a class,
+   and the member of `c.x`, `c.m()`, `C.K` or `C.make(...)`. An ancestor name
+   whose class is not ambiguous itself (`A.x`) passes."
+  [env {:keys [target method has-parens args]} call-info]
+  (let [{:keys [class-target current-class base-type target-name]} call-info]
+    (when (and target-name (not class-target) current-class
+               (or (field-var? env target-name) (not (env-lookup-var env target-name))))
+      (check-ambiguous-member! env current-class [:feature target-name 0]))
+    (when (and method (not (and (map? target) (= :super (:type target)))))
+      (let [n (count (or args []))
+            cls (if class-target target-name base-type)
+            k (if (and class-target has-parens
+                       (explicit-class-constructor-name+arity? env target-name method n))
+                [:create method n]
+                [:feature method (if has-parens n 0)])]
+        (when (string? cls)
+          (check-ambiguous-member! env cls k))))))
+
 (defn- check-target-call
   [env {:keys [target method has-parens] :as expr}]
   (let [call-info (resolve-call-target-info env expr)]
     (reject-undefined-target! env expr call-info)
     (reject-unguarded-detachable-target! env expr call-info)
+    (reject-ambiguous-target-member! env expr call-info)
     (cond
       (and (map? target) (= :super (:type target)))
       (check-super-call env expr call-info)
@@ -4831,7 +4859,8 @@
             ;; check-function-object-call's arity check against the wrong
             ;; signature. check-bare-name-call re-derives this same
             ;; current-class/method-sig pair to actually perform the call.
-            (check-bare-name-call env method args)
+            (do (check-ambiguous-member! env current-class [:feature method (count args)])
+                (check-bare-name-call env method args))
 
             ;; A bare name standing alone as a statement arrives here as a
             ;; paren-less call (see nex.walker/statement-position-node), but a
@@ -5156,7 +5185,9 @@
         (do (validate-generic-args env class-name generic-args)
             {:base-type class-name :type-args generic-args})
         class-name)
-      (let [constructors (lookup-class-constructors env class-name)
+      (let [_ (when constructor
+                (check-ambiguous-member! env class-name [:create constructor (count args)]))
+            constructors (lookup-class-constructors env class-name)
             has-constructors? (seq constructors)
             ctor-name (or constructor "make")
             ctor-sig (lookup-class-method env class-name ctor-name)
@@ -8158,6 +8189,158 @@
                                 (:parents class-def))))))]
     (set (mapcat #(walk (:parent %) #{}) parents))))
 
+;; Ambiguous inherited names (Definition §4.9). Members a class inherits
+;; through two parents that match by name and arity are one member reached
+;; twice when they share an origin (a diamond), and two unrelated members
+;; otherwise. A class may inherit both, but an unqualified use of the name on
+;; it is rejected: inside the class an ancestor name says which one is meant
+;; (`A.x`); a client can use the object as an `A`. Declaring the member in
+;; the class itself settles it, and deferred routines join instead.
+
+(def ^:dynamic *member-origins-cache*
+  "nil, or an atom {class-identity -> member table} shared by one program
+   check (see check-program)."
+  nil)
+
+(defn- member-match-key
+  "What members are matched by: [kind name arity]. Fields and constants
+   match zero-argument routines; constructors match only constructors."
+  [member]
+  (case (:type member)
+    :field [:feature (:name member) 0]
+    :method [:feature (:name member) (count (or (:params member) []))]
+    nil))
+
+(defn- class-own-member-keys
+  "Match keys of the public members CLASS-DEF declares itself, constructors
+   included. Private members are left out: an heir never reaches them."
+  [class-def]
+  (set (concat (keep member-match-key (filter public-member? (feature-members class-def)))
+               (->> (:body class-def)
+                    (filter #(= :constructors (:type %)))
+                    (mapcat :constructors)
+                    (map (fn [c] [:create (:name c) (count (or (:params c) []))]))))))
+
+(defn- builtin-table-member-keys
+  "Match keys of the routines a builtin class (Any, Comparable) has only in
+   the method table."
+  [env class-name]
+  (for [[m-name by-arity] (get @(:methods (env-root env)) class-name)
+        arity (keys by-arity)]
+    [:feature m-name arity]))
+
+(defn- deferred-in-parent?
+  "True when what PARENT passes on for match key K is a deferred routine."
+  [env parent [kind m-name arity]]
+  (and (= kind :feature)
+       (not (java-type-parent env parent))
+       (boolean (:declaration-only? (effective-method-member env parent m-name arity)))))
+
+(declare member-table)
+
+(defn- parent-member-table
+  "The member table of what PARENT-ENTRY (an `inherit` clause) passes on."
+  [env parent-entry memo]
+  (if-let [^Class klass (java-type-parent env (:parent parent-entry))]
+    (let [origin (.getName klass)]
+      (into {} (for [^java.lang.reflect.Method m (.getMethods klass)
+                     :when (not (java.lang.reflect.Modifier/isStatic (.getModifiers m)))
+                     :let [k [:feature (.getName m) (.getParameterCount m)]]]
+                 [k {:origins #{[origin k]}}])))
+    (member-table env (:parent parent-entry) memo)))
+
+(defn- combine-inherited
+  "One key's entry from the VERSIONS ([parent entry] ...) the parents pass on:
+   the union of their origins, and :clash [p1 p2] when two of them are
+   unrelated (no shared origin, not both deferred) or a parent already
+   carries an unsettled clash."
+  [env k versions]
+  {:origins (apply set/union (map (comp :origins second) versions))
+   :clash (or (some (comp :clash second) versions)
+              (first (for [[i [p1 e1]] (map-indexed vector versions)
+                           [p2 e2] (drop (inc i) versions)
+                           :when (and (empty? (set/intersection (:origins e1) (:origins e2)))
+                                      (not (and (deferred-in-parent? env p1 k)
+                                                (deferred-in-parent? env p2 k))))]
+                       [p1 p2])))})
+
+(defn- member-table
+  "Match key -> {:origins #{[declaring-class key] ...}, :clash [p1 p2]?} for
+   every public member of CLASS-NAME, declared or inherited. A member the
+   class declares takes the origins of the inherited members it redefines,
+   or is its own origin when it redefines none, and is never a clash."
+  [env class-name memo]
+  (let [class-id (class-name-identity env class-name)]
+    (if-let [known (get @memo class-id)]
+      known
+      (do
+        ;; A cycle (reported by check-inheritance) must not recurse forever.
+        (swap! memo assoc class-id {})
+        (let [table-of (fn [cn] (into {} (map (fn [k] [k {:origins #{[cn k]}}])
+                                              (builtin-table-member-keys env cn))))
+              any-table (table-of "Any")
+              class-def (env-lookup-class env class-name)
+              result (cond
+                       (contains? builtin-protocol-classes class-name)
+                       (merge any-table (table-of class-name))
+
+                       (nil? class-def)
+                       any-table
+
+                       :else
+                       (let [per-parent (map (fn [pe] [(:parent pe) (parent-member-table env pe memo)])
+                                             (:parents class-def))
+                             inherited (into {}
+                                             (for [k (distinct (concat (keys any-table)
+                                                                       (mapcat (comp keys second) per-parent)))
+                                                   :let [versions (keep (fn [[p t]]
+                                                                          (when-let [e (get t k)] [p e]))
+                                                                        per-parent)]]
+                                               [k (if (seq versions)
+                                                    (combine-inherited env k versions)
+                                                    (get any-table k))]))]
+                         (into inherited
+                               (map (fn [k] [k {:origins (or (:origins (get inherited k))
+                                                             #{[class-id k]})}]))
+                               (class-own-member-keys class-def))))]
+          (swap! memo assoc class-id result)
+          result)))))
+
+(defn check-ambiguous-member!
+  "Reject a use of member K ([kind name arity]) on CLASS-NAME when the class
+   inherits two unrelated members that match K and declares none itself.
+   ENV is where the use is written: inside CLASS-NAME or a descendant, the
+   message suggests an ancestor name; elsewhere, using the object as one of
+   the parents."
+  [env class-name [kind m-name arity :as k]]
+  (when (and (string? class-name) (env-lookup-class env class-name))
+    (let [memo (or *member-origins-cache* (atom {}))]
+      (when-let [[p1 p2] (:clash (get (member-table env class-name memo) k))]
+        (let [shown (or (:true-name (env-lookup-class env class-name)) class-name)
+              current (env-lookup-var env "__current_class__")
+              inside? (and current (types-compatible? env current class-name))
+              constant? (and (= kind :feature) (zero? arity)
+                             (some? (lookup-class-constant env p1 m-name)))
+              spelled (fn [p] (str p "." m-name (when (or (pos? arity) (= kind :create)) "(...)")))
+              a-or-an (fn [p] (str (if (re-find #"(?i)^[aeiou]" p) "an '" "a '") p "'"))
+              what (if (= kind :create) "constructors" "features")
+              advice (cond
+                       (= kind :create)
+                       (str "Give '" shown "' a constructor of its own named '" m-name
+                            "'; it can delegate to '" (spelled p1) "' or '" (spelled p2) "'.")
+
+                       (or inside? constant?)
+                       (str "Write '" (spelled p1) "' or '" (spelled p2)
+                            "' to say which one you mean.")
+
+                       :else
+                       (str "Use the object as " (a-or-an p1) " or " (a-or-an p2)
+                            " to reach one of them, or give '" shown
+                            "' a feature of its own that exposes the one it means."))
+              msg (str "'" m-name "' is ambiguous on '" shown "': it inherits unrelated "
+                       what " named '" m-name "' from '" p1 "' and from '" p2 "'. " advice)]
+          (throw (ex-info msg {:error (type-error msg)})))))))
+
 (defn- inherited-contract-declarations
   "Every public ancestor declaration of METHOD-NAME/ARITY, each class once:
    the declarations whose contracts an override inherits (as both backends
@@ -8332,11 +8515,20 @@
                          (concat (mapcat :body (:clauses stmt)) (:else stmt)))
           nil)))
 
+(def ^:private self-initializing-types
+  "Types whose non-detachable fields need no constructor assignment: a scalar
+   starts at its zero value, and an Array, Map or Set field starts empty
+   ([], {}, #{})."
+  #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
+    "Array" "Map" "Set"})
+
 (defn- attachable-init-field-names
-  "Names of the fields declared in BODY that a constructor must initialize: the
-   attached (non-detachable) ones of a user-defined class type. A builtin scalar
-   has a zero value and a detachable field is allowed to be void, so neither
-   needs one."
+  "Names of the fields declared in BODY that a constructor must initialize:
+   the attached (non-detachable) ones whose type has no initial value. A
+   scalar has a zero value, an Array/Map/Set starts empty, a detachable field
+   may be void, and a generic parameter may stand for a scalar, so none of
+   those needs one; every other class type (Console, Task, a function type, a
+   user class, ...) does."
   [env body]
   (->> body
        (filter #(= :feature-section (:type %)))
@@ -8357,8 +8549,9 @@
                        base (if (map? a) (:base-type a) a)]
                    (and (not (detachable-type? t))
                         (string? base)
-                        (some? (env-lookup-class env base))
-                        (not (builtin-type? base))))))
+                        (or (builtin-type? base) (some? (env-lookup-class env base)))
+                        (not (contains? self-initializing-types base))
+                        (not (contains? #{"Void" "Nil"} base))))))
        (map :name)
        set))
 
@@ -8489,6 +8682,63 @@
       (doseq [ctor (:constructors section)]
         (recovering #(check-constructor class-env name ctor))))))
 
+(defn- constructor-parent-calls
+  "[target ctor-name arg-count] for every call `P.k(...)` (or `super.k(...)`,
+   resolved to P) anywhere in CTOR-BODY, and transitively in the constructors
+   of this class it delegates to with `this.k(...)`. ALL-CTORS and VISITED as
+   for constructor-initialized-fields."
+  [env class-name ctor-name ctor-body all-ctors visited]
+  (if (contains? visited ctor-name)
+    #{}
+    (let [visited' (conj visited ctor-name)
+          own (->> (mapcat constructor-statements ctor-body)
+                   (keep (fn [stmt]
+                           (when (= :call (:type stmt))
+                             (let [target (:target stmt)
+                                   t (if (and (map? target) (= :super (:type target)))
+                                       (resolve-super-parent-class-name env class-name)
+                                       target)]
+                               (when (string? t)
+                                 [t (:method stmt) (count (:args stmt))])))))
+                   set)]
+      (reduce (fn [acc [delegated-name arg-count]]
+                (if-let [delegated (some #(when (and (= (:name %) delegated-name)
+                                                     (= (count (or (:params %) [])) arg-count))
+                                            %)
+                                         all-ctors)]
+                  (into acc (constructor-parent-calls env class-name delegated-name
+                                                      (:body delegated) all-ctors visited'))
+                  acc))
+              own
+              (constructor-delegation-calls ctor-body)))))
+
+(defn- class-ancestor-names
+  "Every proper ancestor of CLASS-NAME, by name."
+  [env class-name]
+  (loop [todo [class-name] seen #{}]
+    (if-let [cn (first todo)]
+      (let [ps (map :parent (:parents (env-lookup-class env cn)))
+            new (remove seen ps)]
+        (recur (concat (rest todo) new) (into seen new)))
+      seen)))
+
+(defn- constructs-parent?
+  "Whether CALLS (from constructor-parent-calls) run a constructor of PARENT:
+   `P.k(...)` naming one of P's constructors, declared or inherited, or, when
+   P declares none of its own, `Q.k(...)` naming a constructor of the ancestor
+   Q that P inherits it from."
+  [env parent calls]
+  (let [ctor-keys (set (map (fn [c] [(:name c) (count (or (:params c) []))])
+                            (lookup-class-constructors env parent)))
+        own-ctors? (some #(= :constructors (:type %)) (:body (env-lookup-class env parent)))
+        ancestors (class-ancestor-names env parent)]
+    (boolean
+     (some (fn [[t k n]]
+             (and (contains? ctor-keys [k n])
+                  (or (= (class-name-identity env t) (class-name-identity env parent))
+                      (and (not own-ctors?) (contains? ancestors t)))))
+           calls))))
+
 (defn- check-attachable-field-initialization!
   "Void-safety: every attachable class-object field must be assigned by every
    constructor, and a constructor of a class that inherits attachable fields
@@ -8507,55 +8757,88 @@
         parents-needing-init (->> parents
                                   (map :parent)
                                   (filter #(needs-constructor-init? env %))
-                                  set)]
-    (when (or (seq required-fields) (seq parents-needing-init))
-      (when (and (seq required-fields) (empty? constructors))
-        (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
-                        {:error (type-error
-                                 (str "Attachable fields must be initialized by constructors in class "
-                                      name ": " (str/join ", " (sort required-fields))))})))
-      ;; A class that declares no constructors of its own inherits its parent's,
-      ;; which already initialize the inherited fields — nothing to check.
-      (doseq [{ctor-name :name ctor-body :body} constructors]
-        (let [statements (mapcat constructor-statements ctor-body)
-              assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
-              missing (sort (seq (set/difference required-fields assigned)))
-              called-parents (->> statements
-                                  (keep (fn [stmt]
-                                          (when (= :call (:type stmt))
-                                            (let [target (:target stmt)]
-                                              ;; `super.ctor(...)` is the other spelling of a
-                                              ;; parent-constructor call alongside `Parent.ctor(...)`;
-                                              ;; its :target is a {:type :super} node, not the parent's
-                                              ;; name, so it must be resolved the same way
-                                              ;; check-expr-super resolves it for real expression
-                                              ;; checking, or it never counts as initializing the
-                                              ;; parent even when it plainly does. check-class-sections!
-                                              ;; has already run (see check-class) and would have
-                                              ;; thrown on an ambiguous/parentless `super` here, so this
-                                              ;; class is guaranteed exactly one direct parent already.
-                                              (if (and (map? target) (= :super (:type target)))
-                                                (resolve-super-parent-class-name env name)
-                                                target)))))
                                   set)
-              uninitialized-parents (sort (seq (set/difference parents-needing-init
-                                                               called-parents)))]
-          (when (seq missing)
-            (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
+        ;; Parents with constructors, declared or inherited: every
+        ;; constructor of this class must run one of each (Definition §4.9,
+        ;; Parent construction). A Java parent is checked separately
+        ;; (check-java-super-constructor-call).
+        constructed-parents (->> parents
+                                 (map :parent)
+                                 (remove #(java-type-parent env %))
+                                 (filter #(seq (lookup-class-constructors env %)))
+                                 distinct
+                                 vec)]
+    (when (and (seq required-fields) (empty? constructors))
+      (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
+                      {:error (type-error
+                               (str "Attachable fields must be initialized by constructors in class "
+                                    name ": " (str/join ", " (sort required-fields))))})))
+    ;; With no constructors of its own, a class is created through an
+    ;; inherited one, which runs only the parent that declares it.
+    (when (and (empty? constructors) (< 1 (count constructed-parents)))
+      (throw (ex-info (str "Class " name " must declare a constructor")
+                      {:error (type-error
+                               (str "Class '" name "' inherits constructors from "
+                                    (str/join " and " (map #(str "'" % "'") constructed-parents))
+                                    ", but an inherited constructor runs only its own class's. "
+                                    "Declare a constructor in '" name "' that calls one constructor of each."))})))
+    (doseq [{ctor-name :name ctor-body :body :as ctor} constructors]
+      (let [assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
+            missing (sort (seq (set/difference required-fields assigned)))
+            parent-calls (constructor-parent-calls env name ctor-name ctor-body constructors #{})
+            ;; A parent with attachable fields but no constructors can only be
+            ;; set up through a method it provides (the derived forms of
+            ;; Appendix C do this), so any call on it counts.
+            called-parents (set (map first parent-calls))
+            uninitialized-parents (sort (seq (remove #(or (contains? called-parents %)
+                                                          (seq (lookup-class-constructors env %)))
+                                                     parents-needing-init)))
+            unconstructed-parents (remove #(constructs-parent? env % parent-calls)
+                                          constructed-parents)]
+        (when (seq missing)
+          (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
+                          {:error (type-error
+                                   (str "Constructor '" ctor-name "' in class '" name
+                                        "' must initialize attachable fields: "
+                                        (str/join ", " missing)
+                                        ". Only scalars (zero) and Array, Map and Set (empty) "
+                                        "start with a value; assign the others, or make them "
+                                        "optional (?T).")
+                                   (:dbg/line ctor) (:dbg/col ctor))})))
+        (when (seq uninitialized-parents)
+          (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
+                          {:error (type-error
+                                   (str "Constructor " ctor-name " in class " name
+                                        " must call a constructor of "
+                                        (str/join ", " uninitialized-parents)
+                                        " to initialize inherited attachable field(s): "
+                                        (str/join ", "
+                                                  (sort (mapcat #(attachable-init-field-names
+                                                                  env (:body (env-lookup-class env %)))
+                                                                uninitialized-parents)))))})))
+        (when (seq unconstructed-parents)
+          (let [call-for (fn [p]
+                           (let [c (first (lookup-class-constructors env p))]
+                             (str p "." (:name c) "(" (str/join ", " (map :name (:params c))) ")")))
+                field-note (fn [p]
+                             (when-let [fs (seq (sort (attachable-init-field-names
+                                                       env (:body (env-lookup-class env p)))))]
+                               (str "'" p "' initializes " (str/join ", " fs))))
+                notes (keep field-note unconstructed-parents)
+                quoted (map #(str "'" % "'") unconstructed-parents)]
+            (throw (ex-info (str "Constructor " ctor-name " does not construct its parents")
                             {:error (type-error
-                                     (str "Constructor " ctor-name " must initialize attachable fields: "
-                                          (str/join ", " missing)))})))
-          (when (seq uninitialized-parents)
-            (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
-                            {:error (type-error
-                                     (str "Constructor " ctor-name " in class " name
-                                          " must call a constructor of "
-                                          (str/join ", " uninitialized-parents)
-                                          " to initialize inherited attachable field(s): "
-                                          (str/join ", "
-                                                    (sort (mapcat #(attachable-init-field-names
-                                                                    env (:body (env-lookup-class env %)))
-                                                                  uninitialized-parents)))))}))))))))
+                                     (str "Constructor '" ctor-name "' in class '" name
+                                          "' must call a constructor of "
+                                          (if (= 1 (count quoted))
+                                            (str "its parent " (first quoted))
+                                            (str "each of its parents " (str/join " and " quoted)))
+                                          (when (seq notes) (str " (" (str/join "; " notes) ")"))
+                                          ". Add " (if (= 1 (count quoted)) "a call such as " "calls such as ")
+                                          (str/join " and " (map #(str "'" (call-for %) "'")
+                                                                 unconstructed-parents))
+                                          ".")
+                                     (:dbg/line ctor) (:dbg/col ctor))}))))))))
 
 (defn check-class
   "Check a class definition"
@@ -9707,14 +9990,9 @@
   (let [{:keys [error line column source-file]} (ex-data e)]
     (error-with-source-file (type-error error line column) source-file)))
 
-(defn check-program
-  "Type check a complete program.
-   opts may include :var-types - a map of {var-name => type} for pre-existing variables.
-   The program's `extend` blocks are merged into their target classes first
-   (nex.extend/apply-extensions; a no-op when the caller already did)."
-  ([program] (check-program program {}))
-  ([program opts]
-   (let [applied (try
+(defn- check-program-with-extensions
+  [program opts]
+  (let [applied (try
                    (extend/apply-extensions program)
                    (catch clojure.lang.ExceptionInfo e
                      (if (:nex/extension-error (ex-data e))
@@ -9724,7 +10002,18 @@
        {:success false
         :errors [(extension-type-error e)]
         :warnings []}
-       (check-program* applied opts)))))
+       (check-program* applied opts))))
+
+(defn check-program
+  "Type check a complete program.
+   opts may include :var-types - a map of {var-name => type} for pre-existing variables.
+   The program's `extend` blocks are merged into their target classes first
+   (nex.extend/apply-extensions; a no-op when the caller already did)."
+  ([program] (check-program program {}))
+  ([program opts]
+   (binding [*member-origins-cache* (or *member-origins-cache* (atom {}))]
+     (check-program-with-extensions program opts))))
+
 
 (defn type-check
   "Type check Nex code (entry point).

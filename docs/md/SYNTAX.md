@@ -745,6 +745,36 @@ class Dog
 end
 ```
 
+### Several parents and ambiguous names
+
+A class may name several parents: `inherit A, B`. If two of them pass on
+members with the same name (and the same number of arguments) that are
+unrelated, because each parent declared its own, the class still inherits
+both, and each parent's code keeps using its own. But the name is ambiguous
+on the class, so an unqualified use of it is an error. Name the parent to say
+which one you mean:
+
+```nex
+class A feature x: Integer end
+class B feature x: Integer end
+
+class C
+  inherit A, B
+  feature
+    sum(): Integer do result := A.x + B.x end   -- fine
+    bad(): Integer do result := x end           -- error: x is ambiguous on C
+end
+```
+
+A client can't write `c.x` either. It can use the object as an `A` or a `B`
+(`let a: A := c` then `a.x`), or `C` can expose the one it means through a
+feature of its own (`a_x(): Integer do result := A.x end`). Declaring `x` in
+`C` itself also settles it.
+
+The name is not ambiguous when both come from one shared ancestor (`B` and `C`
+both inherit `A`, and `D` inherits `B, C`), when both are `deferred` routines
+(they join into one), or for `private` members, which an heir never sees.
+
 ### Redeclaring queries as attributes
 
 A heir may answer an inherited **query** (a routine with no arguments) with a

@@ -48,7 +48,7 @@ end
 class Dog
 inherit Animal
 create
-  make do end
+  make do Animal.make() end
 feature
   bark(): String do result := \"woof\" end
 end
@@ -106,7 +106,7 @@ if yes(convert a to t: Dog) and t /= nil then print(t.bark()) end")))))
            (both (str animals "class Cat
 inherit Animal
 create
-  make do end
+  make do Animal.make() end
 feature
   meow(): String do result := \"meow\" end
 end
@@ -128,7 +128,7 @@ end
 class Animal
 inherit Being
 create
-  make do end
+  make do Being.make() end
 feature
   name(): String do result := \"animal\" end
 end
@@ -141,7 +141,7 @@ end
 class Dog
 inherit Animal, Pet
 create
-  make do end
+  make do Pet.make() Animal.make() end
 feature
   name(): String do result := \"dog\" end
   owner(): String do result := \"dog owner\" end
@@ -149,7 +149,7 @@ end
 class Puppy
 inherit Dog
 create
-  make do end
+  make do Dog.make() end
 feature
   name(): String do result := \"puppy\" end
   kind(): String do result := \"puppy kind\" end

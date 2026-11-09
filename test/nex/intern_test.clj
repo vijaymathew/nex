@@ -1615,7 +1615,7 @@ intern widgets_b/Widget as WB
 class Special
 inherit WA
 create
-  make() do end
+  make() do WA.make() end
 feature
   shout(): String do result := greet() + \"!\" end
 end

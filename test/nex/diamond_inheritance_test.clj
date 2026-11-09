@@ -270,9 +270,9 @@ a.bump_left
 b.bump_right
 print(a = b)")))))
 
-(deftest unrelated-parents-keep-same-named-fields-apart
-  (is (= ["\"7 2 7\""]
-         (both "class Has_X1
+(def ^:private two-unrelated-x
+  "Two parents that each declare their own, unrelated field x."
+  "class Has_X1
   create make() do x := 1 end
 feature
   x: Integer
@@ -285,13 +285,29 @@ feature
   x: Integer
   x2(): Integer do result := x end
 end
-class Both_X
+")
+
+(deftest unrelated-parents-keep-same-named-fields-apart
+  (testing "each parent's code reads its own x"
+    (is (= ["\"7 2\""]
+           (both (str two-unrelated-x "class Both_X
   inherit Has_X1, Has_X2
   create make() do Has_X1.make() Has_X2.make() end
 end
 let b := create Both_X.make()
 b.set_x1(7)
-print(b.x1.to_string + \" \" + b.x2.to_string + \" \" + b.x.to_string)"))))
+print(b.x1.to_string + \" \" + b.x2.to_string)")))))
+  (testing "an unqualified x on Both_X is ambiguous (Definition §4.9)"
+    (let [msg (try (run (str two-unrelated-x "class Both_X
+  inherit Has_X1, Has_X2
+  create make() do Has_X1.make() Has_X2.make() end
+end
+let b := create Both_X.make()
+print(b.x)") {})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex
+                     (str/join "\n" (:errors (ex-data ex)))))]
+      (is (str/includes? (str msg) "'x' is ambiguous on 'Both_X'")))))
 
 (deftest a-deferred-shared-ancestor-implemented-on-one-path
   (testing "a routine still deferred along the running path is the object's own"

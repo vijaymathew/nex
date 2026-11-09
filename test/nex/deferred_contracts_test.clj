@@ -333,7 +333,7 @@ end
 class Child
 inherit Parent
 create
-  make do end
+  make do Parent.make() end
 feature
   f(x: Integer) require positive: x > 0 do print(x) end
 end")]
@@ -365,14 +365,14 @@ end
 class B
 inherit A
 create
-  make do end
+  make do A.make() end
 feature
   f(x: Integer) do print(x) end
 end
 class C
 inherit B
 create
-  make do end
+  make do B.make() end
 feature
   f(x: Integer) require positive: x > 0 do end
 end")))))
@@ -407,14 +407,14 @@ end
 class B
 inherit A
 create
-  make do end
+  make do A.make() end
 feature
   f(x: Integer) do end
 end
 class C
 inherit B
 create
-  make do end
+  make do B.make() end
 feature
   f(x: Integer) require negative: x < 0 do end
 end
@@ -462,14 +462,14 @@ end
 class B
 inherit A
 create
-  make do end
+  make do A.make() end
 feature
   f(x: Integer) do end
 end
 class C
 inherit B
 create
-  make do end
+  make do B.make() end
 feature
   f(x: Integer) do end
 end
@@ -490,7 +490,7 @@ end
 class Child
 inherit Parent
 create
-  make do end
+  make do Parent.make() end
 feature
   f(x: Integer) require positive: x > 0 do print(\"child \" + x.to_string) end
 end
@@ -531,7 +531,7 @@ end
 class Child
 inherit Parent
 create
-  make do end
+  make do Parent.make() end
 feature
   f(y: Integer): Integer do result := y + 1 end
 end
@@ -589,7 +589,7 @@ end
 class Child
 inherit Parent
 create
-  make do end
+  make do Parent.make() end
 feature
   f(limit: Integer) do end
 end")))))
