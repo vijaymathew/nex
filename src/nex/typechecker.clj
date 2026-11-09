@@ -8515,11 +8515,20 @@
                          (concat (mapcat :body (:clauses stmt)) (:else stmt)))
           nil)))
 
+(def ^:private self-initializing-types
+  "Types whose non-detachable fields need no constructor assignment: a scalar
+   starts at its zero value, and an Array, Map or Set field starts empty
+   ([], {}, #{})."
+  #{"Integer" "Byte" "Integer16" "Integer32" "Real" "Char" "Boolean" "String"
+    "Array" "Map" "Set"})
+
 (defn- attachable-init-field-names
-  "Names of the fields declared in BODY that a constructor must initialize: the
-   attached (non-detachable) ones of a user-defined class type. A builtin scalar
-   has a zero value and a detachable field is allowed to be void, so neither
-   needs one."
+  "Names of the fields declared in BODY that a constructor must initialize:
+   the attached (non-detachable) ones whose type has no initial value. A
+   scalar has a zero value, an Array/Map/Set starts empty, a detachable field
+   may be void, and a generic parameter may stand for a scalar, so none of
+   those needs one; every other class type (Console, Task, a function type, a
+   user class, ...) does."
   [env body]
   (->> body
        (filter #(= :feature-section (:type %)))
@@ -8540,8 +8549,9 @@
                        base (if (map? a) (:base-type a) a)]
                    (and (not (detachable-type? t))
                         (string? base)
-                        (some? (env-lookup-class env base))
-                        (not (builtin-type? base))))))
+                        (or (builtin-type? base) (some? (env-lookup-class env base)))
+                        (not (contains? self-initializing-types base))
+                        (not (contains? #{"Void" "Nil"} base))))))
        (map :name)
        set))
 
@@ -8672,6 +8682,63 @@
       (doseq [ctor (:constructors section)]
         (recovering #(check-constructor class-env name ctor))))))
 
+(defn- constructor-parent-calls
+  "[target ctor-name arg-count] for every call `P.k(...)` (or `super.k(...)`,
+   resolved to P) anywhere in CTOR-BODY, and transitively in the constructors
+   of this class it delegates to with `this.k(...)`. ALL-CTORS and VISITED as
+   for constructor-initialized-fields."
+  [env class-name ctor-name ctor-body all-ctors visited]
+  (if (contains? visited ctor-name)
+    #{}
+    (let [visited' (conj visited ctor-name)
+          own (->> (mapcat constructor-statements ctor-body)
+                   (keep (fn [stmt]
+                           (when (= :call (:type stmt))
+                             (let [target (:target stmt)
+                                   t (if (and (map? target) (= :super (:type target)))
+                                       (resolve-super-parent-class-name env class-name)
+                                       target)]
+                               (when (string? t)
+                                 [t (:method stmt) (count (:args stmt))])))))
+                   set)]
+      (reduce (fn [acc [delegated-name arg-count]]
+                (if-let [delegated (some #(when (and (= (:name %) delegated-name)
+                                                     (= (count (or (:params %) [])) arg-count))
+                                            %)
+                                         all-ctors)]
+                  (into acc (constructor-parent-calls env class-name delegated-name
+                                                      (:body delegated) all-ctors visited'))
+                  acc))
+              own
+              (constructor-delegation-calls ctor-body)))))
+
+(defn- class-ancestor-names
+  "Every proper ancestor of CLASS-NAME, by name."
+  [env class-name]
+  (loop [todo [class-name] seen #{}]
+    (if-let [cn (first todo)]
+      (let [ps (map :parent (:parents (env-lookup-class env cn)))
+            new (remove seen ps)]
+        (recur (concat (rest todo) new) (into seen new)))
+      seen)))
+
+(defn- constructs-parent?
+  "Whether CALLS (from constructor-parent-calls) run a constructor of PARENT:
+   `P.k(...)` naming one of P's constructors, declared or inherited, or, when
+   P declares none of its own, `Q.k(...)` naming a constructor of the ancestor
+   Q that P inherits it from."
+  [env parent calls]
+  (let [ctor-keys (set (map (fn [c] [(:name c) (count (or (:params c) []))])
+                            (lookup-class-constructors env parent)))
+        own-ctors? (some #(= :constructors (:type %)) (:body (env-lookup-class env parent)))
+        ancestors (class-ancestor-names env parent)]
+    (boolean
+     (some (fn [[t k n]]
+             (and (contains? ctor-keys [k n])
+                  (or (= (class-name-identity env t) (class-name-identity env parent))
+                      (and (not own-ctors?) (contains? ancestors t)))))
+           calls))))
+
 (defn- check-attachable-field-initialization!
   "Void-safety: every attachable class-object field must be assigned by every
    constructor, and a constructor of a class that inherits attachable fields
@@ -8690,55 +8757,88 @@
         parents-needing-init (->> parents
                                   (map :parent)
                                   (filter #(needs-constructor-init? env %))
-                                  set)]
-    (when (or (seq required-fields) (seq parents-needing-init))
-      (when (and (seq required-fields) (empty? constructors))
-        (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
-                        {:error (type-error
-                                 (str "Attachable fields must be initialized by constructors in class "
-                                      name ": " (str/join ", " (sort required-fields))))})))
-      ;; A class that declares no constructors of its own inherits its parent's,
-      ;; which already initialize the inherited fields — nothing to check.
-      (doseq [{ctor-name :name ctor-body :body} constructors]
-        (let [statements (mapcat constructor-statements ctor-body)
-              assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
-              missing (sort (seq (set/difference required-fields assigned)))
-              called-parents (->> statements
-                                  (keep (fn [stmt]
-                                          (when (= :call (:type stmt))
-                                            (let [target (:target stmt)]
-                                              ;; `super.ctor(...)` is the other spelling of a
-                                              ;; parent-constructor call alongside `Parent.ctor(...)`;
-                                              ;; its :target is a {:type :super} node, not the parent's
-                                              ;; name, so it must be resolved the same way
-                                              ;; check-expr-super resolves it for real expression
-                                              ;; checking, or it never counts as initializing the
-                                              ;; parent even when it plainly does. check-class-sections!
-                                              ;; has already run (see check-class) and would have
-                                              ;; thrown on an ambiguous/parentless `super` here, so this
-                                              ;; class is guaranteed exactly one direct parent already.
-                                              (if (and (map? target) (= :super (:type target)))
-                                                (resolve-super-parent-class-name env name)
-                                                target)))))
                                   set)
-              uninitialized-parents (sort (seq (set/difference parents-needing-init
-                                                               called-parents)))]
-          (when (seq missing)
-            (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
+        ;; Parents with constructors, declared or inherited: every
+        ;; constructor of this class must run one of each (Definition §4.9,
+        ;; Parent construction). A Java parent is checked separately
+        ;; (check-java-super-constructor-call).
+        constructed-parents (->> parents
+                                 (map :parent)
+                                 (remove #(java-type-parent env %))
+                                 (filter #(seq (lookup-class-constructors env %)))
+                                 distinct
+                                 vec)]
+    (when (and (seq required-fields) (empty? constructors))
+      (throw (ex-info (str "Class " name " has attachable fields that require constructor initialization")
+                      {:error (type-error
+                               (str "Attachable fields must be initialized by constructors in class "
+                                    name ": " (str/join ", " (sort required-fields))))})))
+    ;; With no constructors of its own, a class is created through an
+    ;; inherited one, which runs only the parent that declares it.
+    (when (and (empty? constructors) (< 1 (count constructed-parents)))
+      (throw (ex-info (str "Class " name " must declare a constructor")
+                      {:error (type-error
+                               (str "Class '" name "' inherits constructors from "
+                                    (str/join " and " (map #(str "'" % "'") constructed-parents))
+                                    ", but an inherited constructor runs only its own class's. "
+                                    "Declare a constructor in '" name "' that calls one constructor of each."))})))
+    (doseq [{ctor-name :name ctor-body :body :as ctor} constructors]
+      (let [assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
+            missing (sort (seq (set/difference required-fields assigned)))
+            parent-calls (constructor-parent-calls env name ctor-name ctor-body constructors #{})
+            ;; A parent with attachable fields but no constructors can only be
+            ;; set up through a method it provides (the derived forms of
+            ;; Appendix C do this), so any call on it counts.
+            called-parents (set (map first parent-calls))
+            uninitialized-parents (sort (seq (remove #(or (contains? called-parents %)
+                                                          (seq (lookup-class-constructors env %)))
+                                                     parents-needing-init)))
+            unconstructed-parents (remove #(constructs-parent? env % parent-calls)
+                                          constructed-parents)]
+        (when (seq missing)
+          (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
+                          {:error (type-error
+                                   (str "Constructor '" ctor-name "' in class '" name
+                                        "' must initialize attachable fields: "
+                                        (str/join ", " missing)
+                                        ". Only scalars (zero) and Array, Map and Set (empty) "
+                                        "start with a value; assign the others, or make them "
+                                        "optional (?T).")
+                                   (:dbg/line ctor) (:dbg/col ctor))})))
+        (when (seq uninitialized-parents)
+          (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
+                          {:error (type-error
+                                   (str "Constructor " ctor-name " in class " name
+                                        " must call a constructor of "
+                                        (str/join ", " uninitialized-parents)
+                                        " to initialize inherited attachable field(s): "
+                                        (str/join ", "
+                                                  (sort (mapcat #(attachable-init-field-names
+                                                                  env (:body (env-lookup-class env %)))
+                                                                uninitialized-parents)))))})))
+        (when (seq unconstructed-parents)
+          (let [call-for (fn [p]
+                           (let [c (first (lookup-class-constructors env p))]
+                             (str p "." (:name c) "(" (str/join ", " (map :name (:params c))) ")")))
+                field-note (fn [p]
+                             (when-let [fs (seq (sort (attachable-init-field-names
+                                                       env (:body (env-lookup-class env p)))))]
+                               (str "'" p "' initializes " (str/join ", " fs))))
+                notes (keep field-note unconstructed-parents)
+                quoted (map #(str "'" % "'") unconstructed-parents)]
+            (throw (ex-info (str "Constructor " ctor-name " does not construct its parents")
                             {:error (type-error
-                                     (str "Constructor " ctor-name " must initialize attachable fields: "
-                                          (str/join ", " missing)))})))
-          (when (seq uninitialized-parents)
-            (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")
-                            {:error (type-error
-                                     (str "Constructor " ctor-name " in class " name
-                                          " must call a constructor of "
-                                          (str/join ", " uninitialized-parents)
-                                          " to initialize inherited attachable field(s): "
-                                          (str/join ", "
-                                                    (sort (mapcat #(attachable-init-field-names
-                                                                    env (:body (env-lookup-class env %)))
-                                                                  uninitialized-parents)))))}))))))))
+                                     (str "Constructor '" ctor-name "' in class '" name
+                                          "' must call a constructor of "
+                                          (if (= 1 (count quoted))
+                                            (str "its parent " (first quoted))
+                                            (str "each of its parents " (str/join " and " quoted)))
+                                          (when (seq notes) (str " (" (str/join "; " notes) ")"))
+                                          ". Add " (if (= 1 (count quoted)) "a call such as " "calls such as ")
+                                          (str/join " and " (map #(str "'" (call-for %) "'")
+                                                                 unconstructed-parents))
+                                          ".")
+                                     (:dbg/line ctor) (:dbg/col ctor))}))))))))
 
 (defn check-class
   "Check a class definition"
