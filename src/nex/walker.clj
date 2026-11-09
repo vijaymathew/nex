@@ -2009,7 +2009,7 @@
    :constructors (mapv transform-node ctors)})
 
 (defn- handle-field-decl
-  [[_ & tokens]]
+  [[_ & tokens :as node]]
   (let [once? (= "once" (token-text (first tokens)))
         tokens (if once? (rest tokens) tokens)
         name (first tokens)
@@ -2021,6 +2021,17 @@
     (if has-colon?
       (let [type-node (nth tokens 2)
             value-node (when eq-idx (nth tokens (inc eq-idx)))]
+        ;; The grammar shares one rule between fields and typed constants, so
+        ;; `once k: T = e` parses; the Definition (§3.7) allows `once` on fields only.
+        (when (and once? value-node)
+          (let [msg (str "Constant '" (token-text name) "' cannot be marked 'once'. "
+                         "'once' is for fields assigned in a constructor; a constant "
+                         "('" (token-text name) ": T = value') can never be assigned "
+                         "anyway. Remove 'once'.")
+                {:keys [row column]} (node-pos node)]
+            (throw (ex-info msg (cond-> {:error msg}
+                                  (integer? row) (assoc :line (inc row))
+                                  (integer? column) (assoc :column (inc column)))))))
         {:type :field
          :name (token-text name)
          :field-type (transform-node type-node)
