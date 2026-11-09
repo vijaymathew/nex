@@ -71,7 +71,9 @@ create
       source := filename
       support := create Audio_Support.make()
       copies := []
-      start(raw, fmt, frames, rate)
+      data := raw
+      format := fmt
+      start(frames, rate)
     ensure
       named: source = filename
       ready: not is_closed
@@ -113,7 +115,9 @@ create
       source := ""
       support := create Audio_Support.make()
       copies := []
-      start(bytes.to_java, fmt, frames, rate.to_real)
+      data := bytes.to_java
+      format := fmt
+      start(frames, rate.to_real)
     ensure
       sized: this.duration_ms = duration_ms
       ready: not is_closed
@@ -252,10 +256,8 @@ private feature
   audible: Boolean
   support: Audio_Support
 
-  -- Common setup for both constructors.
-  start(raw: Any, fmt: Any, frames: Integer, rate: Real) do
-    data := raw
-    format := fmt
+  -- Common setup for both constructors, once data and format are set.
+  start(frames: Integer, rate: Real) do
     frame_count := frames
     duration_ms := (frames.to_real * 1000.0 / rate).round
     if duration_ms < 1 then duration_ms := 1 end

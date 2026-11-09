@@ -23,8 +23,8 @@
 
 (def ^:private animals
   "class Animal feature name: String set_name(n: String) do name := n end create make do name := \"a\" end end
-   class Dog inherit Animal feature fetch: String do result := \"f\" end create make do set_name(\"d\") end end
-   class Cat inherit Animal create make do set_name(\"c\") end end\n")
+   class Dog inherit Animal feature fetch: String do result := \"f\" end create make do Animal.make set_name(\"d\") end end
+   class Cat inherit Animal create make do Animal.make set_name(\"c\") end end\n")
 
 ;; ---------------------------------------------------------------------------
 ;; Function-value conformance: contravariant parameters, covariant return.
@@ -93,7 +93,7 @@
 (deftest override-param-widening-accepts
   (testing "an override may widen a parameter (contravariant)"
     (is (accepts? "class Animal feature interact(other: Animal) do end create make do end end
-                   class Dog inherit Animal feature interact(other: Any) do end create make do end end"))))
+                   class Dog inherit Animal feature interact(other: Any) do end create make do Animal.make end end"))))
 
 (deftest override-param-narrowing-rejected
   (testing "an override may NOT narrow a parameter (the catcall)"
@@ -102,26 +102,26 @@
                      feature
                        fetch: String do result := \"f\" end
                        interact(other: Dog) do print(other.fetch) end
-                     create make do end
+                     create make do Animal.make end
                    end"))))
 
 (deftest override-return-narrowing-accepts
   (testing "an override may narrow the return type (covariant)"
     (is (accepts? "class Animal feature name: String set_name(n: String) do name := n end create make do name := \"a\" end end
-                   class Dog inherit Animal create make do set_name(\"d\") end end
+                   class Dog inherit Animal create make do Animal.make set_name(\"d\") end end
                    class Base feature make_it(): Animal do result := create Animal.make end create make do end end
-                   class Sub inherit Base feature make_it(): Dog do result := create Dog.make end create make do end end"))))
+                   class Sub inherit Base feature make_it(): Dog do result := create Dog.make end create make do Base.make end end"))))
 
 (deftest override-return-nonconforming-rejected
   (testing "an override may NOT change the return to a non-conforming type"
     (is (rejects? "class Animal feature name: String create make do name := \"a\" end end
                    class Base feature thing(): Animal do result := create Animal.make end create make do end end
-                   class Sub inherit Base feature thing(): Integer do result := 5 end create make do end end"))))
+                   class Sub inherit Base feature thing(): Integer do result := 5 end create make do Base.make end end"))))
 
 (deftest override-same-signature-accepts
   (testing "an override with the identical signature conforms"
     (is (accepts? "class Animal feature speak(): String do result := \"...\" end create make do end end
-                   class Dog inherit Animal feature speak(): String do result := \"woof\" end create make do end end"))))
+                   class Dog inherit Animal feature speak(): String do result := \"woof\" end create make do Animal.make end end"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Generic substitution through inheritance.
@@ -133,17 +133,17 @@
 (deftest generic-override-matching-substitution-accepts
   (testing "override of a method inherited from Container[Integer] using the substituted type"
     (is (accepts? (str container
-                       "class IntBox inherit Container[Integer] feature store(x: Integer) do end create make do end end")))))
+                       "class IntBox inherit Container[Integer] feature store(x: Integer) do end create make do Container.make end end")))))
 
 (deftest generic-override-narrowing-substitution-rejected
   (testing "override narrows the substituted parameter (Integer -> String) and is rejected"
     (is (rejects? (str container
-                       "class BadBox inherit Container[Integer] feature store(x: String) do end create make do end end")))))
+                       "class BadBox inherit Container[Integer] feature store(x: String) do end create make do Container.make end end")))))
 
 (deftest generic-override-preserving-accepts
   (testing "a generic-preserving override (Stack[E] over Container[E]) is not falsely rejected"
     (is (accepts? (str container
-                       "class Stack[E] inherit Container[E] feature store(x: E) do end create make do end end")))))
+                       "class Stack[E] inherit Container[E] feature store(x: E) do end create make do Container.make end end")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Builtin protocol routines. Any's `equals`/`hash`/`clone` and Comparable's
@@ -208,7 +208,7 @@
 (deftest user-any-param-narrowing-rejected
   (testing "narrowing a user ancestor's Any parameter is rejected like any other narrowing"
     (is (rejects? "class Base feature take(x: Any) do end create make do end end
-                   class Sub inherit Base feature take(x: Integer) do end create make do end end"))))
+                   class Sub inherit Base feature take(x: Integer) do end create make do Base.make end end"))))
 
 (deftest protocol-name-at-other-arity-is-not-an-override
   (testing "a routine sharing a protocol name but not its arity is a new routine"
@@ -221,18 +221,18 @@
 (deftest user-any-param-narrowing-through-intermediate-rejected
   (testing "a grandparent's Any parameter is still Any to the override"
     (is (rejects? "class Base feature take(x: Any) do end create make do end end
-                   class Mid inherit Base create make do end end
-                   class Sub inherit Mid feature take(x: Integer) do end create make do end end"))))
+                   class Mid inherit Base create make do Base.make end end
+                   class Sub inherit Mid feature take(x: Integer) do end create make do Mid.make end end"))))
 
 (deftest user-detachable-any-param-narrowing-rejected
   (testing "?Any narrowed to ?Integer is rejected like Any to Integer"
     (is (rejects? "class Base feature take(x: ?Any) do end create make do end end
-                   class Sub inherit Base feature take(x: ?Integer) do end create make do end end"))))
+                   class Sub inherit Base feature take(x: ?Integer) do end create make do Base.make end end"))))
 
 (deftest user-any-param-widening-to-detachable-accepts
   (testing "Any widened to ?Any conforms"
     (is (accepts? "class Base feature take(x: Any) do end create make do end end
-                   class Sub inherit Base feature take(x: ?Any) do end create make do end end"))))
+                   class Sub inherit Base feature take(x: ?Any) do end create make do Base.make end end"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Function values: Any and `?` inside a signature.
@@ -323,44 +323,44 @@
 (deftest override-return-any-widening-rejected
   (testing "an override cannot return Any where the inherited routine returns Integer"
     (is (rejects? "class B feature f(): Integer do result := 1 end create make do end end
-                   class S inherit B feature f(): Any do result := 1 end create make do end end"))))
+                   class S inherit B feature f(): Any do result := 1 end create make do B.make end end"))))
 
 (deftest override-detachable-param
   (testing "Dog widens to ?Dog; ?Dog does not narrow to Dog"
     (is (accepts? (str animals "class B feature f(x: Dog) do end create make do end end
-                                class S inherit B feature f(x: ?Dog) do end create make do end end")))
+                                class S inherit B feature f(x: ?Dog) do end create make do B.make end end")))
     (is (rejects? (str animals "class B feature f(x: ?Dog) do end create make do end end
-                                class S inherit B feature f(x: Dog) do end create make do end end")))))
+                                class S inherit B feature f(x: Dog) do end create make do B.make end end")))))
 
 (deftest override-detachable-return
   (testing "?Dog narrows to Dog; Dog does not widen to ?Dog"
     (is (accepts? (str animals "class B feature f(): ?Dog do result := nil end create make do end end
-                                class S inherit B feature f(): Dog do result := create Dog.make end create make do end end")))
+                                class S inherit B feature f(): Dog do result := create Dog.make end create make do B.make end end")))
     (is (rejects? (str animals "class B feature f(): Dog do result := create Dog.make end create make do end end
-                                class S inherit B feature f(): ?Dog do result := nil end create make do end end")))))
+                                class S inherit B feature f(): ?Dog do result := nil end create make do B.make end end")))))
 
 (deftest override-function-typed-param
   (testing "a Function-typed parameter is contravariant like any other"
     (is (rejects? (str animals "class B feature f(cb: Function(d: Dog): String) do end create make do end end
-                                class S inherit B feature f(cb: Function(a: Animal): String) do end create make do end end")))
+                                class S inherit B feature f(cb: Function(a: Animal): String) do end create make do B.make end end")))
     (is (accepts? (str animals "class B feature f(cb: Function(a: Animal): String) do end create make do end end
-                                class S inherit B feature f(cb: Function(d: Dog): String) do end create make do end end")))))
+                                class S inherit B feature f(cb: Function(d: Dog): String) do end create make do B.make end end")))))
 
 (deftest override-function-typed-return
   (testing "a Function-typed return is covariant like any other"
     (is (accepts? (str animals "class B feature f(): Function(d: Dog): String do result := fn (d: Dog): String do result := \"\" end end create make do end end
-                                class S inherit B feature f(): Function(a: Animal): String do result := fn (a: Animal): String do result := \"\" end end create make do end end")))
+                                class S inherit B feature f(): Function(a: Animal): String do result := fn (a: Animal): String do result := \"\" end end create make do B.make end end")))
     (is (rejects? (str animals "class B feature f(): Function(a: Animal): String do result := fn (a: Animal): String do result := \"\" end end create make do end end
-                                class S inherit B feature f(): Function(d: Dog): String do result := fn (d: Dog): String do result := \"\" end end create make do end end")))))
+                                class S inherit B feature f(): Function(d: Dog): String do result := fn (d: Dog): String do result := \"\" end end create make do B.make end end")))))
 
 (deftest override-generic-param-invariant
   (testing "Array[...] parameters of an override must match exactly"
     (is (rejects? (str animals "class B feature f(xs: Array[Animal]) do end create make do end end
-                                class S inherit B feature f(xs: Array[Dog]) do end create make do end end")))
+                                class S inherit B feature f(xs: Array[Dog]) do end create make do B.make end end")))
     (is (rejects? (str animals "class B feature f(xs: Array[Dog]) do end create make do end end
-                                class S inherit B feature f(xs: Array[Animal]) do end create make do end end")))
+                                class S inherit B feature f(xs: Array[Animal]) do end create make do B.make end end")))
     (is (rejects? (str animals "class B feature f(xs: Array[Animal]) do end create make do end end
-                                class S inherit B feature f(xs: Array[Any]) do end create make do end end")))))
+                                class S inherit B feature f(xs: Array[Any]) do end create make do B.make end end")))))
 
 (deftest deferred-implementation-param-narrowing-rejected
   (testing "implementing a deferred routine is an override"
@@ -370,13 +370,13 @@
 (deftest override-second-param-narrowing-rejected
   (testing "each parameter of an override is checked"
     (is (rejects? (str animals "class B feature f(a: Animal, b: Animal) do end create make do end end
-                                class S inherit B feature f(a: Animal, b: Dog) do end create make do end end")))))
+                                class S inherit B feature f(a: Animal, b: Dog) do end create make do B.make end end")))))
 
 (deftest override-renarrowing-in-grand-heir-rejected
   (testing "a grand-heir conforms to the widened routine it redefines, not the original"
     (is (rejects? (str animals "class B feature f(x: Dog) do end create make do end end
-                                class M inherit B feature f(x: Animal) do end create make do end end
-                                class S inherit M feature f(x: Dog) do end create make do end end")))))
+                                class M inherit B feature f(x: Animal) do end create make do B.make end end
+                                class S inherit M feature f(x: Dog) do end create make do M.make end end")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Overrides under multiple inheritance: every parent's routine counts.
@@ -386,29 +386,29 @@
   (testing "narrowing the second parent's parameter is caught, not just the first's"
     (is (rejects? (str animals "class L feature f(x: Dog) do end create make do end end
                                 class R feature f(x: Animal) do end create make do end end
-                                class Both inherit L, R feature f(x: Dog) do end create make do end end")))
+                                class Both inherit L, R feature f(x: Dog) do end create make do L.make R.make end end")))
     (is (rejects? (str animals "class L feature f(x: Animal) do end create make do end end
                                 class R feature f(x: Dog) do end create make do end end
-                                class Both inherit L, R feature f(x: Dog) do end create make do end end")))))
+                                class Both inherit L, R feature f(x: Dog) do end create make do L.make R.make end end")))))
 
 (deftest multi-inherit-return-must-conform-to-every-parent
   (testing "a return conforming to the first parent's but not the second's is rejected"
     (is (rejects? (str animals "class L feature f(): Animal do result := create Dog.make end create make do end end
                                 class R feature f(): Dog do result := create Dog.make end create make do end end
-                                class Both inherit L, R feature f(): Animal do result := create Dog.make end create make do end end")))))
+                                class Both inherit L, R feature f(): Animal do result := create Dog.make end create make do L.make R.make end end")))))
 
 (deftest multi-inherit-conforming-to-both-accepts
   (testing "an override conforming to both parents is accepted"
     (is (accepts? (str animals "class L feature f(x: Dog): Animal do result := x end create make do end end
                                 class R feature f(x: Cat): Animal do result := x end create make do end end
-                                class Both inherit L, R feature f(x: Animal): Dog do result := create Dog.make end create make do end end")))))
+                                class Both inherit L, R feature f(x: Animal): Dog do result := create Dog.make end create make do L.make R.make end end")))))
 
 (deftest diamond-shared-routine-accepts
   (testing "a diamond reaches one declaration twice; a matching override is fine"
     (is (accepts? "class Counter feature bump(x: Integer) do end create make do end end
-                   class L inherit Counter create make do end end
-                   class R inherit Counter create make do end end
-                   class Both inherit L, R feature bump(x: Integer) do end create make do end end"))))
+                   class L inherit Counter create make do Counter.make end end
+                   class R inherit Counter create make do Counter.make end end
+                   class Both inherit L, R feature bump(x: Integer) do end create make do L.make R.make end end"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Overrides naming the heir's own generic parameters.
@@ -417,38 +417,38 @@
 (deftest generic-heir-narrowing-own-param-rejected
   (testing "Stack[E] inherit Container[E] cannot take store(x: Integer): E may be String"
     (is (rejects? (str container
-                       "class Stack[E] inherit Container[E] feature store(x: Integer) do end create make do end end")))))
+                       "class Stack[E] inherit Container[E] feature store(x: Integer) do end create make do Container.make end end")))))
 
 (deftest generic-heir-widening-own-param-to-any-accepts
   (testing "store(x: Any) accepts every E"
     (is (accepts? (str container
-                       "class Stack[E] inherit Container[E] feature store(x: Any) do end create make do end end")))))
+                       "class Stack[E] inherit Container[E] feature store(x: Any) do end create make do Container.make end end")))))
 
 (deftest generic-heir-concrete-return-for-own-param-rejected
   (testing "get(): ?Integer cannot redefine get(): ?E"
     (is (rejects? "class Container[T] feature get(): ?T do result := nil end create make do end end
-                   class Stack[E] inherit Container[E] feature get(): ?Integer do result := nil end create make do end end"))))
+                   class Stack[E] inherit Container[E] feature get(): ?Integer do result := nil end create make do Container.make end end"))))
 
 (deftest generic-heir-swapped-params-rejected
   (testing "A and B are distinct type parameters"
     (is (rejects? "class P[A, B] feature f(x: A) do end create make do end end
-                   class C[A, B] inherit P[A, B] feature f(x: B) do end create make do end end"))))
+                   class C[A, B] inherit P[A, B] feature f(x: B) do end create make do P.make end end"))))
 
 (deftest generic-heir-widening-to-constraint-accepts
   (testing "a parameter typed by E's constraint accepts every E"
     (is (accepts? (str animals
                        "class Container[T -> Animal] feature store(x: T) do end create make do end end
-                        class Stack[E -> Animal] inherit Container[E] feature store(x: Animal) do end create make do end end")))))
+                        class Stack[E -> Animal] inherit Container[E] feature store(x: Animal) do end create make do Container.make end end")))))
 
 (deftest generic-heir-narrowing-any-to-own-param-rejected
   (testing "take(x: E) cannot redefine take(x: Any)"
     (is (rejects? "class Base feature take(x: Any) do end create make do end end
-                   class Sub[E] inherit Base feature take(x: E) do end create make do end end"))))
+                   class Sub[E] inherit Base feature take(x: E) do end create make do Base.make end end"))))
 
 (deftest generic-heir-returning-own-param-for-any-accepts
   (testing "get(): ?E narrows get(): ?Any, which is covariant"
     (is (accepts? "class Base feature get(): ?Any do result := nil end create make do end end
-                   class Sub[E] inherit Base feature get(): ?E do result := nil end create make do end end"))))
+                   class Sub[E] inherit Base feature get(): ?E do result := nil end create make do Base.make end end"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Runtime: a conforming override is the one that runs, through a reference
@@ -469,7 +469,7 @@
 (deftest variant-override-dispatches-on-both-backends
   (testing "a widened parameter and a narrowed return run through a parent-typed reference"
     (let [code "class Animal feature name: String set_name(n: String) do name := n end create make do name := \"a\" end end
-class Dog inherit Animal create make do set_name(\"d\") end end
+class Dog inherit Animal create make do Animal.make set_name(\"d\") end end
 class B feature
   f(x: Dog): String do result := \"B\" end
   g(): Animal do result := create Animal.make end
@@ -477,7 +477,7 @@ create make do end end
 class S inherit B feature
   f(x: Animal): String do result := \"S:\" + x.name end
   g(): Dog do result := create Dog.make end
-create make do end end
+create make do B.make end end
 let b: B := create S.make
 print(b.f(create Dog.make))
 print(b.g().name)

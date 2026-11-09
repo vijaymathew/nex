@@ -50,7 +50,7 @@ end
 class Dog
 inherit Animal, Pet
 create
-  make do end
+  make do Pet.make() Animal.make() end
 feature
   name(): String do result := \"dog\" end
   bark(): String do result := \"woof\" end
@@ -58,14 +58,14 @@ end
 class Cat
 inherit Animal, Pet
 create
-  make do end
+  make do Pet.make() Animal.make() end
 feature
   name(): String do result := \"cat\" end
 end
 class Fish
 inherit Animal
 create
-  make do end
+  make do Animal.make() end
 feature
   name(): String do result := \"fish\" end
 end

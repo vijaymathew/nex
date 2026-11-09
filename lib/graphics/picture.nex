@@ -70,7 +70,11 @@ create
       if not ok then
         raise "Picture.load: not a readable image: " + path
       end
-      adopt(raw)
+      image := argb_copy(raw)
+      with "java" do
+        width := raw.getWidth()
+        height := raw.getHeight()
+      end
       source := path
     end
 
@@ -96,7 +100,11 @@ create
     require
       has_image: raw /= nil
     do
-      adopt(raw)
+      image := argb_copy(raw)
+      with "java" do
+        width := raw.getWidth()
+        height := raw.getHeight()
+      end
       source := ""
     end
 
@@ -377,16 +385,15 @@ private feature
   -- color and alpha exactly.
   image: Any
 
-  -- Take a TYPE_INT_ARGB copy of RAW as this picture's pixels.
-  adopt(raw: Any) do
+  -- A TYPE_INT_ARGB copy of RAW, a java.awt.image.BufferedImage.
+  argb_copy(raw: Any): Any do
     with "java" do
-      width := raw.getWidth()
-      height := raw.getHeight()
-      image := BufferedImage.new(width, height, BufferedImage.TYPE_INT_ARGB)
-      let g := image.createGraphics()
+      let copy := BufferedImage.new(raw.getWidth(), raw.getHeight(), BufferedImage.TYPE_INT_ARGB)
+      let g := copy.createGraphics()
       g.setComposite(AlphaComposite.Src)
       g.drawImage(raw, 0, 0, nil)
       g.dispose()
+      result := copy
     end
   end
 

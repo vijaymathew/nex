@@ -125,7 +125,7 @@ print(p.b)"))))
              (both (str base "class Child
 inherit Base
 create
-  make do c := 0 end
+  make do Base.make() c := 0 end
 feature
   c: Integer
   bump do
@@ -173,7 +173,7 @@ print(k.b)")))))
              (both (str base "class Child
 inherit Base
 create
-  make do end
+  make do Base.make() end
 feature
   trace() do print(\"child trace\") end
   bump do
@@ -252,7 +252,7 @@ print(p.n)")))))
     (violation-on-both (str base "class Child
 inherit Base
 create
-  make do end
+  make do Base.make() end
 end
 let k: Child := create Child.make
 k.inc_a"))))
@@ -264,7 +264,7 @@ k.inc_a"))))
     (violation-on-both (str base "class Child
 inherit Base
 create
-  make do end
+  make do Base.make() end
 feature
   bump do
     inc_a
@@ -319,7 +319,7 @@ end
 class Child
 inherit Base
 create
-  make do m := 0 end
+  make do Base.make() m := 0 end
 feature
   m: Integer
 end

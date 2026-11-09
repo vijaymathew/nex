@@ -119,7 +119,7 @@ end
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do set_x(q)  set_y(p) end
+  create make(p: P, q: Q) do Base.make(q, p)  set_x(q)  set_y(p) end
 end
 
 let m: Mid[String, Integer] := create Mid[String, Integer].make(\"hello\", 42)
@@ -144,13 +144,13 @@ end
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do set_x(q)  set_y(p) end
+  create make(p: P, q: Q) do Base.make(q, p)  set_x(q)  set_y(p) end
 end
 
 class Leaf
   inherit
     Mid[String, Integer]
-  create make(s: String, i: Integer) do set_x(i)  set_y(s) end
+  create make(s: String, i: Integer) do Mid.make(s, i)  set_x(i)  set_y(s) end
 end
 
 let l: Leaf := create Leaf.make(\"hello\", 42)
@@ -175,7 +175,7 @@ end
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do set_x(q)  set_y(p) end
+  create make(p: P, q: Q) do Base.make(q, p)  set_x(q)  set_y(p) end
 end
 
 function first_field[T, U](b: Base[T, U]): T do
@@ -207,13 +207,13 @@ end
 class Mid[P, Q]
   inherit
     Base[Q, P]
-  create make(p: P, q: Q) do set_x(q)  set_y(p) end
+  create make(p: P, q: Q) do Base.make(q, p)  set_x(q)  set_y(p) end
 end
 
 class Leaf
   inherit
     Mid[String, Integer]
-  create make(s: String, i: Integer) do set_x(i)  set_y(s) end
+  create make(s: String, i: Integer) do Mid.make(s, i)  set_x(i)  set_y(s) end
 end
 
 function first_field[T, U](b: Base[T, U]): T do
@@ -244,7 +244,7 @@ end
 class Same[P, Q]
   inherit
     Base[P, Q]
-  create make(p: P, q: Q) do set_x(p)  set_y(q) end
+  create make(p: P, q: Q) do Base.make(p, q)  set_x(p)  set_y(q) end
 end
 
 let s: Same[String, Integer] := create Same[String, Integer].make(\"hi\", 5)

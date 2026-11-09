@@ -149,4 +149,4 @@ create
 end
 print((create C.make).a)")))]
       (is (not (:success result)))
-      (is (re-find #"must call a constructor of B" (pr-str (:errors result)))))))
+      (is (re-find #"must call a constructor of its parent 'B'" (pr-str (:errors result)))))))
