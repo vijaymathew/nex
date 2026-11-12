@@ -38,7 +38,7 @@ search on text that has one.
 | `replace` | `old: String, new: String` | `String` | Replace all occurrences of `old`. |
 | `char_at` | `idx: Integer` | `Char` | Character at index. |
 | `chars` | none | `Array[Char]` | New array of characters in string order. |
-| `to_bytes` | none | `Array[Byte]` | UTF-8 bytes of the string. |
+| `to_bytes` | none | `Array[Byte]` | UTF-8 bytes of the string. Raises if the text holds an unpaired surrogate (only text from the host can), rather than writing `?`. |
 | `split` | `delim: String` | `Array[String]` | Split into an array. |
 | `plus` | `other: Any` | `String` | Concatenate with `other`. |
 | `equals` | `other: Any` | `Boolean` | Equality check. |

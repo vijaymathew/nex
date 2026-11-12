@@ -17,6 +17,10 @@
   in 16 bits; pass `c.to_integer` to an `int` code-point parameter instead.
   `Char.to_upper`/`to_lower` return a `String`, as they always did (the
   reference said `Char`).
+- **`to_bytes` raises on text that is not a sequence of characters.** Text
+  from the host can hold an unpaired UTF-16 surrogate; `to_bytes` used to
+  write it as `?`, so `from_bytes` did not give the text back. It now raises
+  `Conversion_Error`, as `from_bytes` does on bytes that are not UTF-8.
 
 - **Limits of the numeric types, and overflow tests.** `Integer.MIN` and
   `Integer.MAX` (also `Integer64.MIN`/`MAX`), `Integer32.MIN`/`MAX`,

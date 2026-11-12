@@ -246,3 +246,13 @@
       (finally
         (doseq [f (.listFiles dir)] (.delete ^java.io.File f))
         (.delete dir)))))
+
+(deftest an-unpaired-surrogate-is-one-character-but-not-encodable
+  (testing "host text can hold one (here through an escape); it indexes as one
+            character, and to_bytes refuses it rather than write `?`, so that
+            from_bytes(to_bytes(s)) is always s"
+    (is (= ["3" "55296" "String.to_bytes: the text holds an unpaired surrogate, which is not a character"]
+           (both "let s := \"a\\u{D800}b\""
+                 "print(s.length)"
+                 "print(s.char_at(1).to_integer)"
+                 "do print(s.to_bytes) rescue print(exception) end")))))

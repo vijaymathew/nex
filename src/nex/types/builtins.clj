@@ -802,7 +802,7 @@
    "to_bytes"    ^{:signatures [{:params []
                                  :return-type {:base-type "Array" :type-params ["Byte"]}}]}
    (fn [s & _]
-     (rt/bytes->byte-array (.getBytes (rt/host-string s) StandardCharsets/UTF_8)))
+     (rt/bytes->byte-array (rt/utf8-encode-strict (rt/host-string s))))
    "split"       ^{:signatures [{:params [{:name "delimiter" :type "String"}]
                                  :return-type {:base-type "Array" :type-params ["String"]}}]}
    (fn [s delim & _]

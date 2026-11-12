@@ -1231,6 +1231,24 @@
       (catch java.nio.charset.CharacterCodingException _
         (throw (ex-info "bytes are not valid UTF-8" {:builtin-kind "Conversion_Error"}))))))
 
+(defn utf8-encode-strict
+  "The UTF-8 bytes of the text S. Text that is not a sequence of characters
+   -- an unpaired UTF-16 surrogate, which only host text can hold -- raises
+   Conversion_Error rather than being encoded as `?`, so that decoding the
+   bytes always gives S back (Definition B.3)."
+  ^bytes [^String s]
+  (let [encoder (doto (.newEncoder java.nio.charset.StandardCharsets/UTF_8)
+                  (.onMalformedInput java.nio.charset.CodingErrorAction/REPORT)
+                  (.onUnmappableCharacter java.nio.charset.CodingErrorAction/REPORT))]
+    (try
+      (let [buf (.encode encoder (java.nio.CharBuffer/wrap s))
+            out (byte-array (.remaining buf))]
+        (.get buf out)
+        out)
+      (catch java.nio.charset.CharacterCodingException _
+        (throw (ex-info "String.to_bytes: the text holds an unpaired surrogate, which is not a character"
+                        {:builtin-kind "Conversion_Error"}))))))
+
 (defn string-from-bytes
   "Decode a Nex Array[Byte] as UTF-8 text (see utf8-decode-strict)."
   [values]
