@@ -54,7 +54,10 @@
       "Boolean" :boolean
       "Char" :char
       "Void" :void
-      "String" (ir/object-jvm-type "java/lang/String")
+      ;; A Nex String is a java.lang.String or, when it holds a character
+      ;; outside the BMP, a nex.types.runtime.NexWideString (see
+      ;; nex.types.runtime "Strings"), so its JVM type is their common one.
+      "String" (ir/object-jvm-type "java/lang/Object")
       "Array" (ir/object-jvm-type "java/util/ArrayList")
       "Map" (ir/object-jvm-type "java/util/HashMap")
       "Set" (ir/object-jvm-type "java/util/LinkedHashSet")
@@ -92,7 +95,9 @@
     (= jvm-type :long) "J"
     (= jvm-type :double) "D"
     (= jvm-type :boolean) "Z"
-    (= jvm-type :char) "C"
+    ;; A Char is a Unicode code point (up to 0x10FFFF), so a JVM int, not a
+    ;; JVM char; it is boxed to a nex.types.runtime.NexChar.
+    (= jvm-type :char) "I"
     (= jvm-type :void) "V"
     (ir/object-jvm-type? jvm-type) (str "L" (second jvm-type) ";")
     :else (throw (ex-info "Unknown JVM type" {:jvm-type jvm-type}))))
@@ -115,7 +120,6 @@
     :long "java/lang/Long"
     :double "java/lang/Double"
     :boolean "java/lang/Boolean"
-    :char "java/lang/Character"
     nil))
 
 (defn boxing-descriptor
@@ -130,5 +134,4 @@
     :long {:owner "java/lang/Long" :name "longValue" :descriptor "()J"}
     :double {:owner "java/lang/Double" :name "doubleValue" :descriptor "()D"}
     :boolean {:owner "java/lang/Boolean" :name "booleanValue" :descriptor "()Z"}
-    :char {:owner "java/lang/Character" :name "charValue" :descriptor "()C"}
     nil))

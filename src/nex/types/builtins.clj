@@ -313,10 +313,10 @@
 (defn builtin-scalar-value?
   [v]
   (or (nil? v)
-      (string? v)
+      (rt/nex-string? v)
       (nex-numeric? v)
       (boolean? v)
-      (char? v)))
+      (rt/nex-char? v)))
 
 (defn membership-equals?
   "Element equality for linear-scan membership (Array contains/index_of). With a
@@ -360,10 +360,10 @@
 
 (defn sortable-builtin-scalar-value?
   [v]
-  (or (string? v)
+  (or (rt/nex-string? v)
       (number? v)
       (boolean? v)
-      (char? v)
+      (rt/nex-char? v)
       ;; Integer16 / Integer32 wrappers are Comparable (see rt/nex-int16?).
       (rt/nex-int16? v)
       (rt/nex-int32? v)))
@@ -546,6 +546,8 @@
     ;; string fallback below would misorder them ("10" < "9"). nex-numeric-compare
     ;; handles Integer/Real in both representations.
     (and (nex-numeric? x) (nex-numeric? y)) (nex-numeric-compare x y)
+    ;; Either form of String against either.
+    (and (rt/nex-string? x) (rt/nex-string? y)) (Long/signum (rt/str-compare x y))
     (= x y) 0
     :else
     (try
@@ -568,10 +570,11 @@
    use it; otherwise the built-in Any/to_string formatting path."
   [ctx value]
   (cond
-    (string? value) value
-    (or (nex-array? value) (nex-map? value) (nex-set? value)) (format-value-with-ctx ctx value)
-    :else (or (user-to-string ctx value)
-              (call-builtin-method nil nil value "to_string" []))))
+    (rt/nex-string? value) value
+    (or (nex-array? value) (nex-map? value) (nex-set? value)) (rt/->nex-string (format-value-with-ctx ctx value))
+    :else (rt/->nex-string
+           (or (user-to-string ctx value)
+               (call-builtin-method nil nil value "to_string" [])))))
 
 (defn- nex-compare
   [x y]
@@ -610,7 +613,7 @@
   [coll]
   (cond
     (rt/nex-array? coll) (vec coll)
-    (string? coll) (vec coll)
+    (rt/nex-string? coll) (rt/str-chars coll)
     (rt/nex-set? coll) (vec (rt/nex-set-seq coll))
     (rt/nex-map? coll) (mapv (fn [[k v]] (make-map-entry k v)) (rt/nex-map-entries coll))
     :else (throw (ex-info "Not a collection" {:value coll}))))
@@ -621,7 +624,7 @@
   [coll elems]
   (cond
     (rt/nex-array? coll) (rt/nex-array-from elems)
-    (string? coll) (apply str elems)
+    (rt/nex-string? coll) (rt/->nex-string (apply str elems))
     (instance? java.util.LinkedHashSet coll) (rt/nex-host-set-from elems)
     (rt/nex-set? coll) (rt/nex-set-from elems)
     (instance? java.util.Map coll) (rt/nex-host-map-from (map (juxt :key :value) elems))
@@ -629,7 +632,7 @@
 
 (defn- functional-kind-name
   [coll]
-  (cond (rt/nex-array? coll) "Array" (string? coll) "String"
+  (cond (rt/nex-array? coll) "Array" (rt/nex-string? coll) "String"
         (rt/nex-set? coll) "Set" :else "Map"))
 
 (defn functional-call
@@ -711,9 +714,27 @@
                                              (assoc elem :detachable true)
                                              {:base-type elem :detachable true})}]})}))
 
+(defn- plain-or-normalized
+  "RESULT, a java.lang.String computed from the host text of INPUTS (Nex
+   Strings or Chars), as a Nex String: left plain without a scan when every
+   input is plain text (no surrogate in, none out), else ->nex-string."
+  [^String result & inputs]
+  (if (every? string? inputs) result (rt/->nex-string result)))
+
+(defn- string-index-check
+  [s ^long i]
+  (let [n (rt/str-length s)]
+    (when-not (and (<= 0 i) (< i n))
+      (throw (ex-info (str "Index " i " out of bounds for length " n)
+                      {:builtin-kind "Index_Out_Of_Bounds"})))))
+
+;; A String's receiver S (and any String argument) may be either runtime form
+;; (see nex.types.runtime "Strings"); lengths and positions are in characters
+;; (code points). rt/host-string is the text as a java.lang.String, for the
+;; host's own string functions.
 (def string-type-methods
   {"length"      ^{:signatures [{:params [] :return-type "Integer"}]}
-   (fn [s & _] (->nex-integer (count s)))
+   (fn [s & _] (rt/str-length s))
    ;; The text itself (Definition B.1: to_string is the user-facing
    ;; rendering). Without its own entry a String fell back to Any's, which
    ;; formats a value as print shows it inside a collection -- quoted -- so
@@ -722,88 +743,98 @@
    (fn [s & _] s)
    "index_of"    ^{:signatures [{:params [{:name "substr" :type "String"}] :return-type "Integer"}]}
    (fn [s ch & _]
-     (let [idx (str/index-of s (str ch))]
-       (->nex-integer (if idx idx -1))))
+     (let [off (.indexOf (rt/host-string s) (str ch))]
+       (if (neg? off) -1 (rt/str-index-of-offset s off))))
    "substring"   ^{:signatures [{:params [{:name "start" :type "Integer"}
                                           {:name "end" :type "Integer"}]
                                  :return-type "String"}]}
-   (fn [s start end & _] (subs s (nex-int->number start) (nex-int->number end)))
+   (fn [s start end & _]
+     (let [start (long start) end (long end) n (rt/str-length s)]
+       (when-not (<= 0 start end n)
+         (throw (StringIndexOutOfBoundsException.
+                 (str "begin " start ", end " end ", length " n))))
+       (rt/str-substring s start end)))
    "to_upper"    ^{:signatures [{:params [] :return-type "String"}]}
-   (fn [s & _] (str/upper-case s))
+   (fn [s & _] (plain-or-normalized (str/upper-case (rt/host-string s)) s))
    "to_lower"    ^{:signatures [{:params [] :return-type "String"}]}
-   (fn [s & _] (str/lower-case s))
+   (fn [s & _] (plain-or-normalized (str/lower-case (rt/host-string s)) s))
    "to_integer"  ^{:signatures [{:params [] :return-type "Integer"}]}
-   (fn [s & _] (nex-parse-integer s))
+   (fn [s & _] (nex-parse-integer (rt/host-string s)))
    "to_integer64" ^{:signatures [{:params [] :return-type "Integer"}]}
-   (fn [s & _] (nex-parse-integer64-string s))
+   (fn [s & _] (nex-parse-integer64-string (rt/host-string s)))
    "to_real"     ^{:signatures [{:params [] :return-type "Real"}]}
-   (fn [s & _] (Double/parseDouble (str/trim s)))
+   (fn [s & _] (Double/parseDouble (str/trim (rt/host-string s))))
    "contains"    ^{:signatures [{:params [{:name "substr" :type "String"}] :return-type "Boolean"}]}
-   (fn [s substr & _] (str/includes? s substr))
+   (fn [s substr & _] (str/includes? (rt/host-string s) (str substr)))
    "starts_with" ^{:signatures [{:params [{:name "prefix" :type "String"}] :return-type "Boolean"}]}
-   (fn [s prefix & _] (str/starts-with? s prefix))
+   (fn [s prefix & _] (str/starts-with? (rt/host-string s) (str prefix)))
    "ends_with"   ^{:signatures [{:params [{:name "suffix" :type "String"}] :return-type "Boolean"}]}
-   (fn [s suffix & _] (str/ends-with? s suffix))
+   (fn [s suffix & _] (str/ends-with? (rt/host-string s) (str suffix)))
    "trim"        ^{:signatures [{:params [] :return-type "String"}]}
-   (fn [s & _] (str/trim s))
+   (fn [s & _] (plain-or-normalized (str/trim (rt/host-string s)) s))
    "replace"     ^{:signatures [{:params [{:name "old" :type "String"} {:name "new" :type "String"}]
                                  :return-type "String"}]}
-   (fn [s old new & _] (str/replace s old new))
+   (fn [s old new & _]
+     (plain-or-normalized (str/replace (rt/host-string s) (str old) (str new)) s old new))
    "pad_end"     ^{:signatures [{:params [{:name "pad" :type "String"}
                                           {:name "count" :type "Integer"}]
                                  :return-type "String"}]}
    (fn [s pad len & _]
-     (let [len (nex-int->number len)] (if (>= (count s) len) s (str s (apply str (repeat (- len (count s)) pad))))))
+     (let [len (long len) n (rt/str-length s)]
+       (if (>= n len) s (plain-or-normalized (str (rt/host-string s) (apply str (repeat (- len n) (str pad)))) s pad))))
    "pad_start"   ^{:signatures [{:params [{:name "pad" :type "String"}
                                           {:name "count" :type "Integer"}]
                                  :return-type "String"}]}
    (fn [s pad len & _]
-     (let [len (nex-int->number len)] (if (>= (count s) len) s (str (apply str (repeat (- len (count s)) pad)) s))))
+     (let [len (long len) n (rt/str-length s)]
+       (if (>= n len) s (plain-or-normalized (str (apply str (repeat (- len n) (str pad))) (rt/host-string s)) s pad))))
    "replicate"   ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "String"}]}
-   (fn [s n & _] (apply str (repeat (nex-int->number n) s)))
+   (fn [s n & _] (plain-or-normalized (apply str (repeat (nex-int->number n) (rt/host-string s))) s))
    "char_at"     ^{:signatures [{:params [{:name "index" :type "Integer"}] :return-type "Char"}]}
    (fn [s idx & _]
-     (let [i (nex-int->number idx)]
+     (let [i (long idx)]
        ;; Out of range is an error, as for an Array, not a nil Char.
-       (if (and (<= 0 i) (< i (count s)))
-         (get s i)
-         (throw (ex-info (str "Index " i " out of bounds for length " (count s))
-                         {:builtin-kind "Index_Out_Of_Bounds"})))))
+       (string-index-check s i)
+       (rt/str-char-at s i)))
    "chars"       ^{:signatures [{:params []
                                  :return-type {:base-type "Array" :type-params ["Char"]}}]}
-   (fn [s & _]
-     (nex-array-from
-      (mapv #(get s %) (range (count s)))))
+   (fn [s & _] (nex-array-from (rt/str-chars s)))
    "to_bytes"    ^{:signatures [{:params []
                                  :return-type {:base-type "Array" :type-params ["Byte"]}}]}
    (fn [s & _]
-     (rt/bytes->byte-array (.getBytes ^String s StandardCharsets/UTF_8)))
+     (rt/bytes->byte-array (.getBytes (rt/host-string s) StandardCharsets/UTF_8)))
    "split"       ^{:signatures [{:params [{:name "delimiter" :type "String"}]
                                  :return-type {:base-type "Array" :type-params ["String"]}}]}
-   (fn [s delim & _] (nex-array-from (str/split s (re-pattern delim))))
+   (fn [s delim & _]
+     (let [parts (str/split (rt/host-string s) (re-pattern (str delim)))]
+       (nex-array-from (if (string? s) parts (map rt/->nex-string parts)))))
    "join"        ^{:signatures [{:params [{:name "parts" :type {:base-type "Array" :type-params ["String"]}}]
                                  :return-type "String"}]}
-   (fn [s arr & _] (str/join s arr))
+   (fn [s arr & _]
+     (let [parts (seq arr)]
+       (apply plain-or-normalized (str/join (rt/host-string s) (map str parts)) s parts)))
    ;; String operator methods
    "plus"        (fn [s other & [ctx]]
-                   (str s (if ctx
-                            (concat-string-value ctx other)
-                            (nex-format-value other))))
+                   (rt/str-concat s (if ctx
+                                      (concat-string-value ctx other)
+                                      (rt/->nex-string (nex-format-value other)))))
    "equals"      (fn [s other & _] (= s other))
    "not_equals"  (fn [s other & _] (not= s other))
-   "less_than"   (fn [s other & _] (neg? (compare s other)))
-   "less_than_or_equal" (fn [s other & _] (<= (compare s other) 0))
-   "greater_than" (fn [s other & _] (pos? (compare s other)))
-   "greater_than_or_equal" (fn [s other & _] (>= (compare s other) 0))
+   "less_than"   (fn [s other & _] (neg? (rt/str-compare s other)))
+   "less_than_or_equal" (fn [s other & _] (<= (rt/str-compare s other) 0))
+   "greater_than" (fn [s other & _] (pos? (rt/str-compare s other)))
+   "greater_than_or_equal" (fn [s other & _] (>= (rt/str-compare s other) 0))
    "compare"     (fn [s other & _] (nex-compare s other))
    "hash"        (fn [s & _] (hash s))
    ;; A String iterates over its Chars, exactly as Array/Map/Set iterate over
    ;; their elements — see register-string-methods! for why this is declared
-   ;; explicitly rather than through the universal "Any" fallback.
+   ;; explicitly rather than through the universal "Any" fallback. The cursor
+   ;; keeps the UTF-16 offset of its character, so each step is O(1) in
+   ;; either form.
    "cursor"      ^{:signatures [{:params [] :return-type {:base-type "Cursor" :type-params ["Char"]}}]}
    (fn [s & _]
      {:nex-builtin-type :StringCursor
-      :source s
+      :source (rt/host-string s)
       :index (atom 0)})})
 
 (defn- int-can-add?
@@ -940,7 +971,7 @@
                                            :return-type "Boolean"}]}
    (fn [n other & _] (not (neg? (nex-numeric-compare n other))))
    "to_char"           ^{:signatures [{:params [] :return-type "Char"}]}
-   (fn [n & _] (char (int n)))
+   (fn [n & _] (rt/->nex-char n))
    "to_byte"           ^{:signatures [{:params [] :return-type "Byte"}]}
    (fn [n & _] (rt/->nex-byte n))
    "to_integer16"      ^{:signatures [{:params [] :return-type "Integer16"}]}
@@ -985,7 +1016,7 @@
    "to_integer"        ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [b & _] (->nex-integer (byte-bits b)))
    "to_char"           ^{:signatures [{:params [] :return-type "Char"}]}
-   (fn [b & _] (char (byte-bits b)))
+   (fn [b & _] (rt/make-char (byte-bits b)))
    "to_hex"            ^{:signatures [{:params [] :return-type "String"}]}
    (fn [b & _] (format "%02x" (byte-bits b)))
    "to_integer16"      ^{:signatures [{:params [] :return-type "Integer16"}]}
@@ -1313,9 +1344,9 @@
    "to_lower"    ^{:signatures [{:params [] :return-type "String"}]}
    (fn [c & _] (str/lower-case (str c)))
    "to_integer"  ^{:signatures [{:params [] :return-type "Integer"}]}
-   (fn [c & _] (->nex-integer (int c)))
+   (fn [c & _] (rt/char-code c))
    "is_whitespace" ^{:signatures [{:params [] :return-type "Boolean"}]}
-   (fn [c & _] (Character/isWhitespace (char c)))
+   (fn [c & _] (Character/isWhitespace (int (rt/char-code c))))
    "compare"     (fn [c other & _] (nex-compare c other))
    "hash"        (fn [c & _] (hash c))})
 
@@ -1865,17 +1896,19 @@
   {;; A cursor is itself Iterable: its cursor is itself.
    "cursor"  (fn [c & _] c)
    "start"   (fn [c & _] (reset! (:index c) 0) nil)
+   ;; :source is the host text and :index the UTF-16 offset of the current
+   ;; character, which `next` steps over whole.
    "item"    (fn [c & _]
-               (let [s (:source c)
+               (let [^String s (:source c)
                      idx @(:index c)]
-                 (if (< idx (count s))
-                   (get s idx)
+                 (if (< idx (.length s))
+                   (rt/make-char (long (.codePointAt s (int idx))))
                    (throw (ex-info "Cursor is at end" {:index idx})))))
    "next"    (fn [c & _]
-               (let [s (:source c)
+               (let [^String s (:source c)
                      idx @(:index c)]
-                 (when (< idx (count s))
-                   (swap! (:index c) inc))
+                 (when (< idx (.length s))
+                   (swap! (:index c) + (Character/charCount (.codePointAt s (int idx)))))
                  nil))
    "at_end"  (fn [c & _]
                (>= @(:index c) (count (:source c))))})
@@ -1977,31 +2010,62 @@
 
 (def get-type-name typeinfo/get-type-name)
 
+(defn- declares-string-result?
+  [f]
+  (let [m (meta f)
+        string-type? #(or (= "String" %) (and (map? %) (= "String" (:base-type %))))]
+    (or (string-type? (:returns m))
+        (some #(string-type? (:return-type %)) (:signatures m)))))
+
+(def string-result-methods
+  "#{[type-key method-name]} of the built-in methods declared to return a
+   String, outside String's own table (whose methods make their results in
+   the right form themselves): their result is host text -- a number's
+   digits, a collection's rendering, a line read from the console -- which
+   rt/->nex-string turns into a Nex String. Only these: a method returning a
+   stored value (Array.get) hands back a Nex String already."
+  (into #{}
+        (for [[type-key methods] builtin-type-methods
+              :when (not (#{:String :StringCursor} type-key))
+              [method-name f] methods
+              :when (declares-string-result? f)]
+          [type-key method-name])))
+
+(defn normalize-method-result
+  "RESULT of built-in method METHOD-NAME of TYPE-KEY, as a Nex value (see
+   string-result-methods)."
+  [type-key method-name result]
+  (if (and (string? result) (contains? string-result-methods [type-key method-name]))
+    (rt/->nex-string result)
+    result))
+
 (defn call-builtin-method
   "Call a built-in method on a primitive value"
   ([target value method-name args]
    (call-builtin-method nil target value method-name args))
   ([ctx target value method-name args]
-   (if-let [method-fn
-            (or (when-let [type-name (get-type-name value)]
+   (let [type-name (get-type-name value)
+         own-fn (when type-name
                   (when-let [methods (get builtin-type-methods type-name)]
                     (get methods method-name)))
-                (get-in builtin-type-methods [:Any method-name]))]
-     (if (and ctx
-              (let [type-name (get-type-name value)]
-                (or (and (= type-name :Array)
-                         (contains? #{"sort" "contains" "index_of"} method-name))
-                    ;; map, filter, ... call a function value
-                    (and (contains? #{:Array :Map :Set :String} type-name)
-                         (contains? functional-method-names method-name))
-                    (and (contains? #{:Array :Map :Set} type-name)
-                         (= method-name "to_string"))
-                    (= type-name :Min_Heap)
-                    (and (= type-name :Map_Entry) (= method-name "to_string")))))
-       (apply method-fn value (concat args [ctx]))
-       (apply method-fn value args))
-     (throw (ex-info (str "Method not found on type: " method-name)
-                     {:target target :value value :method method-name})))))
+         table (if own-fn type-name :Any)]
+     (if-let [method-fn (or own-fn (get-in builtin-type-methods [:Any method-name]))]
+       (normalize-method-result
+        table method-name
+        (if (and ctx
+                 (or (and (= type-name :Array)
+                          (contains? #{"sort" "contains" "index_of"} method-name))
+                     ;; map, filter, ... call a function value
+                     (and (contains? #{:Array :Map :Set :String} type-name)
+                          (contains? functional-method-names method-name))
+                     (and (contains? #{:Array :Map :Set} type-name)
+                          (= method-name "to_string"))
+                     (= type-name :Min_Heap)
+                     (and (= type-name :Map_Entry) (= method-name "to_string"))))
+          (apply method-fn value (concat args [ctx]))
+          (apply method-fn value args)))
+       (throw (ex-info (str "Method not found on type: " method-name)
+                       {:target target :value value :method method-name}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Free-function builtins (Stage D2). `builtins` maps a builtin function name
@@ -2135,7 +2199,7 @@
     (= return-type Boolean/TYPE) (boolean value)
     (= return-type Short/TYPE) (short value)
     (= return-type Byte/TYPE) (byte value)
-    (= return-type Character/TYPE) (char value)
+    (= return-type Character/TYPE) (if (rt/nex-char? value) (char (rt/char-code value)) (char value))
     :else value))
 
 (defn- java-proxy-for-object
@@ -2181,7 +2245,8 @@
            (invoke [_ proxy method args]
              (let [^java.lang.reflect.Method method method
                    method-name (.getName method)
-                   arg-values (vec (or args []))
+                   ;; Java's arguments as Nex values (a String, a char).
+                   arg-values (mapv rt/java->nex (or args []))
                    current-obj (get @(:bindings env) slot obj)]
                (if (= (.getDeclaringClass method) Object)
                  (case method-name
@@ -2190,7 +2255,8 @@
                    "toString" (str "NexProxy<" (:class-name current-obj) ">")
                    nil)
                  (coerce-java-return (.getReturnType method)
-                                     (eval-call ctx current-obj method-name arg-values)))))))))))
+                                     (let [r (eval-call ctx current-obj method-name arg-values)]
+                                       (if (rt/nex-wide-string? r) (rt/host-string r) r))))))))))))
 
 (defn java-arg
   "Convert one argument for a reflective Java call: a Nex object implementing
@@ -2199,7 +2265,7 @@
   [ctx v]
   (cond
     (nex-object? v) (java-proxy-for-object ctx v)
-    (rt/nex-sized? v) (rt/nex->java v)
+    (or (rt/nex-sized? v) (rt/nex-char? v) (rt/nex-wide-string? v)) (rt/nex->java v)
     :else v))
 
 (defn java-args
@@ -2904,13 +2970,42 @@
                        {:function "http_server_is_running" :expected 1 :actual (count args)})))
      (some? @(:server (first args))))})
 
+(defn- host-arg
+  "A free builtin's argument as the host functions behind it take it: a
+   String with characters outside the BMP as its java.lang.String text."
+  [v]
+  (if (rt/nex-wide-string? v) (rt/host-string v) v))
+
+(defn- nex-result
+  "A free builtin's result as a Nex value: host text (a path, a line read
+   from a file, a regex match, an HTTP body) as a Nex String, and so each
+   String in an Array it made."
+  [r]
+  (cond
+    (string? r) (rt/->nex-string r)
+    (instance? java.util.ArrayList r)
+    (let [^java.util.ArrayList a r]
+      (dotimes [i (.size a)]
+        (let [x (.get a i)]
+          (when (string? x) (.set a i (rt/->nex-string x)))))
+      a)
+    :else r))
+
+(defn- strings-at-boundary
+  "F, a free builtin (fn [ctx & args]), taking and giving Nex Strings in
+   either form (see nex.types.runtime \"Strings\")."
+  [f]
+  (fn [ctx & args]
+    (nex-result (apply f ctx (map host-arg args)))))
+
 (def builtins
   "Free (target-less) builtin functions, grouped by domain."
-  (merge core-builtins
-         http-client-builtins
-         json-builtins
-         regex-builtins
-         datetime-builtins
-         path-builtins
-         file-builtins
-         http-server-builtins))
+  (update-vals (merge core-builtins
+                      http-client-builtins
+                      json-builtins
+                      regex-builtins
+                      datetime-builtins
+                      path-builtins
+                      file-builtins
+                      http-server-builtins)
+               strings-at-boundary))

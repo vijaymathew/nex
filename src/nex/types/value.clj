@@ -5,12 +5,12 @@
 
 (defn- nex-char-literal
   [value]
-  (case value
-    \space "#space"
-    \tab "#tab"
-    \newline "#newline"
-    \return "#return"
-    \u0000 "#nul"
+  (case (rt/char-code value)
+    32 "#space"
+    9 "#tab"
+    10 "#newline"
+    13 "#return"
+    0 "#nul"
     (str "#" value)))
 
 (defn nex-format-value
@@ -34,7 +34,7 @@
     (and (map? value) (:nex-builtin-type value))
     (str "#<" (name (:nex-builtin-type value)) ">")
 
-    (string? value)
+    (rt/nex-string? value)
     (str \" value \")
 
     (ratio? value)
@@ -74,8 +74,12 @@
     (coll? value)
     (pr-str value)
 
-    (char? value)
+    (rt/nex-char? value)
     (nex-char-literal value)
+
+    ;; A String with characters outside the BMP prints as a plain one does.
+    (rt/nex-wide-string? value)
+    (pr-str (rt/host-string value))
 
     :else
     (pr-str value)))

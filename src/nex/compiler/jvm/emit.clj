@@ -47,6 +47,14 @@
 (declare primitive-class->jvm-type)
 (declare primitive-box-info)
 
+(defn- wide-text?
+  "Whether the text S holds a surrogate, so that as a Nex String it is a
+   NexWideString (nex.types.runtime \"Strings\")."
+  [^String s]
+  (boolean (some #(Character/isSurrogate (char %)) s)))
+
+(declare emit-wide-string-const!)
+
 (defn- emit-string-constant!
   "Push a String onto the stack. A plain LDC references a single CONSTANT_Utf8
    entry, which the class-file format caps at 65535 bytes — a limit large
@@ -679,8 +687,7 @@
           (.visitInsn mv Opcodes/DUP)
           (.visitMethodInsn mv Opcodes/INVOKESPECIAL linkedhashset-internal-name "<init>" "()V" false))
 
-        (and (= (ir/object-jvm-type "java/lang/String") jvm-type)
-             (= "String" nex-type))
+        (= "String" nex-type)
         (.visitLdcInsn mv "")
 
         ;; A Byte, Integer16 or Integer32 field is a JVM byte/short/int.
@@ -747,10 +754,14 @@
 
 (declare emit-sized-box! emit-sized-unbox!)
 
+(declare emit-char-box! emit-char-unbox!)
+
 (defn- emit-box!
   [^MethodVisitor mv jvm-type]
   (when (ir/sized-jvm-type? jvm-type)
     (emit-sized-box! mv jvm-type))
+  (when (= :char jvm-type)
+    (emit-char-box! mv))
   (when-let [owner (desc/boxing-owner jvm-type)]
     (.visitMethodInsn mv
                       Opcodes/INVOKESTATIC
@@ -767,6 +778,9 @@
 
     (ir/sized-jvm-type? jvm-type)
     (emit-sized-unbox! mv jvm-type)
+
+    (= :char jvm-type)
+    (emit-char-unbox! mv)
 
     (= :int jvm-type)
     (do
@@ -846,8 +860,13 @@
     (= :char jvm-type)
     (.visitLdcInsn mv (int value))
 
-    (= (ir/object-jvm-type "java/lang/String") jvm-type)
-    (.visitLdcInsn mv ^String value)
+    ;; A String constant. One holding a character outside the BMP is a
+    ;; NexWideString, made once per class from its text by a dynamic
+    ;; constant (see nex.types.runtime "Strings").
+    (string? value)
+    (if (wide-text? value)
+      (emit-wide-string-const! mv value)
+      (.visitLdcInsn mv ^String value))
 
     ;; A Nex Byte constant (a java.lang.Short holding 0..255).
     (and (instance? Short value) (= (ir/object-jvm-type "java/lang/Short") jvm-type))
@@ -1177,6 +1196,24 @@
   (when (= "Byte" nex-type)
     (.visitTypeInsn mv Opcodes/CHECKCAST "java/lang/Short")))
 
+(defn- emit-wide-string-const!
+  "Push the Nex String of the text S, which holds a character outside the
+   BMP, as a dynamic constant: the runtime's NexWideString of it, made once
+   and then kept by the JVM."
+  [^MethodVisitor mv ^String s]
+  (.visitLdcInsn mv (org.objectweb.asm.ConstantDynamic.
+                     "nexwidestr"
+                     "Ljava/lang/Object;"
+                     constant-bootstraps-invoke
+                     (object-array [ifn-invoke-1-handle
+                                    (org.objectweb.asm.ConstantDynamic.
+                                     "nexvar"
+                                     "Lclojure/lang/Var;"
+                                     constant-bootstraps-invoke
+                                     (object-array [rt-var-handle "nex.compiler.jvm.runtime"
+                                                    "make-nex-string"]))
+                                    s]))))
+
 (def ^:private var-get-raw-root-handle
   (org.objectweb.asm.Handle. Opcodes/H_INVOKEVIRTUAL var-internal-name "getRawRoot"
                              "()Ljava/lang/Object;" false))
@@ -1197,6 +1234,26 @@
                                      constant-bootstraps-invoke
                                      (object-array [rt-var-handle "nex.compiler.jvm.runtime" fn-name]))])))
   (.visitTypeInsn mv Opcodes/CHECKCAST iface))
+
+(defn- emit-char-box!
+  "Replace the Char code point on the stack (a JVM int, IR :char) with its
+   runtime value, a NexChar."
+  [^MethodVisitor mv]
+  (.visitInsn mv Opcodes/I2L)
+  (emit-prim-fn! mv "make-char" "clojure/lang/IFn$LO")
+  (.visitInsn mv Opcodes/DUP_X2)
+  (.visitInsn mv Opcodes/POP)
+  (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$LO" "invokePrim"
+                    "(J)Ljava/lang/Object;" true))
+
+(defn- emit-char-unbox!
+  "Replace the NexChar on the stack with its code point, a JVM int."
+  [^MethodVisitor mv]
+  (emit-prim-fn! mv "char-code" "clojure/lang/IFn$OL")
+  (.visitInsn mv Opcodes/SWAP)
+  (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$OL" "invokePrim"
+                    "(Ljava/lang/Object;)J" true)
+  (.visitInsn mv Opcodes/L2I))
 
 (def ^:private sized-jvm-type-of
   "Sized type name -> its IR JVM type (ir/sized-jvm-types)."
@@ -3812,9 +3869,17 @@
       ;; nil any other Void-returning Nex call would.
       (.visitInsn mv Opcodes/ACONST_NULL)
 
+      ;; A Java char is a Nex Char, a NexChar.
+      (= java-kind :char)
+      (emit-char-box! mv)
+
       java-kind
       (let [{:keys [box-owner box-desc]} (get primitive-box-info java-kind)]
         (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))
+
+      ;; A Java String is a Nex String in the form its text calls for.
+      (#{String CharSequence} (:java-return-class expr))
+      (emit-runtime-invoke-1! mv "make-nex-string")
 
       ;; A reference return is already Object-shaped on the stack — no
       ;; conversion needed, matching Nex's own boxed-everything internal
@@ -4932,6 +4997,14 @@
   (let [^Class target (:target-class expr)
         nex-kind (emit-expr! mv (:value expr) state-slot)]
     (cond
+      ;; A Nex Char (a code point, a JVM int) to a Java char or Character:
+      ;; narrowed to its 16 bits, as Java's own (char) cast does.
+      (and (= :char nex-kind) (#{Character/TYPE Character} target))
+      (do (.visitInsn mv Opcodes/I2C)
+          (when (= Character target)
+            (.visitMethodInsn mv Opcodes/INVOKESTATIC "java/lang/Character" "valueOf"
+                              "(C)Ljava/lang/Character;" false)))
+
       (get primitive-class->jvm-type target)
       (let [java-kind (get primitive-class->jvm-type target)]
         (when-let [conv (numeric-widen-narrow-opcode nex-kind java-kind)]
@@ -4945,7 +5018,11 @@
         (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))
 
       :else
-      (.visitTypeInsn mv Opcodes/CHECKCAST (reference-type-internal-name target))))
+      (do
+        ;; A Nex String crosses into a Java String parameter as its text.
+        (when (#{String CharSequence} target)
+          (emit-runtime-invoke-1! mv "host-string"))
+        (.visitTypeInsn mv Opcodes/CHECKCAST (reference-type-internal-name target)))))
   (:jvm-type expr))
 
 (defn- emit-interface-bridge-method!
@@ -4987,10 +5064,18 @@
               {:keys [load]} (get primitive-box-info java-kind)
               {:keys [box-owner box-desc]} (get primitive-box-info box-kind)]
           (.visitVarInsn mv load slot)
-          (when-let [conv (numeric-widen-narrow-opcode java-kind box-kind)]
-            (.visitInsn mv conv))
-          (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))
-        (.visitVarInsn mv Opcodes/ALOAD slot))
+          (if (= :char java-kind)
+            ;; A Java char reaches Nex as a Char, a NexChar.
+            (emit-char-box! mv)
+            (do
+              (when-let [conv (numeric-widen-narrow-opcode java-kind box-kind)]
+                (.visitInsn mv conv))
+              (.visitMethodInsn mv Opcodes/INVOKESTATIC box-owner "valueOf" box-desc false))))
+        (do
+          (.visitVarInsn mv Opcodes/ALOAD slot)
+          ;; A Java String reaches Nex as a Nex String.
+          (when (#{String CharSequence} param-class)
+            (emit-runtime-invoke-1! mv "make-nex-string"))))
       (.visitInsn mv Opcodes/AASTORE))
     (.visitMethodInsn mv Opcodes/INVOKEVIRTUAL owner target-method-name (repl-fn-method-descriptor) false)
     (let [java-kind (get primitive-class->jvm-type return-class)]
@@ -4998,6 +5083,13 @@
         (= java-kind :void)
         (do (.visitInsn mv Opcodes/POP)
             (.visitInsn mv Opcodes/RETURN))
+
+        ;; A Nex Char returned where Java wants a char: its code point,
+        ;; narrowed to 16 bits.
+        (= java-kind :char)
+        (do (emit-char-unbox! mv)
+            (.visitInsn mv Opcodes/I2C)
+            (.visitInsn mv Opcodes/IRETURN))
 
         ;; A primitive Java return: unbox using whichever wrapper the Nex
         ;; method body actually returned (Nex Integer is a boxed Long
@@ -5018,6 +5110,9 @@
 
         :else
         (do
+          ;; A Nex String returned to Java as its text.
+          (when (#{String CharSequence} return-class)
+            (emit-runtime-invoke-1! mv "host-string"))
           (.visitTypeInsn mv Opcodes/CHECKCAST (reference-type-internal-name return-class))
           (.visitInsn mv Opcodes/ARETURN))))
     (.visitMaxs mv 0 0)

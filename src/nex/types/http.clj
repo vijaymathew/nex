@@ -13,15 +13,15 @@
   [make-object-fn status body headers]
   (make-object-fn "Http_Response"
                   {"status_code" status
-                   "body_text" body
+                   "body_text" (rt/->nex-string body)
                    "header_map" headers}))
 
 (defn make-http-server-request-object
   [make-object-fn method-name path-value body-text header-map route-params query-map]
   (make-object-fn "Http_Request"
                   {"method_name" method-name
-                   "path_value" path-value
-                   "body_text" body-text
+                   "path_value" (rt/->nex-string path-value)
+                   "body_text" (rt/->nex-string body-text)
                    "header_map" header-map
                    "route_params" route-params
                    "query_map" query-map}))

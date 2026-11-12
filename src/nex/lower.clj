@@ -541,6 +541,14 @@
   [env class-name]
   (ir/object-jvm-type (:internal-name (class-jvm-meta env class-name))))
 
+(defn- generic-runtime-token-jvm-type
+  "JVM type of a generic class's runtime type-argument token (the
+   `__generic_type_<param>` field and the constructor parameter feeding it):
+   the type name as a String, held as an Object, as a Nex String is
+   (nex.compiler.jvm.descriptor), since the parameter is typed String."
+  []
+  (ir/object-jvm-type "java/lang/Object"))
+
 (defn- generic-runtime-field-ir
   [env class-name generic-name]
   (ir/field-get-node (:internal-name (class-jvm-meta env class-name))
@@ -548,7 +556,7 @@
                      (ir/this-node class-name
                                    (exact-class-jvm-type env class-name))
                      "String"
-                     (string-jvm-type)))
+                     (generic-runtime-token-jvm-type)))
 
 (defn- generic-runtime-field-bindings
   [env class-name generic-params]
@@ -1756,7 +1764,7 @@
     :long (ir/const-node 0 nex-type :long)
     :double (ir/const-node 0.0 nex-type :double)
     :boolean (ir/const-node false "Boolean" :boolean)
-    :char (ir/const-node (char 0) "Char" :char)
+    :char (ir/const-node 0 "Char" :char)
     (:u8 :i16 :i32) (ir/const-node 0 nex-type jvm-type)
     (ir/const-node nil "Any" (ir/object-jvm-type "java/lang/Object"))))
 
@@ -5504,7 +5512,8 @@
                                                             [(ir/const-node (:value expr) "Integer" :long)]
                                                             "Integer32" (resolve-jvm-type env "Integer32")))
    :real               (fn [_env expr] (ir/const-node (:value expr) "Real" :double))
-   :string             (fn [_env expr] (ir/const-node (:value expr) "String" (ir/object-jvm-type "java/lang/String")))
+   ;; Either form of String (nex.types.runtime "Strings"), so an Object.
+   :string             (fn [_env expr] (ir/const-node (:value expr) "String" (ir/object-jvm-type "java/lang/Object")))
    :char               (fn [_env expr] (ir/const-node (:value expr) "Char" :char))
    :boolean            (fn [_env expr] (ir/const-node (:value expr) "Boolean" :boolean))
    :nil                (fn [_env _expr] (ir/const-node nil "Nil" (ir/object-jvm-type "java/lang/Object")))
@@ -7951,9 +7960,9 @@
                              (ir/local-node (generic-runtime-param-name name)
                                             slot
                                             "String"
-                                            (string-jvm-type))
+                                            (generic-runtime-token-jvm-type))
                              "String"
-                             (string-jvm-type)))
+                             (generic-runtime-token-jvm-type)))
         generic-params
         runtime-params))
 
@@ -8127,8 +8136,10 @@
    detachable type, is an Object. An Integer32 or Integer16 is a JVM int or
    short (nex.compiler.jvm.emit/descriptor-jvm-type reads them back as
    :i32/:i16). A Byte stays an Object, its shared Short box: as a JVM byte,
-   0..255 is out of the range the JIT may assume of one."
-  {"Integer" "J" "Real" "D" "Boolean" "Z" "Char" "C" "Integer32" "I" "Integer16" "S"})
+   0..255 is out of the range the JIT may assume of one. A Char stays an
+   Object too: it is a code point up to 0x10FFFF, out of a JVM char's range,
+   and a JVM int would read back as an Integer32."
+  {"Integer" "J" "Real" "D" "Boolean" "Z" "Integer32" "I" "Integer16" "S"})
 
 (defn typed-method-descriptor
   "Descriptor of the typed method a class routine METHOD-DEF compiles to
@@ -9271,7 +9282,7 @@
         runtime-type-fields (mapv (fn [{:keys [name]}]
                                     {:name (generic-runtime-field-name name)
                                      :nex-type "String"
-                                     :jvm-type (string-jvm-type)})
+                                     :jvm-type (generic-runtime-token-jvm-type)})
                                   (:generic-params class-def))
         constants (lower-class-constants class-def class-name visible-functions
                                          visible-imports compiled-classes (:classes opts))]

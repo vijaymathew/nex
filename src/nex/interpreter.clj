@@ -1472,10 +1472,10 @@
 (defn- scalar-identity-value?
   [v]
   (or (nil? v)
-      (string? v)
+      (rt/nex-string? v)
       (nex-numeric? v)
       (boolean? v)
-      (char? v)))
+      (rt/nex-char? v)))
 
 (defn- nex-identity-equals?
   [a b]
@@ -1692,7 +1692,7 @@
       "Integer16" (rt/->nex-int16 0)
       "Integer32" (rt/->nex-int32 0)
       "Real" 0.0
-      "Char" \0
+      "Char" (rt/make-char 0)
       "Boolean" false
       "String" ""
       "Min_Heap" (make-min-heap nil)
@@ -3088,7 +3088,7 @@
         (throw (ex-info (str val) {:builtin-kind kind :label label})))
       ;; Rendered as `print` would, so an uncaught raise of an object reports
       ;; its own to_string rather than an identity; a string stays unquoted.
-      (throw (ex-info (if (string? val) val (print-output-value ctx val))
+      (throw (ex-info (if (rt/nex-string? val) (str val) (print-output-value ctx val))
                       {:type :nex-exception :value val})))))
 
 (defmethod eval-node :retry
@@ -3421,9 +3421,9 @@
           right-val (eval-node ctx right)]
       (cond
         (and (= operator "+")
-             (or (string? left-val) (string? right-val)))
-        (str (concat-string-value ctx left-val)
-             (concat-string-value ctx right-val))
+             (or (rt/nex-string? left-val) (rt/nex-string? right-val)))
+        (rt/str-concat (concat-string-value ctx left-val)
+                       (concat-string-value ctx right-val))
 
         ;; Value equality honours a user-defined `equals` when an object is
         ;; involved; `==`/`!=` keep identity semantics in apply-binary-op.
@@ -3491,11 +3491,13 @@
 
 (defmethod eval-node :char
   [_ctx {:keys [value]}]
-  value)
+  (rt/->nex-char value))
 
 (defmethod eval-node :string
   [_ctx {:keys [value]}]
-  value)
+  ;; Plain unless the text holds a character outside the BMP (see
+  ;; nex.types.runtime "Strings").
+  (rt/->nex-string value))
 
 (defmethod eval-node :nil
   [_ctx _node]
@@ -3994,19 +3996,19 @@
                      ;; compiled `to_string`, when it defines one.
                      (when (and ctx
                                 value
-                                (not (or (nex-object? value) (string? value) (number? value)
-                                         (boolean? value) (char? value) (coll? value)
+                                (not (or (nex-object? value) (rt/nex-string? value) (number? value)
+                                         (boolean? value) (rt/nex-char? value) (coll? value)
                                          (map? value)))
                                 ((requiring-resolve 'nex.compiler.jvm.runtime/compiled-object-has-to-string?)
                                  value))
                        (let [result (runtime-resolve-call-user-method ctx value "to_string" [])]
-                         (if (string? result) result (nex-format-value result))))
+                         (if (rt/nex-string? result) result (nex-format-value result))))
                      ;; A compiled object with no `to_string` keeps the placeholder an
                      ;; interpreter object gets, not Clojure's raw #object[...] form.
                      (when (and ctx
                                 value
-                                (not (or (nex-object? value) (string? value) (number? value)
-                                         (boolean? value) (char? value) (coll? value)
+                                (not (or (nex-object? value) (rt/nex-string? value) (number? value)
+                                         (boolean? value) (rt/nex-char? value) (coll? value)
                                          (map? value))))
                        (when-let [class-name ((requiring-resolve 'nex.compiler.jvm.runtime/compiled-object-class-name)
                                               value)]
@@ -4020,4 +4022,4 @@
                                                         :target {:type :literal :value value}
                                                         :method "to_string"
                                                         :args []})]
-                             (if (string? result) result (nex-format-value result))))))))})
+                             (if (rt/nex-string? result) result (nex-format-value result))))))))})

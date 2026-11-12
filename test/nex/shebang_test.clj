@@ -42,7 +42,8 @@ print(boom(0))
 (deftest only-the-first-line-is-a-shebang
   (testing "the `#!` character literal still works elsewhere"
     (let [ast (p/ast "let c: Char := #!\n")]
-      (is (= \! (:value (:value (first (:statements ast))))))))
+      ;; A char literal's value is its code point.
+      (is (= 33 (:value (:value (first (:statements ast))))))))
   (testing "a file without the line is unchanged"
     (is (nil? (p/shebang-line "let x: Integer := 1\n")))
     (is (nil? (p/shebang-line " #!/usr/bin/env nex\n")))))
