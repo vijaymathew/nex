@@ -14,9 +14,17 @@ A double-quoted string interprets backslash escapes: `\n` (newline), `\t` (tab),
 single-quoted string is raw — every character, backslash included, is literal —
 which is convenient for regular-expression patterns and paths: `'\d+'`, `'C:\dir'`.
 
+A `String` is a sequence of characters, and a character is a Unicode code point
+(a `Char`). Lengths and positions count characters, so a character outside the
+Basic Multilingual Plane, such as an emoji, counts as one: `"😀".length` is `1`,
+`"a😀b".char_at(1)` is `#😀`, and `across` visits it once. Only `to_bytes` sees the
+encoding, UTF-8 (`"😀".to_bytes()` is four bytes). Indexing stays fast: `length` and
+`char_at` take constant time on text with no such character, and a short, bounded
+search on text that has one.
+
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
-| `length` | none | `Integer` | Number of characters. |
+| `length` | none | `Integer` | Number of characters (code points). |
 | `index_of` | `ch: String` | `Integer` | First index of `ch`, or `-1`. |
 | `substring` | `start: Integer, end: Integer` | `String` | Slice from `start` (inclusive) to `end` (exclusive). |
 | `to_upper` | none | `String` | Uppercase copy. |
@@ -30,7 +38,7 @@ which is convenient for regular-expression patterns and paths: `'\d+'`, `'C:\dir
 | `replace` | `old: String, new: String` | `String` | Replace all occurrences of `old`. |
 | `char_at` | `idx: Integer` | `Char` | Character at index. |
 | `chars` | none | `Array[Char]` | New array of characters in string order. |
-| `to_bytes` | none | `Array[Byte]` | UTF-8 bytes of the string. |
+| `to_bytes` | none | `Array[Byte]` | UTF-8 bytes of the string. Raises if the text holds an unpaired surrogate (only text from the host can), rather than writing `?`. |
 | `split` | `delim: String` | `Array[String]` | Split into an array. |
 | `plus` | `other: Any` | `String` | Concatenate with `other`. |
 | `equals` | `other: Any` | `Boolean` | Equality check. |
@@ -121,6 +129,7 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 | `to_byte` | none | `Byte` | Convert to a `Byte`; raises unless the value is in `0..255`. |
 | `to_integer16` | none | `Integer16` | Convert to an `Integer16`; raises unless the value is in `-32768..32767`. |
 | `to_integer32` | none | `Integer32` | Convert to an `Integer32`; raises unless the value is in `-2147483648..2147483647`. |
+| `to_char` | none | `Char` | The character with this code point; raises unless the value is in `0..1114111`. |
 | `bitwise_left_shift` | `n: Integer` | `Integer` | Left-shift by `n` bit positions. |
 | `bitwise_right_shift` | `n: Integer` | `Integer` | Arithmetic right-shift by `n` bit positions. |
 | `bitwise_logical_right_shift` | `n: Integer` | `Integer` | Logical right-shift by `n` bit positions. |
@@ -421,13 +430,18 @@ print(angle.sin)                  -- 0.7071067811865475
 
 ## `Char`
 
-A `Char` literal is `#` followed by either a letter/symbol (`#a`, `#Z`, `#!`), one of the named controls `#nul`, `#space`, `#newline`, `#tab`, `#return`, or a run of digits — but that digit form is a **Unicode code point**, not the digit character itself: `#65` is `#A` (ASCII 65), and `#c` is the letter `c`. This means `#0` through `#9` name the ASCII *control* codes 0–9 (`#9` is a tab, `#0` is NUL), not the glyphs `'0'`–`'9'` — there is no bare literal for a digit glyph; write its code point instead (`#48` for `'0'` through `#57` for `'9'`), or index into a string (`"0123456789".char_at(9)`).
+A `Char` is one Unicode code point, `0..1114111` (`0x10FFFF`), so it holds any
+character, an emoji included: `#😀` and `#128512` are the same `Char`, and
+`(128512).to_char` makes it. `to_integer` gives the code point back.
+
+A `Char` literal is `#` followed by either a letter/symbol (`#a`, `#Z`, `#!`, `#😀`), one of the named controls `#nul`, `#space`, `#newline`, `#tab`, `#return`, or a run of digits — but that digit form is a **Unicode code point**, not the digit character itself: `#65` is `#A` (ASCII 65), and `#c` is the letter `c`. This means `#0` through `#9` name the ASCII *control* codes 0–9 (`#9` is a tab, `#0` is NUL), not the glyphs `'0'`–`'9'` — there is no bare literal for a digit glyph; write its code point instead (`#48` for `'0'` through `#57` for `'9'`), or index into a string (`"0123456789".char_at(9)`).
 
 | Method | Arguments | Returns | Description |
 |---|---|---|---|
 | `to_string` | none | `String` | Convert to one-character string. |
-| `to_upper` | none | `Char` | Uppercase character. |
-| `to_lower` | none | `Char` | Lowercase character. |
+| `to_integer` | none | `Integer` | The code point, `0..1114111`. |
+| `to_upper` | none | `String` | Uppercase form, as a `String` (it can be longer: `ß` gives `"SS"`). |
+| `to_lower` | none | `String` | Lowercase form, as a `String`. |
 | `is_whitespace` | none | `Boolean` | Check if this is a Unicode space character. |
 | `compare` | `other: Any` | `Integer` | Ordering as integer result. |
 | `hash` | none | `Integer` | Hash code. |

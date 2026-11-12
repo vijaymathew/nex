@@ -48,8 +48,9 @@
     (is (= ["65"] (run "print(\"\\u{41}\".char_at(0).to_integer)")))
     (is (= ["233"] (run "print(\"caf\\u{E9}\".char_at(3).to_integer)"))
         "\\u{E9} is é, code point 233")
-    (is (= ["2"] (run "print(\"\\u{1F600}\".length)"))
-        "an astral code point occupies two UTF-16 code units")))
+    (is (= ["1"] (run "print(\"\\u{1F600}\".length)"))
+        "a code point outside the BMP is one character")
+    (is (= ["128512"] (run "print(\"\\u{1F600}\".char_at(0).to_integer)")))))
 
 (deftest single-quoted-is-raw
   (testing "single-quoted strings interpret no escapes and keep backslashes"

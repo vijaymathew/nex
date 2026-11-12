@@ -8,7 +8,9 @@
     ;; Integer is 64-bit (Int64), matching the interpreter (NUMERIC_TOWER.md).
     (is (= :long (d/nex-type->jvm-type "Integer")))
     (is (= :double (d/nex-type->jvm-type "Real")))
-    (is (= (ir/object-jvm-type "java/lang/String")
+    ;; A String is a java.lang.String or a NexWideString (text with a
+    ;; character outside the BMP), so an Object.
+    (is (= (ir/object-jvm-type "java/lang/Object")
            (d/nex-type->jvm-type "String")))
     (is (= (ir/object-jvm-type "java/util/ArrayList")
            (d/nex-type->jvm-type {:base-type "Array" :type-args ["Integer"]})))))

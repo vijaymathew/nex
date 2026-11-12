@@ -179,12 +179,13 @@ end"
     (let [ctx (interp/make-context)
           chars (interp/call-builtin-method ctx "cat" "cat" "chars" [])]
       (is (= 3 (.size chars)))
-      (is (= [\c \a \t] (vec chars)))
-      (is (= \a (interp/call-builtin-method ctx chars chars "get" [1])))
-      (interp/call-builtin-method ctx chars chars "add" [\!])
+      ;; A Char is a code point (a NexChar), not a java.lang.Character.
+      (is (= (mapv rt/->nex-char "cat") (vec chars)))
+      (is (= (rt/->nex-char \a) (interp/call-builtin-method ctx chars chars "get" [1])))
+      (interp/call-builtin-method ctx chars chars "add" [(rt/->nex-char \!)])
       (is (= 4 (.size chars)))
       (is (= 3 (interp/call-builtin-method ctx "cat" "cat" "length" [])))
-      (is (= \a (interp/call-builtin-method ctx "cat" "cat" "char_at" [1]))))))
+      (is (= (rt/->nex-char \a) (interp/call-builtin-method ctx "cat" "cat" "char_at" [1]))))))
 
 (deftest string-to-bytes-runtime-test
   (testing "String.to_bytes returns UTF-8 bytes as Array[Byte]"

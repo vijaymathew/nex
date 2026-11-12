@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Strings and Chars are Unicode code points, as the Definition says.** A
+  `Char` now holds any code point, `0..1114111`, so an emoji is one `Char`
+  (`#😀`, `#128512`, `(128512).to_char`); before, a `Char` was 16 bits and
+  could not hold one. String `length`, `char_at`, `substring`, `index_of`,
+  `chars`, `across` and the functional methods count characters, not UTF-16
+  units: `"😀".length` is `1`, not `2`, and iterating `"a😀b"` gives three
+  Chars instead of splitting the emoji into two invalid halves. Plain text
+  is stored and indexed exactly as before (constant-time `length` and
+  `char_at`); only a string that holds a character outside the Basic
+  Multilingual Plane carries an index, which keeps `char_at` fast on it.
+  Strings that come from Java, files, the console, HTTP, regex and JSON
+  follow the same rule. A `Char` passed to a Java `char` parameter must fit
+  in 16 bits; pass `c.to_integer` to an `int` code-point parameter instead.
+  `Char.to_upper`/`to_lower` return a `String`, as they always did (the
+  reference said `Char`).
+- **`to_bytes` raises on text that is not a sequence of characters.** Text
+  from the host can hold an unpaired UTF-16 surrogate; `to_bytes` used to
+  write it as `?`, so `from_bytes` did not give the text back. It now raises
+  `Conversion_Error`, as `from_bytes` does on bytes that are not UTF-8.
+
 - **Limits of the numeric types, and overflow tests.** `Integer.MIN` and
   `Integer.MAX` (also `Integer64.MIN`/`MAX`), `Integer32.MIN`/`MAX`,
   `Integer16.MIN`/`MAX` and `Byte.MIN`/`MAX` name each type's range, as
