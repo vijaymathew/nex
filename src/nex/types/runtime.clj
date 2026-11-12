@@ -630,7 +630,10 @@
 (defn nex-int-zero? [a] (zero? a))
 
 (defn nex-int-add [a b] (+ a b))
-(defn nex-int-sub [a b] (- a b))
+;; Not `(- a b)`: on boxed operands Clojure subtracts by adding the negated
+;; right operand, so it raised for every `a - Integer.MIN`, even `-1 - MIN`,
+;; which is Integer.MAX.
+(defn nex-int-sub [a b] (Math/subtractExact (long a) (long b)))
 (defn nex-int-mul [a b] (* a b))
 (defn nex-int-neg [a]   (- a))
 ;; Truncating integer division (toward zero), like quot / BigInt `/`.

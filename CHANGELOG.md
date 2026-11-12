@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Limits of the numeric types, and overflow tests.** `Integer.MIN` and
+  `Integer.MAX` (also `Integer64.MIN`/`MAX`), `Integer32.MIN`/`MAX`,
+  `Integer16.MIN`/`MAX` and `Byte.MIN`/`MAX` name each type's range, as
+  values of that type, and `Real.MAX` is the largest finite `Real`. There
+  is deliberately no `Real.MIN`; the least finite `Real` is `-Real.MAX`.
+  The new queries `a.can_add(b)`, `a.can_subtract(b)` and
+  `a.can_multiply(b)` on `Integer` are true exactly when the operator would
+  not raise `Arithmetic_Overflow`. On `Byte`, `Integer16` and `Integer32`
+  they are true when the `Integer` result fits back in the type. They never
+  overflow themselves, so a precondition can say `require a.can_add(b)`
+  where `a + b <= Integer.MAX` would raise.
+- **Fixed: the interpreter raised on `a - Integer.MIN` for negative `a`.**
+  `-1 - Integer.MIN` is `Integer.MAX`, but the interpreter reported an
+  overflow. Compiled code was already right.
+
 ## 0.7.2 - 2026-11-09
 
 - **Every constructor must call a constructor of each parent that has

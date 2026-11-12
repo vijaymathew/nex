@@ -68,6 +68,19 @@ let remainder: Integer := 10 % 3 -- 1
 let power: Integer := 2 ^ 8     -- 256
 ```
 
+`Integer` arithmetic raises `Arithmetic_Overflow` when the result does not fit in 64
+bits. `Integer.MIN` and `Integer.MAX` name the limits, and `can_add`, `can_subtract` and
+`can_multiply` test for overflow without overflowing, which is what a precondition needs:
+
+```nex
+function safe_add(a, b: Integer): Integer
+  require
+    no_overflow: a.can_add(b)       -- not `a + b <= Integer.MAX`, which overflows
+  do
+    result := a + b
+  end
+```
+
 `Real` has the usual math as methods, and `Real.PI` and `Real.E`:
 
 ```nex
@@ -120,8 +133,10 @@ let back: Integer := s.to_integer()
 ```
 
 Binary arithmetic on any of them gives an `Integer`, so it cannot overflow the narrow type;
-narrow the result again if you need to: `(s + s).to_integer16()`. Comparison and `=`
-are between two values of the same type.
+narrow the result again if you need to: `(s + s).to_integer16()`. `s.can_add(s)` (and
+`can_subtract`, `can_multiply`) tells whether that will succeed. Each type has `MIN` and
+`MAX` constants of its own type: `Byte.MAX` is `255u8`, `Integer16.MIN` is `-32768i16`.
+Comparison and `=` are between two values of the same type.
 
 `Byte` is also the element type of `"text".to_bytes()`, and `create String.from_bytes(bytes)`
 turns an `Array[Byte]` back into a `String`. Their methods are in the scalar types reference.

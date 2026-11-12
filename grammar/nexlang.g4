@@ -528,10 +528,13 @@ primary
     | '(' expression ')'
     ;
 
-// A constant of a built-in type, `Real.PI`. `Real` is a keyword, not an
-// IDENTIFIER, so it needs its own rule; the walker folds it to a literal.
+// A constant of a built-in type, `Real.PI`, `Integer.MAX`. `Real` and
+// `Integer` are keywords, not IDENTIFIERs, so they need their own rule; the
+// walker folds it to a literal. The other numeric types (`Byte.MAX`,
+// `Integer32.MIN`, ...) are IDENTIFIERs, so theirs parse as a member access,
+// which the walker folds the same way.
 builtinTypeConstant
-    : REAL_TYPE '.' IDENTIFIER
+    : (REAL_TYPE | INTEGER_TYPE) '.' IDENTIFIER
     ;
 
 convertExpression

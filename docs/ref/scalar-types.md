@@ -86,6 +86,23 @@ Arithmetic is *checked*: `+`, `-`, `*`, unary `-`, and `^` raise on overflow, an
 `/` and `%` raise on a zero divisor. The least `Integer` is written
 `-9223372036854775808`: a literal one past the maximum is allowed right after a minus.
 
+`Integer.MIN` and `Integer.MAX` name the limits (`Integer64.MIN` and `Integer64.MAX`
+too). To test whether an operation would overflow before doing it, use `can_add`,
+`can_subtract` and `can_multiply`. `a.can_add(b)` is true exactly when `a + b` does not
+raise, and the test cannot overflow itself. The usual place for them is a precondition:
+
+```nex
+function safe_add(a, b: Integer): Integer
+  require
+    no_overflow: a.can_add(b)
+  do
+    result := a + b
+  end
+```
+
+Writing the bound out instead, as `a + b <= Integer.MAX`, does not work: the sum
+overflows while the precondition is checked.
+
 Bitwise operations use 32-bit integer semantics. Bit index `0` is the least-significant
 bit. For method calls on integer literals, wrap the literal in parentheses:
 `(5).bitwise_left_shift(1)`.
@@ -97,6 +114,9 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 | `abs` | none | `Integer` | Absolute value. |
 | `min` | `other: Integer` | `Integer` | Smaller of two values. |
 | `max` | `other: Integer` | `Integer` | Larger of two values. |
+| `can_add` | `other: Integer` | `Boolean` | True when `self + other` is within the `Integer` range (does not overflow). |
+| `can_subtract` | `other: Integer` | `Boolean` | True when `self - other` is within the `Integer` range. |
+| `can_multiply` | `other: Integer` | `Boolean` | True when `self * other` is within the `Integer` range. |
 | `pick` | none | `Integer` | Random integer in `[0, self)`. It cannot be seeded; for repeatable random numbers use [`math/Random`](math.md). |
 | `to_byte` | none | `Byte` | Convert to a `Byte`; raises unless the value is in `0..255`. |
 | `to_integer16` | none | `Integer16` | Convert to an `Integer16`; raises unless the value is in `-32768..32767`. |
@@ -130,6 +150,9 @@ bit. For method calls on integer literals, wrap the literal in parentheses:
 let n := 113
 print(n.to_string(2))  -- "1110001"
 print(n.to_string(16)) -- "71"
+print(Integer.MAX)     -- 9223372036854775807
+print(Integer.MAX.can_add(1))       -- false
+print((-1).can_subtract(Integer.MIN)) -- true: the result is Integer.MAX
 ```
 
 ## `Byte`
@@ -147,11 +170,14 @@ there is no implicit conversion in either direction.
   write `65u8`. There are no negative byte literals: `-5u8` is the `Integer` `-5`.
 - **Making a `Byte` from a value:** `n.to_byte()` on an `Integer` (raises unless
   `0 <= n <= 255`), or reading one out of an `Array[Byte]`.
+- **Limits:** `Byte.MIN` is `0u8` and `Byte.MAX` is `255u8`, both of type `Byte`.
 - **Getting an `Integer`:** `b.to_integer()`. Assigning a `Byte` to an `Integer` variable
   or passing it to an `Integer` parameter is a type error.
 - **Arithmetic** (`+ - * / % ^`, unary `-`) promotes to `Integer`, so the result of
   `b + b` is an `Integer` and cannot overflow a `Byte`; narrow it back with
-  `(b + b).to_byte()`. Mixing with `Real` promotes to `Real`.
+  `(b + b).to_byte()`. Mixing with `Real` promotes to `Real`. `a.can_add(b)`,
+  `a.can_subtract(b)` and `a.can_multiply(b)` tell whether that result fits back in a
+  `Byte`, that is, whether narrowing it with `to_byte()` would succeed.
 - **Comparison** (`= /= < <= > >=`) is between two `Byte`s. Comparing a `Byte` with an
   `Integer` needs `b.to_integer()` first, just as comparing an `Integer` with a `Real`
   needs a conversion. `b.equals(x)` is true only when `x` is a `Byte` of the same value.
@@ -177,6 +203,9 @@ there is no implicit conversion in either direction.
 | `to_integer32` | none | `Integer32` | Widen to an `Integer32`. |
 | `min` | `other: Byte` | `Byte` | Smaller of two values. |
 | `max` | `other: Byte` | `Byte` | Larger of two values. |
+| `can_add` | `other: Byte` | `Boolean` | True when `self + other` (an `Integer`) is in `0..255`. |
+| `can_subtract` | `other: Byte` | `Boolean` | True when `self - other` is in `0..255`, i.e. `self >= other`. |
+| `can_multiply` | `other: Byte` | `Boolean` | True when `self * other` is in `0..255`. |
 | `bitwise_left_shift` | `n: Integer` | `Byte` | Left-shift, dropping bits shifted out of the top. |
 | `bitwise_right_shift` | `n: Integer` | `Byte` | Right-shift. |
 | `bitwise_logical_right_shift` | `n: Integer` | `Byte` | Same as `bitwise_right_shift`; a `Byte` is never negative. |
@@ -217,6 +246,8 @@ way `Integer` is related to `Real`.
 - **No implicit conversion.** None of `Integer`, `Integer16`, `Integer32` and `Byte`
   converts to another without a call, in either direction. `let b: Integer32 := a` where
   `a` is an `Integer16` is a type error; write `a.to_integer32()`.
+- **Limits.** `Integer16.MIN`, `Integer16.MAX`, `Integer32.MIN` and `Integer32.MAX`
+  name the range, each of its own type: `Integer32.MIN` is `-2147483648i32`.
 - **Literals.** An integer literal with an `i16` or `i32` suffix: `300i16`, `0xFFFFi32`,
   `1_000i32`. Unary minus keeps the type, so `-5i16` is an `Integer16`. A literal
   outside the type's range is rejected, except that one past the maximum is allowed
@@ -230,7 +261,9 @@ way `Integer` is related to `Real`.
   gives the `Integer`.
 - **Arithmetic** (`+ - * / % ^`) promotes to `Integer`, so the result of `a + a` is an
   `Integer` and cannot overflow the narrow type; narrow it back with
-  `(a + a).to_integer16()`. Mixing with `Real` promotes to `Real`.
+  `(a + a).to_integer16()`. Mixing with `Real` promotes to `Real`. `can_add`,
+  `can_subtract` and `can_multiply` tell whether that result fits back in the type, that
+  is, whether narrowing it would succeed.
 - **Unary minus** keeps the type: `-a` is an `Integer16` when `a` is. Negating the
   minimum raises `Arithmetic_Overflow`, as `abs` does.
 - **Comparison** (`= /= < <= > >=`) is between two values of the same type. Comparing
@@ -263,6 +296,9 @@ Both types have the same methods. `T` below is the type itself.
 | `abs` | none | `T` | Absolute value; raises for the minimum value. |
 | `min` | `other: T` | `T` | Smaller of two values. |
 | `max` | `other: T` | `T` | Larger of two values. |
+| `can_add` | `other: T` | `Boolean` | True when `self + other` (an `Integer`) is within `T`'s range. |
+| `can_subtract` | `other: T` | `Boolean` | True when `self - other` is within `T`'s range. |
+| `can_multiply` | `other: T` | `Boolean` | True when `self * other` is within `T`'s range. |
 | `bitwise_left_shift` | `n: Integer` | `T` | Left-shift, dropping bits shifted out. |
 | `bitwise_right_shift` | `n: Integer` | `T` | Arithmetic right-shift (the sign bit is copied). |
 | `bitwise_logical_right_shift` | `n: Integer` | `T` | Right-shift, shifting in zeros. |
@@ -359,6 +395,10 @@ are `NaN`, `0.0.log` is `-Infinity`. Test with `is_nan`/`is_finite`. Only the
 |---|---|
 | `Real.PI` | π, `3.141592653589793` |
 | `Real.E` | *e*, `2.718281828459045` |
+| `Real.MAX` | the largest finite `Real`, `1.7976931348623157E308` |
+
+There is no `Real.MIN`. The least finite `Real` is `-Real.MAX`. (In some languages
+`MIN` names the smallest *positive* value instead, so Nex leaves the name out.)
 
 ```nex
 let area: Real := Real.PI * (r ^ 2)

@@ -1,0 +1,65 @@
+-- Nex on a postcard: nearly all of its syntax.
+deferred class Named               -- some features lack a body
+  create
+    named(n: String) do name := n end
+  feature
+    name: String
+    describe(): String deferred
+end
+
+class Stack[T -> Comparable]       -- generic, with a bound
+  inherit Named
+  create
+    make(n: String) do Named.named(n) end
+  feature
+    LIMIT = 100                    -- a class constant
+    items: Array[T]                -- starts empty
+    describe(): String do
+      result := name + ": " + items.length.to_string
+    end
+    push(x: T)
+      require room: items.length < LIMIT
+      do items.add(x)
+      ensure grew: items.length = old items.length + 1
+      end
+    top(): ?T do                   -- ?T may be nil
+      if items.length > 0 then
+        result := items.get(items.length - 1)
+      end
+    end
+  invariant
+    bounded: items.length <= LIMIT
+end
+
+union Shape                        -- a sealed family
+  Circle(r: Real)
+  Square(side: Real)
+end
+
+function area(s: Shape): Real do
+  match s of
+    Circle as c then result := Real.PI * c.r * c.r
+    Square as q then result := q.side * q.side
+  end
+end
+
+let shapes: Array[Shape] := [create Circle.make(1.0),
+                             create Square.make(2.0)]
+let s := create Stack[Real].make("areas")
+across shapes as x do s.push(area(x)) end
+if ?s.top() as t then print(t) end -- t is attached here
+from let r := 2.0 until r > 4.0 do
+  s.push(area(create Circle.make(r)))
+  r := r + 1.0
+end
+repeat 2 do print(s.describe()) end
+let big := shapes.filter(fn (x) => area(x) > 3.0)
+let size := when big.length > 1 then "many" else "few" end
+let job: Task[Real] := spawn do
+  result := shapes.fold(0.0, fn (sum, x) => sum + area(x))
+end
+let sides: Map[String, Integer] := {"circle": 0, "square": 4}
+let kinds: Set[String] := #{"circle", "square"}
+let lits: Array[Any] := [1_000, 0xFF, 2.5e3, 12u8, #a, true, nil]
+do raise "oops" rescue print(exception) end
+case size of "many" then print(job.await) else print(0) end

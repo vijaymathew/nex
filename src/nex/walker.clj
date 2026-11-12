@@ -2995,6 +2995,8 @@
   [[_ postfix]]
   (transform-node postfix))
 
+(declare identifier-type-constant)
+
 (defn- handle-postfix
   [[_ primary-node & parts]]
   (let [base (transform-node primary-node)
@@ -3013,7 +3015,9 @@
       (fn [[acc line] part]
         [(case (:type part)
            :member-access
-           (desugar-safe-expression-call
+           (or
+            (identifier-type-constant acc part)
+            (desugar-safe-expression-call
             (with-name-positions
               (cond-> {:type :call
                        :target (call-target acc)
@@ -3023,7 +3027,7 @@
                 (assoc :has-parens (:has-parens part))
                 (:safe? part)
                 (assoc :safe? true))
-              part acc))
+              part acc)))
 
            ;; `name[Integer]` (no call following, or a call-suffix part
            ;; still to come): stash the explicit type args on the
@@ -3175,18 +3179,54 @@
    :value (Double/parseDouble value)})
 
 (def builtin-type-constants
-  "Constants of built-in types, `Type.NAME`, folded to literals by the walker."
-  {"Real" {"PI" Math/PI
-           "E" Math/E}})
+  "Constants of built-in types, `Type.NAME`, folded to literals by the walker:
+   each is the literal node it stands for. `Integer64` is not listed: it is
+   rewritten to `Integer` first (canonical-type-name). `Real` has no `MIN`
+   on purpose: the least finite Real is `-Real.MAX`, and a `MIN` would invite
+   the host's meaning, the least positive value."
+  {"Real"      {"PI"  {:type :real :value Math/PI}
+                "E"   {:type :real :value Math/E}
+                "MAX" {:type :real :value Double/MAX_VALUE}}
+   "Integer"   {"MIN" {:type :integer :value Long/MIN_VALUE :value-str (str Long/MIN_VALUE)}
+                "MAX" {:type :integer :value Long/MAX_VALUE :value-str (str Long/MAX_VALUE)}}
+   "Integer32" {"MIN" {:type :int32 :value -2147483648}
+                "MAX" {:type :int32 :value 2147483647}}
+   "Integer16" {"MIN" {:type :int16 :value -32768}
+                "MAX" {:type :int16 :value 32767}}
+   "Byte"      {"MIN" {:type :byte :value 0}
+                "MAX" {:type :byte :value 255}}})
+
+(defn- builtin-type-constant-node
+  "The literal node for the constant CONSTANT-NAME of the built-in type
+   TYPE-NAME (as written, so `Integer64` too), raising if it has none."
+  [type-name constant-name]
+  (let [type-name' (canonical-type-name type-name)]
+    (if-let [node (get-in builtin-type-constants [type-name' constant-name])]
+      ;; :source keeps the spelling for the formatter and docgen.
+      (assoc node :source (str type-name "." constant-name))
+      (throw (ex-info (str type-name " has no constant " constant-name
+                           " (it has " (str/join ", " (sort (keys (get builtin-type-constants type-name')))) ")")
+                      {:type-name type-name :constant constant-name})))))
 
 (defn- handle-builtin-type-constant
   [[_ type-name _dot constant-name]]
-  (if-let [v (get-in builtin-type-constants [type-name constant-name])]
-    ;; :source keeps the spelling for the formatter and docgen.
-    {:type :real :value v :source (str type-name "." constant-name)}
-    (throw (ex-info (str type-name " has no constant " constant-name
-                         " (it has " (clojure.string/join ", " (sort (keys (get builtin-type-constants type-name)))) ")")
-                    {:type-name type-name :constant constant-name}))))
+  (builtin-type-constant-node (token-text type-name) (token-text constant-name)))
+
+(defn- identifier-type-constant
+  "The literal node when ACC (the postfix chain so far) is the bare name of a
+   built-in type spelled as an IDENTIFIER (`Byte`, `Integer16`, `Integer32`,
+   `Integer64`) and PART reads one of its constants, `Byte.MAX`: no
+   parentheses, no `?.`, and a name in upper case, as constants are written.
+   nil otherwise, so `Byte.foo()` and the like stay ordinary calls."
+  [acc part]
+  (let [type-name (:name acc)]
+    (when (and (map? acc)
+               (= :identifier (:type acc))
+               (contains? #{"Byte" "Integer16" "Integer32" "Integer64"} type-name)
+               (not (:has-parens part))
+               (not (:safe? part))
+               (re-matches #"[A-Z][A-Z0-9_]*" (str (:name part))))
+      (builtin-type-constant-node type-name (:name part)))))
 
 (defn- handle-boolean-literal
   [[_ value]]

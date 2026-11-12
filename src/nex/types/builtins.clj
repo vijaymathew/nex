@@ -806,6 +806,28 @@
       :source s
       :index (atom 0)})})
 
+(defn- int-can-add?
+  "True when A + B is within the Integer range. The wrapped sum overflowed
+   exactly when it differs in sign from both operands."
+  [a b]
+  (let [a (long a) b (long b) r (unchecked-add a b)]
+    (not (neg? (bit-and (bit-xor a r) (bit-xor b r))))))
+
+(defn- int-can-subtract?
+  "True when A - B is within the Integer range. The wrapped difference
+   overflowed exactly when the operands differ in sign and it differs in sign
+   from A."
+  [a b]
+  (let [a (long a) b (long b) r (unchecked-subtract a b)]
+    (not (neg? (bit-and (bit-xor a b) (bit-xor a r))))))
+
+(defn- int-can-multiply?
+  "True when A * B is within the Integer range: the high 64 bits of the
+   128-bit product are just the sign of its low 64."
+  [a b]
+  (let [a (long a) b (long b)]
+    (== (Math/multiplyHigh a b) (bit-shift-right (unchecked-multiply a b) 63))))
+
 (def integer-type-methods
   {"to_string"         ^{:signatures [{:params [] :return-type "String"}
                                        {:params [{:name "base" :type "Integer"}] :return-type "String"}]}
@@ -837,6 +859,18 @@
    (fn [n other & _] (if (neg? (nex-numeric-compare n other)) other n))
    "pick"              ^{:signatures [{:params [] :return-type "Integer"}]}
    (fn [n & _] (->nex-integer (rand-int (nex-int->number n))))
+   ;; Whether the operator would succeed: `a.can_add(b)` is true exactly when
+   ;; `a + b` does not raise Arithmetic_Overflow, so a precondition can say
+   ;; so without writing the bound out (and without overflowing itself).
+   "can_add"           ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Boolean"}]}
+   (fn [n other & _] (int-can-add? n other))
+   "can_subtract"      ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Boolean"}]}
+   (fn [n other & _] (int-can-subtract? n other))
+   "can_multiply"      ^{:signatures [{:params [{:name "other" :type "Integer"}]
+                                       :return-type "Boolean"}]}
+   (fn [n other & _] (int-can-multiply? n other))
    "bitwise_left_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}]
                                         :return-type "Integer"}]}
    (fn [n shift & _] (nex-bitwise-left-shift n shift))
@@ -962,6 +996,14 @@
    (fn [b other & _] (byte-result (min (byte-bits b) (byte-bits other))))
    "max"               ^{:signatures [{:params [{:name "other" :type "Byte"}] :return-type "Byte"}]}
    (fn [b other & _] (byte-result (max (byte-bits b) (byte-bits other))))
+   ;; Whether the result of the operator, an Integer, fits back in a Byte:
+   ;; true exactly when `(a + b).to_byte` would not raise.
+   "can_add"           ^{:signatures [{:params [{:name "other" :type "Byte"}] :return-type "Boolean"}]}
+   (fn [b other & _] (<= (+ (byte-bits b) (byte-bits other)) 255))
+   "can_subtract"      ^{:signatures [{:params [{:name "other" :type "Byte"}] :return-type "Boolean"}]}
+   (fn [b other & _] (>= (byte-bits b) (byte-bits other)))
+   "can_multiply"      ^{:signatures [{:params [{:name "other" :type "Byte"}] :return-type "Boolean"}]}
+   (fn [b other & _] (<= (* (byte-bits b) (byte-bits other)) 255))
    "bitwise_left_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type "Byte"}]}
    (fn [b n & _] (byte-result (bit-shift-left (byte-bits b) (byte-shift-count n))))
    ;; A Byte is never negative, so the arithmetic and logical right shifts agree.
@@ -1060,6 +1102,15 @@
      (fn [x other & _] (wrap (min (val x) (val other))))
      "max"               ^{:signatures [{:params [{:name "other" :type type-name}] :return-type type-name}]}
      (fn [x other & _] (wrap (max (val x) (val other))))
+     ;; Whether the result of the operator, an Integer (exact: both operands
+     ;; are at most 32 bits), fits back in this type: true exactly when
+     ;; converting it back (`to_integer16`/`to_integer32`) would not raise.
+     "can_add"           ^{:signatures [{:params [{:name "other" :type type-name}] :return-type "Boolean"}]}
+     (fn [x other & _] (<= min-value (+ (val x) (val other)) max-value))
+     "can_subtract"      ^{:signatures [{:params [{:name "other" :type type-name}] :return-type "Boolean"}]}
+     (fn [x other & _] (<= min-value (- (val x) (val other)) max-value))
+     "can_multiply"      ^{:signatures [{:params [{:name "other" :type type-name}] :return-type "Boolean"}]}
+     (fn [x other & _] (<= min-value (* (val x) (val other)) max-value))
      "bitwise_left_shift" ^{:signatures [{:params [{:name "n" :type "Integer"}] :return-type type-name}]}
      (fn [x n & _] (result (bit-shift-left (bits-of x) (shift-count n))))
      ;; Arithmetic: the sign bit is copied in.

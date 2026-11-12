@@ -12,6 +12,9 @@ nex examples/basics_example.nex
 Each of these is self-contained and prints its results, so the quickest way to
 read one is to run it alongside the source.
 
+- **postcard.nex** — nearly all of Nex's syntax in one small program, in the
+  spirit of the Smalltalk syntax postcard. It is the program on the website's
+  [syntax postcard](https://schemer.in/nex/syntax.html); keep the two the same
 - **basics_example.nex** — arithmetic, comparison and logical operators,
   strings, operator precedence, and a first class
 - **let_example.nex** — local variables: `let` to declare (typed or inferred),
