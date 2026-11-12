@@ -74,13 +74,13 @@
    true of exactly that type's values]. Types missing here (Any, Cursor,
    Comparable) have no one representation, so their helpers always dispatch
    on the value."
-  {"string"    [:String `string?]
+  {"string"    [:String `rt/nex-string?]
    "real"      [:Real `(fn [v#] (instance? Double v#))]
    "integer"   [:Integer `(fn [v#] (instance? Long v#))]
    "integer32" [:Integer32 `rt/nex-int32?]
    "integer16" [:Integer16 `rt/nex-int16?]
    "byte"      [:Byte `rt/nex-byte?]
-   "char"      [:Char `char?]
+   "char"      [:Char `rt/nex-char?]
    "boolean"   [:Boolean `boolean?]
    "console"   [:Console `rt/nex-console?]
    "process"   [:Process `rt/nex-process?]
@@ -114,16 +114,23 @@
             b (gensym "b")
             more (gensym "more")
             direct? `(and ~f (~ok ~t))]
-        `(let [~f (get-in bi/builtin-type-methods [~type-key ~method-name])
-               ~ok ~pred]
-           (defn ~fn-name
-             ([~t] (if ~direct? (~f ~t) ~(generic t [])))
-             ([~t ~a] (if ~direct? (~f ~t ~a) ~(generic t [a])))
-             ([~t ~a ~b] (if ~direct? (~f ~t ~a ~b) ~(generic t [a b])))
-             ([~t ~a ~b & ~more]
-              (if ~direct?
-                (apply ~f ~t ~a ~b ~more)
-                ~(generic t `(into [~a ~b] ~more))))))))))
+        ;; A method declared to return a String hands back host text
+        ;; (bi/string-result-methods), made a Nex String here as
+        ;; call-builtin-method does on the generic path.
+        (let [norm (fn [form]
+                     (if (contains? bi/string-result-methods [type-key method-name])
+                       `(rt/->nex-string ~form)
+                       form))]
+          `(let [~f (get-in bi/builtin-type-methods [~type-key ~method-name])
+                 ~ok ~pred]
+             (defn ~fn-name
+               ([~t] (if ~direct? ~(norm `(~f ~t)) ~(generic t [])))
+               ([~t ~a] (if ~direct? ~(norm `(~f ~t ~a)) ~(generic t [a])))
+               ([~t ~a ~b] (if ~direct? ~(norm `(~f ~t ~a ~b)) ~(generic t [a b])))
+               ([~t ~a ~b & ~more]
+                (if ~direct?
+                  ~(norm `(apply ~f ~t ~a ~b ~more))
+                  ~(generic t `(into [~a ~b] ~more)))))))))))
 
 (defn- ->java-array-list
   [value]
@@ -651,10 +658,29 @@
    (a wrapper object, not a Number) to the plain long a Java numeric parameter
    takes. A Byte is left alone: its exact-`byte` handling needs to see it."
   [^Class param-class arg]
-  (coerce-arg-for-resolved-param* param-class
-                                  (if (or (rt/nex-int16? arg) (rt/nex-int32? arg))
-                                    (rt/sized->long arg)
-                                    arg)))
+  (cond
+    ;; A String with a character outside the BMP crosses as its text.
+    (rt/nex-wide-string? arg)
+    (rt/host-string arg)
+
+    (rt/nex-char? arg)
+    (let [cp (rt/char-code arg)]
+      (cond
+        (or (= param-class Character/TYPE) (= param-class Character))
+        (do (when (>= cp 0x10000)
+              (throw (ex-info (str "Char U+" (Long/toHexString cp) " does not fit in a Java char parameter;"
+                                   " pass its code point (to_integer) to an int parameter")
+                              {:value cp :target-type "char"})))
+            (Character/valueOf (char cp)))
+        (or (= param-class Integer/TYPE) (= param-class Integer)) (int cp)
+        (or (= param-class Long/TYPE) (= param-class Long)) cp
+        :else (rt/nex->java arg)))
+
+    :else
+    (coerce-arg-for-resolved-param* param-class
+                                    (if (or (rt/nex-int16? arg) (rt/nex-int32? arg))
+                                      (rt/sized->long arg)
+                                      arg))))
 
 (defn- class-named
   "The class called NAME (Class/forName's error if there is none), looked
@@ -2057,9 +2083,11 @@
 (declare format-value-with-state)
 
 (defn- concat-string-value
+  "VALUE as the Nex String `+` appends (either form, see nex.types.runtime
+   \"Strings\")."
   [state value]
   (cond
-    (string? value) value
+    (rt/nex-string? value) value
 
     ;; An interpreter object (e.g. created inside a deoptimized closure) renders
     ;; through the interpreter so a user-defined `to_string` is honored.
@@ -2073,21 +2101,22 @@
     ;; generic to_string dispatch below, which has no state to invoke a
     ;; nested element's to_string with.
     (or (rt/nex-array? value) (rt/nex-map? value) (rt/nex-set? value))
-    (format-value-with-state state value)
+    (rt/->nex-string (format-value-with-state state value))
 
     :else
     (let [string-value
           (try
             (let [result (invoke-user-method state value "to_string" [])]
-              (if (string? result)
+              (if (rt/nex-string? result)
                 result
                 (bi/nex-format-value result)))
             (catch Exception _
               (or (nex-object-render state value)
                   (bi/call-builtin-method nil nil value "to_string" []))))]
-      (if (string? string-value)
-        string-value
-        (bi/nex-format-value string-value)))))
+      (rt/->nex-string
+       (if (rt/nex-string? string-value)
+         string-value
+         (bi/nex-format-value string-value))))))
 
 (def format-value bi/nex-format-value)
 
@@ -2138,13 +2167,13 @@
     (interp-object? value)
     (concat-string-value state value)
 
-    (or (nil? value) (string? value) (number? value) (boolean? value)
-        (char? value) (coll? value) (map? value))
+    (or (nil? value) (rt/nex-string? value) (number? value) (boolean? value)
+        (rt/nex-char? value) (coll? value) (map? value))
     nil
 
     (compiled-object-has-to-string? value)
     (let [result (invoke-user-method state value "to_string" [])]
-      (if (string? result) result (bi/nex-format-value result)))
+      (if (rt/nex-string? result) result (bi/nex-format-value result)))
 
     :else
     (when-let [class-name (compiled-object-class-name value)]
@@ -2191,7 +2220,7 @@
    its own `to_string` (a re-raised built-in exception, a user Exception heir)
    rather than as a JVM identity; a string stays unquoted."
   [state value]
-  (ex-info (if (string? value) value (bi/print-output-value (builtin-ctx state) value))
+  (ex-info (if (rt/nex-string? value) (str value) (bi/print-output-value (builtin-ctx state) value))
            {:type :nex-exception :value value}))
 
 (defn- format-value-with-state
@@ -2245,7 +2274,7 @@
    Char is the exception: print shows it quoted, but its own to_string is the
    text itself (nex.types.builtins' string and char methods)."
   [state value]
-  (if (or (string? value) (char? value))
+  (if (or (rt/nex-string? value) (rt/nex-char? value))
     (bi/call-builtin-method nil value value "to_string" [])
     (print-value state value)))
 
@@ -2276,10 +2305,13 @@
 
 (defn string-concat
   [state args]
-  (let [sb (StringBuilder.)]
+  (let [sb (StringBuilder.)
+        plain? (volatile! true)]
     (doseq [a args]
-      (.append sb (str (concat-string-value state a))))
-    (.toString sb)))
+      (let [v (concat-string-value state a)]
+        (when-not (string? v) (vreset! plain? false))
+        (.append sb (str v))))
+    (if @plain? (.toString sb) (rt/->nex-string (.toString sb)))))
 
 (declare string-concat-2)
 
@@ -2289,7 +2321,7 @@
    \"java\"` is), as the interpreter does it: `+` on a string concatenates,
    anything else is rt/nex-arithmetic, which both backends share."
   [state op a b]
-  (if (and (= "+" op) (or (string? a) (string? b)))
+  (if (and (= "+" op) (or (rt/nex-string? a) (rt/nex-string? b)))
     (string-concat-2 state a b)
     (rt/nex-arithmetic op a b)))
 
@@ -2307,7 +2339,7 @@
         y (if (string? b) b (concat-string-value state b))]
     (if (and (string? x) (string? y))
       (.concat ^String x ^String y)
-      (str x y))))
+      (rt/str-concat x y))))
 
 (defn div-int
   [a b]
@@ -2372,6 +2404,15 @@
 (def check-byte rt/check-byte)
 (def check-int16 rt/check-int16)
 (def check-int32 rt/check-int32)
+;; A Char's code point (a JVM int in compiled code) to and from its NexChar.
+(def make-char rt/make-char)
+;; A String constant holding a character outside the BMP (see
+;; nex.compiler.jvm.emit/emit-wide-string-const!).
+(def make-nex-string rt/->nex-string)
+;; A Nex String's java.lang.String text, for a Java String parameter.
+(def host-string rt/host-string)
+(def char-code rt/char-code)
+(def check-char rt/check-char)
 
 (defn pow-double
   [a b]
@@ -2502,8 +2543,8 @@
                                  state
                                  "Http_Request"
                                  {"method_name" method
-                                  "path_value" path
-                                  "body_text" body
+                                  "path_value" (rt/->nex-string path)
+                                  "body_text" (rt/->nex-string body)
                                   "header_map" (http/http-exchange-headers->nex-map (.getRequestHeaders exchange))
                                   "route_params" (or (:params route) (rt/nex-map))
                                   "query_map" (http/parse-query-map query)})
@@ -2815,17 +2856,17 @@
 (defn builtin-method-string-length
   "`s.length`, called directly rather than through call-builtin-method's
    lookup by type and name: an `across` over a String tests it per element."
-  [^String s & _]
-  (long (.length s)))
+  [s & _]
+  (rt/str-length s))
 
 (defn builtin-method-string-char-at
   "`s.char_at(i)`, called directly (see builtin-method-string-length). Out of
    range is an Index_Out_Of_Bounds error, as the builtin's is."
-  [^String s idx & _]
+  [s idx & _]
   (let [i (long idx)
-        n (.length s)]
+        n (rt/str-length s)]
     (if (and (<= 0 i) (< i n))
-      (.charAt s (int i))
+      (rt/str-char-at s i)
       (throw (ex-info (str "Index " i " out of bounds for length " n)
                       {:builtin-kind "Index_Out_Of_Bounds"})))))
 
@@ -2998,10 +3039,10 @@
 (defn- scalar-identity-value?
   [v]
   (or (nil? v)
-      (string? v)
+      (rt/nex-string? v)
       (number? v)
       (boolean? v)
-      (char? v)))
+      (rt/nex-char? v)))
 
 (defn identity-equals
   [a b]
@@ -3217,10 +3258,10 @@
 
 (defn- sortable-builtin-scalar-value?
   [v]
-  (or (string? v)
+  (or (rt/nex-string? v)
       (number? v)
       (boolean? v)
-      (char? v)))
+      (rt/nex-char? v)))
 
 (defn- runtime-compare-values
   [state a b]
@@ -3263,11 +3304,11 @@
     (and (instance? Double a) (instance? Double b))
     (let [x (double a) y (double b)] (cond (< x y) -1 (> x y) 1 :else 0))
 
-    (and (instance? String a) (instance? String b))
-    (Integer/signum (.compareTo ^String a ^String b))
+    (and (rt/nex-string? a) (rt/nex-string? b))
+    (Long/signum (rt/str-compare a b))
 
-    (and (instance? Character a) (instance? Character b))
-    (Integer/signum (.compareTo ^Character a ^Character b))
+    (and (rt/nex-char? a) (rt/nex-char? b))
+    (Long/signum (- (rt/char-code a) (rt/char-code b)))
 
     :else nil))
 
@@ -3639,3 +3680,40 @@
         (when-not builtin-fn
           (throw (ex-info (str "Undefined compiled builtin: " name) {:name name})))
         (apply builtin-fn (builtin-ctx state) args)))))
+
+;; ---------------------------------------------------------------------------
+;; Strings at the library boundary. Compiled code calls the library-support
+;; builtins (`__path_name`, `__regex_find_all`, ...) and a few others as these
+;; `builtin-*` functions directly, not through bi/builtins, so each is given
+;; here what bi/builtins gives its own: a String argument with a character
+;; outside the BMP reaches the host function as its java.lang.String text,
+;; and host text coming back (a path, a match, a line, a body) becomes a Nex
+;; String in the form its text calls for (nex.types.runtime "Strings").
+
+(defn- boundary-arg [v]
+  (if (rt/nex-wide-string? v) (rt/host-string v) v))
+
+(defn- boundary-result [r]
+  (cond
+    (string? r) (rt/->nex-string r)
+    (instance? java.util.ArrayList r)
+    (let [^java.util.ArrayList a r]
+      (dotimes [i (.size a)]
+        (let [x (.get a i)]
+          (when (string? x) (.set a i (rt/->nex-string x)))))
+      a)
+    :else r))
+
+(defn- strings-at-boundary [f]
+  (fn
+    ([] (boundary-result (f)))
+    ([a] (boundary-result (f (boundary-arg a))))
+    ([a b] (boundary-result (f (boundary-arg a) (boundary-arg b))))
+    ([a b c] (boundary-result (f (boundary-arg a) (boundary-arg b) (boundary-arg c))))
+    ([a b c & more] (boundary-result (apply f (boundary-arg a) (boundary-arg b) (boundary-arg c)
+                                            (map boundary-arg more))))))
+
+(doseq [[sym v] (ns-publics *ns*)
+        :when (re-matches #"builtin-(regex|datetime|path|text-file|binary-file|byte-array|http-get|http-post|http-request|json-parse|json-stringify)(-.*)?"
+                          (name sym))]
+  (alter-var-root v strings-at-boundary))

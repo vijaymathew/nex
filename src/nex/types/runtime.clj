@@ -415,6 +415,8 @@
       (throw (ex-info (str "Byte value must be in range 0..255, got " n) {:value n :builtin-kind "Conversion_Error"})))
     (aget byte-box-cache (int n))))
 
+(declare ->nex-char ->nex-string)
+
 (defn java->nex
   "Normalize a value coming back from a Java call. A Java `short` is a
    java.lang.Short, which Nex reserves as the tag for Byte (see nex-byte?); the
@@ -424,7 +426,13 @@
    Nex but not as a key in a Java collection (`map.containsKey(Key.LEFT)` after
    `map.put(e.getKeyCode(), ...)`), so the two backends disagreed."
   [v]
-  (if (or (instance? Short v) (instance? Integer v)) (long v) v))
+  (cond
+    (or (instance? Short v) (instance? Integer v)) (long v)
+    ;; A Java `char` is a Nex Char.
+    (instance? Character v) (->nex-char v)
+    ;; A Java String is a Nex String, in the form its text calls for.
+    (instance? String v) (->nex-string v)
+    :else v))
 
 ;; Integer16 and Integer32 are signed fixed-width integers. Unlike Byte (a
 ;; java.lang.Short, see nex-byte?) they cannot borrow a host boxed class as their
@@ -448,6 +456,236 @@
   (hashCode [_] (Long/hashCode v))
   Comparable
   (compareTo [_ o] (Long/compare v (.v ^NexInt32 o))))
+
+;; Char is a Unicode code point, 0..0x10FFFF, held in a JVM int. A
+;; java.lang.Character holds only 16 bits, so it cannot hold a character
+;; outside the Basic Multilingual Plane (an emoji); and java.lang.Integer is
+;; what Java interop returns for every plain `int`, so it cannot be the tag
+;; either (see NexInt16 above). NexChar is the runtime value of a Char on both
+;; backends: compiled code keeps a Char as a JVM int (IR :char) and boxes it
+;; to one of these only where an object is needed. Its toString is the
+;; character itself, so `str` of a Char is the one-character String.
+(deftype NexChar [^int cp]
+  Object
+  (toString [_] (String. (Character/toChars cp)))
+  (equals [_ o] (and (instance? NexChar o) (== cp (.cp ^NexChar o))))
+  (hashCode [_] cp)
+  Comparable
+  (compareTo [_ o] (Integer/compare cp (.cp ^NexChar o))))
+
+(def ^:private ^"[Ljava.lang.Object;" char-cache
+  "The NexChar of each code point below 256, made once: most characters a
+   program handles are ASCII or Latin-1."
+  (let [a (object-array 256)]
+    (dotimes [i 256] (aset a i (NexChar. (int i))))
+    a))
+
+(defn nex-char? [v] (instance? NexChar v))
+
+(defn make-char
+  "The Char of code point CP, which must already be a valid code point (the
+   compiled backend boxes its JVM-int Chars through this)."
+  [^long cp]
+  (if (< cp 256)
+    (aget char-cache cp)
+    (NexChar. (int cp))))
+
+(defn ->nex-char
+  "The Char of V: a code point (any integer), a java.lang.Character, or a
+   Char. Raises Conversion_Error unless the code point is in 0..0x10FFFF."
+  [v]
+  (cond
+    (instance? NexChar v) v
+    (instance? Character v) (make-char (long (int (.charValue ^Character v))))
+    :else (let [n (long v)]
+            (when-not (<= 0 n 0x10FFFF)
+              (throw (ex-info (str "Char code point must be in range 0..1114111, got " n)
+                              {:value n :builtin-kind "Conversion_Error"})))
+            (make-char n))))
+
+(defn char-code
+  "The code point of the Char C, as a long."
+  ^long [c]
+  (long (.cp ^NexChar c)))
+
+(defn check-char
+  "N unchanged when it is a valid code point, else the Conversion_Error a
+   conversion to Char raises."
+  ^long [^long n]
+  (when-not (<= 0 n 0x10FFFF)
+    (throw (ex-info (str "Char code point must be in range 0..1114111, got " n)
+                    {:value n :builtin-kind "Conversion_Error"})))
+  n)
+
+;; ---------------------------------------------------------------------------
+;; Strings
+;;
+;; A Nex String is a sequence of characters (code points, Definition B.2).
+;; It has one of two runtime forms, chosen by its content alone:
+;;
+;; - a plain java.lang.String, when it holds no surrogate code unit, so that
+;;   UTF-16 index i is character i and `length`/`char_at` are the host's own
+;;   O(1) operations. Nearly every string is one of these;
+;; - a NexWideString, when it holds any surrogate (a character outside the
+;;   Basic Multilingual Plane, such as an emoji, or a lone surrogate), which
+;;   keeps the same text and its length in characters, and the UTF-16 offset
+;;   of every 64th character ("breadcrumbs"), so character i is found in at
+;;   most 63 steps.
+;;
+;; Every Nex string is made through ->nex-string (or is known to need no
+;; check, as plain + plain is), so the form is canonical: two strings with
+;; the same text have the same form, and equals/hashCode need not mix them.
+
+(def ^:private ^:const crumb-shift 6)
+(def ^:private ^:const crumb-mask 63)
+
+(defn- has-surrogate?
+  [^String s]
+  (let [n (.length s)]
+    (loop [i 0]
+      (cond
+        (= i n) false
+        (Character/isSurrogate (.charAt s i)) true
+        :else (recur (inc i))))))
+
+(deftype NexWideString [^String s ^int n ^ints crumbs]
+  Object
+  (toString [_] s)
+  (equals [_ o] (and (instance? NexWideString o) (.equals s (.-s ^NexWideString o))))
+  (hashCode [_] (.hashCode s))
+  Comparable
+  (compareTo [_ o] (.compareTo s (str o)))
+  ;; The UTF-16 view, for Java APIs that take a CharSequence.
+  CharSequence
+  (length [_] (.length s))
+  (charAt [_ i] (.charAt s i))
+  (subSequence [_ a b] (.subSequence s a b))
+  (chars [_] (.chars s))
+  (codePoints [_] (.codePoints s)))
+
+(defn- make-wide-string
+  [^String s]
+  (let [len (.length s)
+        crumbs (java.util.ArrayList.)]
+    (loop [off 0 k 0]
+      (if (< off len)
+        (do (when (zero? (bit-and k crumb-mask)) (.add crumbs (Integer/valueOf off)))
+            (recur (+ off (Character/charCount (.codePointAt s (int off)))) (inc k)))
+        (NexWideString. s (int k) (int-array (map int crumbs)))))))
+
+(defn nex-wide-string? [v] (instance? NexWideString v))
+
+(defn nex-string?
+  "True for a Nex String in either form."
+  [v]
+  (or (instance? String v) (instance? NexWideString v)))
+
+(defn ->nex-string
+  "The Nex String holding the text of S (a java.lang.String, any
+   CharSequence, or a Nex String): plain when it has no surrogate, else a
+   NexWideString. Every string that enters Nex from outside (Java, files,
+   the network, decoded bytes) and every string a wide string produces goes
+   through here."
+  [s]
+  (cond
+    (nil? s) nil
+    (instance? NexWideString s) s
+    :else (let [s (str s)]
+            (if (has-surrogate? s) (make-wide-string s) s))))
+
+(defn host-string
+  "The java.lang.String holding the text of the Nex String V (either form);
+   what crosses into Java."
+  ^String [v]
+  (if (instance? NexWideString v) (.-s ^NexWideString v) v))
+
+(defn str-length
+  "The length of the Nex String V in characters."
+  ^long [v]
+  (if (instance? NexWideString v)
+    (long (.-n ^NexWideString v))
+    (long (.length ^String v))))
+
+(defn- wide-offset
+  "The UTF-16 offset of character I (0 <= I <= its length) of the wide
+   string W."
+  ^long [^NexWideString w ^long i]
+  (if (>= i (.-n w))
+    (long (.length ^String (.-s w)))
+    (let [^String s (.-s w)
+          k (bit-shift-right i crumb-shift)]
+      (loop [off (long (aget ^ints (.-crumbs w) k))
+             left (bit-and i crumb-mask)]
+        (if (zero? left)
+          off
+          (recur (+ off (Character/charCount (.codePointAt s (int off)))) (dec left)))))))
+
+(defn str-offset
+  "The UTF-16 offset of character I (0 <= I <= length) of the Nex String V."
+  ^long [v ^long i]
+  (if (instance? NexWideString v) (wide-offset v i) i))
+
+(defn str-index-of-offset
+  "The character index of UTF-16 offset OFF of the Nex String V (OFF at a
+   character boundary)."
+  ^long [v ^long off]
+  (if (instance? NexWideString v)
+    (let [^NexWideString w v
+          ^ints crumbs (.-crumbs w)
+          ;; the last breadcrumb at or before OFF
+          k (loop [lo 0 hi (dec (alength crumbs))]
+              (if (< lo hi)
+                (let [mid (quot (+ lo hi 1) 2)]
+                  (if (<= (aget crumbs mid) off) (recur mid hi) (recur lo (dec mid))))
+                lo))]
+      (+ (bit-shift-left (long k) crumb-shift)
+         (.codePointCount ^String (.-s w) (int (aget crumbs k)) (int off))))
+    off))
+
+(declare make-char)
+
+(defn str-char-at
+  "Character I of the Nex String V, a Char; I must be in range."
+  [v ^long i]
+  (if (instance? NexWideString v)
+    (make-char (long (.codePointAt ^String (.-s ^NexWideString v) (int (wide-offset v i)))))
+    ;; (int ...) first: Clojure has no long cast of a primitive char, and
+    ;; reflects on one (microseconds per call).
+    (make-char (long (int (.charAt ^String v (int i)))))))
+
+(defn str-substring
+  "Characters START (inclusive) to END (exclusive) of the Nex String V."
+  [v ^long start ^long end]
+  (if (instance? NexWideString v)
+    (->nex-string (.substring ^String (.-s ^NexWideString v)
+                              (int (wide-offset v start)) (int (wide-offset v end))))
+    (.substring ^String v (int start) (int end))))
+
+(defn str-chars
+  "The characters of the Nex String V, in order, as a vector of Chars."
+  [v]
+  (let [^String s (host-string v)
+        n (.length s)]
+    (loop [off 0 acc (transient [])]
+      (if (< off n)
+        (let [cp (.codePointAt s (int off))]
+          (recur (+ off (Character/charCount cp)) (conj! acc (make-char (long cp)))))
+        (persistent! acc)))))
+
+(defn str-concat
+  "The Nex String A followed by the Nex String B. Two plain strings make a
+   plain one without a scan: neither holds a surrogate, so neither can
+   their concatenation."
+  [a b]
+  (if (and (instance? String a) (instance? String b))
+    (.concat ^String a ^String b)
+    (make-wide-string (str (host-string a) (host-string b)))))
+
+(defn str-compare
+  "Ordering of the Nex Strings A and B (either form), as String.compareTo
+   orders their text."
+  ^long [a b]
+  (long (.compareTo (host-string a) (host-string b))))
 
 (defn nex-int16? [v] (instance? NexInt16 v))
 (defn nex-int32? [v] (instance? NexInt32 v))
@@ -598,7 +836,16 @@
    compile-time-resolved call path coerces to the exact parameter type itself,
    including Java's signed `byte`.)"
   [v]
-  (if (nex-sized? v) (sized->long v) v))
+  (cond
+    (nex-sized? v) (sized->long v)
+    ;; A Char goes as the java.lang.Character Java's `char` parameters take
+    ;; when it fits in one, else as its code point (an `int`, as Java's own
+    ;; code-point methods take it).
+    (instance? NexChar v) (let [cp (.cp ^NexChar v)]
+                            (if (< cp 0x10000) (Character/valueOf (char cp)) (Integer/valueOf cp)))
+    ;; A String crosses as its java.lang.String text.
+    (instance? NexWideString v) (.-s ^NexWideString v)
+    :else v))
 
 (defn nex-int->number
   "Convert a Nex Integer to a plain host number — for JS array indices, char
@@ -798,7 +1045,7 @@
 (defn nex-parse-integer [s] (nex-parse-integer64-string s))
 (defn nex-parse-real [s] (Double/parseDouble (.trim s)))
 
-(defn nex-file-read [path] (slurp path))
+(defn nex-file-read [path] (->nex-string (slurp (host-string path))))
 (defn nex-file-write [path content] (spit path content))
 (defn nex-file-append [path content] (spit path content :append true))
 (defn path-exists? [path]
@@ -984,11 +1231,29 @@
       (catch java.nio.charset.CharacterCodingException _
         (throw (ex-info "bytes are not valid UTF-8" {:builtin-kind "Conversion_Error"}))))))
 
+(defn utf8-encode-strict
+  "The UTF-8 bytes of the text S. Text that is not a sequence of characters
+   -- an unpaired UTF-16 surrogate, which only host text can hold -- raises
+   Conversion_Error rather than being encoded as `?`, so that decoding the
+   bytes always gives S back (Definition B.3)."
+  ^bytes [^String s]
+  (let [encoder (doto (.newEncoder java.nio.charset.StandardCharsets/UTF_8)
+                  (.onMalformedInput java.nio.charset.CodingErrorAction/REPORT)
+                  (.onUnmappableCharacter java.nio.charset.CodingErrorAction/REPORT))]
+    (try
+      (let [buf (.encode encoder (java.nio.CharBuffer/wrap s))
+            out (byte-array (.remaining buf))]
+        (.get buf out)
+        out)
+      (catch java.nio.charset.CharacterCodingException _
+        (throw (ex-info "String.to_bytes: the text holds an unpaired surrogate, which is not a character"
+                        {:builtin-kind "Conversion_Error"}))))))
+
 (defn string-from-bytes
   "Decode a Nex Array[Byte] as UTF-8 text (see utf8-decode-strict)."
   [values]
   (try
-    (utf8-decode-strict (byte-array->bytes values))
+    (->nex-string (utf8-decode-strict (byte-array->bytes values)))
     (catch clojure.lang.ExceptionInfo e
       (if (= "bytes are not valid UTF-8" (ex-message e))
         (throw (ex-info "String.from_bytes: bytes are not valid UTF-8" {:builtin-kind "Conversion_Error"}))
@@ -1495,9 +1760,6 @@
     (nex-array? coll) (nex-array-get coll idx)
     (nex-map? coll) (nex-map-get coll idx)
     :else (.get coll idx)))
-
-(defn nex-char? [v]
-  (char? v))
 
 (defn nex-error-message
   "A clean, Nex-level message for a Throwable raised during evaluation. Host

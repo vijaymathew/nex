@@ -4,7 +4,7 @@
 (defn get-type-name
   [value]
   (cond
-    (string? value) :String
+    (rt/nex-string? value) :String
     ;; Integer is a long on the JVM and a BigInt on JS; check it before Real so
     ;; that on JS every remaining `number` classifies as Real (Integers are
     ;; BigInt now, so an integer-valued `number` is a Real value).

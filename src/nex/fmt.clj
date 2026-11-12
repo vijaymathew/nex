@@ -105,17 +105,21 @@
       (str/replace "\r" "\\r")))
 
 (defn- format-char [c]
-  (let [c (if (char? c) c (first (str c)))]
-    (case c
-      \newline "#newline"
-      \tab "#tab"
-      \space "#space"
-      \return "#return"
-      \u0000 "#nul"
-      (if (or (Character/isDigit (char c)) (Character/isISOControl (char c))
-              (Character/isWhitespace (char c)))
-        (str "#" (int c))
-        (str "#" c)))))
+  ;; C is a code point (the walker's :char value); a Character or a
+  ;; one-character string is accepted too.
+  (let [cp (int (cond (integer? c) c
+                      (char? c) (int (char c))
+                      :else (.codePointAt (str c) 0)))]
+    (case cp
+      10 "#newline"
+      9 "#tab"
+      32 "#space"
+      13 "#return"
+      0 "#nul"
+      (if (or (Character/isDigit cp) (Character/isISOControl cp)
+              (Character/isWhitespace cp))
+        (str "#" cp)
+        (str "#" (String. (Character/toChars cp)))))))
 
 (defn- format-args [args]
   (str "(" (str/join ", " (map format-expression args)) ")"))

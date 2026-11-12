@@ -6,7 +6,8 @@
   [value]
   (cond
     (nil? value) nil
-    (or (string? value) (boolean? value) (char? value)) value
+    (string? value) (rt/->nex-string value)
+    (boolean? value) value
     (integer? value)
     (let [n (long value)]
       (if (<= Integer/MIN_VALUE n Integer/MAX_VALUE)
@@ -18,7 +19,7 @@
     (map? value)
     (let [m (rt/nex-map)]
       (doseq [[k v] value]
-        (rt/nex-map-put m (str k) (json-value->nex v)))
+        (rt/nex-map-put m (rt/->nex-string (str k)) (json-value->nex v)))
       m)
     :else value))
 
@@ -27,7 +28,8 @@
   (cond
     (nil? value) nil
     (or (string? value) (boolean? value) (number? value)) value
-    (char? value) (str value)
+    (rt/nex-wide-string? value) (rt/host-string value)
+    (rt/nex-char? value) (str value)
     (rt/nex-array? value) (mapv nex-value->json value)
     (rt/nex-map? value)
     (into {}

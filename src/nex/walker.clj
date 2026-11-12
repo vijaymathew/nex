@@ -101,7 +101,8 @@
    "tab" "\t"})
 
 (defn- maybe-transform-special-char [v]
-  (if (and (string? v) (> (count v) 1))
+  ;; More than one character (code point, so `#😀` is not taken for a name).
+  (if (and (string? v) (> (.codePointCount ^String v 0 (count v)) 1))
     (or (get special-char-codes v) 0)
     v))
 
@@ -3242,10 +3243,17 @@
   (let [v0 (subs value 1)
         is-code (re-matches #"\d+" v0)
         v (if is-code v0 (maybe-transform-special-char v0))]
+    ;; The value is the character's code point (a Char is one, Definition
+    ;; B.2), so a character outside the Basic Multilingual Plane fits.
     {:type :char
      :value (if is-code
-              (char (Integer/parseInt v))
-              (first v))}))
+              (let [cp (try (Long/parseLong v) (catch NumberFormatException _ Long/MAX_VALUE))]
+                (when-not (<= 0 cp 0x10FFFF)
+                  (throw (ex-info (str "Char literal out of range: " value
+                                       " (a code point is at most 1114111)")
+                                  {:literal value})))
+                cp)
+              (long (.codePointAt ^String v 0)))}))
 
 (defn- handle-array-literal
   [[_ _open-bracket & elements]]
