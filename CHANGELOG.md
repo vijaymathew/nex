@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.3 - 2026-11-12
+
 - **Strings and Chars are Unicode code points, as the Definition says.** A
   `Char` now holds any code point, `0..1114111`, so an emoji is one `Char`
   (`#😀`, `#128512`, `(128512).to_char`); before, a `Char` was 16 bits and
@@ -21,7 +23,6 @@
   from the host can hold an unpaired UTF-16 surrogate; `to_bytes` used to
   write it as `?`, so `from_bytes` did not give the text back. It now raises
   `Conversion_Error`, as `from_bytes` does on bytes that are not UTF-8.
-
 - **Limits of the numeric types, and overflow tests.** `Integer.MIN` and
   `Integer.MAX` (also `Integer64.MIN`/`MAX`), `Integer32.MIN`/`MAX`,
   `Integer16.MIN`/`MAX` and `Byte.MIN`/`MAX` name each type's range, as
