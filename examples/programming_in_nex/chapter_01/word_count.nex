@@ -1,0 +1,44 @@
+-- word_count.nex: count the lines, words and characters in a text file,
+-- and list its most frequent words.
+
+intern io/Path
+intern text/Regex
+
+-- The `top` most frequent words in `counts`, most frequent first.
+function most_frequent(counts: Map[String, Integer], top: Integer): Array[String]
+  require
+    positive_top: top > 0
+  do
+    let by_count: Array[String] := counts.keys.sort(fn (a, b) => counts.get(b) - counts.get(a))
+    result := []
+    across by_count as word do
+      if result.length < top then
+        result.add(word)
+      end
+    end
+  ensure
+    at_most_top: result.length <= top
+  end
+
+if program.arguments.is_empty then
+  console.print_line("usage: word_count <file>")
+else
+  let file: Path := create Path.make(program.arguments.get(0))
+  let text: String := file.read_text
+
+  let word_pattern: Regex := create Regex.compile("[a-z']+")
+  let words: Array[String] := word_pattern.find_all(text.to_lower)
+
+  let counts: Map[String, Integer] := {}
+  across words as word do
+    counts.set(word, counts.try_get(word, 0) + 1)
+  end
+
+  console.print_line("lines:      " + text.count(fn (c) => c = #10))
+  console.print_line("words:      " + words.length)
+  console.print_line("characters: " + text.length)
+  console.print_line("most frequent:")
+  across most_frequent(counts, 5) as word do
+    console.print_line("  " + word + " " + counts.get(word))
+  end
+end

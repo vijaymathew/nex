@@ -47,6 +47,7 @@ Some chapters span **multiple files** because the exercise is about that:
 
 | Chapter | Extra files | Why |
 |---|---|---|
+| 1 A Quick Tour of Nex | `hello.nex`, `word_count.nex`, `mandelbrot.nex`, `ozymandias.txt` | the tour's complete programs, run as `nex hello.nex Ada`, `nex word_count.nex ozymandias.txt`, `nex mandelbrot.nex` (writes `mandelbrot.png`) |
 | 23 Modules and Files | `temperature.nex`, `contact.nex`, `address_book.nex`, `csv_exporter.nex`, `long_descriptive_module_name.nex` | splitting code across files with `intern`, including `intern … as …` |
 | 24 Interoperability | `pure_greeter.nex`, `host_system.nex` | isolating host (`import` / `with "java"`) work behind a contract |
 | 26 A Complete Program | `todo_item.nex`, `task_list.nex`, `grade_book.nex` | the chapter's "split into files" exercise + an original program |

@@ -1,6 +1,15 @@
 -- Narrative examples from Chapter 2 (Values, Types, and Variables), collected
 -- into one self-checking, non-interactive program.
 
+-- Variables: `let` introduces a name, plain `:=` changes it.
+let x := 10
+let y := x + 5
+assert y = 15
+assert x + y = 25
+x := 20
+assert x = 20
+
+
 assert 10 + 3 = 13
 assert 10 - 3 = 7
 assert 10 * 3 = 30
@@ -16,6 +25,12 @@ assert 6.bitwise_and(3) = 2
 assert 5.bitwise_is_set(0) = true
 assert 6.pick >= 0 and 6.pick < 6
 
+-- Integer literals in other bases, and digit separators.
+assert 0b1010 = 10
+assert 0o17 = 15
+assert 0xFF = 255
+assert 1_000_000 = 1000000
+
 let pi := 3.14159
 assert pi * 2.0 = 6.28318
 assert 10.0 / 3.0 = 3.3333333333333335
@@ -25,7 +40,7 @@ assert 3.2.round = 3
 assert (-3.5).abs = 3.5
 assert 1.2.max(4.7) = 4.7
 
-let x := 10
+x := 10
 assert x > 5
 assert not (x = 5)
 assert x /= 5
@@ -49,6 +64,12 @@ assert padded.trim = "hello"
 
 let csv := "one,two,three"
 assert csv.split(",") = ["one", "two", "three"]
+
+-- Characters.
+assert #65 = #A
+assert "Nex".char_at(0) = #N
+let sparkles: Char := #10024
+print(sparkles)
 
 assert 7 + 5 = 12
 assert 7.plus(5) = 12

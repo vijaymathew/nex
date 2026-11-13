@@ -1,0 +1,111 @@
+-- mandelbrot.nex: draw the Mandelbrot set, computing bands of rows in
+-- parallel, and save the picture as mandelbrot.png.
+
+intern graphics/Picture
+intern graphics/Canvas
+
+let width: Integer := 800
+let height: Integer := 600
+let max_steps: Integer := 200
+
+-- How many steps the point (x, y) takes to escape, up to max_steps.
+-- Points that never escape belong to the Mandelbrot set.
+function escape_count(x, y: Real): Integer do
+  let a: Real := 0.0
+  let b: Real := 0.0
+  result := 0
+  from
+  until
+    result = max_steps or a * a + b * b > 4.0
+  do
+    let next_a: Real := a * a - b * b + x
+    b := 2.0 * a * b + y
+    a := next_a
+    result := result + 1
+  end
+end
+
+-- Escape counts for the rows first_row up to (but not including) last_row,
+-- one count per pixel, row after row.
+function band(first_row, last_row: Integer): Array[Integer]
+  require
+    rows_on_screen: 0 <= first_row and first_row <= last_row and last_row <= height
+  do
+    result := []
+    from
+      let row: Integer := first_row
+    until
+      row = last_row
+    do
+      from
+        let col: Integer := 0
+      until
+        col = width
+      do
+        let x: Real := -2.5 + 3.5 * col.to_real / width.to_real
+        let y: Real := -1.3125 + 2.625 * row.to_real / height.to_real
+        result.add(escape_count(x, y))
+        col := col + 1
+      end
+      row := row + 1
+    end
+  ensure
+    one_count_per_pixel: result.length = (last_row - first_row) * width
+  end
+
+-- A colour for an escape count: black inside the set, shades of blue
+-- and gold outside it.
+function color_for(count: Integer): Integer do
+  if count = max_steps then
+    result := 0x000000
+  else
+    let t: Real := count.to_real / max_steps.to_real
+    let red: Integer := (9.0 * (1.0 - t) * t * t * t * 255.0).truncate
+    let green: Integer := (15.0 * (1.0 - t) * (1.0 - t) * t * t * 255.0).truncate
+    let blue: Integer := (8.5 * (1.0 - t) * (1.0 - t) * (1.0 - t) * t * 255.0).truncate
+    result := red * 65536 + green * 256 + blue
+  end
+end
+
+-- Start one task per band of rows; they all run at the same time.
+let band_count: Integer := 8
+let rows_per_band: Integer := height / band_count
+let tasks: Array[Task[Array[Integer]]] := []
+from
+  let i: Integer := 0
+until
+  i = band_count
+do
+  let first: Integer := i * rows_per_band
+  tasks.add(spawn do
+    result := band(first, first + rows_per_band)
+  end)
+  i := i + 1
+end
+
+-- Wait for every band, then paint its pixels into a picture.
+let picture: Picture := create Picture.make(width, height)
+let first_row: Integer := 0
+across tasks as task do
+  let counts: Array[Integer] := task.await
+  from
+    let k: Integer := 0
+  until
+    k = counts.length
+  do
+    picture.set_rgb(k % width, first_row + k / width, color_for(counts.get(k)))
+    k := k + 1
+  end
+  first_row := first_row + rows_per_band
+end
+
+picture.save("mandelbrot.png")
+console.print_line("saved mandelbrot.png")
+
+-- Show it in a window too, when there is a screen to show it on.
+let canvas: Canvas := create Canvas.make(width, height)
+if canvas.has_display then
+  canvas.picture(0.5, 0.5, picture)
+  canvas.show
+  canvas.wait_until_closed
+end

@@ -51,6 +51,16 @@ function main() do
   let len: Integer := "  Hello, Nex  ".trim.to_lower.length
   console.print_line("4. length of trimmed-lowered string: " + len.to_string)     -- 10
   assert len = 10
+
+  -- --------------------------------------------------------------------------
+  -- 5. At the REPL a second `let x := 20` replaces x, so x is 20.  In a file
+  --    the second `let` is a type error ("Duplicate local variable 'x'
+  --    declared in the same block"); the fix is to assign instead of declare:
+  -- --------------------------------------------------------------------------
+  let x: Integer := 10
+  x := 20
+  console.print_line("5. x after assignment: " + x.to_string)                    -- 20
+  assert x = 20
 end
 
 -- Mimics: read a Celsius line from the console, convert, return the message.

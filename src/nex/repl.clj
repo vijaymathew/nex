@@ -481,6 +481,8 @@
        (map? value)
        (contains? #{:Console :Program} (:nex-builtin-type value))))
 
+(declare format-value)
+
 (defn show-vars [ctx]
   ;; The predeclared names are in every session; listing them would only
   ;; bury the user's own variables.
@@ -491,10 +493,9 @@
       (do
         (println "Defined variables:")
         (doseq [[var-name value] bindings]
-          (let [value-str (if (instance? nex.interpreter.NexObject value)
-                            (str "#<" (:class-name value) " object>")
-                            (pr-str value))]
-            (println (str "  • " var-name " = " value-str))))))))
+          ;; Shown exactly as the REPL echoes a result (format-value), so an
+          ;; array reads ["a", "b"] here too, not Clojure's ["a" "b"].
+          (println (str "  • " var-name " = " (format-value ctx value))))))))
 
 (declare eval-code)
 (declare sync-compiled-session-into-interpreter!)

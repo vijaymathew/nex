@@ -107,7 +107,7 @@
 
 ;; Files examples write into the folder they run in, which is the repository
 ;; root here: graphics_example.nex saves the picture it draws as scene.png.
-(def ^:private example-temp-files ["scene.png"])
+(def ^:private example-temp-files ["scene.png" "mandelbrot.png"])
 
 (defn- example-files []
   (->> (file-seq (io/file "examples"))

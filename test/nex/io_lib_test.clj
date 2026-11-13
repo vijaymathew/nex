@@ -151,3 +151,43 @@
           (is (.contains output "[65, 90, 91, 68]")))
         (finally
           (delete-tree! tmp-dir))))))
+
+(deftest io-relative-paths-resolve-against-user-dir-test
+  (testing "relative paths name files in the folder nex was started from, not the JVM's working directory"
+    ;; The nex launcher runs the JVM from its installation folder and records
+    ;; the user's folder in nex.user.dir / NEX_USER_DIR.
+    (let [tmp-dir (io/file (System/getProperty "java.io.tmpdir") (str "nex-io-user-dir-" (System/nanoTime)))
+          old-user-dir (System/getProperty "nex.user.dir")
+          ctx (repl/init-repl-context)]
+      (.mkdirs tmp-dir)
+      (System/setProperty "nex.user.dir" (.getAbsolutePath tmp-dir))
+      (try
+        (let [output (with-out-str
+                       (repl/eval-code ctx "intern io/Path")
+                       (repl/eval-code ctx "intern io/Text_File")
+                       (repl/eval-code ctx "let dir: Path := create Path.make(\"data\")")
+                       (repl/eval-code ctx "dir.create_directories()")
+                       (repl/eval-code ctx "let file: Path := dir.child(\"notes.txt\")")
+                       (repl/eval-code ctx "file.write_text(\"first\")")
+                       (repl/eval-code ctx "file.append_text(\"\\nsecond\")")
+                       (repl/eval-code ctx "print(file.exists())")
+                       (repl/eval-code ctx "print(file.to_string())")
+                       (repl/eval-code ctx "print(file.read_text())")
+                       (repl/eval-code ctx "let reader: Text_File := create Text_File.open_read(file)")
+                       (repl/eval-code ctx "print(reader.read_line())")
+                       (repl/eval-code ctx "reader.close()")
+                       (repl/eval-code ctx "print(dir.list().length)")
+                       (repl/eval-code ctx "print(dir.list().get(0).to_string())")
+                       (repl/eval-code ctx "print(file.absolute().to_string())"))
+              notes (io/file tmp-dir "data" "notes.txt")]
+          (is (.exists notes))
+          (is (= "first\nsecond" (slurp notes)))
+          (is (re-find #"true" output))
+          (is (re-find #"first" output))
+          (is (re-find #"\"data/notes.txt\"" output))
+          (is (re-find (re-pattern (java.util.regex.Pattern/quote (.getAbsolutePath notes))) output)))
+        (finally
+          (if old-user-dir
+            (System/setProperty "nex.user.dir" old-user-dir)
+            (System/clearProperty "nex.user.dir"))
+          (delete-tree! tmp-dir))))))

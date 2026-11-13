@@ -1045,17 +1045,36 @@
 (defn nex-parse-integer [s] (nex-parse-integer64-string s))
 (defn nex-parse-real [s] (Double/parseDouble (.trim s)))
 
-(defn nex-file-read [path] (->nex-string (slurp (host-string path))))
-(defn nex-file-write [path content] (spit path content))
-(defn nex-file-append [path content] (spit path content :append true))
+(defn user-file
+  "PATH as a java.io.File, a relative PATH resolved against the folder the
+   program was started from (the launcher's nex.user.dir / NEX_USER_DIR) rather than the JVM's own working
+   directory: the `nex` launcher runs the JVM from its installation folder, so
+   without this `create Path.make(\"notes.txt\").read_text` would look for
+   notes.txt there. A program run some other way (`java -jar`) has no
+   NEX_USER_DIR and is in its own folder already. Path strings themselves stay
+   as written; only the file system access is resolved."
+  ^java.io.File [path]
+  (let [p (str path)
+        f (java.io.File. p)]
+    (if (.isAbsolute f)
+      f
+      (let [d (or (System/getProperty "nex.user.dir")
+                  (System/getenv "NEX_USER_DIR"))]
+        (if (and d (not= d ""))
+          (java.io.File. ^String d p)
+          f)))))
+
+(defn nex-file-read [path] (->nex-string (slurp (user-file (host-string path)))))
+(defn nex-file-write [path content] (spit (user-file path) content))
+(defn nex-file-append [path content] (spit (user-file path) content :append true))
 (defn path-exists? [path]
-  (.exists (java.io.File. path)))
+  (.exists (user-file path)))
 
 (defn path-is-file? [path]
-  (.isFile (java.io.File. path)))
+  (.isFile (user-file path)))
 
 (defn path-is-directory? [path]
-  (.isDirectory (java.io.File. path)))
+  (.isDirectory (user-file path)))
 
 (defn path-name [path]
   (.getName (java.io.File. path)))
@@ -1075,16 +1094,16 @@
       (subs name 0 dot-index))))
 
 (defn path-absolute [path]
-  (.getAbsolutePath (java.io.File. path)))
+  (.getAbsolutePath (user-file path)))
 
 (defn path-normalize [path]
   (.normalize (.toPath (java.io.File. path))))
 
 (defn path-size [path]
-  (.length (java.io.File. path)))
+  (.length (user-file path)))
 
 (defn path-modified-time [path]
-  (.lastModified (java.io.File. path)))
+  (.lastModified (user-file path)))
 
 (defn path-parent [path]
   (.getParent (java.io.File. path)))
@@ -1093,19 +1112,19 @@
   (.getPath (java.io.File. ^String path ^String child-name)))
 
 (defn path-create-file [path]
-  (.createNewFile (java.io.File. path))
+  (.createNewFile (user-file path))
   nil)
 
 (defn path-create-directory [path]
-  (.mkdir (java.io.File. path))
+  (.mkdir (user-file path))
   nil)
 
 (defn path-create-directories [path]
-  (.mkdirs (java.io.File. path))
+  (.mkdirs (user-file path))
   nil)
 
 (defn path-delete [path]
-  (let [f (java.io.File. path)]
+  (let [f (user-file path)]
     (when (.exists f)
       (if (.isDirectory f)
         (throw (ex-info "__path_delete does not remove directories" {:path path}))
@@ -1132,11 +1151,11 @@
                                             [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
 
 (defn path-delete-tree [path]
-  (delete-tree-clj! (java.io.File. path))
+  (delete-tree-clj! (user-file path))
   nil)
 
 (defn path-copy [source-path target-path]
-  (copy-tree-clj! (java.io.File. source-path) (java.io.File. target-path))
+  (copy-tree-clj! (user-file source-path) (user-file target-path))
   nil)
 
 (defn path-move [source-path target-path]
@@ -1157,15 +1176,17 @@
   nil)
 
 (defn path-list [path]
-  (let [dir (java.io.File. path)
-        files (.listFiles dir)]
-    (nex-array-from (mapv #(.getPath ^java.io.File %) (or files [])))))
+  ;; Children keep the form of PATH (relative stays relative); only the
+  ;; listing itself is resolved against the user's folder.
+  (let [names (.list (user-file path))]
+    (nex-array-from (mapv #(.getPath (java.io.File. ^String (str path) ^String %))
+                          (or names [])))))
 
 (defn text-file-open-read [path]
   {:nex-builtin-type :TextFileHandle
    :mode :read
    :reader (java.io.BufferedReader.
-            (java.io.InputStreamReader. (java.io.FileInputStream. path)
+            (java.io.InputStreamReader. (java.io.FileInputStream. (user-file path))
                                         java.nio.charset.StandardCharsets/UTF_8))
    :writer nil})
 
@@ -1174,7 +1195,7 @@
    :mode :write
    :reader nil
    :writer (java.io.BufferedWriter.
-            (java.io.OutputStreamWriter. (java.io.FileOutputStream. path false)
+            (java.io.OutputStreamWriter. (java.io.FileOutputStream. (user-file path) false)
                                          java.nio.charset.StandardCharsets/UTF_8))})
 
 (defn text-file-open-append [path]
@@ -1182,7 +1203,7 @@
    :mode :append
    :reader nil
    :writer (java.io.BufferedWriter.
-            (java.io.OutputStreamWriter. (java.io.FileOutputStream. path true)
+            (java.io.OutputStreamWriter. (java.io.FileOutputStream. (user-file path) true)
                                          java.nio.charset.StandardCharsets/UTF_8))})
 
 (defn text-file-read-line [handle]
@@ -1390,16 +1411,16 @@
 
 (defn binary-file-open-read [path]
   (make-binary-file-handle :read
-                           (java.io.RandomAccessFile. path "r")))
+                           (java.io.RandomAccessFile. (user-file path) "r")))
 
 (defn binary-file-open-write [path]
-  (let [raf (java.io.RandomAccessFile. path "rw")]
+  (let [raf (java.io.RandomAccessFile. (user-file path) "rw")]
     (.setLength raf 0)
     (.seek raf 0)
     (make-binary-file-handle :write raf)))
 
 (defn binary-file-open-append [path]
-  (let [raf (java.io.RandomAccessFile. path "rw")
+  (let [raf (java.io.RandomAccessFile. (user-file path) "rw")
         size (.length raf)]
     (.seek raf size)
     (make-binary-file-handle :append raf)))

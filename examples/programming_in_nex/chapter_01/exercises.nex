@@ -1,74 +1,117 @@
 -- ============================================================================
--- Programming with Nex — Chapter 1: Getting Started
+-- Programming with Nex — Chapter 1: A Quick Tour of Nex
 -- Solutions to the end-of-chapter exercises.
 --
--- The book's exercises are posed at the REPL; here they are gathered into one
--- runnable program so the whole set can be checked at once:  nex exercises.nex
+-- The exercises ask the reader to change the chapter's programs; the changed
+-- logic is gathered here into functions called with test values, so the whole
+-- set runs non-interactively:  nex exercises.nex
 -- ============================================================================
+
+intern text/Regex
 
 function main() do
   -- --------------------------------------------------------------------------
-  -- 1. Seconds in a week, built up from named parts.
+  -- 1. Two more greetings; keep greeting until each new one has appeared.
   -- --------------------------------------------------------------------------
-  let seconds_per_minute: Integer := 60
-  let minutes_per_hour: Integer := 60
-  let hours_per_day: Integer := 24
-  let days_per_week: Integer := 7
-  let seconds_per_week: Integer :=
-    seconds_per_minute * minutes_per_hour * hours_per_day * days_per_week
-  console.print_line("1. Seconds in a week: " + seconds_per_week.to_string)   -- 604800
-  assert seconds_per_week = 604800
+  let greetings: Array[String] :=
+    ["Hello", "Привет", "नमस्ते", "こんにちは", "Γεια σου", "Bonjour", "Hallo"]
+  console.print_line("1. greetings.length = " + greetings.length.to_string)   -- 7
+  assert greetings.length = 7
+  let seen_hallo: Boolean := false
+  let seen_bonjour: Boolean := false
+  let tries: Integer := 0
+  from
+  until
+    (seen_hallo and seen_bonjour) or tries = 10000
+  do
+    let g: String := greetings.get(greetings.length.pick)
+    if g = "Hallo" then seen_hallo := true end
+    if g = "Bonjour" then seen_bonjour := true end
+    tries := tries + 1
+  end
+  assert seen_hallo and seen_bonjour
 
   -- --------------------------------------------------------------------------
-  -- 2. Area of a circle, radius 5.0.
+  -- 2. Discussion only. :vars lists greetings and name; after :clear, :vars
+  --    lists nothing, and typing `greetings` reports
+  --      Error: Undefined variable: greetings
+  --    because :clear forgot every definition.
   -- --------------------------------------------------------------------------
-  let radius: Real := 5.0
-  let pi: Real := 3.14159
-  let area: Real := pi * radius * radius
-  console.print_line("2. Area of circle (r=5.0): " + area.to_string)          -- 78.53975
-  assert area = 78.53975
 
   -- --------------------------------------------------------------------------
-  -- 3. Greeting from two string variables.
+  -- 3. hello.nex asks for the name when none is given on the command line.
+  --    In the program the second argument is console.read_line("What is your
+  --    name? "); here it is passed in.
   -- --------------------------------------------------------------------------
-  let first_name: String := "Ada"
-  let last_name: String := "Lovelace"
-  console.print_line("3. Hello, " + first_name + " " + last_name)
-  -- At the REPL, :vars would then show first_name and last_name in the session.
+  console.print_line("3. " + name_to_greet(["Grace"], "unused"))   -- Grace
+  console.print_line("3. " + name_to_greet([], "Ada"))             -- Ada
+  assert name_to_greet(["Grace"], "unused") = "Grace"
+  assert name_to_greet([], "Ada") = "Ada"
 
   -- --------------------------------------------------------------------------
-  -- 4. `let x := 10` then `let x := 20`.
-  --    A second `let` in the SAME scope re-DECLARES the name: it introduces a
-  --    fresh binding that shadows the first, rather than mutating it. To UPDATE
-  --    an existing variable you use assignment (`:=`) without `let`. Shown here
-  --    with two differently named variables, since re-`let`-ing one name in a
-  --    single function body is a redeclaration error in compiled code:
+  -- 4. Greet every name on the command line (program.arguments in hello.nex).
+  --    Compile with  nex compile jvm hello.nex build/  and run
+  --    java -jar build/hello.jar Ada Grace Alan
   -- --------------------------------------------------------------------------
-  let x_first: Integer := 10        -- like the first  `let x := 10`
-  let x_second: Integer := 20       -- like the second `let x := 20` (new binding)
-  console.print_line("4. first let -> " + x_first.to_string +
-                     ", second let -> " + x_second.to_string +
-                     "  (the second `let` introduces a new variable)")
-  assert x_first = 10
-  assert x_second = 20
-  let counter: Integer := 10
-  counter := 20                     -- THIS is an update of the same variable
-  console.print_line("   plain `:=` updates in place -> " + counter.to_string)
-  assert counter = 20
+  let lines: Array[String] := greet_all(["Ada", "Grace", "Alan"])
+  across lines as line do
+    console.print_line("4. " + line)
+  end
+  assert lines.length = 3
+  assert lines.get(2).ends_with(", Alan!")
 
   -- --------------------------------------------------------------------------
-  -- 5.* Fahrenheit -> Celsius:  C = (F - 32) * 5 / 9
-  --     Verified at the two reference temperatures.
+  -- 5. The longest word in the file. most_frequent(counts, 0) breaks its
+  --    precondition, and the program stops with
+  --      Error: Precondition violation: positive_top
+  --    naming the call that broke it.
   -- --------------------------------------------------------------------------
-  assert report_f_to_c(32.0) = 0.0     -- freezing point of water  -> 0.0 C
-  assert report_f_to_c(98.6) = 37.0    -- body temperature         -> 37.0 C
+  let word_pattern: Regex := create Regex.compile("[a-z']+")
+  let words: Array[String] :=
+    word_pattern.find_all("Look on my Works, ye Mighty, and despair!".to_lower)
+  console.print_line("5. longest word: " + longest(words))   -- despair
+  assert longest(words) = "despair"
+
+  -- --------------------------------------------------------------------------
+  -- 6.* Discussion with a sketch. In mandelbrot.nex set max_steps to 500 and
+  --     change the two lines in `band` that compute x and y to
+  --       let x: Real := -0.755 + 0.02 * col.to_real / width.to_real
+  --       let y: Real := 0.10 + 0.015 * row.to_real / height.to_real
+  --     With band_count 1 every pixel is computed by one task, one after
+  --     another; with 8, the bands run on separate cores, so the computing
+  --     part is several times faster (start-up time is the same either way).
+  -- --------------------------------------------------------------------------
 end
 
--- Convert one Fahrenheit reading to Celsius, print it readably, and return it.
-function report_f_to_c(f: Real): Real do
-  let celsius: Real := (f - 32.0) * 5.0 / 9.0
-  console.print_line("5. " + f.to_string + " deg F = " + celsius.to_string + " deg C")
-  result := celsius
+-- The name to greet: the first command-line argument, else the typed name.
+function name_to_greet(arguments: Array[String], typed: String): String do
+  if arguments.is_empty then
+    result := typed
+  else
+    result := arguments.get(0)
+  end
 end
+
+-- One greeting per name, each in a randomly chosen language.
+function greet_all(names: Array[String]): Array[String] do
+  let greetings: Array[String] := ["Hello", "Привет", "नमस्ते", "こんにちは", "Γεια σου"]
+  result := []
+  across names as name do
+    result.add(greetings.get(greetings.length.pick) + ", " + name + "!")
+  end
+end
+
+-- The longest of `words`; the first one wins a tie.
+function longest(words: Array[String]): String
+  require
+    some_words: not words.is_empty
+  do
+    result := words.get(0)
+    across words as word do
+      if word.length > result.length then
+        result := word
+      end
+    end
+  end
 
 main()

@@ -1,0 +1,12 @@
+-- hello.nex: greet the person named on the command line
+-- in a randomly chosen language.
+
+let greetings: Array[String] := ["Hello", "Привет", "नमस्ते", "こんにちは", "Γεια σου"]
+
+if program.arguments.is_empty then
+  console.print_line("usage: nex hello.nex <name>")
+else
+  let name: String := program.arguments.get(0)
+  let greeting: String := greetings.get(greetings.length.pick)
+  console.print_line(greeting + ", " + name + "!")
+end
