@@ -10,7 +10,7 @@ set -e
 #   - a source checkout: builds that folder first (scripts/package-release.sh),
 #     which also needs the Clojure CLI.
 
-VERSION="0.7.3"
+VERSION="0.7.4"
 TARGET="jvm"
 INSTALL_DEPS=false
 INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"

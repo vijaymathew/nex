@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 0.7.4 - 2026-11-14
+
+- **Faster `char_at`, `length` and `Char.to_integer` in compiled code.**
+  `c.to_integer` on a `Char` is now a single JVM instruction, since compiled
+  code already keeps a `Char` as its code point; before, it made a `NexChar`
+  and looked the method up at run time. `s.char_at(i)` and `s.length` call
+  runtime helpers that take and return primitive values, instead of the
+  general built-in method call, which boxed the index and the result. A loop
+  that sums the code points of an ASCII string with `char_at` runs about 7x
+  faster (90M calls: 1.61 s before, 0.24 s now). Out-of-range indexes raise
+  the same `Index_Out_Of_Bounds` error as before.
+- **Faster indexing of strings with characters outside the Basic
+  Multilingual Plane.** Such a string records the offset of every 32nd
+  character, not every 64th, so finding a character takes at most 31 steps
+  instead of 63. A 32-character block with no surrogate pair now needs no
+  steps at all, and the string remembers the last character it found, so a
+  loop over `char_at(i)`, `char_at(i + 1)`, ... takes one step per character.
+  The remembered position is safe to share between threads. On a 9,000-
+  character string with an emoji in every ninth position, 90M sequential
+  `char_at` calls take 1.34 s, down from 5.63 s; in random order they are
+  about a quarter faster than before. Plain strings are unchanged.
+- **Benchmarks for string indexing.** `char_at` and `char_at_wide` in
+  `benchmarks/` time 90M `char_at` calls on an ASCII string and on one with
+  an emoji in every ninth position, in Nex, Java, Python and Clojure.
+
 ## 0.7.3 - 2026-11-12
 
 - **Strings and Chars are Unicode code points, as the Definition says.** A
