@@ -55,6 +55,39 @@
     (is (every? #(= (nth cps %) (rt/char-code (rt/str-char-at w %))) (range (count cps))))
     (is (every? #(= % (rt/str-index-of-offset w (rt/str-offset w %))) (range (inc (count cps)))))))
 
+(deftest wide-offsets-in-any-order
+  ;; wide-offset finds a character without a walk in a block with no
+  ;; surrogate pair, and otherwise walks from the breadcrumb or from the
+  ;; string's cursor (the last character found). Every order of access must
+  ;; give the same answers: forwards, backwards, at random and repeated, on
+  ;; blocks of both kinds, unpaired surrogates, and threads sharing one
+  ;; string, whose cursor they all move.
+  (let [texts {"emoji every ninth" (apply str (repeat 300 "abcdefgh😀"))
+               "one emoji at the end" (str (apply str (repeat 300 "abcdefghi")) "😀")
+               "emoji in some blocks" (apply str (for [b (range 40)]
+                                                   (if (even? b) (apply str (repeat 32 "x")) "😀a😀b")))
+               "unpaired surrogates" (str "a\uD800b\uDC00c" (apply str (repeat 50 "😀\uD83Dz")))
+               "all emoji" (apply str (repeat 200 "😀"))}
+        rng (java.util.Random. 42)]
+    (doseq [[label text] texts]
+      (testing label
+        (let [w (rt/->nex-string text)
+              cps (vec (.toArray (.codePoints ^String text)))
+              n (count cps)
+              check (fn [order] (every? #(= (nth cps %) (rt/str-code-at w %)) order))]
+          (is (rt/nex-wide-string? w))
+          (is (= n (rt/str-length w)))
+          (is (check (range n)) "forwards")
+          (is (check (reverse (range n))) "backwards")
+          (is (check (repeatedly (* 4 n) #(.nextInt rng n))) "at random")
+          (is (check (mapcat #(repeat 3 %) (range n))) "each one repeatedly")
+          (is (every? #(= % (rt/str-index-of-offset w (rt/str-offset w %))) (range (inc n)))
+              "offset and index agree")
+          (let [results (doall (for [t (range 4)]
+                                 (future (let [r (java.util.Random. t)]
+                                           (check (repeatedly 20000 #(.nextInt r n)))))))]
+            (is (every? deref results) "threads sharing the string")))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Char
 

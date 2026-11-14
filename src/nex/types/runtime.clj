@@ -529,15 +529,17 @@
 ;; - a NexWideString, when it holds any surrogate (a character outside the
 ;;   Basic Multilingual Plane, such as an emoji, or a lone surrogate), which
 ;;   keeps the same text and its length in characters, and the UTF-16 offset
-;;   of every 64th character ("breadcrumbs"), so character i is found in at
-;;   most 63 steps.
+;;   of every 32nd character ("breadcrumbs"), so character i is found in at
+;;   most 31 steps. A 32-character block with no surrogate pair needs no
+;;   steps, and the string remembers the last character it found, so a
+;;   loop over i, i + 1, ... takes one step per character (see wide-offset).
 ;;
 ;; Every Nex string is made through ->nex-string (or is known to need no
 ;; check, as plain + plain is), so the form is canonical: two strings with
 ;; the same text have the same form, and equals/hashCode need not mix them.
 
-(def ^:private ^:const crumb-shift 6)
-(def ^:private ^:const crumb-mask 63)
+(def ^:private ^:const crumb-shift 5)
+(def ^:private ^:const crumb-mask 31)
 
 (defn- has-surrogate?
   [^String s]
@@ -548,7 +550,8 @@
         (Character/isSurrogate (.charAt s i)) true
         :else (recur (inc i))))))
 
-(deftype NexWideString [^String s ^int n ^ints crumbs]
+(deftype NexWideString [^String s ^int n ^ints crumbs
+                        ^java.util.concurrent.atomic.AtomicLong cursor]
   Object
   (toString [_] s)
   (equals [_ o] (and (instance? NexWideString o) (.equals s (.-s ^NexWideString o))))
@@ -571,7 +574,9 @@
       (if (< off len)
         (do (when (zero? (bit-and k crumb-mask)) (.add crumbs (Integer/valueOf off)))
             (recur (+ off (Character/charCount (.codePointAt s (int off)))) (inc k)))
-        (NexWideString. s (int k) (int-array (map int crumbs)))))))
+        ;; The cursor starts at character 0, which is at offset 0.
+        (NexWideString. s (int k) (int-array (map int crumbs))
+                        (java.util.concurrent.atomic.AtomicLong. 0))))))
 
 (defn nex-wide-string? [v] (instance? NexWideString v))
 
@@ -608,17 +613,40 @@
 
 (defn- wide-offset
   "The UTF-16 offset of character I (0 <= I <= its length) of the wide
-   string W."
+   string W. Character I is in block K = I / 32, which starts at
+   breadcrumb K. When the block holds no surrogate pair, its offsets advance
+   by one per character, so I's is found without a walk. Otherwise the walk
+   starts at the breadcrumb, or at W's cursor, the last character found,
+   when that is in the same block at or before I. The cursor is one long,
+   character << 32 | offset, read and written with opaque access, which
+   cannot tear it: a thread that sees another's cursor sees a true pair."
   ^long [^NexWideString w ^long i]
-  (if (>= i (.-n w))
-    (long (.length ^String (.-s w)))
-    (let [^String s (.-s w)
-          k (bit-shift-right i crumb-shift)]
-      (loop [off (long (aget ^ints (.-crumbs w) k))
-             left (bit-and i crumb-mask)]
-        (if (zero? left)
-          off
-          (recur (+ off (Character/charCount (.codePointAt s (int off)))) (dec left)))))))
+  (let [^String s (.-s w)
+        n (long (.-n w))]
+    (if (>= i n)
+      (long (.length s))
+      (let [^ints crumbs (.-crumbs w)
+            k (bit-shift-right i crumb-shift)
+            base (long (aget crumbs k))
+            next-k (inc k)
+            block-end (if (< next-k (alength crumbs))
+                        (long (aget crumbs next-k))
+                        (long (.length s)))
+            block-chars (min (inc crumb-mask) (- n (bit-shift-left k crumb-shift)))]
+        (if (== (- block-end base) block-chars)
+          (+ base (bit-and i crumb-mask))
+          (let [^java.util.concurrent.atomic.AtomicLong cursor (.-cursor w)
+                c (.getOpaque cursor)
+                ci (unsigned-bit-shift-right c 32)
+                from-cursor? (and (<= ci i) (== k (bit-shift-right ci crumb-shift)))
+                off (loop [off (if from-cursor? (bit-and c 0xFFFFFFFF) base)
+                           left (if from-cursor? (- i ci) (bit-and i crumb-mask))]
+                      (if (zero? left)
+                        off
+                        (recur (+ off (Character/charCount (.codePointAt s (int off))))
+                               (dec left))))]
+            (.setOpaque cursor (bit-or (bit-shift-left i 32) off))
+            off))))))
 
 (defn str-offset
   "The UTF-16 offset of character I (0 <= I <= length) of the Nex String V."
