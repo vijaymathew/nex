@@ -1,0 +1,40 @@
+-- Indexing a string: char_at on every character of a 9,000-character string,
+-- a string with 😀 as every ninth character, so a wide string, 10,000 times over (90M calls), summing the code points.
+import java.lang.System
+
+-- The work's own time, in microseconds, from the JVM's monotonic clock.
+function clock_us(): Integer do
+  with "java" do
+    result := System.nanoTime() / 1000
+  end
+end
+
+function build(unit: String, n: Integer): String do
+  let s := ""
+  from let i := 0 until i = n do
+    s := s + unit
+    i := i + 1
+  end
+  result := s
+end
+
+function run(passes: Integer): Integer do
+  let s := build("abcdefgh😀", 1000)
+  let n := s.length
+  let total := 0
+  from let p := 0 until p = passes do
+    from let i := 0 until i = n do
+      total := total + s.char_at(i).to_integer
+      i := i + 1
+    end
+    p := p + 1
+  end
+  result := total
+end
+
+clock_us() -- warm the clock up before timing
+let t0 := clock_us()
+let r := run(10000)
+let t1 := clock_us()
+print(r)
+print(t1 - t0)

@@ -73,6 +73,15 @@ public class Bench {
                 LongUnaryOperator f = x -> x + 1;
                 for (long i = 0; i < 20000000L; i++) total = (total + f.applyAsLong(i)) % 1000003;
             }
+            case "char_at" -> {
+                String s = "abcdefghi".repeat(1000);
+                for (int p = 0; p < 10000; p++) for (int i = 0; i < s.length(); i++) total += s.charAt(i);
+            }
+            case "char_at_wide" -> {
+                // Java has no constant-time indexing by code point, so take the code points once.
+                int[] cps = "abcdefgh\uD83D\uDE00".repeat(1000).codePoints().toArray();
+                for (int p = 0; p < 10000; p++) for (int i = 0; i < cps.length; i++) total += cps[i];
+            }
             default -> throw new IllegalArgumentException("unknown benchmark " + args[0]);
         }
         long t1 = System.nanoTime();
