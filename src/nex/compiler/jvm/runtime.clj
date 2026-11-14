@@ -2859,6 +2859,13 @@
   [s & _]
   (rt/str-length s))
 
+(defn- char-at-out-of-bounds
+  "The Index_Out_Of_Bounds error of `s.char_at(i)`. Thrown at each call site,
+   so that a primitive helper's other branch stays unboxed."
+  [^long i ^long n]
+  (ex-info (str "Index " i " out of bounds for length " n)
+           {:builtin-kind "Index_Out_Of_Bounds"}))
+
 (defn builtin-method-string-char-at
   "`s.char_at(i)`, called directly (see builtin-method-string-length). Out of
    range is an Index_Out_Of_Bounds error, as the builtin's is."
@@ -2867,8 +2874,33 @@
         n (rt/str-length s)]
     (if (and (<= 0 i) (< i n))
       (rt/str-char-at s i)
-      (throw (ex-info (str "Index " i " out of bounds for length " n)
-                      {:builtin-kind "Index_Out_Of_Bounds"})))))
+      (throw (char-at-out-of-bounds i n)))))
+
+(defn string-length-prim
+  "`s.length` on a String receiver, as a primitive long, for compiled code
+   (nex.compiler.jvm.emit/emit-string-char-intrinsic!)."
+  ^long [s]
+  (if (instance? String s)
+    (long (.length ^String s))
+    (rt/str-length s)))
+
+(defn string-code-at
+  "The code point of `s.char_at(i)` on a String receiver, as a primitive
+   long, for compiled code, which keeps a Char as a JVM int (see
+   nex.compiler.jvm.emit/emit-string-char-intrinsic!). A plain String is
+   indexed directly. Out of range is an Index_Out_Of_Bounds error, as
+   builtin-method-string-char-at's is."
+  ^long [s ^long i]
+  (if (instance? String s)
+    (let [^String s s
+          n (.length s)]
+      (if (and (<= 0 i) (< i n))
+        (long (int (.charAt s (int i))))
+        (throw (char-at-out-of-bounds i n))))
+    (let [n (rt/str-length s)]
+      (if (and (<= 0 i) (< i n))
+        (rt/str-code-at s i)
+        (throw (char-at-out-of-bounds i n))))))
 
 (defn builtin-method-string-split
   [target delim]

@@ -644,14 +644,19 @@
 
 (declare make-char)
 
+(defn str-code-at
+  "The code point of character I of the Nex String V; I must be in range."
+  ^long [v ^long i]
+  (if (instance? NexWideString v)
+    (long (.codePointAt ^String (.-s ^NexWideString v) (int (wide-offset v i))))
+    ;; (int ...) first: Clojure has no long cast of a primitive char, and
+    ;; reflects on one (microseconds per call).
+    (long (int (.charAt ^String v (int i))))))
+
 (defn str-char-at
   "Character I of the Nex String V, a Char; I must be in range."
   [v ^long i]
-  (if (instance? NexWideString v)
-    (make-char (long (.codePointAt ^String (.-s ^NexWideString v) (int (wide-offset v i)))))
-    ;; (int ...) first: Clojure has no long cast of a primitive char, and
-    ;; reflects on one (microseconds per call).
-    (make-char (long (int (.charAt ^String v (int i)))))))
+  (make-char (str-code-at v i)))
 
 (defn str-substring
   "Characters START (inclusive) to END (exclusive) of the Nex String V."

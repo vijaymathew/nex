@@ -119,6 +119,48 @@
                  "print(big.substring(198, 203))"
                  "print(big.index_of(\"end\"))")))))
 
+(deftest char-at-length-and-to-integer-on-unboxed-values
+  ;; Compiled code emits these three without the general built-in call
+  ;; (nex.compiler.jvm.emit/emit-string-char-intrinsic!): to_integer on a
+  ;; Char is I2L on its code point, and length and char_at call primitive
+  ;; runtime helpers. Each result is used as a Char, an Integer, Any and a
+  ;; discarded statement, on both forms of String.
+  (testing "plain and wide strings, in a loop summing code points"
+    (is (= ["9090" "129316" "3" "#😀"]
+           (both "function sum(s: String): Integer do"
+                 "  let total := 0"
+                 "  from let i := 0 until i = s.length do"
+                 "    total := total + s.char_at(i).to_integer"
+                 "    i := i + 1"
+                 "  end"
+                 "  result := total"
+                 "end"
+                 "print(sum(\"abcdefghi\".replicate(10)))"
+                 "print(sum(\"abcdefgh😀\"))"
+                 "let w := \"a😀b\""
+                 "print(w.length)"
+                 "print(w.char_at(1))"))))
+  (testing "the result as a Char, as Any, and discarded"
+    (is (= ["#x" "#😀" "128513" "\"discarded ok\""]
+           (both "let c: Char := \"xyz\".char_at(0)"
+                 "print(c)"
+                 "let a: Any := \"a😀\".char_at(1)"
+                 "print(a)"
+                 "print(#😀.to_integer + 1)"
+                 "\"a😀\".char_at(1)"
+                 "\"a😀\".length"
+                 "print(\"discarded ok\")"))))
+  (testing "out of range is an Index_Out_Of_Bounds error on both forms"
+    (is (= ["\"Index 3 out of bounds for length 3\""
+            "\"Index -1 out of bounds for length 2\""]
+           (both "function at(s: String, i: Integer): String do"
+                 "  result := s.char_at(i).to_string"
+                 "rescue"
+                 "  result := exception.to_string"
+                 "end"
+                 "print(at(\"abc\", 3))"
+                 "print(at(\"a😀\", -1))")))))
+
 (deftest string-operations-keep-the-form-hidden
   (is (= ["\"HÉLLO 😀\"" "7" "\"abcd\"" "true" "1" "true" "[\"x\", \"y\"]" "\"😀,b\"" "\"😀😀ab\"" "4"
           "[240, 159, 152, 128]" "true" "2" "1" "true" "2" "\"String\"" "true" "2"]
