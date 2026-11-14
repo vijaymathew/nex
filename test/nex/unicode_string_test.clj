@@ -55,6 +55,39 @@
     (is (every? #(= (nth cps %) (rt/char-code (rt/str-char-at w %))) (range (count cps))))
     (is (every? #(= % (rt/str-index-of-offset w (rt/str-offset w %))) (range (inc (count cps)))))))
 
+(deftest wide-offsets-in-any-order
+  ;; wide-offset finds a character without a walk in a block with no
+  ;; surrogate pair, and otherwise walks from the breadcrumb or from the
+  ;; string's cursor (the last character found). Every order of access must
+  ;; give the same answers: forwards, backwards, at random and repeated, on
+  ;; blocks of both kinds, unpaired surrogates, and threads sharing one
+  ;; string, whose cursor they all move.
+  (let [texts {"emoji every ninth" (apply str (repeat 300 "abcdefgh😀"))
+               "one emoji at the end" (str (apply str (repeat 300 "abcdefghi")) "😀")
+               "emoji in some blocks" (apply str (for [b (range 40)]
+                                                   (if (even? b) (apply str (repeat 32 "x")) "😀a😀b")))
+               "unpaired surrogates" (str "a\uD800b\uDC00c" (apply str (repeat 50 "😀\uD83Dz")))
+               "all emoji" (apply str (repeat 200 "😀"))}
+        rng (java.util.Random. 42)]
+    (doseq [[label text] texts]
+      (testing label
+        (let [w (rt/->nex-string text)
+              cps (vec (.toArray (.codePoints ^String text)))
+              n (count cps)
+              check (fn [order] (every? #(= (nth cps %) (rt/str-code-at w %)) order))]
+          (is (rt/nex-wide-string? w))
+          (is (= n (rt/str-length w)))
+          (is (check (range n)) "forwards")
+          (is (check (reverse (range n))) "backwards")
+          (is (check (repeatedly (* 4 n) #(.nextInt rng n))) "at random")
+          (is (check (mapcat #(repeat 3 %) (range n))) "each one repeatedly")
+          (is (every? #(= % (rt/str-index-of-offset w (rt/str-offset w %))) (range (inc n)))
+              "offset and index agree")
+          (let [results (doall (for [t (range 4)]
+                                 (future (let [r (java.util.Random. t)]
+                                           (check (repeatedly 20000 #(.nextInt r n)))))))]
+            (is (every? deref results) "threads sharing the string")))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Char
 
@@ -118,6 +151,48 @@
                  "print(big.length)"
                  "print(big.substring(198, 203))"
                  "print(big.index_of(\"end\"))")))))
+
+(deftest char-at-length-and-to-integer-on-unboxed-values
+  ;; Compiled code emits these three without the general built-in call
+  ;; (nex.compiler.jvm.emit/emit-string-char-intrinsic!): to_integer on a
+  ;; Char is I2L on its code point, and length and char_at call primitive
+  ;; runtime helpers. Each result is used as a Char, an Integer, Any and a
+  ;; discarded statement, on both forms of String.
+  (testing "plain and wide strings, in a loop summing code points"
+    (is (= ["9090" "129316" "3" "#😀"]
+           (both "function sum(s: String): Integer do"
+                 "  let total := 0"
+                 "  from let i := 0 until i = s.length do"
+                 "    total := total + s.char_at(i).to_integer"
+                 "    i := i + 1"
+                 "  end"
+                 "  result := total"
+                 "end"
+                 "print(sum(\"abcdefghi\".replicate(10)))"
+                 "print(sum(\"abcdefgh😀\"))"
+                 "let w := \"a😀b\""
+                 "print(w.length)"
+                 "print(w.char_at(1))"))))
+  (testing "the result as a Char, as Any, and discarded"
+    (is (= ["#x" "#😀" "128513" "\"discarded ok\""]
+           (both "let c: Char := \"xyz\".char_at(0)"
+                 "print(c)"
+                 "let a: Any := \"a😀\".char_at(1)"
+                 "print(a)"
+                 "print(#😀.to_integer + 1)"
+                 "\"a😀\".char_at(1)"
+                 "\"a😀\".length"
+                 "print(\"discarded ok\")"))))
+  (testing "out of range is an Index_Out_Of_Bounds error on both forms"
+    (is (= ["\"Index 3 out of bounds for length 3\""
+            "\"Index -1 out of bounds for length 2\""]
+           (both "function at(s: String, i: Integer): String do"
+                 "  result := s.char_at(i).to_string"
+                 "rescue"
+                 "  result := exception.to_string"
+                 "end"
+                 "print(at(\"abc\", 3))"
+                 "print(at(\"a😀\", -1))")))))
 
 (deftest string-operations-keep-the-form-hidden
   (is (= ["\"HÉLLO 😀\"" "7" "\"abcd\"" "true" "1" "true" "[\"x\", \"y\"]" "\"😀,b\"" "\"😀😀ab\"" "4"

@@ -60,6 +60,22 @@
                       (if (< i 20000000) (recur (inc i) (rem (+ total (long (step c i))) 1000003)) total)))
     "call_poly2" (poly [(->S1) (->S2)] 20000000)
     "call_poly4" (poly [(->S1) (->S2) (->S3) (->S4)] 20000000)
+    "char_at" (let [^String s (apply str (repeat 1000 "abcdefghi"))
+                    n (.length s)]
+                (loop [p 0 total 0]
+                  (if (< p 10000)
+                    (recur (inc p) (long (loop [i 0 total total]
+                                           (if (< i n) (recur (inc i) (+ total (int (.charAt s i)))) total))))
+                    total)))
+    ;; Java has no constant-time indexing by code point, so take the code points once.
+    "char_at_wide" (let [^String s (apply str (repeat 1000 "abcdefgh\uD83D\uDE00"))
+                         ^ints cps (.toArray ^java.util.stream.IntStream (.codePoints s))
+                         n (alength cps)]
+                     (loop [p 0 total 0]
+                       (if (< p 10000)
+                         (recur (inc p) (long (loop [i 0 total total]
+                                                (if (< i n) (recur (inc i) (+ total (aget cps i))) total))))
+                         total)))
     "call_closure" (let [f (fn ^long [^long x] (+ x 1))]
                      (loop [i 0 total 0]
                        (if (< i 20000000) (recur (inc i) (rem (+ total (long (f i))) 1000003)) total)))))

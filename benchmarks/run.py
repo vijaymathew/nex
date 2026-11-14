@@ -42,6 +42,8 @@ BENCHMARKS = [
     ("call_poly2", "polymorphic calls over 2 classes: 20M"),
     ("call_poly4", "polymorphic calls over 4 classes: 20M"),
     ("call_closure", "closure calls: 20M"),
+    ("char_at", "string indexing: 90M char_at on ASCII text"),
+    ("char_at_wide", "string indexing: 90M char_at on text with emoji"),
 ]
 
 LANGS = ["nex", "java", "python", "clojure"]

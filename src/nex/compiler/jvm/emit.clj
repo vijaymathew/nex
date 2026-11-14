@@ -2461,11 +2461,55 @@
       (emit-value-coerce! mv :long (:jvm-type expr))
       (:jvm-type expr))))
 
+(defn- emit-string-char-intrinsic!
+  "`c.to_integer` on a Char, and `s.length` and `s.char_at(i)` on a String,
+   without the general built-in method call: that boxes the arguments, goes
+   through a Var and a variadic helper, and for a Char makes a NexChar only to
+   read its code point back. Compiled code keeps a Char as a JVM int (its code
+   point), so `to_integer` is I2L; `length` and `char_at` call primitive
+   runtime helpers (string-length-prim, string-code-at), and `char_at` leaves
+   the code point as the Char. Returns the result's JVM type, or nil when EXPR
+   is not one of these."
+  [^MethodVisitor mv expr state-slot]
+  (let [args (:args expr)
+        finish (fn [result]
+                 (if (= :void (:jvm-type expr))
+                   (do (.visitInsn mv (if (= :long result) Opcodes/POP2 Opcodes/POP)) :void)
+                   (do (emit-value-coerce! mv result (:jvm-type expr))
+                       (:jvm-type expr))))]
+    (case (:helper expr)
+      "builtin-method:Char:to_integer"
+      (when (and (= 1 (count args)) (= :char (:jvm-type (first args))))
+        (emit-value-coerce! mv (emit-expr! mv (first args) state-slot) :char)
+        (.visitInsn mv Opcodes/I2L)
+        (finish :long))
+
+      "builtin-method:String:length"
+      (when (= 1 (count args))
+        (emit-prim-fn! mv "string-length-prim" "clojure/lang/IFn$OL")
+        (emit-boxed-expr! mv (first args) state-slot)
+        (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$OL" "invokePrim"
+                          "(Ljava/lang/Object;)J" true)
+        (finish :long))
+
+      "builtin-method:String:char_at"
+      (when (and (= 2 (count args)) (#{:long :int} (:jvm-type (second args))))
+        (emit-prim-fn! mv "string-code-at" "clojure/lang/IFn$OLL")
+        (emit-boxed-expr! mv (first args) state-slot)
+        (emit-value-coerce! mv (emit-expr! mv (second args) state-slot) :long)
+        (.visitMethodInsn mv Opcodes/INVOKEINTERFACE "clojure/lang/IFn$OLL" "invokePrim"
+                          "(Ljava/lang/Object;J)J" true)
+        (.visitInsn mv Opcodes/L2I)
+        (finish :char))
+
+      nil)))
+
 (defn- emit-direct-runtime-helper-call!
   [^MethodVisitor mv expr state-slot]
   (or (emit-prim-long-arith! mv expr state-slot)
       (emit-integer-compare! mv expr state-slot)
       (emit-string-concat-2! mv expr state-slot)
+      (emit-string-char-intrinsic! mv expr state-slot)
       (emit-sized-intrinsic! mv expr state-slot)
       (emit-byte-array-intrinsic! mv expr state-slot)
       (emit-numeric-intrinsic! mv expr state-slot)

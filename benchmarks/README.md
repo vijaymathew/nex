@@ -125,6 +125,16 @@ you pass `--nex` or set `NEX`.
 | `call_poly2` | 20M calls of a deferred method over objects of 2 classes |
 | `call_poly4` | The same over 4 classes, past what the JVM inlines |
 | `call_closure` | 20M calls of a closure (`fn` value) |
+| `char_at` | String indexing: 90M `char_at` calls on a 9,000-character ASCII string |
+| `char_at_wide` | The same on a string with 😀 as every ninth character |
+
+`char_at` and `char_at_wide` together show what a Nex String costs once it
+holds a character outside the Basic Multilingual Plane. The first string is a
+plain `java.lang.String`; the second is a `NexWideString`, whose `char_at`
+walks from the nearest breadcrumb. Python indexes both by code point
+natively. Java and Clojure have no constant-time indexing by code point, so
+in `char_at_wide` they take the string's code points into an `int` array once
+and index that.
 
 ## The programs
 
