@@ -663,6 +663,14 @@
                              (and (= "deferred" word) (zero? j) (= :routine (:kind top))
                                   (not= "ensure" (some-> (get order (inc k)) first-word)))
                              (pop stack) ; a deferred routine without `ensure` has no `end`
+                             ;; `deferred` ending a routine's header line, with
+                             ;; `ensure ... end` on the lines after it, opens
+                             ;; the routine there: its clauses and `end` go
+                             ;; flush with the header.
+                             (and (= "deferred" word) (pos? j) last? (not continues?)
+                                  (not= :routine (:kind top))
+                                  (= "ensure" (some-> (get order (inc k)) first-word)))
+                             (conj stack (open-frame :routine at))
                              (and (= "assert" word) (zero? j) (= 1 n))
                              (conj stack {:kind :assert :c indent :body (+ indent indent-size) :end indent})
                              :else stack)

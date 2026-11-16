@@ -228,6 +228,11 @@
                      "ensure"
                      "named: result /= \"\""
                      "end"
+                     "adjoin(t: T) deferred"
+                     "ensure"
+                     "added: contains(t)"
+                     "end"
+                     "contains(t: T): Boolean deferred"
                      "end")
               (lines "union Shape"
                      "  Circle(r: Real)"
@@ -245,6 +250,11 @@
                      "  ensure"
                      "    named: result /= \"\""
                      "  end"
+                     "  adjoin(t: T) deferred"
+                     "  ensure"
+                     "    added: contains(t)"
+                     "  end"
+                     "  contains(t: T): Boolean deferred"
                      "end")))
 
 (deftest continuation-lines

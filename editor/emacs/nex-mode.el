@@ -541,6 +541,16 @@ the line after (absent inside an expression)."
                             (and (eq 'word (nex-fmt--kind nt))
                                  (equal "ensure" (nex-fmt--text nt))))))
                 (setq stack (cdr stack)))
+               ;; `deferred' ending a routine's header line, with `ensure ...
+               ;; end' on the lines after it, opens the routine there: its
+               ;; clauses and `end' go flush with the header.
+               ((and (equal "deferred" word) (> j 0) last (not continues)
+                     (not (eq 'routine kind))
+                     (let* ((next (cadr rest))
+                            (nt (and next (aref (gethash next code) 0))))
+                       (and (eq 'word (nex-fmt--kind nt))
+                            (equal "ensure" (nex-fmt--text nt)))))
+                (push (nex-fmt--frame 'routine at) stack))
                ((and (equal "assert" word) (= j 0) (= n 1))
                 (push (list :kind 'assert :c indent :body (+ indent nex-indent-offset)
                             :end indent)

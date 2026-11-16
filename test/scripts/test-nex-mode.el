@@ -662,8 +662,9 @@ comment-start flags, so the string scanner mis-read quotes in comments."
 (ert-deftest nex-indent-deferred-routine-body ()
   "A `deferred' standing in for a routine's body aligns with the routine, as
 its `do' would: after a `require' clause, with or without an `ensure' clause
-after it, and directly after the signature.  A `deferred class' header is
-unaffected."
+after it, and directly after the signature.  A `deferred' at the end of the
+signature line with an `ensure' clause after it opens the routine there.  A
+`deferred class' header is unaffected."
   (let ((expected '("deferred class Shape"
                     "feature"
                     "  scale(x: Integer): Integer"
@@ -676,6 +677,13 @@ unaffected."
                     ""
                     "  area(): Real"
                     "  deferred"
+                    ""
+                    "  adjoin(t: Integer) deferred"
+                    "  ensure"
+                    "    added: has(t)"
+                    "  end"
+                    ""
+                    "  has(t: Integer): Boolean deferred"
                     ""
                     "  grow(x: Integer): Integer"
                     "  require"
