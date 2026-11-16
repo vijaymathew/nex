@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **A class may not be named `Array`, `Map` or `Set`.** These built-in type
+  names are identifiers, not keywords like `String` and `Integer`, so
+  `class Set[T]` was accepted. Compiled code then read `Set[...]` as the
+  built-in collection, and calls on the class's objects failed at run time
+  with an unrelated type error. It is now a type error that names the class.
+  `extend Array[T]` and the other extensions of built-in types are
+  unaffected.
+- **Fixed: the interpreter called the wrong object when a routine's own names
+  shadowed the caller's variable.** An unqualified call inside a routine is
+  routed back through the variable the routine was called on, and that
+  variable was looked up in the routine's own scope. So `t.put(1)`, where
+  `put` has a parameter `t` and calls another routine of its class, or
+  `result.put(1)` inside a function, failed with a void or "method not found"
+  error. Compiled code was not affected.
+- **Fixed: `nex format` and the Emacs mode indented a deferred routine with
+  `deferred` on its signature line wrongly.** With `ensure ... end` after
+  `name(...) deferred`, the `end` was taken to close the class, and the rest
+  of the class lost a level of indentation.
+
 ## 0.7.4 - 2026-11-14
 
 - **Faster `char_at`, `length` and `Char.to_integer` in compiled code.**

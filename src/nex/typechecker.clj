@@ -9680,6 +9680,11 @@
       (pos? omitted) (conj (str "... and " omitted " more error" (when (> omitted 1) "s")
                                 " (use --max-errors to see more)")))))
 
+(def ^:private reserved-class-names
+  "Built-in type names a class may not take (see check-program*): the
+   collections, whose names are identifiers rather than keywords."
+  #{"Array" "Map" "Set"})
+
 (defn- check-program*
   "Type check a complete program whose extensions are applied (see
    check-program)."
@@ -9759,6 +9764,19 @@
                                          "a later definition would silently replace the earlier one. "
                                          "Rename or remove the duplicate.")
                                     line column)})))
+
+       ;; A class may not take the name of a built-in collection type. Unlike
+       ;; `String` or `Integer`, `Array`, `Map` and `Set` are not keywords, so
+       ;; the parser accepts `class Set[T]`, but the compiled backend reads
+       ;; `Set[...]` as the built-in type wherever it appears, and calls on
+       ;; the user's objects would be compiled as built-in Set operations.
+         (when-let [clash (first (filter #(contains? reserved-class-names (:name %)) classes))]
+           (let [n (:name clash)]
+             (throw (ex-info (str "Class name clashes with built-in type: " n)
+                             {:error (type-error
+                                      (str "Class '" n "' has the same name as the built-in type `"
+                                           n "`. Choose another name, such as `My_" n "`.")
+                                      (:dbg/line clash) (:dbg/col clash))}))))
 
        ;; A free function may not reuse a built-in function's name: the compiled
        ;; backend resolves builtins first (silently ignoring the user's

@@ -191,3 +191,46 @@ feature
 end
 let c: Child := create Child.make
 c.both"))))
+
+(deftest self-call-on-a-variable-the-routine-shadows-test
+  ;; The interpreter routes an unqualified call back through the variable the
+  ;; routine was called on, so that what the call changes reaches the caller.
+  ;; It used to look that variable up in the routine's own env, where a
+  ;; parameter, a local or `result` of the same name shadows it: `t.put(1)`
+  ;; with a parameter `t`, or `result.put(1)` in a function, called the inner
+  ;; routine on the wrong value.
+  (testing "a caller variable named like a parameter, a local and `result`"
+    (is (= ["[1]" "[2]" "[3, 4]" "[5]"]
+           (both "class Bag
+feature
+  items: Array[Integer]
+  has(t: Integer): Boolean do
+    result := items.contains(t)
+  end
+  put(t: Integer) do
+    if not has(t) then
+      items.add(t)
+    end
+  end
+  put_twice(a: Integer, b: Integer) do
+    let n := a
+    put(n)
+    across [b] as k do
+      put(k)
+    end
+  end
+end
+function bag_of(x: Integer): Bag do
+  result := create Bag
+  result.put(x)
+end
+let t := create Bag
+t.put(1)
+print(t.items)
+print(bag_of(2).items)
+let n := create Bag
+n.put_twice(3, 4)
+print(n.items)
+let k := create Bag
+k.put_twice(5, 5)
+print(k.items)")))))

@@ -58,3 +58,19 @@ print(__mine(1))"]
 (deftest library-helpers-are-all-prefixed
   (is (empty? (filter #(re-find #"^(binary_file_|byte_array_|datetime_|path_|regex_|text_file_)" %)
                       (keys bi/builtins)))))
+
+(deftest a-class-may-not-take-a-collection-type-name
+  ;; `Array`, `Map` and `Set` are identifiers, not keywords, so the parser
+  ;; accepts a class of that name; the compiled backend then read `Set[...]`
+  ;; as the built-in type and compiled calls on the user's objects as
+  ;; built-in Set operations. The type checker rejects the name instead.
+  (doseq [[n header] [["Array" "class Array[T]"]
+                      ["Map" "class Map[K, V]"]
+                      ["Set" "deferred class Set[T]"]]]
+    (testing n
+      (let [err (error-text (str header "\nfeature\n  size(): Integer do result := 0 end\nend"))]
+        (is (str/includes? (str err) (str "Class '" n "' has the same name as the built-in type")))
+        (is (str/includes? (str err) "line 1")))))
+  (testing "other names, and extending the built-in types, are still allowed"
+    (is (nil? (error-text "class Set_Array[T]\nfeature\n  size(): Integer do result := 0 end\nend")))
+    (is (nil? (error-text "extend Array[T]\nfeature\n  second(): T do result := get(1) end\nend")))))

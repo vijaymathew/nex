@@ -1137,7 +1137,7 @@
   (let [fields (:fields obj)
         inv-ctx (-> ctx
                     (assoc :current-object obj)
-                    (dissoc :current-target :param-names :modified-fields :in-constructor?))]
+                    (dissoc :current-target :caller-env :param-names :modified-fields :in-constructor?))]
     (let [env (make-env (:current-env ctx))]
       (bind-fields! env fields {})
       (check-class-invariant (assoc inv-ctx :current-env env :current-path [] :current-view {})
@@ -2059,7 +2059,7 @@
     ;; env, which holds the routine's live bindings.
     (:current-object ctx)
     (assoc :enclosing (assoc (select-keys ctx [:current-object :current-class-name :current-target
-                                               :current-path :current-view
+                                               :caller-env :current-path :current-view
                                                :param-names :modified-fields])
                              :in-closure? true))))
 
@@ -2230,6 +2230,7 @@
                         (assoc :current-object current-obj)
                         (assoc :param-names (set (map :name params)))
                         (assoc :current-target (:current-target ctx))
+                        (assoc :caller-env (:caller-env ctx))
                         (assoc :current-class-name (:name (or (:source-class method-lookup)
                                                               parent-class-def)))
                         (assoc :current-path path)
@@ -2489,6 +2490,11 @@
                         (assoc :current-env method-env)
                         (assoc :current-object obj)
                         (assoc :current-target target-name)
+                        ;; Where TARGET-NAME is bound: an unqualified call in
+                        ;; the routine is routed back through it, and the
+                        ;; routine's own names may shadow it (see
+                        ;; eval-call-without-target).
+                        (assoc :caller-env (:current-env ctx))
                         (assoc :current-class-name (:name source-class))
                         (assoc :current-path path)
                         (assoc :current-view view)
@@ -2882,13 +2888,18 @@
               (if (string? target-name)
               ;; The enclosing method was invoked on a plain variable, so route
               ;; the self-call back through that variable to propagate any
-              ;; field mutations to the caller.
-                (let [_ (env-set! (-> ctx :current-env :parent) target-name updated-obj)
-                      result (eval-node self-ctx {:type :call
-                                                  :target target-name
-                                                  :method method
-                                                  :args literal-args})
-                      called-obj (env-lookup (-> ctx :current-env :parent) target-name)
+              ;; field mutations to the caller. The variable is the caller's,
+              ;; so it is looked up and called in the caller's env: in the
+              ;; routine's own, a parameter, local or `result` of the same
+              ;; name would shadow it.
+                (let [caller-env (or (:caller-env ctx) (-> ctx :current-env :parent))
+                      _ (env-set! caller-env target-name updated-obj)
+                      result (eval-node (assoc self-ctx :current-env caller-env)
+                                        {:type :call
+                                         :target target-name
+                                         :method method
+                                         :args literal-args})
+                      called-obj (env-lookup caller-env target-name)
                       _ (when called-obj
                           (sync-fields! current-env (:fields called-obj) view nil))]
                   result)
