@@ -841,9 +841,11 @@
   "The Nex value of V, read by reflection from a compiled object's field of
    class TYPE: a Byte, Integer16 or Integer32 field is a JVM byte, short or
    int (see nex.compiler.jvm.descriptor/jvm-type->descriptor), which
-   reflection boxes to a java.lang.Byte, Short or Integer. No other Nex type
-   is stored in a field of these types, so each is turned back into its
-   tagged value. A reference-typed field's value is already a Nex value."
+   reflection boxes to a java.lang.Byte, Short or Integer, and each is turned
+   back into its tagged value. A Char field is a JVM int too, so an int field
+   read without knowing which it holds is taken for an Integer32: read a field
+   with reflected-field-value, which knows. A reference-typed field's value is
+   already a Nex value."
   [^Class type v]
   (cond
     (= Integer/TYPE type) (NexInt32. (long (.intValue ^Integer v)))
@@ -851,11 +853,51 @@
     (= Byte/TYPE type) (aget byte-box-cache (bit-and (long (.byteValue ^Byte v)) 0xFF))
     :else v))
 
+(def char-fields-field
+  "The static String field a compiled class lists its Char fields in,
+   separated by spaces (nex.compiler.jvm.emit/user-class-spec)."
+  "__char_fields__")
+
+(def ^:private char-field-cache
+  "java.lang.reflect.Field -> whether it holds a Char."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn char-field?
+  "True when the compiled field F holds a Char. A Char is a JVM int, as an
+   Integer32 is, so F's type cannot tell them apart; its class's
+   char-fields-field lists the Char ones."
+  [^java.lang.reflect.Field f]
+  (and (= Integer/TYPE (.getType f))
+       (let [^java.util.concurrent.ConcurrentHashMap cache char-field-cache
+             hit (.get cache f)]
+         (if (some? hit)
+           (boolean hit)
+           (let [names (try
+                         (let [^java.lang.reflect.Field lf (.getDeclaredField (.getDeclaringClass f)
+                                                                               ^String char-fields-field)]
+                           (.setAccessible lf true)
+                           (str (.get lf nil)))
+                         (catch NoSuchFieldException _ ""))
+                 char? (contains? (set (str/split names #" ")) (.getName f))]
+             (.put cache f char?)
+             char?)))))
+
+(defn reflected-field-value
+  "The Nex value of compiled field F of OWNER, read by reflection: a Char
+   field's int as a Char (char-field?), else as field-value->nex gives it."
+  [^java.lang.reflect.Field f owner]
+  (let [v (.get f owner)]
+    (if (char-field? f)
+      (make-char (long (.intValue ^Integer v)))
+      (field-value->nex (.getType f) v))))
+
 (defn nex->field-value
   "V converted for Field/set into a field of class TYPE: a tagged sized value
-   (or an Integer) into a JVM byte, short or int field. Anything else as is."
+   (or an Integer) into a JVM byte, short or int field, and a Char into the
+   int that holds its code point. Anything else as is."
   [^Class type v]
   (cond
+    (and (= Integer/TYPE type) (instance? NexChar v)) (Integer/valueOf (.cp ^NexChar v))
     (= Integer/TYPE type) (Integer/valueOf (int (sized-long v)))
     (= Short/TYPE type) (Short/valueOf (short (sized-long v)))
     (= Byte/TYPE type) (Byte/valueOf (unchecked-byte (sized-long v)))

@@ -14,7 +14,8 @@
             [clojure.walk :as walk]
             [nex.compiler.jvm.descriptor :as desc]
             [nex.ir :as ir]
-            [nex.types.builtins :as bi])
+            [nex.types.builtins :as bi]
+            [nex.types.runtime :as rt])
   (:import [org.objectweb.asm ClassReader ClassVisitor ClassWriter Label MethodVisitor Opcodes Type]))
 
 (def ^:private class-version Opcodes/V17)
@@ -371,12 +372,26 @@
                       :jvm-type jvm-type
                       :nex-type nex-type})
                    (:fields class-spec))))
-    :static-fields (mapv (fn [{:keys [name jvm-type]}]
-                           {:name name
-                            :descriptor (desc/jvm-type->descriptor jvm-type)
-                            :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC Opcodes/ACC_FINAL)
-                            :jvm-type jvm-type})
-                         (:constants class-spec))
+    :static-fields (vec
+                    (concat
+                     (mapv (fn [{:keys [name jvm-type]}]
+                             {:name name
+                              :descriptor (desc/jvm-type->descriptor jvm-type)
+                              :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC Opcodes/ACC_FINAL)
+                              :jvm-type jvm-type})
+                           (:constants class-spec))
+                     ;; A Char field is a JVM int, as an Integer32 one is, so
+                     ;; a field read by reflection could not tell them apart;
+                     ;; this constant names the Char ones
+                     ;; (nex.types.runtime/char-field?).
+                     (when-let [names (seq (keep (fn [{:keys [name jvm-type]}]
+                                                   (when (= :char jvm-type) name))
+                                                 (:fields class-spec)))]
+                       [{:name rt/char-fields-field
+                         :descriptor "Ljava/lang/String;"
+                         :flags (+ Opcodes/ACC_PUBLIC Opcodes/ACC_STATIC Opcodes/ACC_FINAL)
+                         :jvm-type (ir/object-jvm-type "java/lang/String")
+                         :value (str/join " " names)}])))
     :methods (vec
               (concat
                [{:name "<init>"
@@ -4879,8 +4894,10 @@
     (.visitEnd mv)))
 
 (defn- emit-field!
-  [^ClassWriter cw {:keys [name descriptor flags]}]
-  (let [fv (.visitField cw flags name descriptor nil nil)]
+  "A field of the class. A static final one with a :value gets it as its
+   ConstantValue, so it needs no <clinit>."
+  [^ClassWriter cw {:keys [name descriptor flags value]}]
+  (let [fv (.visitField cw flags name descriptor nil value)]
     (.visitEnd fv)))
 
 (defn- emit-class-initializer!

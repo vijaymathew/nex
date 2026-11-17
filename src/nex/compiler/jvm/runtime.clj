@@ -1662,8 +1662,9 @@
                                    (throw (ex-info (str "Undefined compiled field: " field-name)
                                                    {:field field-name
                                                     :class (.getName (.getClass ^Object target))})))]
-      ;; A Byte/Integer16/Integer32 field is a JVM byte/short/int.
-      (rt/field-value->nex (.getType field) (.get field owner)))))
+      ;; A Byte/Integer16/Integer32 field is a JVM byte/short/int, and a Char
+      ;; field a JVM int.
+      (rt/reflected-field-value field owner))))
 
 (defn- set-user-field!
   [target field-name value]
@@ -3129,7 +3130,7 @@
           (copy-compiled-fields! state src-part dst-part memo)))
       (.set f dst (rt/nex->field-value
                    (.getType f)
-                   (clone-deep state (rt/field-value->nex (.getType f) (.get f src)) memo))))))
+                   (clone-deep state (rt/reflected-field-value f src) memo))))))
 
 (defn- clone-compiled-object
   "A copy of compiled object SRC, made through its class's no-argument <init>
