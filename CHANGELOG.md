@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fixed: compiled code could not read a `Char` field from outside its
+  class.** A `Char` is stored as a JVM `int`, like an `Integer32`, and a field
+  read by reflection (from another class, a top-level `let`, or a copy) was
+  taken for an `Integer32`, so `leaf.symbol` or `print(p.ch)` failed with "a
+  value was not of the expected type". Each compiled class now records which
+  of its fields hold a `Char`. The interpreter was not affected.
 - **A class may not be named `Array`, `Map` or `Set`.** These built-in type
   names are identifiers, not keywords like `String` and `Integer`, so
   `class Set[T]` was accepted. Compiled code then read `Set[...]` as the

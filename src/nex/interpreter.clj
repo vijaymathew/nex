@@ -591,12 +591,12 @@
 (defn- compiled-object-field
   [value field-name]
   (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
-    [true (.get field owner)]))
+    [true (rt/reflected-field-value field owner)]))
 
 (defn- compiled-object-field-set!
   [value field-name new-value]
   (when-let [[owner ^Field field] (deep-reflected-field value field-name)]
-    (.set field owner new-value)
+    (.set field owner (rt/nex->field-value (.getType field) new-value))
     true))
 
 (defn- compiled-runtime-class-name

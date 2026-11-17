@@ -331,3 +331,49 @@
                  "print(s.length)"
                  "print(s.char_at(1).to_integer)"
                  "do print(s.to_bytes) rescue print(exception) end")))))
+
+(deftest char-fields-read-from-outside-their-class
+  ;; A Char field is a JVM int, as an Integer32 field is. Compiled code that
+  ;; reads a field by reflection (from outside the class, through Any, or in
+  ;; a copy) took every int field for an Integer32, so reading a Char field
+  ;; failed with "a value was not of the expected type". Each compiled class
+  ;; now lists its Char fields (nex.types.runtime/char-field?).
+  (is (= ["#A" "65" "\"Abc\"" "\"xA\"" "true"
+          "#😀 5 6" "#x #y 7" "true"]
+         (both "class Leaf"
+               "create"
+               "  make(s: Char) do symbol := s end"
+               "feature"
+               "  symbol: Char"
+               "end"
+               "class P"
+               "create"
+               "  make(c: Char, n: Integer32) do"
+               "    ch := c"
+               "    small := n"
+               "  end"
+               "feature"
+               "  ch: Char"
+               "  small: Integer32"
+               "end"
+               "class Q"
+               "inherit P"
+               "create"
+               "  make2(c: Char, d: Char) do"
+               "    P.make(c, 7i32)"
+               "    other := d"
+               "  end"
+               "feature"
+               "  other: Char"
+               "end"
+               "let l := create Leaf.make(#A)"
+               "print(l.symbol)"
+               "print(l.symbol.to_integer)"
+               "print(l.symbol + \"bc\")"
+               "print(\"x\" + l.symbol)"
+               "print(l.symbol = #A)"
+               "let p := create P.make(#😀, 5i32)"
+               "print(p.ch, p.small, p.small + 1i32)"
+               "let q := create Q.make2(#x, #y)"
+               "print(q.ch, q.other, q.small)"
+               "print(p = p.clone)"))))
