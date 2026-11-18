@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Fixed: `this` in a generic class lost its type parameters.** Inside
+  `class Stream[T]`, `this` was typed as a bare `Stream`, which reads every
+  parameter as `Any`. So a call through `this` whose argument mentions `T`,
+  such as `this.finite(t, d, e)` with `d: Function(T): T`, was refused with
+  "should be Function(Any): Any, but got Function(T): T". `this` is now a
+  `Stream[T]`.
+- **A constructor called by its bare name is now a type error.** In
+  `default do make(0) end`, the checker accepted `make(0)` and both backends
+  failed at run time ("Undefined method" in the interpreter, a void value in
+  compiled code), while the constructor was also reported as leaving its
+  fields uninitialized. The error now says to delegate with `this.make(...)`.
+  `Claude_Model.from_environment` in `examples/coding_agent` had this bug,
+  and now uses `this.make(...)`.
 - **A contract view in the Emacs mode.** `C-c C-v` (`nex-contract-view-mode`)
   folds every routine's and function's body to `do …` and hides `rescue`
   clauses, leaving the signatures, `require` and `ensure` clauses, class

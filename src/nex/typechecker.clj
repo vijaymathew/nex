@@ -4771,6 +4771,28 @@
   [^String name]
   (.startsWith name "AnonymousFunction_"))
 
+(defn- bare-constructor-call?
+  "Whether a bare `name(args)` in CLASS-NAME names one of its constructors
+   (its own or inherited) and no routine. The lookup that resolves bare
+   calls also finds constructors, so `make(0)` passed the checker, but
+   neither backend runs a constructor called that way: delegation is
+   spelled `this.make(0)`."
+  [env class-name method arity]
+  (letfn [(routine? [cn visited]
+            (when-let [class-def (and (not (contains? visited cn))
+                                      (env-lookup-class env cn))]
+              (or (some #(and (= :method (:type %))
+                              (= method (:name %))
+                              (= arity (count (or (:params %) []))))
+                        (feature-members class-def))
+                  (some #(routine? (:parent %) (conj visited cn))
+                        (:parents class-def)))))]
+    (and (some #(and (= method (:name %))
+                     (= arity (count (or (:params %) []))))
+               (lookup-class-constructors env class-name))
+         (not (routine? class-name #{}))
+         (not (env-lookup-global env method)))))
+
 (defn- check-bare-name-call
   "A bare `f(args)` that is neither a builtin nor a known callable variable:
    an implicit-`this` method call inside a class body, a readable top-level
@@ -4789,6 +4811,12 @@
    exclusion — resolving the very reference the shadow guard exists to
    reject, just through a different, unguarded path."
   [env method args]
+  (when-let [current-class (env-lookup-var env "__current_class__")]
+    (when (bare-constructor-call? env current-class method (count args))
+      (let [msg (str "`" method "` is a constructor, and a constructor is not called"
+                     " by its bare name. Another constructor of the class can delegate"
+                     " to it with `this." method "(...)`.")]
+        (throw (ex-info msg {:error (type-error msg)})))))
   (if-let [current-class (env-lookup-var env "__current_class__")]
     (if-let [method-sig (lookup-class-method env current-class method (count args) current-class)]
       ;; A bare call to an INHERITED generic method used to check each
@@ -5586,8 +5614,14 @@
   (check-expression env (:expr expr)))
 
 (defn- check-expr-this
+  "`this` in a generic class `C[T]` is a `C[T]`, its parameters standing for
+   themselves. As a bare `C`, every parameter read as Any, and a call such as
+   `this.set_f(d)` with `d: Function(T): T` was refused for not matching
+   `Function(Any): Any`."
   [env _expr]
-  (or (env-lookup-var env "__current_class__") "Any"))
+  (if-let [class-name (env-lookup-var env "__current_class__")]
+    (self-type-with-own-generic-params env class-name)
+    "Any"))
 
 ;; `super`'s type is its resolved parent class, so a call/field access
 ;; through it type-checks through the ordinary machinery for a value of a
