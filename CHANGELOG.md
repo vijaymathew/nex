@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A contract view in the Emacs mode.** `C-c C-v` (`nex-contract-view-mode`)
+  folds every routine's and function's body to `do …` and hides `rescue`
+  clauses, leaving the signatures, `require` and `ensure` clauses, class
+  invariants, fields and comments: what a client of the code may rely on.
+  The buffer is read-only while the view is on; `C-c C-v` again shows the
+  full code. The bodies are found by the same walk that indents the code.
 - **Fixed: compiled code could not read a `Char` field from outside its
   class.** A `Char` is stored as a JVM `int`, like an `Integer32`, and a field
   read by reflection (from another class, a top-level `let`, or a copy) was

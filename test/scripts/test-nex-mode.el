@@ -805,4 +805,162 @@ interfere with brace detection."
   (should (eq 'font-lock-type-face (nex-test--face-at "extend Shape\nfeature\nend\n" "Shape")))
   (should-not (eq 'font-lock-keyword-face (nex-test--face-at "let extend := 3\n" "extend"))))
 
+;;; Contract view
+
+(defun nex-test--contract-view (text)
+  "TEXT as the contract view shows it: each hidden span replaced by what
+is shown in its place."
+  (with-temp-buffer
+    (nex-mode)
+    (insert text)
+    (nex-contract-view-mode 1)
+    (let ((out (buffer-string)))
+      (dolist (ov (sort (overlays-in (point-min) (point-max))
+                        (lambda (a b) (> (overlay-start a) (overlay-start b)))))
+        (when (overlay-get ov 'nex-contract-view)
+          (setq out (concat (substring out 0 (1- (overlay-start ov)))
+                            (or (overlay-get ov 'display) "")
+                            (substring out (1- (overlay-end ov)))))))
+      (substring-no-properties out))))
+
+(ert-deftest nex-contract-view-function ()
+  "A function's body folds; its require and ensure clauses stay."
+  (should (equal (nex-test--contract-view
+                  "function zeros(n: Integer): Array[Real]
+require
+  non_negative: n >= 0
+do
+  result := create Array.filled(n, 0.0)
+  if n > 0 then
+    print(n)
+  end
+ensure
+  right_length: result.length = n
+end
+")
+                 "function zeros(n: Integer): Array[Real]
+require
+  non_negative: n >= 0
+do …
+ensure
+  right_length: result.length = n
+end
+")))
+
+(ert-deftest nex-contract-view-one-line-header ()
+  "A body after `do' on the header line folds to `do … end'."
+  (should (equal (nex-test--contract-view
+                  "function sum(v: Array[Real]): Real do
+  across v as x do
+    result := result + x
+  end
+end
+")
+                 "function sum(v: Array[Real]): Real do … end
+")))
+
+(ert-deftest nex-contract-view-class ()
+  "Members' bodies fold and rescue clauses are hidden; fields, deferred
+routines, constructors and the invariant stay."
+  (should (equal (nex-test--contract-view
+                  "deferred class Shape
+feature
+  area(): Real deferred
+  ensure
+    non_negative: result >= 0.0
+  end
+end
+
+class Account
+inherit Shape
+feature
+  balance: Integer
+  area(): Real do result := 0.0 end
+  withdraw(amount: Integer)
+    require
+      enough: amount <= balance
+    do
+      from let i := 0 until i = 1 do
+        balance := balance - amount
+        i := i + 1
+      end
+    ensure
+      less: balance = old balance - amount
+    rescue
+      print(\"failed\")
+    end
+create
+  make(b: Integer,
+       label: String) do
+    balance := b
+  end
+invariant
+  non_negative: balance >= 0
+end
+")
+                 "deferred class Shape
+feature
+  area(): Real deferred
+  ensure
+    non_negative: result >= 0.0
+  end
+end
+
+class Account
+inherit Shape
+feature
+  balance: Integer
+  area(): Real do … end
+  withdraw(amount: Integer)
+    require
+      enough: amount <= balance
+    do …
+    ensure
+      less: balance = old balance - amount
+    end
+create
+  make(b: Integer,
+       label: String) do … end
+invariant
+  non_negative: balance >= 0
+end
+")))
+
+(ert-deftest nex-contract-view-rescue-without-ensure ()
+  "Without an ensure clause, the rescue clause folds with the body."
+  (should (equal (nex-test--contract-view
+                  "function f(): Integer
+do
+  result := 1
+rescue
+  result := 0
+end
+")
+                 "function f(): Integer
+do … end
+")))
+
+(ert-deftest nex-contract-view-leaves-top-level-code ()
+  "Statements outside routines, and `do' blocks in them, are left alone."
+  (let ((text "let xs := [1, 2]
+across xs as x do
+  print(x)
+end
+"))
+    (should (equal (nex-test--contract-view text) text))))
+
+(ert-deftest nex-contract-view-toggles ()
+  "The view makes the buffer read-only and turning it off restores it."
+  (with-temp-buffer
+    (nex-mode)
+    (insert "function f() do\n  print(1)\nend\n")
+    (nex-contract-view-mode 1)
+    (should buffer-read-only)
+    (should (seq-some (lambda (ov) (overlay-get ov 'nex-contract-view))
+                      (overlays-in (point-min) (point-max))))
+    (nex-contract-view-mode -1)
+    (should-not buffer-read-only)
+    (should-not (seq-some (lambda (ov) (overlay-get ov 'nex-contract-view))
+                          (overlays-in (point-min) (point-max))))))
+
 ;;; test-nex-mode.el ends here

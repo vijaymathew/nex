@@ -19,6 +19,8 @@
 ;; - REPL integration (C-c C-z to start, C-c C-c to eval buffer)
 ;; - Comment support
 ;; - Imenu support for navigation
+;; - A contract view (C-c C-v) that folds routine bodies, leaving signatures
+;;   and contracts
 ;; - Errors as you type and formatting through eglot (`nex lsp')
 ;;
 ;; Installation:
@@ -42,6 +44,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'comint)
 (require 'seq)
 
@@ -242,6 +245,7 @@
 (defsubst nex-fmt--text (tok) (and tok (aref tok 0)))
 (defsubst nex-fmt--line (tok) (aref tok 1))
 (defsubst nex-fmt--kind (tok) (and tok (aref tok 2)))
+(defsubst nex-fmt--pos (tok) (aref tok 3))
 
 (defun nex-fmt--letter-p (c)
   (memq (get-char-code-property c 'general-category) '(Lu Ll Lt Lm Lo)))
@@ -257,9 +261,10 @@
 
 (defun nex-fmt--tokenize (src)
   "The tokens of SRC and the lines that end inside a string.
-Return (TOKENS . STRING-LINES): TOKENS a list of [TEXT LINE KIND], KIND
-being `word', `string', `char', `comment', `punct' or `other', and lines
-counted from 0; STRING-LINES a hash table of line numbers."
+Return (TOKENS . STRING-LINES): TOKENS a list of [TEXT LINE KIND POS], KIND
+being `word', `string', `char', `comment', `punct' or `other', lines
+counted from 0 and POS the offset in SRC where the token starts;
+STRING-LINES a hash table of line numbers."
   (let ((n (length src)) (i 0) (line 0) (tokens nil)
         (string-lines (make-hash-table)))
     (while (< i n)
@@ -269,7 +274,7 @@ counted from 0; STRING-LINES a hash table of line numbers."
          ((memq c '(?\s ?\t ?\r ?\f ?\v)) (setq i (1+ i)))
          ((and (eq c ?-) (< (1+ i) n) (eq (aref src (1+ i)) ?-))
           (let ((end (or (string-search "\n" src i) n)))
-            (push (vector (substring src i end) line 'comment) tokens)
+            (push (vector (substring src i end) line 'comment i) tokens)
             (setq i end)))
          ((memq c '(?\" ?'))
           (let ((j (1+ i)) (count 0) (done nil))
@@ -288,7 +293,7 @@ counted from 0; STRING-LINES a hash table of line numbers."
                   (setq count (1+ count) j (1+ j)))
                  (t (setq j (1+ j))))))
             (setq j (min j n))
-            (push (vector (substring src i j) line 'string) tokens)
+            (push (vector (substring src i j) line 'string i) tokens)
             (setq i j line (+ line count))))
          ((eq c ?#)
           (let* ((d (and (< (1+ i) n) (aref src (1+ i))))
@@ -301,14 +306,14 @@ counted from 0; STRING-LINES a hash table of line numbers."
                           j))
                        ((and d (not (eq d ?\n))) (+ i 2))
                        (t (1+ i)))))
-            (push (vector (substring src i end) line (if (eq d ?{) 'punct 'char))
+            (push (vector (substring src i end) line (if (eq d ?{) 'punct 'char) i)
                   tokens)
             (setq i end)))
          ((nex-fmt--word-start-p c)
           (let ((j (1+ i)))
             (while (and (< j n) (nex-fmt--word-char-p (aref src j)))
               (setq j (1+ j)))
-            (push (vector (substring src i j) line 'word) tokens)
+            (push (vector (substring src i j) line 'word i) tokens)
             (setq i j)))
          ((nex-fmt--digit-p c)
           (let ((j (1+ i)) (go t))
@@ -320,12 +325,12 @@ counted from 0; STRING-LINES a hash table of line numbers."
                  ((and (eq d ?.) (< (1+ j) n) (nex-fmt--digit-p (aref src (1+ j))))
                   (setq j (1+ j)))
                  (t (setq go nil)))))
-            (push (vector (substring src i j) line 'other) tokens)
+            (push (vector (substring src i j) line 'other i) tokens)
             (setq i j)))
          (t
           (let* ((two (and (< (1+ i) n) (substring src i (+ i 2))))
                  (end (if (member two '(":=" "/=" "<=" ">=" "->" "=>" "?.")) (+ i 2) (1+ i))))
-            (push (vector (substring src i end) line 'punct) tokens)
+            (push (vector (substring src i end) line 'punct i) tokens)
             (setq i end))))))
     (cons (nreverse tokens) string-lines)))
 
@@ -380,6 +385,19 @@ line, PREV-NEW the new indentation of the line above."
          (+ head (* 2 nex-indent-offset)))
         (t (+ head nex-indent-offset)))))))
 
+;; The contract view (below) learns where routine bodies are from the same
+;; walk that indents the code.
+(defvar nex-fmt--routine-parts nil
+  "When non-nil, a function `nex-fmt--code-indents' calls with each part of
+a routine or function it passes, as (ID PART POS): ID tells the routines
+apart, PART is `do' (POS just after the word), `ensure' or `rescue' (POS
+where the word starts) or `end' (POS where `end' starts).")
+
+(defun nex-fmt--note-part (frame part pos)
+  "Report PART of the routine FRAME at POS to `nex-fmt--routine-parts'."
+  (when (and nex-fmt--routine-parts (plist-get frame :rid))
+    (funcall nex-fmt--routine-parts (list (plist-get frame :rid) part pos))))
+
 (defun nex-fmt--code-indents (order code)
   "Indent the code lines ORDER (sorted line numbers); CODE maps each to a
 vector of its code tokens.  Return (INDENT . AFTER), two hash tables from
@@ -388,7 +406,7 @@ the line after (absent inside an expression)."
   (let ((indents (make-hash-table)) (afters (make-hash-table))
         (stack (list (nex-fmt--frame 'top 0 :body 0)))
         (prev nil) (head 0) (head-word nil) (pending nil) (prev-new nil)
-        (rest order))
+        (rest order) (rid 0))
     (while rest
       (let* ((i (car rest))
              (toks (gethash i code))
@@ -408,6 +426,18 @@ the line after (absent inside an expression)."
                        (> n 1) (eq 'string (nex-fmt--kind (aref toks 1))))
                   (member prev-text nex-fmt--continuing-ends)
                   (member (nex-fmt--text t0) nex-fmt--continuing-starts)))
+             ;; Whether a `do' on this line starts a routine's body: the line
+             ;; is a function's or a class member's header, or continues one.
+             (header-do
+              (if continues
+                  pending
+                (or (equal "function" w0)
+                    (and (eq 'class (plist-get (seq-find
+                                                (lambda (f) (not (eq 'bracket (plist-get f :kind))))
+                                                stack)
+                                               :kind))
+                         (eq 'word (nex-fmt--kind t0))
+                         (not (member w0 '("class" "note" "inherit")))))))
              top clause case-level indent clause-line)
         ;; A lone `assert' takes the `label: expression' lines after it.
         (when (and (eq 'assert (plist-get (car stack) :kind)) (not continues)
@@ -419,7 +449,7 @@ the line after (absent inside an expression)."
         (when (and (not continues) pending
                    (member w0 '("require" "do" "deferred"))
                    (not (plist-get (car stack) :await-do)))
-          (push (nex-fmt--frame 'routine head :await-do t) stack))
+          (push (nex-fmt--frame 'routine head :await-do t :rid (setq rid (1+ rid))) stack))
         ;; A class's sections go flush with `class'.
         (let ((f (car stack)))
           (when (and (not continues) (eq 'class (plist-get f :kind))
@@ -434,6 +464,8 @@ the line after (absent inside an expression)."
                           (or (not (equal "do" w0)) (plist-get top :await-do)
                               (not (memq (plist-get top :kind)
                                          '(routine loop block-loop))))))
+        (when (and clause (member w0 '("ensure" "rescue")))
+          (nex-fmt--note-part top (intern w0) (nex-fmt--pos t0)))
         (setq case-level (and (eq 'case (plist-get top :kind))
                               (if (or (plist-get top :stmt) (plist-get top :else-block))
                                   (+ (plist-get top :c) nex-indent-offset)
@@ -526,13 +558,18 @@ the line after (absent inside an expression)."
                     (setq stack (cons (nex-fmt--with f :await-do nil
                                                      :body (+ (plist-get f :c) nex-indent-offset))
                                       (cdr stack)))
-                  (push (nex-fmt--frame 'do at) stack)))
+                  (push (if header-do
+                            (nex-fmt--frame 'do at :rid (setq rid (1+ rid)))
+                          (nex-fmt--frame 'do at))
+                        stack))
+                (nex-fmt--note-part (car stack) 'do (+ (nex-fmt--pos tok) 2)))
                ((and (equal "then" word) (eq 'case kind))
                 (when last
                   (setq stack (cons (nex-fmt--with f :stmt t) (cdr stack)))))
                ((and (equal "else" word) (eq 'case kind) last)
                 (setq stack (cons (nex-fmt--with f :else-block t) (cdr stack))))
                ((equal "end" word)
+                (nex-fmt--note-part f 'end (nex-fmt--pos tok))
                 (when (cdr stack) (setq stack (cdr stack))))
                ;; A deferred routine without `ensure' has no `end'.
                ((and (equal "deferred" word) (= j 0) (eq 'routine kind)
@@ -722,6 +759,70 @@ A blank line gets the indentation a statement typed there would have."
           (setq i (1+ i)))))
     (set-marker end-marker nil)))
 
+;;;; Contract View
+;;
+;; `nex-contract-view-mode' folds every routine and function body to
+;; `do …' and hides `rescue' clauses, leaving the signatures, `require' and
+;; `ensure' clauses, class invariants, fields and comments: what a client of
+;; the code may rely on.  The routine bodies are found by the walk that
+;; indents the code, so the view sees the same blocks `nex format' does.
+
+(defun nex-contract-view--spans (src)
+  "The parts of SRC that the contract view hides, in order.
+Each is (START END SHOW): offsets into SRC, and the text to show in its
+place, or nil to show nothing."
+  (let ((parts (make-hash-table)) (spans nil))
+    (let ((nex-fmt--routine-parts
+           (lambda (part) (push (cdr part) (gethash (car part) parts)))))
+      (nex-fmt--line-indents src))
+    (let ((line-start
+           (lambda (pos) (1+ (or (cl-position ?\n src :end pos :from-end t) -1)))))
+      (maphash
+       (lambda (_id routine)
+         (let ((do-end (cadr (assq 'do routine)))
+               (ensure (cadr (assq 'ensure routine)))
+               (rescue (cadr (assq 'rescue routine)))
+               (end (cadr (assq 'end routine))))
+           (when (and do-end end)
+             (cond
+              ;; `do …' on its line, the `ensure' clause below it
+              ((and ensure (> ensure do-end))
+               (push (list do-end (1- (funcall line-start ensure)) " …") spans)
+               (when (and rescue (> rescue ensure))
+                 (push (list (funcall line-start rescue) (funcall line-start end) nil)
+                       spans)))
+              ;; `do … end'
+              (t (push (list do-end end " … ") spans))))))
+       parts))
+    (sort spans (lambda (a b) (< (car a) (car b))))))
+
+(defvar-local nex-contract-view--read-only nil
+  "Whether the buffer was read-only before the contract view was turned on.")
+
+(define-minor-mode nex-contract-view-mode
+  "Show only the interface and contracts of the code in this buffer.
+Each routine's and function's body folds to `do …' and `rescue' clauses
+are hidden.  Signatures, `require' and `ensure' clauses, class invariants,
+fields and comments stay.  The buffer is read-only while the view is on;
+turn it off to edit."
+  :lighter " Contracts"
+  (save-restriction
+    (widen)
+    (remove-overlays (point-min) (point-max) 'nex-contract-view t)
+    (if nex-contract-view-mode
+        (let ((base (point-min)))
+          (dolist (span (nex-contract-view--spans
+                         (buffer-substring-no-properties (point-min) (point-max))))
+            (let ((ov (make-overlay (+ base (nth 0 span)) (+ base (nth 1 span)))))
+              (overlay-put ov 'nex-contract-view t)
+              (overlay-put ov 'evaporate t)
+              (if (nth 2 span)
+                  (overlay-put ov 'display (propertize (nth 2 span) 'face 'shadow))
+                (overlay-put ov 'invisible t))))
+          (setq nex-contract-view--read-only buffer-read-only
+                buffer-read-only t))
+      (setq buffer-read-only nex-contract-view--read-only))))
+
 ;;;; Navigation
 
 (defun nex-beginning-of-defun (&optional arg)
@@ -835,6 +936,7 @@ ARG is the number of definitions to move."
     (define-key map (kbd "C-c C-r") 'nex-eval-region)
     (define-key map (kbd "C-c C-l") 'nex-load-file)
     (define-key map (kbd "C-c C-d") 'nex-repl-show-help)
+    (define-key map (kbd "C-c C-v") 'nex-contract-view-mode)
     (define-key map (kbd "C-M-a") 'nex-beginning-of-defun)
     (define-key map (kbd "C-M-e") 'nex-end-of-defun)
     map)
