@@ -35,6 +35,7 @@
 (declare call-builtin-method)
 (declare eval-node)
 (declare eval-node)
+(declare record-old-values)
 (declare nex-ordering-compare)
 (declare make-object)
 (declare invoke-http-server-handler)
@@ -2244,10 +2245,27 @@
                                  :field-names (set (map :name all-fields))
                                  :source (:debug-source ctx)})
                         (assoc :debug-depth (inc (or (:debug-depth ctx) 0))))
+            ;; The callee's own contracts, as on any other call: a method's
+            ;; effective ones (with the clauses it inherits), a
+            ;; constructor's own. `super.m(...)`, `P.k(...)` and `this.k(...)`
+            ;; used to skip them here, though compiled code checked them.
+            require-assertions (if method-lookup
+                                 (:effective-require method-lookup)
+                                 (:require ctor-def))
+            ensure-assertions (if method-lookup
+                                (:effective-ensure method-lookup)
+                                (:ensure ctor-def))
+            _ (when (seq require-assertions)
+                (check-assertions new-ctx require-assertions Precondition))
+            old-values (when (and (seq ensure-assertions) (not (:skip-contracts? ctx)))
+                         (record-old-values new-ctx ensure-assertions))
             _ (if-let [rescue (:rescue callable)]
                 (eval-body-with-rescue new-ctx (:body callable) rescue)
                 (doseq [stmt (:body callable)]
                   (eval-node new-ctx stmt)))
+            _ (when (seq ensure-assertions)
+                (check-assertions (assoc new-ctx :old-values old-values)
+                                  ensure-assertions Postcondition))
             updated-fields (read-fields method-env (:fields current-obj) view)
             updated-obj (make-object (:class-name current-obj) updated-fields (:closure-env current-obj))
             result (let [res (try

@@ -7982,13 +7982,15 @@
     (= :let (:type stmt))
     (let [[env' lowered] (lower-statement env stmt)
           nex-type (or (:var-type stmt) (infer-type env (:value stmt)))
-          jvm-type (resolve-jvm-type env' nex-type)]
-      [env' [lowered] (if (:top-level? env')
+          jvm-type (resolve-jvm-type env' nex-type)
+          local (get (:locals env') (:name stmt))]
+      ;; A top-level `let` that a whole-file compile keeps in a JVM local
+      ;; (promotable-top-level-names) is not in the map of top-level values;
+      ;; reading it from there gave nil, which failed to unbox when the
+      ;; program's last statement was `let x: Integer := 3`.
+      [env' [lowered] (if (and (:top-level? env') (not local))
                         (ir/top-get-node (:name stmt) nex-type jvm-type)
-                        (ir/local-node (:name stmt)
-                                       (:slot (get (:locals env') (:name stmt)))
-                                       nex-type
-                                       jvm-type))])
+                        (ir/local-node (:name stmt) (:slot local) nex-type jvm-type))])
 
     (= :assign (:type stmt))
     (let [[env' lowered] (lower-statement env stmt)

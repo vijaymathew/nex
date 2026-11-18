@@ -33,9 +33,9 @@ create
     known_effort: Claude_Model.EFFORTS.contains(effort)
   do
     if program.has_env("ANTHROPIC_API_KEY") and program.env("ANTHROPIC_API_KEY") /= "" then
-      make(program.env("ANTHROPIC_API_KEY"), false, model_id, effort)
+      this.make(program.env("ANTHROPIC_API_KEY"), false, model_id, effort)
     else
-      make(program.env("ANTHROPIC_AUTH_TOKEN"), true, model_id, effort)
+      this.make(program.env("ANTHROPIC_AUTH_TOKEN"), true, model_id, effort)
     end
     if program.has_env("ANTHROPIC_BASE_URL") and program.env("ANTHROPIC_BASE_URL") /= "" then
       base_url := program.env("ANTHROPIC_BASE_URL")

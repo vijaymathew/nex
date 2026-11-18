@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **Fixed: the interpreter skipped contracts on delegated calls.** A call
+  that runs a routine of a named class on the current object did not check
+  the callee's precondition or postcondition: `super.m(...)`, `P.m(...)`, a
+  parent constructor `P.k(...)`, a sibling constructor `this.k(...)`, and
+  `this.m(...)` during construction. So `super.set(-5)` ran even though
+  `set` requires a non-negative argument. Compiled code checked them, as the
+  Definition says it should; the interpreter now does too.
+- **Fixed: a compiled program could not end with a `let`.** When the last
+  statement was a top-level `let` of an `Integer`, `Real` or `Boolean`
+  (`let x: Integer := 3`), the program failed with "Used a value that is
+  void (nil)". The variable was kept in a JVM local, but the program's result
+  was read from the map of top-level values. A `String` was not affected, and
+  neither was the interpreter.
+- **The examples in `SYNTAX.md` are tested in both backends.** Every
+  `nex` block in `docs/md/SYNTAX.md` that type-checks as a file now runs,
+  compiled and interpreted, in the test suite. Both runs must give the same
+  output without an error, unless the docs show the error on purpose.
+  Templates and fragments that do not type-check are skipped. This test found
+  the `let` bug above: four of the doc's first examples crashed in compiled
+  code.
+- **Fixed: `this` in a generic class lost its type parameters.** Inside
+  `class Stream[T]`, `this` was typed as a bare `Stream`, which reads every
+  parameter as `Any`. So a call through `this` whose argument mentions `T`,
+  such as `this.finite(t, d, e)` with `d: Function(T): T`, was refused with
+  "should be Function(Any): Any, but got Function(T): T". `this` is now a
+  `Stream[T]`.
+- **A constructor called by its bare name is now a type error.** In
+  `default do make(0) end`, the checker accepted `make(0)` and both backends
+  failed at run time ("Undefined method" in the interpreter, a void value in
+  compiled code), while the constructor was also reported as leaving its
+  fields uninitialized. The error now says to delegate with `this.make(...)`.
+  `Claude_Model.from_environment` in `examples/coding_agent` had this bug,
+  and now uses `this.make(...)`.
 - **A contract view in the Emacs mode.** `C-c C-v` (`nex-contract-view-mode`)
   folds every routine's and function's body to `do …` and hides `rescue`
   clauses, leaving the signatures, `require` and `ensure` clauses, class
