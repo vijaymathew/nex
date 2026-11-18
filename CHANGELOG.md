@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Fixed: a compiled program could not end with a `let`.** When the last
+  statement was a top-level `let` of an `Integer`, `Real` or `Boolean`
+  (`let x: Integer := 3`), the program failed with "Used a value that is
+  void (nil)". The variable was kept in a JVM local, but the program's result
+  was read from the map of top-level values. A `String` was not affected, and
+  neither was the interpreter.
+- **The examples in `SYNTAX.md` are tested in both backends.** Every
+  `nex` block in `docs/md/SYNTAX.md` that type-checks as a file now runs,
+  compiled and interpreted, in the test suite. Both runs must give the same
+  output without an error, unless the docs show the error on purpose.
+  Templates and fragments that do not type-check are skipped. This test found
+  the `let` bug above: four of the doc's first examples crashed in compiled
+  code.
 - **Fixed: `this` in a generic class lost its type parameters.** Inside
   `class Stream[T]`, `this` was typed as a bare `Stream`, which reads every
   parameter as `Any`. So a call through `this` whose argument mentions `T`,
