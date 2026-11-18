@@ -8773,6 +8773,443 @@
                       (and (not own-ctors?) (contains? ancestors t)))))
            calls))))
 
+;;
+;; Object readiness in constructors
+;;
+;; A constructor runs on an object whose attachable fields are void until it
+;; assigns them. Until every one is assigned, on every path, and every parent
+;; that must be constructed has been, the object is not ready: the
+;; constructor may assign fields, delegate (`this.k(...)`, `P.k(...)`) and
+;; compute with locals and parameters, but may not read a field still void,
+;; call a routine of the object that can reach a read of one
+;; (reach-violation), or pass `this` on. A parent constructor runs the
+;; class's overrides, so one that can reach a read of a field of the class
+;; must be called after that field is assigned (parent-init-call!).
+;; Definition of Nex, Section 4.9, Use before attachment.
+
+(declare body-let-names class-field-names)
+
+(defn- routine-bound-names
+  "Names a routine body binds locally, which shadow a like-named feature: its
+   parameters, every `let` (and the names an attached test or `convert`
+   binds), and the parameters of the closures inside it."
+  [params body]
+  (-> (set (map :name params))
+      (into (body-let-names body))
+      (into (for [n (aw/maps body)
+                  :when (= :anonymous-function (:type n))
+                  p (:params n)]
+              (:name p)))))
+
+(defn- class-and-ancestors
+  "CLASS-NAME and its ancestors, nearest first, as they are searched for a
+   feature."
+  [env class-name]
+  (loop [todo [class-name] seen #{} out []]
+    (if-let [cn (first todo)]
+      (if (contains? seen cn)
+        (recur (rest todo) seen out)
+        (recur (concat (rest todo) (map :parent (:parents (env-lookup-class env cn))))
+               (conj seen cn) (conj out cn)))
+      out)))
+
+(defn- class-own-routines
+  "The methods declared in CLASS-NAME's own feature sections."
+  [env class-name]
+  (filter #(= :method (:type %)) (feature-members (env-lookup-class env class-name))))
+
+(defn- resolve-routine
+  "[declaring-class member] for the routine NAME (with ARITY args, when
+   given) that a call on an object of class CLASS-NAME runs: the nearest
+   declaration, searching CLASS-NAME first."
+  [env class-name name arity]
+  (some (fn [cn]
+          (some #(when (and (= name (:name %))
+                            (or (nil? arity) (= arity (count (or (:params %) [])))))
+                   [cn %])
+                (class-own-routines env cn)))
+        (class-and-ancestors env class-name)))
+
+(defn- resolve-constructor
+  "[declaring-class ctor] for the constructor NAME/ARITY of CLASS-NAME,
+   declared or inherited."
+  [env class-name name arity]
+  (some (fn [cn]
+          (some #(when (and (= name (:name %)) (= arity (count (or (:params %) []))))
+                   [cn %])
+                (->> (:body (env-lookup-class env cn))
+                     (filter #(= :constructors (:type %)))
+                     (mapcat :constructors))))
+        (class-and-ancestors env class-name)))
+
+(defn- this-escapes?
+  "Whether BODY uses `this` as a value -- passes it, stores it, compares it
+   -- rather than only as the target of a call or field assignment."
+  [body]
+  (let [nodes (aw/maps body)
+        this? #(= :this (:type %))]
+    (> (count (filter this? nodes))
+       (count (filter #(or (and (= :call (:type %)) (map? (:target %)) (this? (:target %)))
+                           (and (= :member-assign (:type %)) (this? (:object %))))
+                      nodes)))))
+
+(defn- this-target-name
+  "The feature a node names on the current object, or nil: a bare
+   identifier, a call with no target, or a call or read on `this`. BOUND
+   names are locals, not features."
+  [bound node]
+  (case (:type node)
+    :identifier (when-not (contains? bound (:name node)) (:name node))
+    :call (let [t (:target node)]
+            (cond
+              (nil? t) (when-not (contains? bound (:method node)) (:method node))
+              (and (map? t) (= :this (:type t))) (:method node)
+              :else nil))
+    nil))
+
+(defn- field-reads
+  "The fields of FIELDS that BODY reads on the current object, by name."
+  [fields bound body]
+  (into #{}
+        (keep (fn [n]
+                (or (when-let [f (this-target-name bound n)]
+                      (when (contains? fields f) f))
+                    ;; `a.hello` parses its receiver to a string target
+                    (when (and (= :call (:type n)) (string? (:target n))
+                               (not (contains? bound (:target n)))
+                               (contains? fields (:target n)))
+                      (:target n)))))
+        (aw/maps body)))
+
+(defn- reach-violation
+  "A routine run on an object of class CLASS-NAME before its fields UNSET
+   are assigned: the first routine it can reach that reads one of them, as
+   {:path [routine ...] :field f}, or {:path [...] :field f :escape? true}
+   when the routines reach code that is passed `this`, and a routine of the
+   object reads one. START is [declaring-class routine], PATH the names that
+   lead to it (empty for a parent constructor, which cannot read the fields
+   of CLASS-NAME itself). The call reaches what the routines call on the
+   object, through the routines an object of CLASS-NAME runs for them."
+  [env class-name unset [start-class start] path]
+  (let [lineage (class-and-ancestors env class-name)
+        methods (set (mapcat #(map :name (class-own-routines env %)) lineage))
+        reads-unset (fn [member]
+                      (first (sort (field-reads unset
+                                                (routine-bound-names (:params member) (:body member))
+                                                (:body member)))))
+        key-of (fn [owner member] [owner (:name member) (count (:params member))])]
+    (loop [todo [[start-class start path]]
+           seen #{}
+           escaped nil]
+      (if-let [[owner member path] (first todo)]
+        (if (contains? seen (key-of owner member))
+          (recur (rest todo) seen escaped)
+          (or (when (seq path)
+                (when-let [f (reads-unset member)] {:path path :field f}))
+              (let [body (:body member)
+                    bound (routine-bound-names (:params member) body)
+                    ancestors (set (rest (class-and-ancestors env owner)))
+                    calls (for [n (aw/maps body)
+                                :when (#{:call :identifier} (:type n))
+                                :let [t (:target n)
+                                      arity (count (:args n))
+                                      named (this-target-name bound n)
+                                      sibling (when (and (= :call (:type n)) (map? t) (= :this (:type t)))
+                                                (resolve-constructor env owner (:method n) arity))]
+                                :let [hit (cond
+                                            ;; a sibling constructor of the routine's own class
+                                            (and sibling (= owner (first sibling)))
+                                            [sibling path]
+                                            ;; a routine of the object, as its class runs it
+                                            (and named (contains? methods named))
+                                            (when-let [r (resolve-routine env class-name named
+                                                                          (when (= :call (:type n)) arity))]
+                                              [r (conj path named)])
+                                            ;; `super.m(...)`, `P.m(...)`, `P.k(...)`: that one
+                                            (and (= :call (:type n))
+                                                 (or (and (map? t) (= :super (:type t)))
+                                                     (and (string? t) (not (contains? bound t))
+                                                          (contains? ancestors t))))
+                                            (let [q (if (map? t)
+                                                      (try (resolve-super-parent-class-name env owner)
+                                                           (catch Exception _ nil))
+                                                      t)]
+                                              (when-let [r (and q (or (resolve-constructor env q (:method n) arity)
+                                                                      (resolve-routine env q (:method n) arity)))]
+                                                [r (if (seq path) (conj path (str q "." (:method n))) path)])))]
+                                :when hit]
+                            (let [[[cn m] p] hit] [cn m p]))]
+                (recur (concat (rest todo) calls)
+                       (conj seen (key-of owner member))
+                       (or escaped (when (this-escapes? body) path))))))
+        (when escaped
+          (some (fn [cn]
+                  (some (fn [m] (when-let [f (reads-unset m)]
+                                  {:path (conj (vec escaped) (:name m)) :field f :escape? true}))
+                        (class-own-routines env cn)))
+                lineage))))))
+
+(defn- reach-sentence
+  "How a call reached the read of a field, from reach-violation: \"`m`
+   reads `a`\", \"`m` → `n` reads `a`\", \"`m` passes `this` to other code,
+   which may call `n`, which reads `a`\". LEAD names the call, for a path
+   that does not start with a routine name."
+  [lead {:keys [path field escape?]}]
+  (let [q #(str "`" % "`")]
+    (if escape?
+      (str (str/join " → " (map q (remove nil? (cons lead (butlast path)))))
+           " passes `this` to other code, which may call " (q (last path))
+           ", which reads " (q field))
+      (str (str/join " → " (map q (remove nil? (cons lead path)))) " reads " (q field)))))
+
+(defn- name-list
+  "`a`, `a` and `b`, `a`, `b` and `c`."
+  [names]
+  (let [q (map #(str "`" % "`") names)]
+    (if (< (count q) 2)
+      (first q)
+      (str (str/join ", " (butlast q)) " and " (last q)))))
+
+(defn- unready-reason
+  "Why the object is not ready in STATE, as the end of a sentence
+   (\"before `a` is assigned\")."
+  [{:keys [required needed-parents]} {:keys [assigned parents]}]
+  (let [fields (sort (set/difference required assigned))
+        ps (sort (set/difference needed-parents parents))]
+    (str "before "
+         (str/join " and "
+                   (concat (when (seq fields)
+                             [(str (name-list fields) (if (= 1 (count fields)) " is" " are") " assigned")])
+                           (when (seq ps)
+                             [(str "a constructor of " (name-list ps) " runs")]))))))
+
+(defn- ready?
+  [{:keys [required needed-parents]} {:keys [assigned parents]}]
+  (and (set/subset? required assigned) (set/subset? needed-parents parents)))
+
+(defn- meet-states
+  "The state after joining paths: only what holds on all of them."
+  [states]
+  {:assigned (apply set/intersection (map :assigned states))
+   :parents (apply set/intersection (map :parents states))})
+
+(declare ctor-walk constructor-end-state)
+
+(defn- ctor-error!
+  [{:keys [report? ctor]} node msg]
+  (when report?
+    (throw (ex-info msg {:error (type-error msg
+                                            (or (:dbg/line node) (:dbg/line ctor))
+                                            (if (:dbg/line node) (:dbg/col node) (:dbg/col ctor)))}))))
+
+(defn- check-field-read!
+  [{:keys [required inherited-required ctor-name] :as ctx} state node f]
+  (cond
+    (and (contains? required f) (not (contains? (:assigned state) f)))
+    (ctor-error! ctx node (str "Constructor '" ctor-name "' reads `" f "` before it is assigned. "
+                               "Until then `" f "` is void."))
+    ;; an inherited field is set by the parent constructors
+    (and (contains? inherited-required f)
+         (not (set/subset? (:needed-parents ctx) (:parents state))))
+    (ctor-error! ctx node (str "Constructor '" ctor-name "' reads `" f "` "
+                               (unready-reason (assoc ctx :required #{}) state)
+                               ". Until then `" f "` may be void."))))
+
+(defn- unset-fields
+  "The fields of the object still void in STATE: its own unassigned ones,
+   and the inherited ones until its parents are constructed."
+  [{:keys [required inherited-required needed-parents]} {:keys [assigned parents]}]
+  (set/union (set/difference required assigned)
+             (if (set/subset? needed-parents parents) #{} inherited-required)))
+
+(defn- check-routine-call!
+  "A call of the routine START ([declaring-class member], or nil for one
+   with no Nex body), named LABEL, on the object in STATE: it may not reach
+   a read of a field that is still void."
+  [{:keys [env class-name ctor-name required] :as ctx} state node label start]
+  (when (and start (not (ready? ctx state)))
+    (when-let [v (reach-violation env class-name (unset-fields ctx state) start [label])]
+      (let [f (:field v)]
+        (ctor-error! ctx node (str "Constructor '" ctor-name "' calls `" label "` "
+                                   (if (contains? required f)
+                                     (str "before `" f "` is assigned")
+                                     (unready-reason (assoc ctx :required #{}) state))
+                                   ": " (reach-sentence nil v)
+                                   (if (contains? required f)
+                                     ". Assign it first, or move the call after."
+                                     ". Call the parent's constructor first.")))))))
+
+(defn- parent-init-call!
+  "A call STMT that constructs (or, for a parent without constructors,
+   initializes) PARENT: checks what it can reach, and records it."
+  [{:keys [env class-name required ctor-name needed-parents] :as ctx} state node parent ctor?]
+  (let [arity (count (:args node))
+        unset (set/difference required (:assigned state))
+        start (if ctor?
+                (resolve-constructor env parent (:method node) arity)
+                (resolve-routine env parent (:method node) arity))
+        label (str parent "." (:method node))]
+    (when (and (seq unset) start)
+      (when-let [v (reach-violation env class-name unset start (if ctor? [] [label]))]
+        (ctor-error! ctx node
+                     (str "Constructor '" ctor-name "' in class '" class-name "' must assign `"
+                          (:field v) "` before it calls `" label "`: "
+                          (reach-sentence (when ctor? label) v)
+                          " (`" (last (:path v)) "` as '" class-name "' defines it)."))))
+    (update state :parents into
+            (filter #(or (= % parent)
+                         (constructs-parent? env % [[parent (:method node) arity]]))
+                    needed-parents))))
+
+(defn- ctor-walk-call
+  [{:keys [env class-name bound fields methods own-ctors needed-parents] :as ctx} node state]
+  (let [{:keys [target method args]} node
+        arity (count args)
+        state (ctor-walk ctx args state)
+        ancestors (set (rest (class-and-ancestors env class-name)))]
+    (cond
+      (nil? target)
+      (do (when-not (contains? bound method)
+            (cond (contains? fields method) (check-field-read! ctx state node method)
+                  (contains? methods method) (check-routine-call! ctx state node method
+                                                                (resolve-routine env class-name method arity))))
+          state)
+
+      (and (map? target) (= :this (:type target)))
+      (if-let [k (some #(when (and (= method (:name %)) (= arity (count (or (:params %) [])))) %)
+                       own-ctors)]
+        ;; delegation: the object gets what that constructor gives it
+        (let [out (constructor-end-state ctx k)]
+          {:assigned (set/union (:assigned state) (:assigned out))
+           :parents (set/union (:parents state) (:parents out))})
+        (do (if (and (contains? fields method) (zero? arity) (not (:has-parens node)))
+              (check-field-read! ctx state node method)
+              (check-routine-call! ctx state node method
+                                   (resolve-routine env class-name method
+                                                    (when (:has-parens node) arity))))
+            state))
+
+      (and (map? target) (= :super (:type target)))
+      (let [p (try (resolve-super-parent-class-name env class-name) (catch Exception _ nil))]
+        (cond
+          (and p (resolve-constructor env p method arity)) (parent-init-call! ctx state node p true)
+          :else (do (check-routine-call! ctx state node (str "super." method)
+                                         (when p (resolve-routine env p method arity)))
+                    state)))
+
+      (string? target)
+      (cond
+        (contains? bound target) state
+        (contains? fields target) (do (check-field-read! ctx state node target) state)
+        (contains? ancestors target)
+        (cond
+          (resolve-constructor env target method arity) (parent-init-call! ctx state node target true)
+          ;; a parent without constructors is set up by a routine of its own
+          (and (contains? needed-parents target)
+               (empty? (lookup-class-constructors env target)))
+          (parent-init-call! ctx state node target false)
+          :else (do (check-routine-call! ctx state node (str target "." method)
+                                         (resolve-routine env target method arity))
+                    state))
+        :else state)
+
+      :else (ctor-walk ctx target state))))
+
+(defn- ctor-walk-branches
+  "The state after a construct that runs one of BODIES, entered in STATE;
+   FALLS-THROUGH? when it may run none of them."
+  [ctx state bodies falls-through?]
+  (let [outs (for [b bodies
+                   :let [out (ctor-walk ctx b state)]
+                   :when (body-may-complete-normally? (if (map? b) [b] b))]
+               out)
+        outs (if falls-through? (conj (vec outs) state) outs)]
+    (if (seq outs) (meet-states outs) state)))
+
+(defn- ctor-walk
+  "Walk NODE, part of a constructor body, entered with STATE: what the
+   object has on every path that reaches it, {:assigned fields :parents
+   constructed}. Returns the state after it, and reports (when (:report?
+   CTX)) each use of the object before it is ready."
+  [{:keys [bound fields] :as ctx} node state]
+  (cond
+    (sequential? node) (reduce (fn [s n] (ctor-walk ctx n s)) state node)
+    (not (map? node)) state
+    :else
+    (case (:type node)
+      :assign (let [s (ctor-walk ctx (:value node) state)
+                    t (:target node)]
+                (if (and (contains? fields t) (not (contains? bound t)))
+                  (update s :assigned conj t)
+                  s))
+      :member-assign (if (= :this (:type (:object node)))
+                       (update (ctor-walk ctx (:value node) state) :assigned conj (:field node))
+                       (ctor-walk ctx (:value node) (ctor-walk ctx (:object node) state)))
+      :this (let [unset (unset-fields ctx state)
+                  own (sort (set/intersection unset (:required ctx)))]
+              (when (seq unset)
+                (ctor-error! ctx node (str "Constructor '" (:ctor-name ctx) "' passes `this` on "
+                                           (if (seq own)
+                                             (str "before " (name-list own)
+                                                  (if (= 1 (count own)) " is" " are") " assigned")
+                                             (unready-reason (assoc ctx :required #{}) state))
+                                           ". Code it reaches could read a void field.")))
+              state)
+      :identifier (let [n (:name node)]
+                    (when-not (contains? bound n)
+                      (cond (contains? fields n) (check-field-read! ctx state node n)
+                            (contains? (:methods ctx) n)
+                            (check-routine-call! ctx state node n
+                                                 (resolve-routine (:env ctx) (:class-name ctx) n nil))))
+                    state)
+      :call (ctor-walk-call ctx node state)
+      ;; a closure runs later, but may run before the object is ready
+      :anonymous-function (do (ctor-walk ctx (:body node) state) state)
+      :if (let [state (reduce #(ctor-walk ctx %2 %1)
+                              (ctor-walk ctx (:condition node) state)
+                              (map :condition (:elseif node)))]
+            (ctor-walk-branches ctx state
+                                (concat [(:then node)] (map :then (:elseif node))
+                                        (when (:else node) [(:else node)]))
+                                (nil? (:else node))))
+      :loop (let [s (ctor-walk ctx (:init node) state)]
+              (ctor-walk ctx [(:until node) (:invariant node) (:variant node) (:body node)] s)
+              s)
+      :scoped-block (let [b (ctor-walk ctx (:body node) state)]
+                      (if-let [r (:rescue node)]
+                        (let [r-out (ctor-walk ctx r state)]
+                          (if (body-may-complete-normally? r) (meet-states [b r-out]) b))
+                        b))
+      :with (ctor-walk ctx (:body node) (ctor-walk ctx (dissoc node :body :type) state))
+      :case (ctor-walk-branches ctx (ctor-walk ctx (:expr node) state)
+                                (concat (keep :body (:clauses node))
+                                        (when-let [e (:else node)] [e]))
+                                (nil? (:else node)))
+      :match (ctor-walk-branches ctx (ctor-walk ctx (:expr node) state)
+                                 (concat (map :body (:clauses node))
+                                         (when-let [e (:else node)] [e]))
+                                 false)
+      ;; anything else: checked inside, but it may assign nothing for sure
+      (do (reduce-kv (fn [s k v]
+                       (if (or (= k :class-def) (not (coll? v))) s (ctor-walk ctx v s)))
+                     state node)
+          state))))
+
+(defn- constructor-end-state
+  "What the constructor K gives the object on every path through it,
+   followed through the constructors it delegates to. Reports nothing: K's
+   own check does."
+  [ctx k]
+  (let [key [(:name k) (count (or (:params k) []))]]
+    (if (contains? (:visiting ctx) key)
+      {:assigned #{} :parents #{}}
+      (ctor-walk (assoc ctx
+                        :report? false
+                        :visiting (conj (:visiting ctx #{}) key)
+                        :bound (routine-bound-names (:params k) (:body k)))
+                 (:body k)
+                 {:assigned #{} :parents #{}}))))
+
 (defn- check-attachable-field-initialization!
   "Void-safety: every attachable class-object field must be assigned by every
    constructor, and a constructor of a class that inherits attachable fields
@@ -8817,7 +9254,28 @@
                                     ", but an inherited constructor runs only its own class's. "
                                     "Declare a constructor in '" name "' that calls one constructor of each."))})))
     (doseq [{ctor-name :name ctor-body :body :as ctor} constructors]
-      (let [assigned (constructor-initialized-fields ctor-name ctor-body constructors #{})
+      (let [lineage (class-and-ancestors env name)
+            ctx {:env env
+                 :class-name name
+                 :required required-fields
+                 :inherited-required (set (mapcat #(attachable-init-field-names
+                                                    env (:body (env-lookup-class env %)))
+                                                  (rest lineage)))
+                 :needed-parents (set (concat constructed-parents
+                                              (remove #(seq (lookup-class-constructors env %))
+                                                      parents-needing-init)))
+                 :fields (set (mapcat #(class-field-names (env-lookup-class env %)) lineage))
+                 :methods (set (mapcat #(map :name (class-own-routines env %)) lineage))
+                 :own-ctors constructors
+                 :report? true
+                 :ctor ctor
+                 :ctor-name ctor-name
+                 :visiting #{[ctor-name (count (or (:params ctor) []))]}
+                 :bound (routine-bound-names (:params ctor) ctor-body)}
+            ;; on every path through it, which also reports each use of the
+            ;; object before it is ready
+            assigned (:assigned (ctor-walk ctx ctor-body {:assigned #{} :parents #{}}))
+            somewhere (constructor-initialized-fields ctor-name ctor-body constructors #{})
             missing (sort (seq (set/difference required-fields assigned)))
             parent-calls (constructor-parent-calls env name ctor-name ctor-body constructors #{})
             ;; A parent with attachable fields but no constructors can only be
@@ -8832,12 +9290,17 @@
         (when (seq missing)
           (throw (ex-info (str "Constructor " ctor-name " does not initialize all attachable fields")
                           {:error (type-error
-                                   (str "Constructor '" ctor-name "' in class '" name
-                                        "' must initialize attachable fields: "
-                                        (str/join ", " missing)
-                                        ". Only scalars (zero) and Array, Map and Set (empty) "
-                                        "start with a value; assign the others, or make them "
-                                        "optional (?T).")
+                                   (if (every? somewhere missing)
+                                     (str "Constructor '" ctor-name "' in class '" name
+                                          "' must assign " (name-list missing)
+                                          " on every path through it; some paths leave "
+                                          (if (= 1 (count missing)) "it" "them") " void.")
+                                     (str "Constructor '" ctor-name "' in class '" name
+                                          "' must initialize attachable fields: "
+                                          (str/join ", " missing)
+                                          ". Only scalars (zero) and Array, Map and Set (empty) "
+                                          "start with a value; assign the others, or make them "
+                                          "optional (?T)."))
                                    (:dbg/line ctor) (:dbg/col ctor))})))
         (when (seq uninitialized-parents)
           (throw (ex-info (str "Constructor " ctor-name " does not initialize its inherited attachable fields")

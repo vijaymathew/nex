@@ -707,6 +707,66 @@ print(b.value)                   -- 0
 (To call a *parent* class's constructor instead, see
 [Inheritance](#inheritance).)
 
+### Using the object in its constructor
+
+A field of a class type (not `?T`, a scalar, `String`, or a collection) is
+void until the constructor assigns it, and the constructor must assign it on
+every path. Until it does, the object is incomplete, so the constructor may
+not use it in a way that could read the void field:
+
+- read the field;
+- call a routine of the object that reads it, directly or through other
+  routines;
+- pass `this` to other code.
+
+Assignments, delegation, and work with locals and parameters are fine. Each of
+these is a compile-time error:
+
+```nex
+class Engine
+  feature
+    status: String do result := "ok" end
+end
+
+class Car
+  feature
+    engine: Engine
+    report: String do result := engine.status end
+  create
+    make do
+      print(report)              -- error: `report` reads `engine`, not yet assigned
+      engine := create Engine
+    end
+    maybe(fast: Boolean) do
+      if fast then
+        engine := create Engine
+      end                        -- error: `engine` is void when `fast` is false
+    end
+end
+```
+
+Assign first, then use:
+
+```nex
+class Engine
+  feature
+    status: String do result := "ok" end
+end
+
+class Car
+  feature
+    engine: Engine
+    report: String do result := engine.status end
+  create
+    make do
+      engine := create Engine
+      print(report)              -- "ok"
+    end
+end
+
+let c := create Car.make
+```
+
 ## Optional arguments via method overloading
 
 Nex has no default parameter values, but a class may define several methods
@@ -759,6 +819,48 @@ class Dog
     with_name(n: String) do Animal.with_name(n) end
 end
 ```
+
+### Constructing the parent
+
+A constructor usually calls the parent's constructor first. That runs on the
+new object, so when the parent's constructor calls a routine that the class
+overrides, it runs the override, before the rest of the class's constructor.
+If the override reads a field of the class that is not yet assigned, the
+class must assign it before calling the parent's constructor:
+
+```nex
+class Engine
+  feature
+    status: String do result := "ok" end
+end
+
+class Vehicle
+  feature
+    describe: String do result := "a vehicle" end
+  create
+    make do
+      print(describe)            -- runs Car's describe on a Car
+    end
+end
+
+class Car
+  inherit Vehicle
+  feature
+    engine: Engine
+    describe: String do result := "a car, engine " + engine.status end
+  create
+    make do
+      engine := create Engine    -- before Vehicle.make, which reads it
+      Vehicle.make
+    end
+end
+
+let c := create Car.make         -- "a car, engine ok"
+```
+
+With the two lines the other way around, the compiler reports that `make`
+must assign `engine` before it calls `Vehicle.make`, and why. When the parent's
+constructor reaches no such override, the order is free.
 
 ### Several parents and ambiguous names
 
