@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed: the interpreter skipped contracts on delegated calls.** A call
+  that runs a routine of a named class on the current object did not check
+  the callee's precondition or postcondition: `super.m(...)`, `P.m(...)`, a
+  parent constructor `P.k(...)`, a sibling constructor `this.k(...)`, and
+  `this.m(...)` during construction. So `super.set(-5)` ran even though
+  `set` requires a non-negative argument. Compiled code checked them, as the
+  Definition says it should; the interpreter now does too.
 - **Fixed: a compiled program could not end with a `let`.** When the last
   statement was a top-level `let` of an `Integer`, `Real` or `Boolean`
   (`let x: Integer := 3`), the program failed with "Used a value that is
