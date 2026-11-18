@@ -21,6 +21,10 @@ A comprehensive Emacs major mode for editing Nex programming language files.
   - Evaluate buffer, region, or file
   - Interactive help
 
+- ✅ **Contract view** (`C-c C-v`)
+  - Folds every routine's and function's body to `do …`, leaving signatures,
+    `require`/`ensure` clauses, class invariants, fields and comments
+
 - ✅ **Navigation**
   - Jump to beginning/end of class or method
   - Imenu support for quick navigation
@@ -111,9 +115,40 @@ emacs example.nex
 | `C-c C-r` | `nex-eval-region` | Evaluate selected region |
 | `C-c C-l` | `nex-load-file` | Load current file in REPL |
 | `C-c C-d` | `nex-repl-show-help` | Show REPL help |
+| `C-c C-v` | `nex-contract-view-mode` | Show only signatures and contracts |
 | `C-M-a` | `nex-beginning-of-defun` | Jump to beginning of class/method |
 | `C-M-e` | `nex-end-of-defun` | Jump to end of class/method |
 | `TAB` | `nex-indent-line` | Indent current line |
+
+### Contract View
+
+`C-c C-v` (`nex-contract-view-mode`) shows the buffer as its clients see it.
+Each routine's and function's body folds to `do …`, and `rescue` clauses are
+hidden. Signatures, `note`s, `require` and `ensure` clauses, class invariants,
+fields and comments stay:
+
+```nex
+class Account
+feature
+  balance: Integer
+
+  withdraw(amount: Integer)
+    require
+      enough: amount <= balance
+    do …
+    ensure
+      less: balance = old balance - amount
+    end
+
+  is_empty(): Boolean do … end
+invariant
+  non_negative: balance >= 0
+end
+```
+
+The buffer is read-only while the view is on. Press `C-c C-v` again to return
+to the full code. Code outside routines, such as top-level `let`s and
+statements, is left as it is.
 
 ### REPL Workflow
 
