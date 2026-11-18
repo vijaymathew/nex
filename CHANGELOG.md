@@ -4,6 +4,26 @@
 
 ## 0.7.5 - 2026-11-18
 
+- **A constructor may not use the object before its fields are assigned.**
+  A field of a class type is void until the constructor assigns it. These
+  programs type-checked, then failed at run time with "Used a value that is
+  void (nil)"; each is now a compile-time error that names the field:
+  - calling a routine of the object that reads a field not yet assigned,
+    directly or through other routines (`this.call_a` before
+    `a := create A`);
+  - reading such a field, also from a closure made before the assignment;
+  - passing `this` to other code before every field is assigned;
+  - assigning a field on only some paths (`if c then a := create A end`).
+    The check was "assigned somewhere in the constructor"; it is now "on
+    every path", as the Definition says;
+  - calling a parent constructor that reaches an override reading a field
+    the class has not assigned yet. The parent's constructor runs the
+    class's overrides, so such a field must be assigned before the call.
+    When the parent's constructor reaches no such override, it can still be
+    called first, as usual.
+
+  A routine called early that reads no unassigned field is still allowed.
+  None of the examples or libraries needed a change.
 - **Fixed: the interpreter skipped contracts on delegated calls.** A call
   that runs a routine of a named class on the current object did not check
   the callee's precondition or postcondition: `super.m(...)`, `P.m(...)`, a
