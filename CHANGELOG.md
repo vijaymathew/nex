@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.5 - 2026-11-18
+
 - **Fixed: the interpreter skipped contracts on delegated calls.** A call
   that runs a routine of a named class on the current object did not check
   the callee's precondition or postcondition: `super.m(...)`, `P.m(...)`, a
