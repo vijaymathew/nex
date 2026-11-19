@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Fixed: a closure could not call a function held in a field.** Inside an
+  anonymous function or `spawn` body in a method, `g(t)`, where `g` is a
+  field of type `Function(...)`, failed in compiled code with "internal
+  error in the compiled backend: Unable to infer expression type during
+  lowering". The same call directly in the method worked, and so did the
+  interpreter. Writing `g.call1(t)` avoided it.
+- **Fixed: a closure could not always reach the object of the routine that
+  made it.** In a closure made inside a method:
+  - `let me := this` before the closure, then `me.get` in it, failed in
+    compiled code with "Unable to infer expression type during lowering",
+    unless the local was typed (`let me: Box := this`);
+  - a routine with no arguments called without parentheses (`get`, or
+    `get.to_string`) failed the same way.
+
+  In the interpreter, a closure stored in a field (a stream's
+  `delayed_rest`) lost track of its object after its first call, and its
+  next call failed with "Undefined method" or "Method not found". A closure
+  that outlived its routine could also run its calls on whatever object the
+  routine's caller variable held by then.
+- **Fixed: a routine called bare as a receiver, with arguments.** `rest.map(f)`,
+  where `rest` is a routine with no arguments, was typed `Any`, so
+  `result := rest.map(f)` was refused with "Cannot assign Any". Without
+  arguments (`rest.v`) it worked. The interpreter then failed on it with
+  "Cannot assign to undefined variable: rest".
+
 ## 0.7.5 - 2026-11-18
 
 - **A constructor may not use the object before its fields are assigned.**

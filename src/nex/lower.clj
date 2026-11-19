@@ -3111,7 +3111,13 @@
   (or (tc/infer-expression-type expr {:classes (:classes ctx)
                                       :functions (:functions ctx)
                                       :imports (:imports ctx)
-                                      :var-types (merge (:var-types ctx) local-types)})
+                                      :var-types (merge (:var-types ctx) local-types)
+                                      ;; Without it `this`, and a bare call of
+                                      ;; one of the class's routines, have no
+                                      ;; type: `let me := this` captured by a
+                                      ;; closure was typed Any, and `me.get`
+                                      ;; in the closure could not be lowered.
+                                      :current-class (:this-type ctx)})
       "Any"))
 
 (defn- narrow-local-types-by-condition
@@ -3328,7 +3334,10 @@
   [ctx local-types captures expr]
   (if (and (not (contains? local-types (:name expr)))
            (not (contains? (:var-types ctx) (:name expr)))
-           (this-type-field? ctx (:name expr)))
+           ;; a field, or a routine with no arguments called without
+           ;; parentheses (`get`), which parses as an identifier too
+           (or (this-type-field? ctx (:name expr))
+               (this-type-method? ctx (:name expr) 0)))
     (do (capture-closure-this! captures ctx)
         {:type :call
          :target {:type :identifier :name closure-this-capture-name}
@@ -3429,7 +3438,38 @@
 ;; prefix — is rewritten the same way: route it through the captured
 ;; `this` identifier, exactly like calling/reading through any other
 ;; captured object reference (`other.bump()`), which already works.
+(declare rewrite-call-for-closures rewrite-call-for-closures*)
+
+(defn- field-function-call?
+  "Whether EXPR, a call with no receiver, calls the function held in a field
+   of the enclosing `this` (`g(t)`, with `g: Function(...)`): a call with
+   parentheses that names no local, no outer variable and no routine, only
+   a field."
+  [ctx local-types expr]
+  (let [method (:method expr)
+        arity (count (:args expr))]
+    (and (nil? (:target expr))
+         (not (false? (:has-parens expr)))
+         (not (:self-recursive-call? expr))
+         (not (contains? local-types method))
+         (not (contains? (:var-types ctx) method))
+         (not (this-type-method? ctx method arity))
+         (this-type-field? ctx method))))
+
 (defn- rewrite-call-for-closures
+  [ctx local-types captures expr]
+  (if (field-function-call? ctx local-types expr)
+    ;; `g(t)` is `g.callN(t)`: the field is read through the captured
+    ;; `this`, as any field receiver is, and its function called. Left bare,
+    ;; the call named nothing in the closure's own class.
+    (rewrite-call-for-closures ctx local-types captures
+                               (assoc expr
+                                      :target (:method expr)
+                                      :method (str "call" (count (:args expr)))
+                                      :has-parens true))
+    (rewrite-call-for-closures* ctx local-types captures expr)))
+
+(defn- rewrite-call-for-closures*
   [ctx local-types captures expr]
   (let [target (:target expr)
         method (:method expr)
@@ -3472,7 +3512,8 @@
                      (and (string? target)
                           (not (contains? local-types target))
                           (not (contains? (:var-types ctx) target))
-                          (this-type-field? ctx target))
+                          (or (this-type-field? ctx target)
+                              (this-type-method? ctx target 0)))
                      (rewrite-identifier-for-closures ctx local-types captures
                                                       {:type :identifier :name target})
 
