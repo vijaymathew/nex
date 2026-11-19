@@ -1,5 +1,6 @@
 (ns nex.field-shadowing-test
-  "A `let` inside a class's routines may not reuse a visible field's name."
+  "A `let` inside a class's routines may not reuse a visible field's or
+   routine's name."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [nex.parser :as p]
@@ -84,6 +85,50 @@ class C inherit B feature reset do let value := 0 end end")))))
 class Child inherit Base
 feature
   reset do let value := 0 end
+end")))))
+
+(deftest let-shadowing-a-routine-is-rejected
+  (testing "a closure named like the routine it means to call"
+    (let [msg (rejection "class Stream
+feature
+  first: Integer
+  rest: Stream do result := this end
+  map(f: Function(Integer): Integer): Stream
+  do
+    let rest := fn(t: Integer): Stream do
+      result := rest.map(f)
+    end
+    result := this
+  end
+end")]
+      (is (str/starts-with? (str msg) "Line 7:") msg)
+      (is (str/includes? (str msg) "the same name as the routine 'rest' of class 'Stream'") msg)
+      (is (str/includes? (str msg) "would hide it") msg)))
+  (testing "a routine with arguments"
+    (is (str/includes? (str (rejection "class Box
+feature
+  add(x: Integer): Integer do result := x end
+  run do let add := 1 print(add) end
+end"))
+                       "routine 'add' of class 'Box'")))
+  (testing "an inherited routine"
+    (is (re-find #"routine 'size' that class 'Child' inherits from 'Base'"
+                 (str (rejection "class Base feature size: Integer do result := 1 end end
+class Child inherit Base
+feature
+  run do let size := 2 print(size) end
+end")))))
+  (testing "a private routine of a parent is not visible, so it is not shadowed"
+    (is (nil? (rejection "class Base private feature size: Integer do result := 1 end end
+class Child inherit Base
+feature
+  run do let size := 2 print(size) end
+end"))))
+  (testing "a parameter named like a routine stays allowed"
+    (is (nil? (rejection "class Box
+feature
+  size: Integer do result := 1 end
+  scaled(size: Integer): Integer do result := size * 2 end
 end")))))
 
 (deftest deliberate-bindings-stay-allowed

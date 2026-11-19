@@ -680,9 +680,11 @@ print(c.area)                    -- 78.53975
 
 A field is set by assigning it (`radius := r`). Declaring a local with the
 field's name (`let radius := r`) would only hide the field, so a `let` in a
-class's routines may not reuse the name of a field or constant visible there,
-including an inherited one. A parameter may, as in `make(name: String) do
-this.name := name end`.
+class's routines may not reuse the name of a field, constant or routine
+visible there, including an inherited one. A local named like a routine hides
+it the same way: in `let rest := fn(...) do result := rest.map(f) end`,
+`rest` is the function being defined, not the routine. A parameter may reuse
+such a name, as in `make(name: String) do this.name := name end`.
 
 A constructor can delegate to another constructor of the same class with
 `this.<ctor-name>(...)`, so shared setup lives in one place:

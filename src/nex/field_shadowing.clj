@@ -5,6 +5,12 @@
    constructor), it leaves the field unset — and the backends disagree on
    which one a later bare `value` means.
 
+   Nor may it reuse the name of a routine visible there. Inside the `let`'s
+   scope the bare name means the local, so a call meant for the routine
+   reaches the local instead: in `let rest := fn(t: T): Stream[T] do result
+   := rest.map(f) end`, `rest` is the function being defined, not the
+   stream's `rest`.
+
    Only user-written `let`s are checked. Parameters (`make(name: String) do
    this.name := name end`) and loop/pattern variables are deliberate bindings
    and stay allowed."
@@ -24,21 +30,36 @@
         :when (= :field (:type member))]
     (:name member)))
 
-(defn- visible-fields
-  "{field-name declaring-class-name} for every field visible inside CLASS-DEF:
-   its own, then each ancestor's non-private ones (nearest wins)."
+(defn- routine-names
+  "Routine names CLASS-DEF declares; private ones only when
+   INCLUDE-PRIVATE?."
+  [class-def include-private?]
+  (for [section (feature-sections class-def)
+        :when (or include-private? (not= :private (get-in section [:visibility :type])))
+        member (:members section)
+        :when (= :method (:type member))]
+    (:name member)))
+
+(defn- visible-features
+  "{name [declaring-class-name kind]} for every field (kind :field) or
+   routine (kind :routine) visible inside CLASS-DEF: its own, then each
+   ancestor's non-private ones (nearest wins; a field wins over a routine
+   of the same name in the same class)."
   [lookup class-def]
   (letfn [(ancestors [class-name visited]
             (when (and (string? class-name) (not (contains? visited class-name)))
               (when-let [cd (lookup class-name)]
                 (cons cd (mapcat #(ancestors (:parent %) (conj visited class-name))
-                                 (:parents cd))))))]
-    (reduce (fn [m cd]
-              (reduce (fn [m n] (if (contains? m n) m (assoc m n (:name cd))))
-                      m
-                      (field-names cd false)))
-            (zipmap (field-names class-def true) (repeat (:name class-def)))
-            (mapcat #(ancestors (:parent %) #{(:name class-def)}) (:parents class-def)))))
+                                 (:parents cd))))))
+          (own [cd include-private?]
+            (concat (map (fn [n] [n [(:name cd) :field]]) (field-names cd include-private?))
+                    (map (fn [n] [n [(:name cd) :routine]]) (routine-names cd include-private?))))]
+    (reduce (fn [m [n v]] (if (contains? m n) m (assoc m n v)))
+            {}
+            (concat (own class-def true)
+                    (mapcat #(own % false)
+                            (mapcat #(ancestors (:parent %) #{(:name class-def)})
+                                    (:parents class-def)))))))
 
 (defn- routine-bodies
   [class-def]
@@ -76,20 +97,27 @@
   (let [messages
         (for [class-def class-defs
               :when (and (map? class-def) (= :class (:type class-def)))
-              :let [fields (visible-fields lookup class-def)]
-              :when (seq fields)
+              :let [features (visible-features lookup class-def)]
+              :when (seq features)
               routine (routine-bodies class-def)
-              :let [[{:keys [name]} line] (shadowing-let fields [(:body routine) (:rescue routine)]
+              :let [[{:keys [name]} line] (shadowing-let features [(:body routine) (:rescue routine)]
                                                          (:dbg/line routine))]
               :when name]
-          (let [owner (get fields name)]
+          (let [[owner kind] (get features name)
+                whose (if (= owner (:name class-def))
+                        (str " of class '" owner "'")
+                        (str " that class '" (:name class-def) "' inherits from '" owner "'"))]
             (str (when line (str "Line " line ": "))
-                 "Local variable '" name "' has the same name as the field '" name "'"
-                 (if (= owner (:name class-def))
-                   (str " of class '" owner "'")
-                   (str " that class '" (:name class-def) "' inherits from '" owner "'"))
-                 ", and would hide it. To set the field, assign it: `" name
-                 " := ...`. Otherwise choose another name.")))]
+                 (if (= kind :field)
+                   (str "Local variable '" name "' has the same name as the field '" name "'"
+                        whose
+                        ", and would hide it. To set the field, assign it: `" name
+                        " := ...`. Otherwise choose another name.")
+                   (str "Local variable '" name "' has the same name as the routine '" name "'"
+                        whose
+                        ", and would hide it: where the local is in scope, `" name
+                        "` means the local, so a call meant for the routine reaches it"
+                        " instead. Choose another name.")))))]
     (when (seq messages)
       (let [msg (str/join "\n" messages)]
         (throw (ex-info msg {:error msg :messages (vec messages)}))))))
