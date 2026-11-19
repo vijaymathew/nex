@@ -3865,6 +3865,20 @@
         (check-call-signature env method args method-sig
                               (member-type-map env target-type type-map method-sig)))
       (let [arg-types (mapv #(check-expression env %) args)]
+        ;; A function has no features but the ones every value has (found
+        ;; above): it is called. Typed Any
+        ;; instead, `rest.map(f)` on a local `rest` holding a function was
+        ;; reported only where its Any value was used ("Cannot assign Any"),
+        ;; and compiled code then failed on the call itself.
+        (when (and (= "Function" base-type) (not with-java?))
+          (let [target (:target call)
+                msg (str "`" method "` is not a feature of "
+                         (if (string? target) (str "`" target "`, a function") "a function")
+                         " of type " (display-type target-type)
+                         ". A function is called"
+                         (when (string? target) (str ": `" target "(...)`"))
+                         ".")]
+            (throw (ex-info msg {:error (type-error msg)}))))
         ;; A method not declared/inherited anywhere in the Nex chain may
         ;; still be a real, inherited (non-overridden) member of a Java
         ;; class this class `extends` (Phase 2, docs/proposals/

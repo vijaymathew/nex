@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **A `let` may not reuse the name of a routine.** A `let` in a class's
+  routines was already refused when it reused the name of a field or
+  constant. It is now refused for a visible routine too, own or inherited:
+  in `let rest := fn(t: T): Stream[T] do result := rest.map(f) end`, `rest`
+  is the function being defined, not the stream's `rest`. Parameters, loop
+  variables and pattern bindings may still reuse such a name.
+- **An unknown feature of a function is an error.** `f.map(3)`, where `f`
+  holds a function, was typed `Any`. So the mistake was reported only where
+  the value was used ("Cannot assign Any to variable ..."), and when nothing
+  used it, compiled code failed on the call itself. It is now reported at
+  the call: "`map` is not a feature of `f`, a function of type ... A
+  function is called: `f(...)`."
+
 - **Fixed: a closure could not call a function held in a field.** Inside an
   anonymous function or `spawn` body in a method, `g(t)`, where `g` is a
   field of type `Function(...)`, failed in compiled code with "internal
