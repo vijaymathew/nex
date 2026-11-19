@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.6 - 2026-11-19
+
 - **A `let` may not reuse the name of a routine.** A `let` in a class's
   routines was already refused when it reused the name of a field or
   constant. It is now refused for a visible routine too, own or inherited:
