@@ -3490,6 +3490,13 @@
                              (when current-class
                                (or (lookup-class-field env current-class target)
                                    (:field-type (lookup-class-constant env current-class target))
+                                   ;; A routine with no arguments, called
+                                   ;; without parentheses (`rest.map(f)`), as
+                                   ;; check-identifier types a bare one. Without
+                                   ;; it the receiver had no type, and the call
+                                   ;; was typed Any.
+                                   (some-> (lookup-class-method env current-class target 0)
+                                           (#(or (:return-type %) "Void")))
                                    ;; A readable top-level global (§7). Gated on
                                    ;; being in the static world so top-level
                                    ;; source-order threading is preserved.

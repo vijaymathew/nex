@@ -2061,7 +2061,7 @@
     (:current-object ctx)
     (assoc :enclosing (assoc (select-keys ctx [:current-object :current-class-name :current-target
                                                :caller-env :current-path :current-view
-                                               :param-names :modified-fields])
+                                               :param-names :modified-fields :live])
                              :in-closure? true))))
 
 (defn- write-back-target!
@@ -2073,10 +2073,14 @@
               (env-lookup (:current-env ctx) expr)
               (eval-node ctx expr)))]
     (let [updated? (cond
+                     ;; A name that is no variable is a routine called
+                     ;; without parentheses (`rest.map(f)`): its result is
+                     ;; a value, not a slot to write back to.
                      (string? target-expr)
-                     (do
-                       (env-set! (:current-env ctx) target-expr value)
-                       true)
+                     (if (env-contains? (:current-env ctx) target-expr)
+                       (do (env-set! (:current-env ctx) target-expr value)
+                           true)
+                       false)
 
                      (and (map? target-expr) (= :call (:type target-expr)))
                      (let [{:keys [target method args has-parens]} target-expr]
@@ -2502,8 +2506,10 @@
                              nil)
             _ (env-define method-env "result" default-result)
             _ (env-define method-env "this" obj)
+            live (atom true)
             new-ctx (-> ctx
                         (dissoc :unchecked-call? :self-call? :in-closure?)
+                        (assoc :live live)
                         (assoc :param-names param-names)
                         (assoc :current-env method-env)
                         (assoc :current-object obj)
@@ -2541,13 +2547,19 @@
                 (check-assertions new-ctx require-assertions Precondition))
             old-values (when-not (:skip-contracts? ctx)
                          (record-old-values new-ctx effective-ensure))
-            _ (if-let [rescue (:rescue method-def)]
-                (eval-body-with-rescue new-ctx (:body method-def) rescue)
-                (doseq [stmt (:body method-def)]
-                  (eval-node new-ctx stmt)))
+            _ (try
+                (if-let [rescue (:rescue method-def)]
+                  (eval-body-with-rescue new-ctx (:body method-def) rescue)
+                  (doseq [stmt (:body method-def)]
+                    (eval-node new-ctx stmt)))
+                (finally (reset! live false)))
             updated-fields (read-back-method-fields method-env (:fields obj) view
                                                     param-names modified-fields)
-            updated-obj (make-object (:class-name obj) updated-fields (:closure-env obj))
+            ;; A closure keeps its enclosing context: written back into the
+            ;; field that holds it (`delayed_rest(t)`), it lost it, and its
+            ;; next call ran with the closure itself as `this`.
+            updated-obj (cond-> (make-object (:class-name obj) updated-fields (:closure-env obj))
+                          (:enclosing obj) (assoc :enclosing (:enclosing obj)))
             result (method-result-value method-env)]
         (try
           (when-let [ensure-assertions effective-ensure]
@@ -2816,6 +2828,25 @@
       :else
       (invoke-compiled-object-call ctx obj method has-parens arg-values))))
 
+(defn- route-through-caller?
+  "Whether an unqualified call on OBJ, the current object as the routine
+   sees it, is routed back through TARGET-NAME, the variable the routine was
+   invoked on (see eval-call-without-target). While the routine runs, it
+   is. A closure the routine made may run after the routine returned, and
+   by then the variable may be gone, or hold another object -- a stream's
+   `at` walks `stream := stream.rest` -- so it routes through the variable
+   only while that still holds OBJ."
+  [ctx target-name obj]
+  (and (string? target-name)
+       (let [caller-env (or (:caller-env ctx) (-> ctx :current-env :parent))]
+         (and caller-env
+              (env-contains? caller-env target-name)
+              (or (not (some-> (:live ctx) deref false?))
+                  (let [v (env-lookup caller-env target-name)]
+                    (and (nex-object? v)
+                         (= (:class-name v) (:class-name obj))
+                         (= (:fields v) (:fields obj)))))))))
+
 (defn- eval-call-without-target
   "A call with no receiver: `method` is either a callable bound in the
    current env (a local Function, a compiled top-level function, or a host
@@ -2903,7 +2934,7 @@
                   self-ctx (assoc ctx :unchecked-call? (not (:in-closure? ctx))
                                       :self-call? true)
                   literal-args (mapv (fn [v] {:type :literal :value v}) arg-values)]
-              (if (string? target-name)
+              (if (route-through-caller? ctx target-name updated-obj)
               ;; The enclosing method was invoked on a plain variable, so route
               ;; the self-call back through that variable to propagate any
               ;; field mutations to the caller. The variable is the caller's,
