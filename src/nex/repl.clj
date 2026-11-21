@@ -1300,11 +1300,19 @@
 
 (defn- repl-alias-env
   "A minimal type-checker environment carrying just the active REPL type
-  aliases, suitable for `tc/expand-type-aliases`."
+  aliases, suitable for `tc/expand-type-aliases`. A generic alias's param list
+  goes in too: without it `Pair[String]` (for `declare type Pair[T] = ...`)
+  expands to its raw body `Array[T]`, leaving the recorded variable type with
+  an unbound `T` that later calls (`ps.add(...)`) then fail to match."
   []
   {:type-aliases (atom (into {}
                              (map (fn [[k v]] [k (:type-expr v)]))
                              @*repl-type-aliases*))
+   :type-alias-generic-params (atom (into {}
+                                          (keep (fn [[k v]]
+                                                  (when (seq (:generic-params v))
+                                                    [k (:generic-params v)])))
+                                          @*repl-type-aliases*))
    :parent nil})
 
 (defn- expand-alias-type

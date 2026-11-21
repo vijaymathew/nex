@@ -479,6 +479,27 @@ if convert b to z: ?Quantity then print(\"yes\") else print(\"no\") end")))))
                        (filter #{"true" "false"}))]
       (is (= ["true" "false" "true"] printed) out))))
 
+;; The REPL rewrites each recorded variable type through the session's aliases
+;; (repl-alias-env). That env used to carry no generic-param lists, so
+;; `Pair[String]` expanded to its raw body `Array[T]`, `ps` was recorded as
+;; `Array[Array[T]]`, and the next line's `ps.add(["c", "d"])` failed with
+;; "should be Array[T], but got Array[String]".
+(deftest generic-refinement-alias-from-earlier-repl-cell
+  (testing "a generic alias applied on an earlier REPL line keeps its type argument"
+    (let [ctx (repl/init-repl-context)
+          out (try
+                (reset! repl/*type-checking-enabled* true)
+                (with-out-str
+                  (repl/eval-code ctx "declare type Pair[T] = Array[T] where a: a.length = 2")
+                  (repl/eval-code ctx "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]")
+                  (repl/eval-code ctx "ps.add([\"c\", \"d\"])")
+                  (repl/eval-code ctx "ps"))
+                (finally
+                  (reset! repl/*type-checking-enabled* false)
+                  (reset! repl/*repl-var-types* {})))]
+      (is (not (str/includes? out "Type error")) out)
+      (is (str/includes? out "[[\"a\", \"b\"], [\"c\", \"d\"]]") out))))
+
 ;; `where` is matched the same way `alias` is (see operator_alias_test.clj):
 ;; a plain IDENTIFIER at the one position it means something, spelling checked
 ;; by the walker. That makes it usable everywhere else — local, field,
