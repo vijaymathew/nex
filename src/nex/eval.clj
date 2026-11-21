@@ -232,6 +232,42 @@
                 (run-interpreted source-id ast program-args skip-contracts?))
             nil)))))))
 
+(defn- with-interned-refinements
+  "AST with the walker's refinement passes run again, seeing the aliases of
+   MODULE-AST, the intern-merged program: as nex.compiler.jvm.file/augment-
+   ast-with-interns does for the compiled backend. The interpreter runs the
+   file's own AST, whose parse saw only its own aliases, so a refinement
+   declared in an interned file went unchecked there (`let q: Quantity :=
+   -1`), and a `convert` to one tested against a class of its name, never
+   matching."
+  [ast module-ast]
+  (let [own (:type-aliases ast)
+        merged (:type-aliases module-ast)]
+    (if (= (count own) (count merged))
+      ast
+      (-> ast
+          (assoc :type-aliases merged)
+          walker/resolve-convert-aliases
+          walker/inject-refinement-checks
+          (assoc :type-aliases own)))))
+
+(defn- with-generated-checks
+  "AST with the functions the walker generated to check a refinement
+   (`__refine_...`) that MODULE-AST, the intern-merged program, has and AST
+   lacks: those for a refinement declared in an interned file are made only
+   once the files are merged, yet the interpreter runs AST, whose call sites
+   the type checker's rewrite routes through them."
+  [ast module-ast]
+  (let [have (set (map :name (:functions ast)))
+        missing (filter #(and (str/starts-with? (str (:name %)) "__refine")
+                              (not (have (:name %))))
+                        (:functions module-ast))]
+    (if (empty? missing)
+      ast
+      (-> ast
+          (update :functions #(vec (concat % missing)))
+          (update :classes #(vec (concat % (keep :class-def missing))))))))
+
 (defn eval-file
   "Parse and evaluate a Nex file. opts: {:interpret? bool} to force the
    tree-walking interpreter instead of the compiled JVM backend; {:skip-contracts?
@@ -255,6 +291,8 @@
      ;; not the merged one.
      (run-ast source-id
               (-> ast
+                  (with-interned-refinements module-ast)
+                  (with-generated-checks module-ast)
                   (extend/rewrite-checked-sites nil refinement-sites)
                   (tc/apply-inferred-lambda-types lambda-types))
               module-ast opts))))

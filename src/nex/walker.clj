@@ -896,27 +896,47 @@
   where ...`) gets its :base specialized to them (`Array[String]`), since the
   check binds the predicate's binder at that type. A detachable annotation
   (`?Quantity`) gets an info marked :detachable: nil passes there, so
-  make-refinement-check tests the predicate only on a value that isn't nil."
-  [refinements type-expr]
-  (cond
-    (string? type-expr)
-    (when-let [r (get refinements type-expr)]
-      [type-expr r])
+  make-refinement-check tests the predicate only on a value that isn't nil.
 
-    (and (map? type-expr)
-         (string? (:base-type type-expr))
-         (not (:param-types type-expr)))
-    (let [rname (:base-type type-expr)
-          args (or (:type-args type-expr) (:type-params type-expr))]
-      (when-let [{:keys [generic-params] :as r} (get refinements rname)]
-        [rname (cond-> r
-                 (and (seq generic-params) (= (count generic-params) (count args)))
-                 (update :base substitute-type-params
-                         (zipmap (map :name generic-params) args))
-                 (:detachable type-expr)
-                 (assoc :detachable true))]))
+   A refinement of a refinement (`declare type Small = Quantity where n: n <
+   10`) gets its base's [name info] as :parent, and its :binder-type is the
+   base all the way down (Integer): its check runs the parent's predicate
+   first, then its own, binding the value at that type. Binding it at
+   `Quantity` instead left the parent's predicate to a later walker pass
+   over the check itself, which only the compiled backend's intern merge
+   made (nex.compiler.jvm.file/augment-ast-with-interns); the interpreter
+   accepted `let s: Small := -1`. SEEN guards a cycle of declarations, which
+   the type checker reports."
+  ([refinements type-expr] (refinement-for refinements type-expr #{}))
+  ([refinements type-expr seen]
+   (let [found (cond
+                 (string? type-expr)
+                 (when-let [r (get refinements type-expr)]
+                   [type-expr r])
 
-    :else nil))
+                 (and (map? type-expr)
+                      (string? (:base-type type-expr))
+                      (not (:param-types type-expr)))
+                 (let [rname (:base-type type-expr)
+                       args (or (:type-args type-expr) (:type-params type-expr))]
+                   (when-let [{:keys [generic-params] :as r} (get refinements rname)]
+                     [rname (cond-> r
+                              (and (seq generic-params) (= (count generic-params) (count args)))
+                              (update :base substitute-type-params
+                                      (zipmap (map :name generic-params) args))
+                              (:detachable type-expr)
+                              (assoc :detachable true))]))
+
+                 :else nil)]
+     (when-let [[rname r] found]
+       (if (contains? seen rname)
+         [rname r]
+         (let [parent (refinement-for refinements (:base r) (conj seen rname))]
+           [rname (assoc r
+                         :parent parent
+                         :binder-type (if-let [[_ pr] parent]
+                                        (:binder-type pr)
+                                        (:base r)))]))))))
 
 (defn- make-refinement-check
   "AST for `do let <binder>: <base> := <value-expr>  if not(<pred>) then raise ... end end`.
@@ -931,19 +951,26 @@
    refinement-for) nil passes: the check is guarded by `if <value> /= nil`,
    which narrows VALUE-EXPR — a name, at every site that builds one — for
    the binder."
-  [rname {:keys [binder predicate base detachable]} value-expr]
-  (let [check {:type :scoped-block
-               :rescue nil
-               :body [{:type :let :name binder :var-type base
-                       :value value-expr}
-                      {:type :if
-                       :condition {:type :unary :operator "not" :expr predicate}
-                       :then [{:type :raise
-                               :value {:type :string
-                                       :value (str "Refinement " rname " violated")}
-                               :builtin (str "Refinement_Violation/" rname)}]
-                       :elseif []
-                       :else nil}]}]
+  [rname {:keys [binder predicate base binder-type parent detachable]} value-expr]
+  (let [own {:type :scoped-block
+             :rescue nil
+             :body [{:type :let :name binder :var-type (or binder-type base)
+                     :value value-expr}
+                    {:type :if
+                     :condition {:type :unary :operator "not" :expr predicate}
+                     :then [{:type :raise
+                             :value {:type :string
+                                     :value (str "Refinement " rname " violated")}
+                             :builtin (str "Refinement_Violation/" rname)}]
+                     :elseif []
+                     :else nil}]}
+        ;; A refinement of a refinement: its base's predicate first.
+        check (if-let [[pname pr] parent]
+                {:type :scoped-block
+                 :rescue nil
+                 :body [(make-refinement-check pname (dissoc pr :detachable) value-expr)
+                        own]}
+                own)]
     (if detachable
       {:type :if
        :condition {:type :binary :operator "/=" :left value-expr :right {:type :nil}}
@@ -1094,6 +1121,19 @@
                                     :rescue nil}]}]
                  :invariant nil}}))
 
+(defn- runtime-type
+  "TYPE-EXPR with the alias it names resolved, through a chain of them
+  (`Small = Quantity where ...`, `Quantity = Integer where ...`), to a type
+  that exists at run time. Stops at anything else, including a cycle."
+  [aliases type-expr]
+  (loop [t type-expr seen #{}]
+    (let [nm (alias-target-name t)
+          alias (get aliases nm)]
+      (if (and alias (not (seen nm)))
+        (recur (if (and (map? t) (:detachable t)) (detach (:type-expr alias)) (:type-expr alias))
+               (conj seen nm))
+        t))))
+
 (defn- resolve-convert-alias
   "NODE with its alias target resolved. A refinement target R is kept as
   written, for the typechecker; the value is routed through R's checker, the
@@ -1115,14 +1155,10 @@
                            :method (refinement-checker-name alias-name)
                            :args [value]
                            :has-parens true}
-                   :runtime-target-type (if (and (map? target-type) (:detachable target-type))
-                                          (detach type-expr)
-                                          type-expr)))
+                   :runtime-target-type (runtime-type aliases target-type)))
 
         :else
-        (assoc node :target-type (if (and (map? target-type) (:detachable target-type))
-                                   (detach type-expr)
-                                   type-expr)))
+        (assoc node :target-type (runtime-type aliases target-type)))
       node)))
 
 (defn resolve-convert-aliases
@@ -1152,9 +1188,27 @@
                           n))
                       program)
             defined (set (map :name (:functions program')))
-            checkers (->> (sort @used-refinements)
-                          (remove #(defined (refinement-checker-name %)))
-                          (mapv #(refinement-checker-function % (get aliases %))))]
+            ;; A checker's own `convert` targets R's base, which may itself be
+            ;; an alias (`Pos = Count where ...`) or a refinement (`Small = Q
+            ;; where ...`): resolve those too, which may need further
+            ;; checkers, until none is missing. Without it, `convert x to y:
+            ;; Small` tested against a class named Q and was always false.
+            checkers (loop [made []
+                            made-names #{}]
+                       (let [missing (->> (sort @used-refinements)
+                                          (remove #(or (defined (refinement-checker-name %))
+                                                       (made-names %))))]
+                         (if (empty? missing)
+                           made
+                           (recur (into made
+                                        (map #(walk/postwalk
+                                               (fn [n]
+                                                 (if (and (map? n) (= :convert (:type n)))
+                                                   (resolve-convert-alias n aliases used-refinements)
+                                                   n))
+                                               (refinement-checker-function % (get aliases %))))
+                                        missing)
+                                  (into made-names missing)))))]
         (cond-> program'
           (seq checkers) (-> (update :functions #(vec (concat % checkers)))
                              (update :classes #(vec (concat % (map :class-def checkers))))))))))

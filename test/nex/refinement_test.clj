@@ -151,7 +151,7 @@ print(e)"))))
 let c: Count := -7
 print(c * -1)")))))
 
-(deftest where-is-a-soft-keyword
+(deftest where-as-member-name-alongside-a-refinement
   (testing "`where` stays usable as a member name alongside a refinement decl"
     (is (= ["3"]
            (run "declare type Quantity = Integer where n: n > 0
@@ -972,3 +972,219 @@ print(convert 0 to z: Quantity)")]
                      "let x: Any := 5
 if convert x to y: Count then print(\"matched \" + y.to_string) else print(\"no match\") end")]
       (is (= "\"matched 5\"\n" (:output (run-cross-file main-file)))))))
+
+;; ─── Coverage: every refinement shape and site, on both backends ───────────
+;;
+;; The tests above grew with the features; these fill in what they left out:
+;; the direct narrowing sites on the compiled backend (the early tests run
+;; only the interpreter, unchecked), refinements declared in an interned file,
+;; the remaining whole-collection and `?` sites, the declaration shapes a
+;; refinement can take, and generic classes beyond a single `T`.
+
+(def ^:private coverage-prelude
+  "declare type Q = Integer where n: n > 0
+declare type Pair[T] = Array[T] where a: a.length = 2
+declare type Qs = Array[Q]
+class Holder
+  create make(qs: Array[Q]) do this.qs := qs end
+  feature
+    qs: Array[Q]
+    opt: ?Q
+    count: Q
+    replace(raw: Array[Integer]) do this.qs := raw end
+    take(xs: Array[Q]) do end
+    set_opt(v: ?Q) do opt := v end
+    set_count(v: Integer) do count := v end
+    set_count_this(v: Integer) do this.count := v end
+end
+function want_q(v: Q): Integer do result := v end
+function bad_ret(): Q do result := -1 end
+function want_opt(v: ?Q): Integer do result := 0 end
+function maybe_q(v: Integer): ?Q do result := v end
+")
+
+(deftest direct-refinement-sites-on-both-backends
+  (testing "let, parameter, return, nested let"
+    (doseq [body ["let q: Q := -3"
+                  "print(want_q(0))"
+                  "print(bad_ret())"
+                  "if true then\n  let q: Q := 0\nend"]]
+      (is (violates-on-both? "Q" (str coverage-prelude body)) body)))
+  ;; A field's check names the field, not the refinement (see
+  ;; narrow-field-assignment), as cross-file-refinement-field-assignment-
+  ;; is-enforced-test records.
+  (testing "field, implicit and `this.`"
+    (doseq [body ["let h := create Holder.make([1])\nh.set_count(0)"
+                  "let h := create Holder.make([1])\nh.set_count_this(-1)"]]
+      (is (violates-on-both? "count" (str coverage-prelude body)) body))))
+
+(defn- violation-on-file
+  "The error message running FILE raises on the given backend, or nil."
+  [^java.io.File file interpret?]
+  (try
+    (with-out-str (e/eval-file (.getPath file) {:interpret? interpret?}))
+    nil
+    (catch Exception ex (ex-message ex))))
+
+(deftest cross-file-refinement-checks-on-both-backends
+  (testing "a refinement declared in an interned file, checked in the main file"
+    (doseq [body ["let qs: Array[Quantity] := [1]\nqs.add(0)"
+                  "let qs: Array[Quantity] := [1, -1]"
+                  "let raw: Array[Integer] := [0]\nlet qs: Array[Quantity] := raw"
+                  "let q: Quantity := -1"
+                  "function f(q: Quantity): Integer do result := q end\nprint(f(0))"
+                  "let t: Task[Quantity] := spawn do result := -5 end\nprint(t.await)"]
+            interpret? [false true]]
+      (is (= "Refinement Quantity violated"
+             (violation-on-file (write-lib-and-main! "declare type Quantity = Integer where n: n > 0" body)
+                                interpret?))
+          (str body (when interpret? " (interpreted)")))))
+  (testing "valid values pass, and a convert tests the predicate"
+    (doseq [interpret? [false true]]
+      (let [main (write-lib-and-main!
+                  "declare type Quantity = Integer where n: n > 0"
+                  "let qs: Array[Quantity] := [1]
+qs.add(2)
+let m: Map[String, Quantity] := {\"a\": 1}
+let x: Any := 5
+let z: Any := -5
+print(qs)
+print(m)
+print(convert x to y: Quantity)
+print(convert z to w: Quantity)")
+            out (with-out-str (e/eval-file (.getPath main) {:interpret? interpret?}))]
+        (is (= ["[1, 2]" "{\"a\": 1}" "true" "false"] (str/split-lines (str/trim-newline out)))
+            (str "interpreted? " interpret?))))))
+
+(deftest whole-collection-narrowing-at-every-site
+  (testing "a field, a method argument, a constructor argument, a `?` collection, an alias"
+    (doseq [body ["let h := create Holder.make([1])\nlet raw: Array[Integer] := [0]\nh.replace(raw)"
+                  "let h := create Holder.make([1])\nlet raw: Array[Integer] := [0]\nh.take(raw)"
+                  "let raw: Array[Integer] := [0]\nlet h := create Holder.make(raw)"
+                  "let raw: Array[Integer] := [0]\nlet qs: ?Array[Q] := raw"
+                  "let raw: Array[Integer] := [0]\nlet qs: Qs := raw"
+                  "let qs: Qs := [1]\nqs.add(0)"]]
+      (is (violates-on-both? "Q" (str coverage-prelude body)) body))))
+
+(deftest detachable-refinement-at-every-site
+  (testing "a `?` parameter, return, field, map value, and generic refinement"
+    (doseq [[rname body] [["Q" "print(want_opt(-1))"]
+                          ["Q" "print(maybe_q(-1))"]
+                          ["Q" "let h := create Holder.make([1])\nh.set_opt(-2)"]
+                          ["Q" "let m: Map[String, ?Q] := {\"a\": nil}\nm.put(\"b\", -1)"]
+                          ["Pair" "let p: ?Pair[String] := [\"only\"]"]]]
+      (is (violates-on-both? rname (str coverage-prelude body)) body))))
+
+(deftest refinement-declaration-shapes
+  (testing "a refinement of a refinement checks its base's predicate, then its own"
+    (let [decl "declare type Small = Q where n: n < 10\n"]
+      (is (violates-on-both? "Small" (str coverage-prelude decl "let s: Small := 20")))
+      (is (violates-on-both? "Q" (str coverage-prelude decl "let s: Small := -1"))
+          "the base's predicate, on the interpreter too")
+      (is (violates-on-both? "Small" (str coverage-prelude decl "let xs: Array[Small] := [1]\nxs.add(20)")))
+      (is (violates-on-both? "Q" (str coverage-prelude decl "let xs: Array[Small] := [1]\nxs.add(-1)")))))
+  (testing "a refinement whose base is a plain alias"
+    (let [decl "declare type Count = Integer\ndeclare type Pos = Count where n: n > 0\n"]
+      (is (violates-on-both? "Pos" (str coverage-prelude decl "let p: Pos := 0")))
+      (is (violates-on-both? "Pos" (str coverage-prelude decl "let xs: Array[Pos] := [1]\nxs.add(0)")))))
+  (testing "a generic refinement with a constraint"
+    (let [decl "declare type Sorted2[T -> Comparable] = Array[T] where a: a.length < 2 or a.get(0) <= a.get(1)\n"]
+      (is (violates-on-both? "Sorted2" (str coverage-prelude decl "let s: Sorted2[Integer] := [3, 1]")))
+      (is (violates-on-both? "Sorted2" (str coverage-prelude decl
+                                            "let xs: Array[Sorted2[Integer]] := [[1, 2]]\nxs.add([3, 1])")))))
+  (testing "a predicate that doesn't fit an instantiation is a type error"
+    (is (str/includes? (str (type-error-message
+                             "declare type Pos[T] = Array[T] where a: a.get(0) > 0
+let xs: Array[Pos[String]] := []"))
+                       "Comparison requires compatible types"))))
+
+(deftest refinement-declaration-shapes-valid-values-and-convert
+  (testing "valid values pass, and a convert to each shape tests every predicate"
+    (is (= ["6" "true" "false" "false" "[1, 9, 3]" "true" "false" "true" "false" "[[1, 2], [2, 5]]"]
+           (both (str coverage-prelude
+                      "declare type Small = Q where n: n < 10
+declare type Count = Integer
+declare type Num = Count
+declare type Pos = Count where n: n > 0
+declare type Sorted2[T -> Comparable] = Array[T] where a: a.length < 2 or a.get(0) <= a.get(1)
+let ok: Small := 5
+print(ok + 1)
+let five: Any := 5
+let twenty: Any := 20
+let minus: Any := -1
+let zero: Any := 0
+let s: Any := \"s\"
+print(convert five to a: Small)
+print(convert twenty to b: Small)
+print(convert minus to c: Small)
+let xs: Array[Small] := [1, 9]
+xs.add(3)
+print(xs)
+print(convert five to d: Pos)
+print(convert zero to e: Pos)
+print(convert five to f: Num)
+print(convert s to g: Num)
+let sorted: Array[Sorted2[Integer]] := [[1, 2]]
+sorted.add([2, 5])
+print(sorted)"))))))
+
+(deftest generic-class-shapes
+  (testing "a subclass fixing the type parameter, and a class with two"
+    (let [classes "class Box[T]
+  create make(v: T) do this.item := v end
+  feature
+    item: T
+    set(v: T) do item := v end
+end
+class QBox inherit Box[Q]
+  create make(v: Q) do Box.make(v) end
+end
+class Duo[A, B]
+  create make(a: A, b: B) do this.a := a  this.b := b end
+  feature
+    a: A
+    b: B
+    set_b(v: B) do b := v end
+end
+"]
+      (doseq [body ["let b := create QBox.make(1)\nb.set(-1)"
+                    "let d: Duo[String, Q] := create Duo[String, Q].make(\"x\", 1)\nd.set_b(-1)"
+                    "let d: Duo[String, Q] := create Duo[String, Q].make(\"x\", 0)"]]
+        (is (violates-on-both? "Q" (str coverage-prelude classes body)) body))
+      (is (= ["5" "\"x\"" "2"]
+             (both (str coverage-prelude classes
+                        "let b := create QBox.make(1)
+b.set(5)
+print(b.item)
+let d: Duo[String, Q] := create Duo[String, Q].make(\"x\", 1)
+d.set_b(2)
+print(d.a)
+print(d.b)")))))))
+
+(deftest coverage-sites-valid-values-pass
+  (testing "valid values pass every site above, and nil every `?` one"
+    (is (= ["0" "3" "nil" "[2]" "[1, 5]" "{\"a\": nil, \"b\": 1}" "nil" "[\"a\", \"b\"]" "4" "3"]
+           (both (str coverage-prelude
+                      "let h := create Holder.make([1])
+let raw: Array[Integer] := [2]
+h.replace(raw)
+h.take(raw)
+h.set_opt(nil)
+h.set_count(4)
+print(want_opt(nil))
+print(maybe_q(3))
+print(h.opt)
+print(h.qs)
+let qs: Qs := [1]
+qs.add(5)
+print(qs)
+let m: Map[String, ?Q] := {\"a\": nil}
+m.put(\"b\", 1)
+print(m)
+let p: ?Pair[String] := nil
+print(p)
+p := [\"a\", \"b\"]
+print(p)
+print(h.count)
+h.set_opt(3)
+print(h.opt)"))))))

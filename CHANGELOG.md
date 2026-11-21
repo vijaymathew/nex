@@ -41,6 +41,21 @@
   Pair[String] := ["only"]` was accepted: no check was made for a
   refinement written with type arguments, at a `let`, parameter, return or
   field. It is now checked against `Array[String]`.
+- **Fixed: a refinement of a refinement was half-checked by the
+  interpreter.** With `declare type Small = Q where n: n < 10`, `let s:
+  Small := -1` was accepted under `--interpret`: only `Small`'s own
+  predicate ran, not `Q`'s. Both backends now check the base's predicate,
+  then the refinement's own.
+- **Fixed: `convert` to a refinement whose base is an alias was always
+  false.** `convert x to y: Small` (base `Q`, a refinement) and `convert x
+  to y: Pos` with `declare type Pos = Count where ...` (base `Count`, a
+  plain alias) tested the value against a class named after the base, which
+  never matched. They now test the base's runtime type and every predicate
+  in the chain. A chain of plain aliases (`Num = Count`, `Count = Integer`)
+  resolves the same way.
+- **Fixed: under `--interpret`, a refinement declared in an interned file
+  went unchecked in the main file.** `let q: Quantity := -1` was accepted,
+  and `convert x to y: Quantity` was false even for a valid value.
 - **Fixed: a `?` alias refused `nil`.** `let m: ?Q := nil`, for any
   `declare type Q = ...` (plain, refinement or generic), failed with
   "Cannot assign Nil to variable 'm' of type ?Q": the `?` was dropped when
