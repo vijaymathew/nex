@@ -246,6 +246,44 @@
   (if (portable-set? s)
     (:items @(:state s))
     (seq s)))
+(defn nex-host-collections
+  "V with every portable map or set in it (the interpreter's representation)
+   replaced by the host one the compiled backend expects, looking inside
+   arrays, maps and sets. Compiled code takes a Map or Set value to be a host
+   collection outright, so one the interpreter built (a REPL cell it ran)
+   failed with a ClassCastException the first time a compiled cell used it.
+   An array is updated in place, so every reference to it sees the change;
+   a portable map or set becomes a new host one."
+  ([v] (nex-host-collections v (java.util.IdentityHashMap.)))
+  ([v ^java.util.IdentityHashMap seen]
+   (cond
+     (portable-map? v)
+     (nex-host-map-from (map (fn [[k x]] [(nex-host-collections k seen) (nex-host-collections x seen)])
+                             (nex-map-entries v)))
+
+     (portable-set? v)
+     (nex-host-set-from (map #(nex-host-collections % seen) (nex-set-seq v)))
+
+     (and (instance? java.util.ArrayList v) (not (.containsKey seen v)))
+     (let [^java.util.ArrayList a v]
+       (.put seen a true)
+       (dotimes [i (.size a)]
+         (let [e (.get a i)
+               e' (nex-host-collections e seen)]
+           (when-not (identical? e e') (.set a i e'))))
+       a)
+
+     (and (instance? java.util.Map v) (not (.containsKey seen v)))
+     (let [^java.util.Map m v]
+       (.put seen m true)
+       (doseq [^java.util.Map$Entry e (vec (.entrySet m))]
+         (let [x (.getValue e)
+               x' (nex-host-collections x seen)]
+           (when-not (identical? x x') (.put m (.getKey e) x'))))
+       m)
+
+     :else v)))
+
 (defn nex-set-contains [s v]
   (cond
     (portable-set? s) (set-bucket-member? (:index @(:state s)) v)

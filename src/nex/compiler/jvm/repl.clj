@@ -15,6 +15,7 @@
             [nex.lower :as lower]
             [nex.types.bootstrap :as bootstrap]
             [nex.types.builtins :as bi]
+            [nex.types.runtime :as types-rt]
             [nex.typechecker :as tc])
   (:import [java.util HashMap]
            [java.lang.reflect InvocationTargetException]))
@@ -1195,7 +1196,9 @@
        (doseq [[k v] @(:bindings (:globals ctx))
                :let [name (if (string? k) k (name k))]
                :when (not (contains? function-names name))]
-         (rt/state-set-value! state name v))
+         ;; Values the interpreter made hold its portable maps and sets;
+         ;; compiled code expects host ones.
+         (rt/state-set-value! state name (types-rt/nex-host-collections v)))
        (doseq [[k t] var-types
                :when (not (contains? function-names k))]
          (rt/state-set-type! state k t))

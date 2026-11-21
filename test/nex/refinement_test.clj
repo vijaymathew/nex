@@ -395,6 +395,37 @@ print(m)
 print(opt)
 print(q)"))))))
 
+;; A REPL line naming an alias runs on the interpreter, whose maps and sets
+;; are its own portable structures; a compiled line using one afterwards
+;; failed with a ClassCastException ("a value was not of the expected
+;; type"). They are now turned into host collections as they reach the
+;; compiled session (nex.types.runtime/nex-host-collections).
+(deftest alias-typed-map-from-interpreted-repl-line-is-usable
+  (doseq [typecheck? [false true]]
+    (testing (str "maps and sets made by an alias-typed line, type checking " typecheck?)
+      (let [ctx (repl/init-repl-context)
+            out (try
+                  (reset! repl/*type-checking-enabled* typecheck?)
+                  (with-out-str
+                    (doseq [l ["declare type C = Integer"
+                               "let m: Map[String, C] := {\"a\": 1}"
+                               "m.put(\"b\", 2)"
+                               "m"
+                               "let s: Set[C] := #{1}"
+                               "s.add(2)"
+                               "s"
+                               "let nested: Array[Map[String, C]] := [{\"x\": 1}]"
+                               "nested.get(0).put(\"y\", 2)"
+                               "nested"]]
+                      (repl/eval-code ctx l)))
+                  (finally
+                    (reset! repl/*type-checking-enabled* false)
+                    (reset! repl/*repl-var-types* {})))]
+        (is (not (str/includes? out "Error")) out)
+        (is (str/includes? out "{\"a\": 1, \"b\": 2}") out)
+        (is (str/includes? out "#{1, 2}") out)
+        (is (str/includes? out "[{\"x\": 1, \"y\": 2}]") out)))))
+
 (deftest refinement-type-argument-in-later-repl-cells
   (testing "a collection declared on one REPL line is checked when stored into on a later one"
     (let [ctx (repl/init-repl-context)

@@ -981,12 +981,14 @@
 ;; it through that function before either backend runs.
 
 (def ^:dynamic *refinement-sites*
-  "While type-check runs, a java.util.HashMap from each expression node that
-   flows into a refinement-typed element slot to the name of the function
-   that checks it (a :spawn node: that checks its result). Keyed by value,
-   not identity: the interpreter runs the file's own AST, of which the
-   checked, intern-merged program holds rebuilt (equal) copies. nil
-   otherwise."
+  "While type-check runs on a program that has functions checking a
+   refinement slot (nex.walker/add-element-refinement-checkers), a
+   java.util.HashMap from each expression node that flows into such a slot
+   to the name of the function that checks it (a :spawn node: that checks its
+   result). Keyed by value, not identity: the interpreter runs the file's own
+   AST, of which the checked, intern-merged program holds rebuilt (equal)
+   copies. nil otherwise — which is also what keeps a program with no
+   refinement in any type argument from paying anything for this."
   nil)
 
 (defn- refinement-checker-for
@@ -997,10 +999,11 @@
    nil otherwise. TYPE-EXPR is expected with its refinements kept named
    (keep-refinements)."
   [env type-expr]
-  (when (or (string? type-expr)
-            (and (map? type-expr)
-                 (string? (:base-type type-expr))
-                 (not (:param-types type-expr))))
+  (when (and *refinement-sites*
+             (or (string? type-expr)
+                 (and (map? type-expr)
+                      (string? (:base-type type-expr))
+                      (not (:param-types type-expr)))))
     (let [fn-name (refs/checker-name type-expr)]
       (when (env-lookup-var env fn-name)
         fn-name))))
@@ -1025,9 +1028,13 @@
    itself is expanded whatever it names: a caller typing a literal against it
    needs the base (`Array[...]`) to see what kind of literal is wanted."
   [env type-expr]
-  (if-let [e (expand-alias-once env type-expr)]
-    (expand-type-aliases-keeping-refinements env e)
-    (map-type-args (partial keep-refinements env) type-expr)))
+  (cond
+    ;; No checking functions (no refinement in any type argument): nothing
+    ;; to keep, so this is just expand-type-aliases.
+    (nil? *refinement-sites*) (expand-type-aliases env type-expr)
+    :else (if-let [e (expand-alias-once env type-expr)]
+            (expand-type-aliases-keeping-refinements env e)
+            (map-type-args (partial keep-refinements env) type-expr))))
 
 (def ^:private builds-its-own-elements
   "Expressions whose elements reach a collection slot one by one, each
@@ -4020,7 +4027,8 @@
                      (check-call-signature env method args method-sig
                                            (member-type-map env target-type type-map method-sig)
                                            :raw-type-map
-                                           (when (and raw-target-type (not (builtin-type? base-type)))
+                                           (when (and *refinement-sites* raw-target-type
+                                                      (not (builtin-type? base-type)))
                                              (member-type-map
                                               env
                                               (normalize-type (expand-type-aliases-keeping-refinements env raw-target-type))
@@ -5502,7 +5510,7 @@
             ;; `create Box[Quantity].make(v)` narrows `v` into a Quantity.
             (record-argument-refinements!
              env args (map #(assoc %1 :type %2) params param-types) arg-types type-map
-             (when (seq generic-args)
+             (when (and *refinement-sites* (seq generic-args))
                (zipmap (map #(type-name-string (:name %)) gparams)
                        (map (partial keep-refinements env) generic-args))))))
         target-type))))
@@ -10761,7 +10769,9 @@
   ([ast opts]
    (binding [*inferred-lambda-types* (atom {})
              *extension-calls* (java.util.IdentityHashMap.)
-             *refinement-sites* (java.util.HashMap.)]
+             *refinement-sites* (when (some #(refs/element-refinement-checker? (:name %))
+                                            (:functions ast))
+                                  (java.util.HashMap.))]
      (assoc (check-program ast opts)
             :lambda-types @*inferred-lambda-types*
             :extension-calls *extension-calls*

@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+- **A refinement used as a type argument is checked.** With `declare type
+  Q = Integer where n: n > 0`, an `Array[Q]`, `Map[String, Q]` or
+  `Box[Q]` held values that broke `n > 0`, because only a `let`,
+  parameter, return or field typed `Q` itself was checked. A value
+  entering such a slot is now checked, and a bad one raises `Refinement Q
+  violated`. The checked places are:
+  - features that store an element: `Array.add/add_at/set`,
+    `Map.put/set` (key and value), `Set.add`, `Channel.send/try_send`,
+    `Min_Heap.insert`, `Atomic_Reference.make/store` and the new value of
+    `compare_and_set`;
+  - the elements of an array, map or set literal, nested ones too
+    (`let qs: Array[Array[Q]] := [[1], [0]]`);
+  - the result of a `spawn` stored as a `Task[Q]`;
+  - an argument of a generic class's routine or constructor whose
+    parameter is typed in its type parameters (`create Box[Q].make(v)`,
+    `b.set(v)` for `set(v: T)`);
+  - a whole collection narrowed into a collection of refinements by a
+    `let`, assignment, argument, `result` or field (`let qs: Array[Q] :=
+    raw`, where `raw: Array[Integer]`): every element is checked, and an
+    `Atomic_Reference`'s current value.
+
+  Features that only look an element up (`contains`, `index_of`,
+  `remove`, `get`) are not checked: asking whether a list holds a value
+  that could never be in it is just false. A `Channel`, `Task` or
+  `Min_Heap` can't be checked as a whole without consuming it, so only
+  what enters one is. In the REPL these checks need `:typecheck on`. A
+  program with no refinement in a type argument is unaffected: nothing is
+  generated or wrapped.
+- **A `?` refinement is checked.** `let q: ?Q := -1` was accepted: a
+  detachable refinement was never checked. `nil` still passes; any other
+  value is checked, as are `?Q` elements (`Array[?Q]`).
+- **A generic refinement applied to type arguments is checked.** With
+  `declare type Pair[T] = Array[T] where a: a.length = 2`, `let p:
+  Pair[String] := ["only"]` was accepted: no check was made for a
+  refinement written with type arguments, at a `let`, parameter, return or
+  field. It is now checked against `Array[String]`.
+- **Fixed: a `?` alias refused `nil`.** `let m: ?Q := nil`, for any
+  `declare type Q = ...` (plain, refinement or generic), failed with
+  "Cannot assign Nil to variable 'm' of type ?Q": the `?` was dropped when
+  the alias was expanded.
+- **Fixed: in the REPL, a generic alias lost its type argument on later
+  lines.** After `declare type Pair[T] = ...` and `let ps:
+  Array[Pair[String]] := ...`, the next line's `ps.add(["c", "d"])` failed
+  with "Argument `value` of `add` should be Array[T], but got
+  Array[String]".
+- **Fixed: in the REPL, a map or set declared with an alias type could not
+  be changed.** After `declare type C = Integer`, `let m: Map[String, C]
+  := {"a": 1}` and then `m.put("b", 2)` failed with "Type error: a value
+  was not of the expected type". A line naming an alias runs on the
+  interpreter, whose maps and sets the compiled lines after it could not
+  use. The same went for a `Set`, and for a map inside an array.
+
 ## 0.7.6 - 2026-11-19
 
 - **A `let` may not reuse the name of a routine.** A `let` in a class's
