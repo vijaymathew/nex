@@ -191,6 +191,41 @@ print(s.union(t).size())")))))
     (is (= interpreted compiled) "compiled and interpreted output must agree")
     compiled))
 
+;; A generic refinement applied to type arguments (`Pair[String]`) is an
+;; annotation with type args, which refinement-for used to skip outright, so
+;; none of its narrowing sites got a check: `let p: Pair[String] := ["only"]`
+;; was silently accepted. The check now binds the predicate's binder at the
+;; base specialized to those args (`Array[String]`).
+(def ^:private generic-pair-prelude
+  "declare type Pair[T] = Array[T] where a: a.length = 2
+function swap(p: Pair[String]): Pair[String] do result := [p.get(1), p.get(0)] end
+function bad_ret(): Pair[Integer] do result := [1] end
+class Box
+  create make(v: Pair[Integer]) do this.p := v end
+  feature p: Pair[Integer]
+  feature set(v: Array[Integer]) do p := v end
+end
+")
+
+(deftest generic-refinement-narrowing-sites-are-checked
+  (testing "let, parameter, return and field narrowing into Pair[X] test the predicate"
+    (is (violates? (str generic-pair-prelude "let p: Pair[String] := [\"only\"]")) "let")
+    (is (violates? (str generic-pair-prelude "print(swap([\"x\"]))")) "parameter")
+    (is (violates? (str generic-pair-prelude "print(bad_ret())")) "return")
+    (is (violates? (str generic-pair-prelude "let b := create Box.make([1, 2, 3])")) "constructor field")
+    (is (violates? (str generic-pair-prelude "let b := create Box.make([1, 2])\nb.set([1])")) "field")))
+
+(deftest generic-refinement-valid-values-pass-on-both-backends
+  (testing "values satisfying a generic refinement's predicate flow through every site"
+    (is (= ["[\"b\", \"a\"]" "[1, 2]" "[3, 4]"]
+           (both (str generic-pair-prelude
+                      "let ok: Pair[String] := [\"a\", \"b\"]
+print(swap(ok))
+let b := create Box.make([1, 2])
+print(b.p)
+b.set([3, 4])
+print(b.p)"))))))
+
 (deftest compiled-refinement-local-receiver
   (testing "base-type methods dispatch on a refinement-typed local"
     (is (= ["5" "\"TRK-1\"" "true"]

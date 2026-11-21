@@ -858,21 +858,62 @@
 ;; and `skip-contracts` is out of scope here (a follow-up can gate it like
 ;; `require`).
 
-(defn- refinement-name
-  "The refinement name a type annotation refers to, or nil. Only plain named
-  types are handled; detachable/parameterized annotations are left unchecked."
-  [type-expr]
-  (when (string? type-expr) type-expr))
-
 (defn- collect-refinements
-  "Map of refinement name -> {:base :binder :predicate} from a program's aliases."
+  "Map of refinement name -> {:base :binder :predicate :generic-params} from a
+  program's aliases. :generic-params is the alias's own `[T, ...]` list (empty
+  for a plain refinement), which refinement-for needs to specialize :base."
   [program]
-  (reduce (fn [m {:keys [name type-expr refinement]}]
+  (reduce (fn [m {:keys [name type-expr refinement generic-params]}]
             (if refinement
-              (assoc m name (assoc refinement :base type-expr))
+              (assoc m name (assoc refinement
+                                   :base type-expr
+                                   :generic-params (vec generic-params)))
               m))
           {}
           (:type-aliases program)))
+
+(defn- substitute-type-params
+  "TYPE-EXPR with each generic-param name in TYPE-MAP replaced by its type
+  argument, wherever it appears: a bare name, a :base-type, the args of an
+  `Array[T]`-shaped type, or the parameters/return of a Function type."
+  [type-expr type-map]
+  (cond
+    (string? type-expr) (get type-map type-expr type-expr)
+    (map? type-expr)
+    (cond-> type-expr
+      (string? (:base-type type-expr)) (update :base-type #(get type-map % %))
+      (:type-args type-expr) (update :type-args #(mapv (fn [t] (substitute-type-params t type-map)) %))
+      (:type-params type-expr) (update :type-params #(mapv (fn [t] (substitute-type-params t type-map)) %))
+      (:param-types type-expr) (update :param-types #(mapv (fn [p] (update p :type substitute-type-params type-map)) %))
+      (:return-type type-expr) (update :return-type substitute-type-params type-map))
+    :else type-expr))
+
+(defn- refinement-for
+  "[refinement-name info] for the refinement a type annotation names, or nil.
+  A plain name (`Quantity`) looks the refinement up as is. A generic one applied
+  to type arguments (`Pair[String]`, for `declare type Pair[T] = Array[T]
+  where ...`) gets its :base specialized to them (`Array[String]`), since the
+  check binds the predicate's binder at that type. Detachable annotations
+  (`?Quantity`) are still left unchecked: nil must be accepted there, and the
+  check as built would run the predicate on it."
+  [refinements type-expr]
+  (cond
+    (string? type-expr)
+    (when-let [r (get refinements type-expr)]
+      [type-expr r])
+
+    (and (map? type-expr)
+         (not (:detachable type-expr))
+         (string? (:base-type type-expr)))
+    (let [rname (:base-type type-expr)
+          args (or (:type-args type-expr) (:type-params type-expr))]
+      (when-let [{:keys [generic-params] :as r} (get refinements rname)]
+        (if (and (seq generic-params) (= (count generic-params) (count args)))
+          [rname (update r :base substitute-type-params
+                         (zipmap (map :name generic-params) args))]
+          [rname r])))
+
+    :else nil))
 
 (defn- make-refinement-check
   "AST for `do let <binder>: <base> := <value-expr>  if not(<pred>) then raise ... end end`.
@@ -909,11 +950,11 @@
   [stmts refinements]
   (vec (mapcat
         (fn [s]
-          (if-let [r (and (map? s) (= :let (:type s))
-                          (not (:refinement-checked s))
-                          (get refinements (refinement-name (:var-type s))))]
+          (if-let [[rname r] (and (map? s) (= :let (:type s))
+                                  (not (:refinement-checked s))
+                                  (refinement-for refinements (:var-type s)))]
             [(assoc s :refinement-checked true)
-             (make-refinement-check (refinement-name (:var-type s)) r (identifier-node (:name s)))]
+             (make-refinement-check rname r (identifier-node (:name s)))]
             [s]))
         stmts)))
 
@@ -927,11 +968,10 @@
   (if (:refinement-checks-injected? node)
     node
     (let [param-checks (keep (fn [p]
-                               (when-let [r (get refinements (refinement-name (:type p)))]
-                                 (make-refinement-check (refinement-name (:type p)) r (identifier-node (:name p)))))
+                               (when-let [[rname r] (refinement-for refinements (:type p))]
+                                 (make-refinement-check rname r (identifier-node (:name p)))))
                              (:params node))
-          ret-name (refinement-name (:return-type node))
-          ret-r (get refinements ret-name)
+          [ret-name ret-r] (refinement-for refinements (:return-type node))
           ret-check (when ret-r (make-refinement-check ret-name ret-r (identifier-node "result")))]
       (if (or (seq param-checks) ret-check)
         (assoc node
@@ -1264,7 +1304,7 @@
   (into {}
         (keep (fn [member]
                 (when (and (= :field (:type member)) (not (:constant? member)))
-                  (when-let [r (get refinements (refinement-name (:field-type member)))]
+                  (when-let [[_ r] (refinement-for refinements (:field-type member))]
                     [(:name member) r]))))
         (mapcat :members (filter #(= :feature-section (:type %)) (:body class-node)))))
 
