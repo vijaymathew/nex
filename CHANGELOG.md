@@ -30,6 +30,9 @@
   what enters one is. In the REPL these checks need `:typecheck on`. A
   program with no refinement in a type argument is unaffected: nothing is
   generated or wrapped.
+- **An error in a `spawn` body says so.** Its trace read `at line 3, in
+  AnonymousSpawn_1.call0`, an internal name; it now reads `at line 3, in a
+  spawn body`, as one in a closure reads `in an anonymous function`.
 - **A `?` refinement is checked.** `let q: ?Q := -1` was accepted: a
   detachable refinement was never checked. `nil` still passes; any other
   value is checked, as are `?Q` elements (`Array[?Q]`).

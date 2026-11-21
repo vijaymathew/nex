@@ -279,6 +279,7 @@
         cls (str/replace (last (str/split class-name #"\.")) jvm-emit/companion-suffix-pattern "")]
     (cond
       (str/starts-with? cls "AnonymousFunction") "an anonymous function"
+      (str/starts-with? cls "AnonymousSpawn") "a spawn body"
       :else
       (when-let [[_ kind name] (re-matches #"__(i?method|ctor)_(.+)\$arity\d+(?:\$t)?" method)]
         (cond
@@ -296,6 +297,15 @@
        (= (.getMethodName inner) (str (.getMethodName outer) "$t"))
        (not (pos? (.getLineNumber outer)))))
 
+(defn- generated-check-frame?
+  "Whether FRAME is in a function the walker generated to check a
+   refinement (`__refine_check_...` for a value entering a collection, a
+   generic class's `T` or a whole collection; `__refine_...` for a
+   `convert`). The reader never wrote it: the error belongs to the line
+   that handed it the value, the next frame out, so it is left out."
+  [{:keys [routine]}]
+  (and (string? routine) (str/starts-with? routine "__refine_")))
+
 (defn- nex-frames
   "The frames of compiled Nex code in T's stack trace, innermost first:
    [{:file :line :routine}], :line nil for contract-checking code. MAIN-NAME
@@ -311,6 +321,11 @@
       {:file file
        :line (when (pos? (.getLineNumber fr)) (.getLineNumber fr))
        :routine (frame-routine (.getClassName fr) method)})))
+
+(defn- user-frames
+  "nex-frames without those of generated refinement checks."
+  [^Throwable t main-name]
+  (remove generated-check-frame? (nex-frames t main-name)))
 
 (defn- drop-forwarder-frames
   "FRAMES (innermost first) without the frames of the methods that forward a
@@ -388,7 +403,7 @@
         ;; repeat count is only a lower bound.
         truncated? (>= (count (.getStackTrace t)) 1024)
         main-name (.getName (io/file main-file))
-        frames (collapse-repeats (drop-forwarder-frames (nex-frames t main-name)))
+        frames (collapse-repeats (drop-forwarder-frames (user-frames t main-name)))
         place (fn [{:keys [file line]}]
                 (str "line " line (when (not= file main-name) (str " of " file))))
         in (fn [{:keys [routine]}] (when (string? routine) (str ", in " routine)))

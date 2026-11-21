@@ -395,6 +395,41 @@ print(m)
 print(opt)
 print(q)"))))))
 
+;; The functions generated to check a refinement slot are the walker's, not
+;; the reader's: an error raised in one is reported at the line that handed
+;; it the value (nex.eval/generated-check-frame?), as an inline check at a
+;; `let` is, never as `in __refine_check_Pair_String_`.
+(defn- reported-error
+  "What `nex` prints when CODE fails."
+  [code]
+  (let [f (java.io.File/createTempFile "refinement" ".nex")]
+    (try
+      (spit f code)
+      (with-out-str (e/run-file (.getPath f) {}))
+      (finally (.delete f)))))
+
+(deftest generated-refinement-checks-are-not-shown-in-error-traces
+  (testing "the trace starts at the reader's own line"
+    (let [out (reported-error (str element-prelude
+                                   "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]\nps.add([\"f\"])"))]
+      (is (str/includes? out "Error: Refinement Pair violated") out)
+      (is (str/includes? out "  at line 4") out)
+      (is (not (str/includes? out "__refine")) out)))
+  (testing "inside a routine, the routine and its caller are shown"
+    (let [out (reported-error (str element-prelude
+                                   "function g(xs: Array[Q], v: Integer) do xs.add(v) end
+let qs: Array[Q] := [1]
+g(qs, 0)"))]
+      (is (str/includes? out "  at line 3, in g") out)
+      (is (str/includes? out "  called from line 5") out)
+      (is (not (str/includes? out "__refine")) out)))
+  (testing "a spawn body is named as such"
+    (let [out (reported-error (str element-prelude
+                                   "let t: Task[Q] := spawn do result := -4 end\nprint(t.await)"))]
+      (is (str/includes? out "in a spawn body") out)
+      (is (not (str/includes? out "AnonymousSpawn")) out)
+      (is (not (str/includes? out "__refine")) out))))
+
 ;; A REPL line naming an alias runs on the interpreter, whose maps and sets
 ;; are its own portable structures; a compiled line using one afterwards
 ;; failed with a ClassCastException ("a value was not of the expected
