@@ -937,7 +937,17 @@
       (let [alias-name (:base-type type-expr)
             alias-body (env-lookup-type-alias env alias-name)
             alias-generic-params (env-lookup-type-alias-generic-params env alias-name)
-            explicit-args (or (:type-args type-expr) (:type-params type-expr))]
+            explicit-args (or (:type-args type-expr) (:type-params type-expr))
+            ;; `?Q` / `?Pair[String]`: the `?` sits on this map, not on the
+            ;; alias body, so carry it over to whatever the alias expands to.
+            ;; Dropping it turned `let m: ?Q := nil` into an assignment of Nil
+            ;; to a plain, attached Integer.
+            keep-detachable (fn [t]
+                              (cond
+                                (not (:detachable type-expr)) t
+                                (string? t) {:base-type t :detachable true}
+                                (map? t) (assoc t :detachable true)
+                                :else t))]
         (cond
           ;; A generic alias applied with explicit args (`Pair[Integer]`):
           ;; substitute the alias's own generic-param names for those args in
@@ -945,7 +955,8 @@
           ;; itself reference another alias.
           (and alias-body (seq alias-generic-params) (seq explicit-args))
           (let [type-map (into {} (map (fn [p a] [(:name p) a]) alias-generic-params explicit-args))]
-            (expand-type-aliases env (resolve-generic-type alias-body type-map)))
+            (keep-detachable
+             (expand-type-aliases env (resolve-generic-type alias-body type-map))))
 
           ;; A plain (non-generic) alias, or a generic one referenced bare
           ;; with no explicit args (its own generic-param names are left
@@ -954,7 +965,7 @@
           ;; :type-args on THIS map are meaningless for a non-generic alias
           ;; and are dropped, matching prior behavior.
           alias-body
-          (expand-type-aliases env alias-body)
+          (keep-detachable (expand-type-aliases env alias-body))
 
           :else
           (cond-> type-expr

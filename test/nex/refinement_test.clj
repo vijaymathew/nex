@@ -320,6 +320,35 @@ print(n + 1)")))))
       (str/join "\n" (map #(if (map? %) (or (:message %) (pr-str %)) (str %))
                           (:errors result))))))
 
+;; expand-type-aliases dropped the `?` on an alias reference, so `?Q` expanded
+;; to a plain, attached `Integer` and `let m: ?Q := nil` was rejected with
+;; "Cannot assign Nil" — for plain aliases, refinements and generic ones alike.
+(deftest detachable-alias-accepts-nil
+  (testing "a `?Alias` variable can hold nil and later a value"
+    (is (= ["nil" "[\"a\", \"b\"]" "nil" "5" "nil"]
+           (both "declare type Pair[T] = Array[T] where a: a.length = 2
+declare type Q = Integer where n: n > 0
+declare type C = Integer
+let m: ?Pair[String] := nil
+print(m)
+m := [\"a\", \"b\"]
+print(m)
+let q: ?Q := nil
+print(q)
+q := 5
+print(q)
+let c: ?C := nil
+print(c)"))))
+  (testing "the `?` is kept, so the value must still be checked for nil before use"
+    (is (str/includes? (str (type-error-message "declare type Q = Integer where n: n > 0
+let q: ?Q := nil
+print(q + 1)"))
+                       "?Integer")))
+  (testing "an alias without `?` still rejects nil"
+    (is (str/includes? (str (type-error-message "declare type C = Integer
+let c: C := nil"))
+                       "Cannot assign Nil"))))
+
 (deftest plain-alias-resolves-in-a-convert
   (testing "convert to an alias tests the alias's base type"
     (is (= ["\"matched 5\""]
