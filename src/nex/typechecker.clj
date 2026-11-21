@@ -6279,9 +6279,19 @@
         val-type (if var-type
                    (check-expression-with-expected env value var-type)
                    (check-expression env value))]
-    ;; `qs := raw`, `result := raw`: every element is narrowed.
+    ;; `qs := raw`, `result := raw`: every element is narrowed. And
+    ;; `q := v` on a local or global declared `Quantity` (or `?Quantity`)
+    ;; narrows `v` into it: only its `let` was checked, so `q` could come to
+    ;; hold anything, and every later site that trusts a value already typed
+    ;; `Quantity` (record-refinement-site!'s ACTUAL) would let it through. A
+    ;; field is checked by the walker (narrow-field-assignment), `result` as
+    ;; the routine returns (add-param-return-checks).
     (when var-type
-      (record-refinement-site! env value var-type val-type true))
+      (let [field? (when-let [current-class (env-lookup-var env "__current_class__")]
+                     (and (not (let-shadowed? env target))
+                          (lookup-class-field-member env current-class target current-class)))]
+        (record-refinement-site! env value var-type val-type
+                                 (boolean (or field? (#{"result" "Result"} target))))))
     (when-not var-type
       (if (and (env-lookup-var env "__current_class__")
                (env-lookup-global env target))
@@ -10645,8 +10655,12 @@
        ;; Matrix := ...`) resolves its methods on later inputs. A refinement
        ;; in its type arguments stays named (`Array[Quantity]`), so storing
        ;; into it is still checked (record-stored-element-refinements!).
+         ;; Itself too, when it is one (`q: Quantity`), as a `let` in the same
+         ;; input would leave it: assigning `q` then narrows into it.
          (doseq [[var-name var-type] (:var-types opts)]
-           (env-add-var env var-name (expand-type-aliases-keeping-refinements env var-type)))
+           (env-add-var env var-name (if *refinement-sites*
+                                       (keep-refinements env var-type)
+                                       (expand-type-aliases env var-type))))
 
        ;; Register top-level `let` globals so class and function bodies can read
        ;; them (§7), and enforce the def-before-use watermark before those bodies

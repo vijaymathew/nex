@@ -47,6 +47,15 @@
   [type-expr]
   (str "__refine_check_" (render-type type-expr)))
 
+(defn convert-checker-name
+  "The name of the function a `convert` to refinement TYPE-EXPR routes its
+   value through (nex.walker/resolve-convert-aliases): `__refine_Quantity`,
+   `__refine_Pair_String_`. It yields the value when it satisfies the
+   refinement and nil otherwise, rather than raising as a `checker-name`
+   function does."
+  [type-expr]
+  (str "__refine_" (render-type type-expr)))
+
 (defn element-refinement-checker?
   "Whether NAME is one of the functions `checker-name` names."
   [name]

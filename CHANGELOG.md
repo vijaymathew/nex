@@ -33,6 +33,24 @@
 - **An error in a `spawn` body says so.** Its trace read `at line 3, in
   AnonymousSpawn_1.call0`, an internal name; it now reads `at line 3, in a
   spawn body`, as one in a closure reads `in an anonymous function`.
+- **Assigning a local declared with a refinement is checked.** `let q: Q
+  := 5` was checked, but `q := -1` after it was not, so `q` could hold a
+  value `Q` forbids and pass it on to anything that trusts its type
+  (`[q]`, `create Box[Q].make(q)`). The assignment itself now raises
+  `Refinement Q violated`, for a local or global, `?` or not, in the REPL
+  too. A field was already checked on assignment, and `result` is checked
+  when the routine returns.
+- **Fixed: `convert` to a generic alias applied to arguments was always
+  false.** `convert x to y: Pair[String]`, for a refinement `Pair[T]` or a
+  plain alias `Box2[T]`, tested against a class named after the alias. It
+  now tests what the alias stands for (`Array[String]`) and, for a
+  refinement, every predicate, including a refinement built on another
+  (`SPair[T] = Pair[T] where ...`). As with `Array[String]` itself, the
+  elements' types are not tested at run time.
+- **Fixed: a routine returning a `?` alias started `result` at an empty
+  collection in compiled code.** `function f(): ?Box2[Integer] do end`,
+  with `declare type Box2[T] = Array[T]`, returned `[]` instead of `nil`:
+  the compiled backend dropped the `?` when it expanded a generic alias.
 - **A `?` refinement is checked.** `let q: ?Q := -1` was accepted: a
   detachable refinement was never checked. `nil` still passes; any other
   value is checked, as are `?Q` elements (`Array[?Q]`).

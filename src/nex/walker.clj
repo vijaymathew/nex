@@ -1040,15 +1040,17 @@
 ;; and the typechecker still sees the target as `Quantity`.
 
 (defn- alias-target-name
-  "The alias name a convert target refers to, or nil. `Count` and `?Count` both
-  name one; a parameterized target does not, since an alias cannot be generic."
+  "The name a convert target refers to, which may be an alias: `Count`,
+  `?Count`, and a generic one applied to arguments, `Pair[String]`. nil for a
+  Function type. (It once refused a parameterized target, from before an
+  alias could be generic, so `convert x to y: Pair[String]` tested against a
+  class named Pair and was always false.)"
   [target-type]
   (cond
     (string? target-type) target-type
     (and (map? target-type)
-         (:detachable target-type)
          (string? (:base-type target-type))
-         (not (:type-args target-type)))
+         (not (:param-types target-type)))
     (:base-type target-type)
     :else nil))
 
@@ -1059,9 +1061,27 @@
     {:base-type type-expr :detachable true}
     (assoc type-expr :detachable true)))
 
-(defn- refinement-checker-name
-  [refinement-name]
-  (str "__refine_" refinement-name))
+(defn- alias-body
+  "The type the alias TARGET-TYPE names stands for: ALIAS's body, its
+  generic parameters replaced by TARGET-TYPE's arguments (`Pair[String]` ->
+  `Array[String]`), detachable when TARGET-TYPE is."
+  [{:keys [type-expr generic-params]} target-type]
+  (let [args (when (map? target-type) (or (:type-args target-type) (:type-params target-type)))
+        body (if (and (seq generic-params) (= (count generic-params) (count args)))
+               (substitute-type-params type-expr (zipmap (map :name generic-params) args))
+               type-expr)]
+    (if (and (map? target-type) (:detachable target-type))
+      (detach body)
+      body)))
+
+(defn- refinement-target
+  "TARGET-TYPE as the refinement it applies, `?` dropped and a bare name for
+  one with no arguments: the key a convert's checker is made for."
+  [target-type]
+  (let [t (if (map? target-type) (dissoc target-type :detachable) target-type)]
+    (if (and (map? t) (empty? (or (:type-args t) (:type-params t))))
+      (:base-type t)
+      t)))
 
 (def ^:private refinement-checker-param "__refine_value__")
 
@@ -1073,9 +1093,11 @@
    end` -- the value when it is a Base satisfying R's predicate, else nil. The
   predicate runs exactly as written, with its own binder, as at every other
   narrowing site; the `and` narrows the binder to Base for it."
-  [refinement-name {:keys [type-expr refinement]}]
-  (let [{:keys [binder predicate]} refinement
-        fn-name (refinement-checker-name refinement-name)
+  [aliases target]
+  (let [{:keys [refinement] :as alias} (get aliases (alias-target-name target))
+        type-expr (alias-body alias target)
+        {:keys [binder predicate]} refinement
+        fn-name (refs/convert-checker-name target)
         class-name (str fn-name "_Function")
         ;; The parameter must not be the predicate's own binder.
         param (if (= binder refinement-checker-param)
@@ -1130,8 +1152,7 @@
     (let [nm (alias-target-name t)
           alias (get aliases nm)]
       (if (and alias (not (seen nm)))
-        (recur (if (and (map? t) (:detachable t)) (detach (:type-expr alias)) (:type-expr alias))
-               (conj seen nm))
+        (recur (alias-body alias t) (conj seen nm))
         t))))
 
 (defn- resolve-convert-alias
@@ -1148,11 +1169,11 @@
         node
 
         refinement
-        (do (swap! used-refinements conj alias-name)
+        (do (swap! used-refinements conj (refinement-target target-type))
             (assoc node
                    :value {:type :call
                            :target nil
-                           :method (refinement-checker-name alias-name)
+                           :method (refs/convert-checker-name (refinement-target target-type))
                            :args [value]
                            :has-parens true}
                    :runtime-target-type (runtime-type aliases target-type)))
@@ -1195,20 +1216,22 @@
             ;; Small` tested against a class named Q and was always false.
             checkers (loop [made []
                             made-names #{}]
-                       (let [missing (->> (sort @used-refinements)
-                                          (remove #(or (defined (refinement-checker-name %))
-                                                       (made-names %))))]
+                       (let [missing (->> @used-refinements
+                                          (map (juxt refs/convert-checker-name identity))
+                                          (into (sorted-map))
+                                          (remove (fn [[nm _]] (or (defined nm) (made-names nm)))))]
                          (if (empty? missing)
                            made
                            (recur (into made
-                                        (map #(walk/postwalk
-                                               (fn [n]
-                                                 (if (and (map? n) (= :convert (:type n)))
-                                                   (resolve-convert-alias n aliases used-refinements)
-                                                   n))
-                                               (refinement-checker-function % (get aliases %))))
+                                        (map (fn [[_ target]]
+                                               (walk/postwalk
+                                                (fn [n]
+                                                  (if (and (map? n) (= :convert (:type n)))
+                                                    (resolve-convert-alias n aliases used-refinements)
+                                                    n))
+                                                (refinement-checker-function aliases target))))
                                         missing)
-                                  (into made-names missing)))))]
+                                  (into made-names (map first missing))))))]
         (cond-> program'
           (seq checkers) (-> (update :functions #(vec (concat % checkers)))
                              (update :classes #(vec (concat % (map :class-def checkers))))))))))
@@ -1739,17 +1762,19 @@
                           :when (type-like? t)]
                       t)
         found (atom #{})
-        visit (fn visit [t nested?]
+        visit (fn visit [t _nested?]
                 (let [t (expand t)]
                   (when (not-any? generic-names (mapcat names-in (type-args-of t)))
                     (cond
                       ;; Both forms: a generic class's `?T` (Atomic_Reference's
                       ;; store, a user class's `?T` parameter) makes `?Quantity`
-                      ;; a slot wherever `Quantity` is a type argument.
+                      ;; a slot wherever `Quantity` is a type argument. At the
+                      ;; top level too: assigning a local declared `Quantity`
+                      ;; (`q := v`) narrows into it, and the type checker routes
+                      ;; the value through the same function.
                       (refinement-for refinements t)
-                      (when nested?
-                        (let [attached (if (and (map? t) (:detachable t)) (dissoc t :detachable) t)]
-                          (swap! found conj attached (detachable-type attached))))
+                      (let [attached (if (and (map? t) (:detachable t)) (dissoc t :detachable) t)]
+                        (swap! found conj attached (detachable-type attached)))
 
                       (map? t)
                       (do (when (checked-collection? refinements (if (:detachable t) (dissoc t :detachable) t))

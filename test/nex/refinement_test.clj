@@ -1188,3 +1188,136 @@ print(p)
 print(h.count)
 h.set_opt(3)
 print(h.opt)"))))))
+
+;; ─── Reassigning a refinement-typed local ───────────────────────────────────
+;;
+;; `let q: Q := 5` was checked, `q := -1` after it was not: the type checker
+;; reads Q as Integer, and the walker's narrowing sites are a `let`,
+;; parameter, return and field. `q` then held a value Q forbids, and the
+;; element checks — which trust a value already typed as their slot — let
+;; it into `[q]`, `create Box[Q].make(q)` and `b.set(q)`. The type checker
+;; now routes a value assigned to a local or global declared with a
+;; refinement through the refinement's check (check-assignment).
+
+(def ^:private reassign-prelude
+  "declare type Q = Integer where n: n > 0
+declare type Pair[T] = Array[T] where a: a.length = 2
+class Box[T]
+  create make(v: T) do this.item := v end
+  feature
+    item: T
+    set(v: T) do item := v end
+end
+")
+
+(deftest reassigning-a-refinement-local-is-checked
+  (testing "at the assignment itself, wherever the local is"
+    (doseq [[rname body]
+            [["Q" "let q: Q := 5\nq := -1"]
+             ["Q" "let q: ?Q := nil\nq := 3\nq := nil\nq := -1"]
+             ["Pair" "let p: Pair[String] := [\"a\", \"b\"]\np := [\"c\"]"]
+             ["Q" "let q: Q := 5\nfrom let i := 0 until i = 3 do\n  q := q - 2\n  i := i + 1\nend"]
+             ["Q" "function f(): Integer do\n  let q: Q := 1\n  q := 0\n  result := q\nend\nprint(f())"]]]
+      (is (violates-on-both? rname (str reassign-prelude body)) body)))
+  (testing "so a value broken by reassignment can no longer reach a slot that trusts its type"
+    (doseq [body ["let q: Q := 5\nq := -1\nlet qs: Array[Q] := [q]"
+                  "let q: Q := 5\nq := -1\nlet b: Box[Q] := create Box[Q].make(q)"
+                  "let q: Q := 5\nq := -1\nlet b: Box[Q] := create Box[Q].make(1)\nb.set(q)"]]
+      (is (violates-on-both? "Q" (str reassign-prelude body)) body)))
+  (testing "the error is reported at the assignment"
+    (is (str/includes? (reported-error (str reassign-prelude "let q: Q := 5\nq := -1"))
+                       "  at line 10"))))
+
+(deftest reassigning-a-refinement-local-with-valid-values
+  (testing "valid values, nil for a `?` local, and a value already typed as the refinement"
+    (is (= ["9" "[9]" "nil" "3" "[\"c\", \"d\"]"]
+           (both (str reassign-prelude
+                      "let q: Q := 5
+let r: Q := 7
+q := r
+q := 9
+print(q)
+let qs: Array[Q] := [q]
+print(qs)
+let o: ?Q := 3
+o := nil
+print(o)
+o := 3
+print(o)
+let p: Pair[String] := [\"a\", \"b\"]
+p := [\"c\", \"d\"]
+print(p)"))))))
+
+(deftest reassigning-a-refinement-local-in-a-later-repl-line
+  (testing "a REPL variable declared with a refinement is checked when assigned later"
+    (let [ctx (repl/init-repl-context)
+          out (try
+                (reset! repl/*type-checking-enabled* true)
+                (with-out-str
+                  (doseq [l ["declare type Q = Integer where n: n > 0"
+                             "let q: Q := 5"
+                             "q := 7"
+                             "q := -1"
+                             "q"]]
+                    (repl/eval-code ctx l)))
+                (finally
+                  (reset! repl/*type-checking-enabled* false)
+                  (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? out "Refinement Q violated") out)
+      (is (str/includes? out "Integer 7") "the failed assignment left q as it was"))))
+
+;; ─── `convert` to a generic alias applied to arguments ──────────────────────
+;;
+;; nex.walker/alias-target-name refused a target with type arguments — from
+;; before an alias could be generic — so `convert x to y: Pair[String]`
+;; tested against a class named Pair and was always false, for a refinement
+;; and a plain generic alias alike. It is now resolved: a plain one to what it
+;; stands for (`Box2[String]` -> Array[String]); a refinement through a
+;; checker made for that instantiation (`__refine_Pair_String_`), which tests
+;; its base and every predicate in the chain. A runtime type test does not
+;; see element types, so `Pair[String]` accepts `[1, 2]` exactly as
+;; `Array[String]` does.
+
+(deftest convert-to-a-generic-alias-with-arguments
+  (testing "refinement, plain generic alias, `?` form, and a refinement of one"
+    (is (= ["true" "false" "true" "true" "false"
+            "true" "false" "false" "3" "false" "false" "true"]
+           (both "declare type Pair[T] = Array[T] where a: a.length = 2
+declare type Box2[T] = Array[T]
+declare type SPair[T -> Comparable] = Pair[T] where a: a.get(0) <= a.get(1)
+let two: Any := [\"a\", \"b\"]
+let one: Any := [\"a\"]
+print(convert two to p: Pair[String])
+print(convert one to q: Pair[String])
+print(convert two to r: Box2[String])
+print(convert two to s: ?Pair[String])
+print(convert one to t: ?Pair[String])
+let up: Any := [1, 2]
+let down: Any := [2, 1]
+let three: Any := [1, 2, 3]
+print(convert up to a: SPair[Integer])
+print(convert down to b: SPair[Integer])
+print(convert three to c: SPair[Integer])
+if convert up to pair: Pair[Integer] then
+  print(pair.get(0) + pair.get(1))
+end
+let m: Any := {\"k\": 1}
+print(convert m to d: Pair[Integer])
+let n: Any := nil
+print(convert n to e: ?Pair[Integer])
+print(convert up to f: Pair[String])")))))
+
+;; The compiled backend's alias expansion (nex.lower/resolve-type-alias)
+;; dropped the `?` of a generic alias, and skipped a non-generic one behind a
+;; `?` altogether: a routine returning `?Box2[Integer]` started `result` at []
+;; instead of nil — which is what made a checker for `SPair[Integer]` above,
+;; returning `?Pair[Integer]`, fail its own return check.
+(deftest detachable-generic-alias-result-starts-nil
+  (testing "a routine returning a `?` alias returns nil when nothing assigns result"
+    (is (= ["nil" "nil"]
+           (both "declare type Box2[T] = Array[T]
+declare type Ints = Array[Integer]
+function f(): ?Box2[Integer] do end
+function g(): ?Ints do end
+print(f())
+print(g())")))))
