@@ -2,6 +2,94 @@
 
 ## Unreleased
 
+- **A refinement used as a type argument is checked.** With `declare type
+  Q = Integer where n: n > 0`, an `Array[Q]`, `Map[String, Q]` or
+  `Box[Q]` held values that broke `n > 0`, because only a `let`,
+  parameter, return or field typed `Q` itself was checked. A value
+  entering such a slot is now checked, and a bad one raises `Refinement Q
+  violated`. The checked places are:
+  - features that store an element: `Array.add/add_at/set`,
+    `Map.put/set` (key and value), `Set.add`, `Channel.send/try_send`,
+    `Min_Heap.insert`, `Atomic_Reference.make/store` and the new value of
+    `compare_and_set`;
+  - the elements of an array, map or set literal, nested ones too
+    (`let qs: Array[Array[Q]] := [[1], [0]]`);
+  - the result of a `spawn` stored as a `Task[Q]`;
+  - an argument of a generic class's routine or constructor whose
+    parameter is typed in its type parameters (`create Box[Q].make(v)`,
+    `b.set(v)` for `set(v: T)`);
+  - a whole collection narrowed into a collection of refinements by a
+    `let`, assignment, argument, `result` or field (`let qs: Array[Q] :=
+    raw`, where `raw: Array[Integer]`): every element is checked, and an
+    `Atomic_Reference`'s current value.
+
+  Features that only look an element up (`contains`, `index_of`,
+  `remove`, `get`) are not checked: asking whether a list holds a value
+  that could never be in it is just false. A `Channel`, `Task` or
+  `Min_Heap` can't be checked as a whole without consuming it, so only
+  what enters one is. In the REPL these checks need `:typecheck on`. A
+  program with no refinement in a type argument is unaffected: nothing is
+  generated or wrapped.
+- **An error in a `spawn` body says so.** Its trace read `at line 3, in
+  AnonymousSpawn_1.call0`, an internal name; it now reads `at line 3, in a
+  spawn body`, as one in a closure reads `in an anonymous function`.
+- **Assigning a local declared with a refinement is checked.** `let q: Q
+  := 5` was checked, but `q := -1` after it was not, so `q` could hold a
+  value `Q` forbids and pass it on to anything that trusts its type
+  (`[q]`, `create Box[Q].make(q)`). The assignment itself now raises
+  `Refinement Q violated`, for a local or global, `?` or not, in the REPL
+  too. A field was already checked on assignment, and `result` is checked
+  when the routine returns.
+- **Fixed: `convert` to a generic alias applied to arguments was always
+  false.** `convert x to y: Pair[String]`, for a refinement `Pair[T]` or a
+  plain alias `Box2[T]`, tested against a class named after the alias. It
+  now tests what the alias stands for (`Array[String]`) and, for a
+  refinement, every predicate, including a refinement built on another
+  (`SPair[T] = Pair[T] where ...`). As with `Array[String]` itself, the
+  elements' types are not tested at run time.
+- **Fixed: a routine returning a `?` alias started `result` at an empty
+  collection in compiled code.** `function f(): ?Box2[Integer] do end`,
+  with `declare type Box2[T] = Array[T]`, returned `[]` instead of `nil`:
+  the compiled backend dropped the `?` when it expanded a generic alias.
+- **A `?` refinement is checked.** `let q: ?Q := -1` was accepted: a
+  detachable refinement was never checked. `nil` still passes; any other
+  value is checked, as are `?Q` elements (`Array[?Q]`).
+- **A generic refinement applied to type arguments is checked.** With
+  `declare type Pair[T] = Array[T] where a: a.length = 2`, `let p:
+  Pair[String] := ["only"]` was accepted: no check was made for a
+  refinement written with type arguments, at a `let`, parameter, return or
+  field. It is now checked against `Array[String]`.
+- **Fixed: a refinement of a refinement was half-checked by the
+  interpreter.** With `declare type Small = Q where n: n < 10`, `let s:
+  Small := -1` was accepted under `--interpret`: only `Small`'s own
+  predicate ran, not `Q`'s. Both backends now check the base's predicate,
+  then the refinement's own.
+- **Fixed: `convert` to a refinement whose base is an alias was always
+  false.** `convert x to y: Small` (base `Q`, a refinement) and `convert x
+  to y: Pos` with `declare type Pos = Count where ...` (base `Count`, a
+  plain alias) tested the value against a class named after the base, which
+  never matched. They now test the base's runtime type and every predicate
+  in the chain. A chain of plain aliases (`Num = Count`, `Count = Integer`)
+  resolves the same way.
+- **Fixed: under `--interpret`, a refinement declared in an interned file
+  went unchecked in the main file.** `let q: Quantity := -1` was accepted,
+  and `convert x to y: Quantity` was false even for a valid value.
+- **Fixed: a `?` alias refused `nil`.** `let m: ?Q := nil`, for any
+  `declare type Q = ...` (plain, refinement or generic), failed with
+  "Cannot assign Nil to variable 'm' of type ?Q": the `?` was dropped when
+  the alias was expanded.
+- **Fixed: in the REPL, a generic alias lost its type argument on later
+  lines.** After `declare type Pair[T] = ...` and `let ps:
+  Array[Pair[String]] := ...`, the next line's `ps.add(["c", "d"])` failed
+  with "Argument `value` of `add` should be Array[T], but got
+  Array[String]".
+- **Fixed: in the REPL, a map or set declared with an alias type could not
+  be changed.** After `declare type C = Integer`, `let m: Map[String, C]
+  := {"a": 1}` and then `m.put("b", 2)` failed with "Type error: a value
+  was not of the expected type". A line naming an alias runs on the
+  interpreter, whose maps and sets the compiled lines after it could not
+  use. The same went for a `Set`, and for a map inside an array.
+
 ## 0.7.6 - 2026-11-19
 
 - **A `let` may not reuse the name of a routine.** A `let` in a class's

@@ -7,8 +7,13 @@
   org.ow2.asm/asm {:mvn/version "9.7.1"}
   org.jline/jline {:mvn/version "3.25.1"}}
  :aliases
- {:test {:extra-paths ["test"]
-         :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}}
+ {;; Headless: nex.examples-smoke-test runs the graphics examples in this
+  ;; JVM, and on a machine with a display each opened a real window and
+  ;; waited for it to be closed, so the run never finished. Headless, they
+  ;; take their no-display path, as in CI.
+  :test {:extra-paths ["test"]
+         :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}
+         :jvm-opts ["-Djava.awt.headless=true"]}
   :run-tests {:exec-fn clojure.test/run-all-tests
               :extra-paths ["test"]}
   :repl {:main-opts ["-m" "nex.repl"]}

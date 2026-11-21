@@ -2,7 +2,8 @@
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
             [nex.ast-walk :as aw]
-            [nex.field-shadowing :as field-shadowing]))
+            [nex.field-shadowing :as field-shadowing]
+            [nex.refinements :as refs]))
 
 ;;
 ;; Utilities
@@ -858,21 +859,84 @@
 ;; and `skip-contracts` is out of scope here (a follow-up can gate it like
 ;; `require`).
 
-(defn- refinement-name
-  "The refinement name a type annotation refers to, or nil. Only plain named
-  types are handled; detachable/parameterized annotations are left unchecked."
-  [type-expr]
-  (when (string? type-expr) type-expr))
-
 (defn- collect-refinements
-  "Map of refinement name -> {:base :binder :predicate} from a program's aliases."
+  "Map of refinement name -> {:base :binder :predicate :generic-params} from a
+  program's aliases. :generic-params is the alias's own `[T, ...]` list (empty
+  for a plain refinement), which refinement-for needs to specialize :base."
   [program]
-  (reduce (fn [m {:keys [name type-expr refinement]}]
+  (reduce (fn [m {:keys [name type-expr refinement generic-params]}]
             (if refinement
-              (assoc m name (assoc refinement :base type-expr))
+              (assoc m name (assoc refinement
+                                   :base type-expr
+                                   :generic-params (vec generic-params)))
               m))
           {}
           (:type-aliases program)))
+
+(defn- substitute-type-params
+  "TYPE-EXPR with each generic-param name in TYPE-MAP replaced by its type
+  argument, wherever it appears: a bare name, a :base-type, the args of an
+  `Array[T]`-shaped type, or the parameters/return of a Function type."
+  [type-expr type-map]
+  (cond
+    (string? type-expr) (get type-map type-expr type-expr)
+    (map? type-expr)
+    (cond-> type-expr
+      (string? (:base-type type-expr)) (update :base-type #(get type-map % %))
+      (:type-args type-expr) (update :type-args #(mapv (fn [t] (substitute-type-params t type-map)) %))
+      (:type-params type-expr) (update :type-params #(mapv (fn [t] (substitute-type-params t type-map)) %))
+      (:param-types type-expr) (update :param-types #(mapv (fn [p] (update p :type substitute-type-params type-map)) %))
+      (:return-type type-expr) (update :return-type substitute-type-params type-map))
+    :else type-expr))
+
+(defn- refinement-for
+  "[refinement-name info] for the refinement a type annotation names, or nil.
+  A plain name (`Quantity`) looks the refinement up as is. A generic one applied
+  to type arguments (`Pair[String]`, for `declare type Pair[T] = Array[T]
+  where ...`) gets its :base specialized to them (`Array[String]`), since the
+  check binds the predicate's binder at that type. A detachable annotation
+  (`?Quantity`) gets an info marked :detachable: nil passes there, so
+  make-refinement-check tests the predicate only on a value that isn't nil.
+
+   A refinement of a refinement (`declare type Small = Quantity where n: n <
+   10`) gets its base's [name info] as :parent, and its :binder-type is the
+   base all the way down (Integer): its check runs the parent's predicate
+   first, then its own, binding the value at that type. Binding it at
+   `Quantity` instead left the parent's predicate to a later walker pass
+   over the check itself, which only the compiled backend's intern merge
+   made (nex.compiler.jvm.file/augment-ast-with-interns); the interpreter
+   accepted `let s: Small := -1`. SEEN guards a cycle of declarations, which
+   the type checker reports."
+  ([refinements type-expr] (refinement-for refinements type-expr #{}))
+  ([refinements type-expr seen]
+   (let [found (cond
+                 (string? type-expr)
+                 (when-let [r (get refinements type-expr)]
+                   [type-expr r])
+
+                 (and (map? type-expr)
+                      (string? (:base-type type-expr))
+                      (not (:param-types type-expr)))
+                 (let [rname (:base-type type-expr)
+                       args (or (:type-args type-expr) (:type-params type-expr))]
+                   (when-let [{:keys [generic-params] :as r} (get refinements rname)]
+                     [rname (cond-> r
+                              (and (seq generic-params) (= (count generic-params) (count args)))
+                              (update :base substitute-type-params
+                                      (zipmap (map :name generic-params) args))
+                              (:detachable type-expr)
+                              (assoc :detachable true))]))
+
+                 :else nil)]
+     (when-let [[rname r] found]
+       (if (contains? seen rname)
+         [rname r]
+         (let [parent (refinement-for refinements (:base r) (conj seen rname))]
+           [rname (assoc r
+                         :parent parent
+                         :binder-type (if-let [[_ pr] parent]
+                                        (:binder-type pr)
+                                        (:base r)))]))))))
 
 (defn- make-refinement-check
   "AST for `do let <binder>: <base> := <value-expr>  if not(<pred>) then raise ... end end`.
@@ -881,20 +945,39 @@
   VALUE-EXPR is a full expression node (not just a name), so a caller checking
   a narrowed field can pass a reference to the temp local it copied the
   right-hand side into (see narrow-field-assignment) rather than only a bare
-  variable name."
-  [rname {:keys [binder predicate base]} value-expr]
-  {:type :scoped-block
-   :rescue nil
-   :body [{:type :let :name binder :var-type base
-           :value value-expr}
-          {:type :if
-           :condition {:type :unary :operator "not" :expr predicate}
-           :then [{:type :raise
-                   :value {:type :string
-                           :value (str "Refinement " rname " violated")}
-                   :builtin (str "Refinement_Violation/" rname)}]
-           :elseif []
-           :else nil}]})
+  variable name.
+
+   For a detachable refinement (`?Quantity`, INFO marked :detachable by
+   refinement-for) nil passes: the check is guarded by `if <value> /= nil`,
+   which narrows VALUE-EXPR — a name, at every site that builds one — for
+   the binder."
+  [rname {:keys [binder predicate base binder-type parent detachable]} value-expr]
+  (let [own {:type :scoped-block
+             :rescue nil
+             :body [{:type :let :name binder :var-type (or binder-type base)
+                     :value value-expr}
+                    {:type :if
+                     :condition {:type :unary :operator "not" :expr predicate}
+                     :then [{:type :raise
+                             :value {:type :string
+                                     :value (str "Refinement " rname " violated")}
+                             :builtin (str "Refinement_Violation/" rname)}]
+                     :elseif []
+                     :else nil}]}
+        ;; A refinement of a refinement: its base's predicate first.
+        check (if-let [[pname pr] parent]
+                {:type :scoped-block
+                 :rescue nil
+                 :body [(make-refinement-check pname (dissoc pr :detachable) value-expr)
+                        own]}
+                own)]
+    (if detachable
+      {:type :if
+       :condition {:type :binary :operator "/=" :left value-expr :right {:type :nil}}
+       :then [check]
+       :elseif []
+       :else nil}
+      check)))
 
 (defn- identifier-node [name]
   {:type :identifier :name name})
@@ -909,11 +992,11 @@
   [stmts refinements]
   (vec (mapcat
         (fn [s]
-          (if-let [r (and (map? s) (= :let (:type s))
-                          (not (:refinement-checked s))
-                          (get refinements (refinement-name (:var-type s))))]
+          (if-let [[rname r] (and (map? s) (= :let (:type s))
+                                  (not (:refinement-checked s))
+                                  (refinement-for refinements (:var-type s)))]
             [(assoc s :refinement-checked true)
-             (make-refinement-check (refinement-name (:var-type s)) r (identifier-node (:name s)))]
+             (make-refinement-check rname r (identifier-node (:name s)))]
             [s]))
         stmts)))
 
@@ -927,11 +1010,10 @@
   (if (:refinement-checks-injected? node)
     node
     (let [param-checks (keep (fn [p]
-                               (when-let [r (get refinements (refinement-name (:type p)))]
-                                 (make-refinement-check (refinement-name (:type p)) r (identifier-node (:name p)))))
+                               (when-let [[rname r] (refinement-for refinements (:type p))]
+                                 (make-refinement-check rname r (identifier-node (:name p)))))
                              (:params node))
-          ret-name (refinement-name (:return-type node))
-          ret-r (get refinements ret-name)
+          [ret-name ret-r] (refinement-for refinements (:return-type node))
           ret-check (when ret-r (make-refinement-check ret-name ret-r (identifier-node "result")))]
       (if (or (seq param-checks) ret-check)
         (assoc node
@@ -958,15 +1040,17 @@
 ;; and the typechecker still sees the target as `Quantity`.
 
 (defn- alias-target-name
-  "The alias name a convert target refers to, or nil. `Count` and `?Count` both
-  name one; a parameterized target does not, since an alias cannot be generic."
+  "The name a convert target refers to, which may be an alias: `Count`,
+  `?Count`, and a generic one applied to arguments, `Pair[String]`. nil for a
+  Function type. (It once refused a parameterized target, from before an
+  alias could be generic, so `convert x to y: Pair[String]` tested against a
+  class named Pair and was always false.)"
   [target-type]
   (cond
     (string? target-type) target-type
     (and (map? target-type)
-         (:detachable target-type)
          (string? (:base-type target-type))
-         (not (:type-args target-type)))
+         (not (:param-types target-type)))
     (:base-type target-type)
     :else nil))
 
@@ -977,9 +1061,27 @@
     {:base-type type-expr :detachable true}
     (assoc type-expr :detachable true)))
 
-(defn- refinement-checker-name
-  [refinement-name]
-  (str "__refine_" refinement-name))
+(defn- alias-body
+  "The type the alias TARGET-TYPE names stands for: ALIAS's body, its
+  generic parameters replaced by TARGET-TYPE's arguments (`Pair[String]` ->
+  `Array[String]`), detachable when TARGET-TYPE is."
+  [{:keys [type-expr generic-params]} target-type]
+  (let [args (when (map? target-type) (or (:type-args target-type) (:type-params target-type)))
+        body (if (and (seq generic-params) (= (count generic-params) (count args)))
+               (substitute-type-params type-expr (zipmap (map :name generic-params) args))
+               type-expr)]
+    (if (and (map? target-type) (:detachable target-type))
+      (detach body)
+      body)))
+
+(defn- refinement-target
+  "TARGET-TYPE as the refinement it applies, `?` dropped and a bare name for
+  one with no arguments: the key a convert's checker is made for."
+  [target-type]
+  (let [t (if (map? target-type) (dissoc target-type :detachable) target-type)]
+    (if (and (map? t) (empty? (or (:type-args t) (:type-params t))))
+      (:base-type t)
+      t)))
 
 (def ^:private refinement-checker-param "__refine_value__")
 
@@ -991,9 +1093,11 @@
    end` -- the value when it is a Base satisfying R's predicate, else nil. The
   predicate runs exactly as written, with its own binder, as at every other
   narrowing site; the `and` narrows the binder to Base for it."
-  [refinement-name {:keys [type-expr refinement]}]
-  (let [{:keys [binder predicate]} refinement
-        fn-name (refinement-checker-name refinement-name)
+  [aliases target]
+  (let [{:keys [refinement] :as alias} (get aliases (alias-target-name target))
+        type-expr (alias-body alias target)
+        {:keys [binder predicate]} refinement
+        fn-name (refs/convert-checker-name target)
         class-name (str fn-name "_Function")
         ;; The parameter must not be the predicate's own binder.
         param (if (= binder refinement-checker-param)
@@ -1039,6 +1143,18 @@
                                     :rescue nil}]}]
                  :invariant nil}}))
 
+(defn- runtime-type
+  "TYPE-EXPR with the alias it names resolved, through a chain of them
+  (`Small = Quantity where ...`, `Quantity = Integer where ...`), to a type
+  that exists at run time. Stops at anything else, including a cycle."
+  [aliases type-expr]
+  (loop [t type-expr seen #{}]
+    (let [nm (alias-target-name t)
+          alias (get aliases nm)]
+      (if (and alias (not (seen nm)))
+        (recur (alias-body alias t) (conj seen nm))
+        t))))
+
 (defn- resolve-convert-alias
   "NODE with its alias target resolved. A refinement target R is kept as
   written, for the typechecker; the value is routed through R's checker, the
@@ -1053,21 +1169,17 @@
         node
 
         refinement
-        (do (swap! used-refinements conj alias-name)
+        (do (swap! used-refinements conj (refinement-target target-type))
             (assoc node
                    :value {:type :call
                            :target nil
-                           :method (refinement-checker-name alias-name)
+                           :method (refs/convert-checker-name (refinement-target target-type))
                            :args [value]
                            :has-parens true}
-                   :runtime-target-type (if (and (map? target-type) (:detachable target-type))
-                                          (detach type-expr)
-                                          type-expr)))
+                   :runtime-target-type (runtime-type aliases target-type)))
 
         :else
-        (assoc node :target-type (if (and (map? target-type) (:detachable target-type))
-                                   (detach type-expr)
-                                   type-expr)))
+        (assoc node :target-type (runtime-type aliases target-type)))
       node)))
 
 (defn resolve-convert-aliases
@@ -1097,9 +1209,29 @@
                           n))
                       program)
             defined (set (map :name (:functions program')))
-            checkers (->> (sort @used-refinements)
-                          (remove #(defined (refinement-checker-name %)))
-                          (mapv #(refinement-checker-function % (get aliases %))))]
+            ;; A checker's own `convert` targets R's base, which may itself be
+            ;; an alias (`Pos = Count where ...`) or a refinement (`Small = Q
+            ;; where ...`): resolve those too, which may need further
+            ;; checkers, until none is missing. Without it, `convert x to y:
+            ;; Small` tested against a class named Q and was always false.
+            checkers (loop [made []
+                            made-names #{}]
+                       (let [missing (->> @used-refinements
+                                          (map (juxt refs/convert-checker-name identity))
+                                          (into (sorted-map))
+                                          (remove (fn [[nm _]] (or (defined nm) (made-names nm)))))]
+                         (if (empty? missing)
+                           made
+                           (recur (into made
+                                        (map (fn [[_ target]]
+                                               (walk/postwalk
+                                                (fn [n]
+                                                  (if (and (map? n) (= :convert (:type n)))
+                                                    (resolve-convert-alias n aliases used-refinements)
+                                                    n))
+                                                (refinement-checker-function aliases target))))
+                                        missing)
+                                  (into made-names (map first missing))))))]
         (cond-> program'
           (seq checkers) (-> (update :functions #(vec (concat % checkers)))
                              (update :classes #(vec (concat % (map :class-def checkers))))))))))
@@ -1264,7 +1396,7 @@
   (into {}
         (keep (fn [member]
                 (when (and (= :field (:type member)) (not (:constant? member)))
-                  (when-let [r (get refinements (refinement-name (:field-type member)))]
+                  (when-let [[_ r] (refinement-for refinements (:field-type member))]
                     [(:name member) r]))))
         (mapcat :members (filter #(= :feature-section (:type %)) (:body class-node)))))
 
@@ -1396,6 +1528,284 @@
            program)
           (update :classes (fn [classes]
                              (mapv #(inject-class-field-refinement-checks % refinements) classes)))))))
+
+;; Refinements the walker's own narrowing checks can't reach (see
+;; nex.refinements): a refinement used as a type argument (`Array[Quantity]`,
+;; `Box[Pair[String]]`), a detachable one there (`Array[?Quantity]`,
+;; `Atomic_Reference[Quantity]`), and a whole collection of them flowing into
+;; a slot typed as one (`let qs: Array[Quantity] := raw`). Values reach those
+;; through `xs.add(v)`, a literal, a `spawn`, an argument, an assignment —
+;; sites only the type checker can tell are typed so. The walker generates a
+;; checking function per such type written in the program; the type checker
+;; records which expressions to route through it (nex.typechecker
+;; *refinement-sites*), and nex.extend/rewrite-checked-sites wraps them.
+;; Generated before type checking, so the checker checks these functions too:
+;; an instantiation the predicate doesn't fit is a type error, as `let p: R :=
+;; ...` with that same instantiation already is.
+
+(def ^:private checked-collection-types
+  "Built-in generic classes whose whole value can be checked element by
+   element. A Channel, Task or Min_Heap can't be looked into without
+   consuming it, so only what enters one is checked."
+  #{"Array" "Set" "Map" "Atomic_Reference"})
+
+(defn- plain-alias-expander
+  "A function expanding PROGRAM's plain (non-refinement) aliases in a type,
+   generic ones specialized to their arguments, so `Quantities` (= `Array[
+   Quantity]`) is seen as the collection it is."
+  [program]
+  (let [aliases (into {}
+                      (keep (fn [{:keys [name type-expr refinement generic-params]}]
+                              (when-not refinement [name [type-expr generic-params]])))
+                      (:type-aliases program))
+        detach-like (fn [t like]
+                      (if (and (map? like) (:detachable like))
+                        (if (string? t) {:base-type t :detachable true} (assoc t :detachable true))
+                        t))]
+    (fn expand [t]
+      (cond
+        (and (string? t) (aliases t))
+        (expand (first (aliases t)))
+
+        (and (map? t) (string? (:base-type t)) (aliases (:base-type t)))
+        (let [[body gparams] (aliases (:base-type t))
+              args (or (:type-args t) (:type-params t))
+              body (if (and (seq gparams) (= (count gparams) (count args)))
+                     (substitute-type-params body (zipmap (map :name gparams) args))
+                     body)]
+          (expand (detach-like body t)))
+
+        (map? t)
+        (cond-> t
+          (:type-args t) (update :type-args #(mapv expand %))
+          (:type-params t) (update :type-params #(mapv expand %)))
+
+        :else t))))
+
+(defn- type-args-of [t]
+  (when (map? t) (or (:type-args t) (:type-params t))))
+
+(defn- mentions-refinement?
+  "Whether type T applies a refinement anywhere, itself included."
+  [refinements t]
+  (boolean (or (refinement-for refinements t)
+               (and (map? t) (some #(mentions-refinement? refinements %) (type-args-of t))))))
+
+(defn- checked-collection?
+  "Whether T is a built-in collection (see checked-collection-types) with a
+   refinement somewhere in its type arguments."
+  [refinements t]
+  (and (map? t)
+       (contains? checked-collection-types (:base-type t))
+       (some #(mentions-refinement? refinements %) (type-args-of t))))
+
+(defn- erase-refinements
+  "T with each refinement it applies replaced by its (specialized) base: the
+   type a checking function's parameter is declared at."
+  [refinements t]
+  (if-let [[_ r] (refinement-for refinements t)]
+    (let [base (erase-refinements refinements (:base r))]
+      (if (:detachable r)
+        (if (string? base) {:base-type base :detachable true} (assoc base :detachable true))
+        base))
+    (if (map? t)
+      (cond-> t
+        (:type-args t) (update :type-args #(mapv (partial erase-refinements refinements) %))
+        (:type-params t) (update :type-params #(mapv (partial erase-refinements refinements) %)))
+      t)))
+
+(defn- detachable-type [t]
+  (cond
+    (string? t) {:base-type t :detachable true}
+    (map? t) (assoc t :detachable true)
+    :else t))
+
+(defn- fresh-name [prefix]
+  (str "__" prefix "_" (swap! next-fn-id inc) "__"))
+
+(defn- across-loop
+  "The loop `across COLL as ITEM do BODY end` desugars to (handle-across-statement)."
+  [coll item body]
+  (let [cursor (fresh-name "refine_c")]
+    {:type :loop
+     :init [{:type :let :name cursor :synthetic true
+             :value {:type :call :target coll :method "cursor" :args [] :from-across true}}
+            {:type :call :target cursor :method "start" :args []}]
+     :invariant nil
+     :variant nil
+     :until {:type :call :target cursor :method "at_end" :args []}
+     :body (vec (concat [{:type :let :name item :synthetic true
+                          :value {:type :call :target cursor :method "item" :args []}}]
+                        body
+                        [{:type :call :target cursor :method "next" :args []}]))}))
+
+(defn- nil-guarded
+  "`if <name> /= nil then BODY end`."
+  [name body]
+  {:type :if
+   :condition {:type :binary :operator "/=" :left (identifier-node name) :right {:type :nil}}
+   :then (vec body)
+   :elseif []
+   :else nil})
+
+(defn- slot-check
+  "Statements checking VALUE-EXPR, entering a slot of type T: T's refinement
+  predicate (nil passing a detachable one), or for a checked collection every
+  element, through its own checking function. Empty when T needs no check."
+  [refinements t value-expr]
+  (if-let [[rname r] (refinement-for refinements t)]
+    (if (:detachable r)
+      (let [tmp (fresh-name "refine_v")]
+        [{:type :let :name tmp :var-type (erase-refinements refinements t) :value value-expr}
+         (nil-guarded tmp [(make-refinement-check rname (dissoc r :detachable) (identifier-node tmp))])])
+      [(make-refinement-check rname r value-expr)])
+    (if (checked-collection? refinements (if (:detachable t) (dissoc t :detachable) t))
+      [{:type :let :name (fresh-name "refine_v") :var-type (erase-refinements refinements t)
+        :value {:type :call :target nil :method (refs/checker-name t)
+                :args [value-expr] :has-parens true}}]
+      [])))
+
+(defn- checker-body
+  "Statements checking parameter PARAM, a value of type T."
+  [refinements t param]
+  (let [v (identifier-node param)
+        attached (if (and (map? t) (:detachable t)) (dissoc t :detachable) t)
+        body (if (refinement-for refinements attached)
+               (slot-check refinements attached v)
+               (let [[a b] (type-args-of attached)]
+                 (case (:base-type attached)
+                   ("Array" "Set")
+                   (let [x (fresh-name "refine_x")]
+                     [(across-loop v x (slot-check refinements a (identifier-node x)))])
+
+                   "Map"
+                   (let [e (fresh-name "refine_e")
+                         field (fn [f] {:type :call :target e :method f :args [] :has-parens false})]
+                     [(across-loop v e (concat (slot-check refinements a (field "key"))
+                                               (slot-check refinements b (field "value"))))])
+
+                   "Atomic_Reference"
+                   (slot-check refinements (detachable-type a)
+                               {:type :call :target v :method "load" :args [] :has-parens false})
+
+                   [])))]
+    (if (not= t attached)
+      [(nil-guarded param body)]
+      body)))
+
+(defn- slot-checker-function
+  "`function <name>(v: <T erased>): <T erased> do <check v> result := v end`."
+  [refinements t]
+  (let [fn-name (refs/checker-name t)
+        class-name (str fn-name "_Function")
+        param (fresh-name "refine_value")
+        erased (erase-refinements refinements t)
+        params [{:name param :type erased}]
+        body (conj (checker-body refinements t param)
+                   {:type :assign :target "result" :value (identifier-node param)})]
+    {:type :function
+     :name fn-name
+     :class-name class-name
+     :generic-params nil
+     :declaration-only? false
+     :params params
+     :return-type erased
+     :body body
+     :class-def {:type :class
+                 :name class-name
+                 :generic-params nil
+                 :note nil
+                 :parents [{:parent "Function"}]
+                 :body [{:type :feature-section
+                         :visibility {:type :public}
+                         :members [{:type :method
+                                    :name "call1"
+                                    :function-name fn-name
+                                    :params params
+                                    :return-type erased
+                                    :declaration-only? false
+                                    :note nil
+                                    :require nil
+                                    :body body
+                                    :ensure nil
+                                    :rescue nil}]}]
+                 :invariant nil}}))
+
+(defn- checked-slot-types
+  "Every type in PROGRAM's annotations that needs a checking function: a
+  refinement (or detachable one) applied as a type argument, and a checked
+  collection anywhere. An application mentioning a generic parameter
+  (`Pair[T]` inside a generic class) is skipped: it isn't a type outside its
+  class."
+  [program refinements]
+  (let [nodes (aw/maps (select-keys program [:statements :functions :classes]))
+        expand (plain-alias-expander program)
+        generic-names (into #{}
+                            (comp (mapcat :generic-params)
+                                  (keep #(if (map? %) (:name %) %))
+                                  (filter string?))
+                            nodes)
+        names-in (fn names-in [t]
+                   (cond
+                     (string? t) [t]
+                     (map? t) (concat (when (string? (:base-type t)) [(:base-type t)])
+                                      (mapcat names-in (type-args-of t))
+                                      (mapcat (comp names-in :type) (:param-types t))
+                                      (some-> (:return-type t) names-in))
+                     :else []))
+        type-like? (fn [t] (or (string? t) (and (map? t) (or (:base-type t) (:param-types t)))))
+        annotations (for [n nodes
+                          t (concat [(:var-type n) (:return-type n) (:field-type n)
+                                     (when (type-like? (:type n)) (:type n))]
+                                    (when (and (= :create (:type n)) (seq (:generic-args n)))
+                                      [{:base-type (:class-name n) :type-args (:generic-args n)}]))
+                          :when (type-like? t)]
+                      t)
+        found (atom #{})
+        visit (fn visit [t _nested?]
+                (let [t (expand t)]
+                  (when (not-any? generic-names (mapcat names-in (type-args-of t)))
+                    (cond
+                      ;; Both forms: a generic class's `?T` (Atomic_Reference's
+                      ;; store, a user class's `?T` parameter) makes `?Quantity`
+                      ;; a slot wherever `Quantity` is a type argument. At the
+                      ;; top level too: assigning a local declared `Quantity`
+                      ;; (`q := v`) narrows into it, and the type checker routes
+                      ;; the value through the same function.
+                      (refinement-for refinements t)
+                      (let [attached (if (and (map? t) (:detachable t)) (dissoc t :detachable) t)]
+                        (swap! found conj attached (detachable-type attached)))
+
+                      (map? t)
+                      (do (when (checked-collection? refinements (if (:detachable t) (dissoc t :detachable) t))
+                            (swap! found conj t))
+                          (doseq [a (type-args-of t)]
+                            (visit a true)))))))]
+    (doseq [t annotations] (visit t false))
+    @found))
+
+(defn add-element-refinement-checkers
+  "PROGRAM with a checking function (named by nex.refinements/checker-name)
+  for each type in its annotations that needs one (checked-slot-types),
+  unless one of that name is already among its :functions or in
+  ALREADY-DEFINED (a REPL session's functions). Safe to run twice.
+
+   Public for the same reason inject-refinement-checks is: an intern-merged
+   program, or a REPL cell, sees refinements its own parse did not."
+  ([program] (add-element-refinement-checkers program #{}))
+  ([program already-defined]
+   (let [refinements (collect-refinements program)]
+     (if (empty? refinements)
+       program
+       (let [defined (into (set already-defined) (map :name (:functions program)))
+             new-fns (->> (checked-slot-types program refinements)
+                          (map (fn [t] [(refs/checker-name t) t]))
+                          (into (sorted-map))
+                          (remove (comp defined key))
+                          (mapv (fn [[_ t]] (slot-checker-function refinements t))))]
+         (cond-> program
+           (seq new-fns) (-> (update :functions #(vec (concat % new-fns)))
+                             (update :classes #(vec (concat % (map :class-def new-fns)))))))))))
 
 (defn- process-field-patterns
   "Desugar a variant's field patterns against a bound variable `var-name`.
@@ -1638,7 +2048,8 @@
                     (add-implied-interns nodes)
                     (add-implied-exception-intern nodes))))
         resolve-convert-aliases
-        inject-refinement-checks)))
+        inject-refinement-checks
+        add-element-refinement-checkers)))
 
 (defn- handle-intern-stmt
   [[_ _intern-kw & tokens]]

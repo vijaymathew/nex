@@ -540,23 +540,70 @@
                 {:dbg/line (get-in b [:builtin-extension :info :line])}
                 {:source-file (get-in b [:builtin-extension :info :source-file])}))))))
 
+(defn- extension-call
+  "Call node N, which reaches a built-in type's extension feature, made a call
+   of FN-NAME, the function implementing it, its receiver first."
+  [n fn-name]
+  (let [target (:target n)
+        receiver (if (string? target) {:type :identifier :name target} target)]
+    (merge (dissoc n :target)
+           {:type :call :target nil :method fn-name
+            :args (into [receiver] (:args n)) :has-parens true})))
+
+(defn- refinement-checked
+  "Expression N routed through FN-NAME, the function checking the refinement
+   the slot it flows into is typed with (see the type checker's
+   :refinement-sites). A `spawn` instead checks its own result as it
+   finishes. INNER, N with any extension rewrite applied, is marked when it
+   goes inside the wrapping call, so the walk, descending into that call,
+   doesn't wrap it a second time (the walk never revisits the node it is
+   handed back, so the rewritten spawn needs no mark)."
+  [n inner fn-name]
+  (let [check (fn [e]
+                (cond-> {:type :call :target nil :method fn-name :args [e] :has-parens true}
+                  (:dbg/line n) (assoc :dbg/line (:dbg/line n) :dbg/col (:dbg/col n))))]
+    (if (= :spawn (:type n))
+      (update inner :body #(conj (vec %) {:type :assign :target "result"
+                                          :value (check {:type :identifier :name "result"})}))
+      (check (assoc inner ::checked true)))))
+
+(defn rewrite-checked-sites
+  "AST with the call sites the type checker recorded rewritten:
+
+   - each call node in EXTENSION-CALLS (an IdentityHashMap from the node to
+     the generated function it reaches; type-check's :extension-calls) made a
+     call of that function, its receiver first;
+   - each expression in REFINEMENT-SITES (a HashMap, keyed by value, from
+     the node to the function checking it; type-check's :refinement-sites)
+     routed through that function.
+
+   One walk does both: an extension call is found by identity, which a
+   second walk over the rebuilt tree would no longer have."
+  [ast ^java.util.IdentityHashMap extension-calls ^java.util.Map refinement-sites]
+  (let [ext? (and extension-calls (not (.isEmpty extension-calls)))
+        ref? (and refinement-sites (not (.isEmpty refinement-sites)))]
+    (if-not (or ext? ref?)
+      ast
+      (walk/prewalk
+       (fn [n]
+         (cond
+           (not (map? n)) n
+           (::checked n) (dissoc n ::checked)
+           :else
+           (let [ext-fn (when ext? (.get extension-calls n))
+                 ref-fn (when ref? (.get refinement-sites n))
+                 n' (if ext-fn (extension-call n ext-fn) n)]
+             (if ref-fn
+               (refinement-checked n n' ref-fn)
+               n'))))
+       ast))))
+
 (defn rewrite-extension-calls
   "AST with each call node in CALLS (an IdentityHashMap from the call node to
    the name of the generated function it reaches; see the type checker's
    :extension-calls) made a call of that function, its receiver first."
   [ast ^java.util.IdentityHashMap calls]
-  (if (or (nil? calls) (.isEmpty calls))
-    ast
-    (walk/prewalk
-     (fn [n]
-       (if-let [fn-name (and (map? n) (.get calls n))]
-         (let [target (:target n)
-               receiver (if (string? target) {:type :identifier :name target} target)]
-           (merge (dissoc n :target)
-                  {:type :call :target nil :method fn-name
-                   :args (into [receiver] (:args n)) :has-parens true}))
-         n))
-     ast)))
+  (rewrite-checked-sites ast calls nil))
 
 (defn- target-indices
   "Indices in CLASSES of the class EXT extends, by bare or qualified name."

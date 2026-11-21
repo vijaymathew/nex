@@ -36,10 +36,14 @@
     {:module-ast (-> module-ast
                      ;; Calls of a built-in type's extension features become
                      ;; calls of the functions that implement them
-                     ;; (docs/proposals/open-features.md).
-                     (extend/rewrite-extension-calls (:extension-calls result))
+                     ;; (docs/proposals/open-features.md); values stored
+                     ;; into a refinement-typed element slot go through
+                     ;; its check.
+                     (extend/rewrite-checked-sites (:extension-calls result)
+                                                   (:refinement-sites result))
                      (tc/apply-inferred-lambda-types (:lambda-types result)))
-     :lambda-types (:lambda-types result)}))
+     :lambda-types (:lambda-types result)
+     :refinement-sites (:refinement-sites result)}))
 
 (defn- run-interpreted
   [source-id ast program-args skip-contracts?]
@@ -228,6 +232,42 @@
                 (run-interpreted source-id ast program-args skip-contracts?))
             nil)))))))
 
+(defn- with-interned-refinements
+  "AST with the walker's refinement passes run again, seeing the aliases of
+   MODULE-AST, the intern-merged program: as nex.compiler.jvm.file/augment-
+   ast-with-interns does for the compiled backend. The interpreter runs the
+   file's own AST, whose parse saw only its own aliases, so a refinement
+   declared in an interned file went unchecked there (`let q: Quantity :=
+   -1`), and a `convert` to one tested against a class of its name, never
+   matching."
+  [ast module-ast]
+  (let [own (:type-aliases ast)
+        merged (:type-aliases module-ast)]
+    (if (= (count own) (count merged))
+      ast
+      (-> ast
+          (assoc :type-aliases merged)
+          walker/resolve-convert-aliases
+          walker/inject-refinement-checks
+          (assoc :type-aliases own)))))
+
+(defn- with-generated-checks
+  "AST with the functions the walker generated to check a refinement
+   (`__refine_...`) that MODULE-AST, the intern-merged program, has and AST
+   lacks: those for a refinement declared in an interned file are made only
+   once the files are merged, yet the interpreter runs AST, whose call sites
+   the type checker's rewrite routes through them."
+  [ast module-ast]
+  (let [have (set (map :name (:functions ast)))
+        missing (filter #(and (str/starts-with? (str (:name %)) "__refine")
+                              (not (have (:name %))))
+                        (:functions module-ast))]
+    (if (empty? missing)
+      ast
+      (-> ast
+          (update :functions #(vec (concat % missing)))
+          (update :classes #(vec (concat % (keep :class-def missing))))))))
+
 (defn eval-file
   "Parse and evaluate a Nex file. opts: {:interpret? bool} to force the
    tree-walking interpreter instead of the compiled JVM backend; {:skip-contracts?
@@ -244,10 +284,18 @@
          ;; `console` and `program` (see nex.predeclared), declared before
          ;; the program's first statement.
          ast (predeclared/add (parser/ast source))
-         {:keys [module-ast lambda-types]} (type-check-ast! source-id ast (:max-errors opts))]
+         {:keys [module-ast lambda-types refinement-sites]} (type-check-ast! source-id ast (:max-errors opts))]
      ;; The interpreter loads interned files itself, so it gets the program's
-     ;; own AST (with its lambdas' inferred types), not the merged one.
-     (run-ast source-id (tc/apply-inferred-lambda-types ast lambda-types) module-ast opts))))
+     ;; own AST (with its lambdas' inferred types and refinement-site checks,
+     ;; the latter found by value in the merged program the checker saw),
+     ;; not the merged one.
+     (run-ast source-id
+              (-> ast
+                  (with-interned-refinements module-ast)
+                  (with-generated-checks module-ast)
+                  (extend/rewrite-checked-sites nil refinement-sites)
+                  (tc/apply-inferred-lambda-types lambda-types))
+              module-ast opts))))
 
 ;;
 ;; Where a runtime error happened
@@ -269,6 +317,7 @@
         cls (str/replace (last (str/split class-name #"\.")) jvm-emit/companion-suffix-pattern "")]
     (cond
       (str/starts-with? cls "AnonymousFunction") "an anonymous function"
+      (str/starts-with? cls "AnonymousSpawn") "a spawn body"
       :else
       (when-let [[_ kind name] (re-matches #"__(i?method|ctor)_(.+)\$arity\d+(?:\$t)?" method)]
         (cond
@@ -286,6 +335,15 @@
        (= (.getMethodName inner) (str (.getMethodName outer) "$t"))
        (not (pos? (.getLineNumber outer)))))
 
+(defn- generated-check-frame?
+  "Whether FRAME is in a function the walker generated to check a
+   refinement (`__refine_check_...` for a value entering a collection, a
+   generic class's `T` or a whole collection; `__refine_...` for a
+   `convert`). The reader never wrote it: the error belongs to the line
+   that handed it the value, the next frame out, so it is left out."
+  [{:keys [routine]}]
+  (and (string? routine) (str/starts-with? routine "__refine_")))
+
 (defn- nex-frames
   "The frames of compiled Nex code in T's stack trace, innermost first:
    [{:file :line :routine}], :line nil for contract-checking code. MAIN-NAME
@@ -301,6 +359,11 @@
       {:file file
        :line (when (pos? (.getLineNumber fr)) (.getLineNumber fr))
        :routine (frame-routine (.getClassName fr) method)})))
+
+(defn- user-frames
+  "nex-frames without those of generated refinement checks."
+  [^Throwable t main-name]
+  (remove generated-check-frame? (nex-frames t main-name)))
 
 (defn- drop-forwarder-frames
   "FRAMES (innermost first) without the frames of the methods that forward a
@@ -378,7 +441,7 @@
         ;; repeat count is only a lower bound.
         truncated? (>= (count (.getStackTrace t)) 1024)
         main-name (.getName (io/file main-file))
-        frames (collapse-repeats (drop-forwarder-frames (nex-frames t main-name)))
+        frames (collapse-repeats (drop-forwarder-frames (user-frames t main-name)))
         place (fn [{:keys [file line]}]
                 (str "line " line (when (not= file main-name) (str " of " file))))
         in (fn [{:keys [routine]}] (when (string? routine) (str ", in " routine)))

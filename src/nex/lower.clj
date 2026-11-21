@@ -320,18 +320,31 @@
            (not (contains? seen t)))
       (recur (get *type-aliases* t) (conj seen t))
 
+      ;; A map naming an alias: a generic one applied to arguments
+      ;; (`Pair[Integer]`), or any alias behind a `?` (`?Ints`). The `?`
+      ;; carries over to what the alias stands for: dropping it made
+      ;; `?Box2[Integer]` an attached Array[Integer], so a routine returning
+      ;; one started `result` at [] instead of nil.
       (and (map? t)
            (string? (:base-type t))
-           (contains? *type-alias-generic-params* (:base-type t))
+           (or (contains? *type-alias-generic-params* (:base-type t))
+               (contains? *type-aliases* (:base-type t)))
            (not (contains? seen (:base-type t))))
       (let [alias-name (:base-type t)
             gparams (get *type-alias-generic-params* alias-name)
             explicit-args (or (:type-args t) (:type-params t))
-            body (get *type-aliases* alias-name)]
-        (if (and body (seq gparams) (seq explicit-args))
-          (recur (tc/resolve-generic-type body (zipmap (map :name gparams) explicit-args))
-                 (conj seen alias-name))
-          (recur (or body t) (conj seen alias-name))))
+            body (get *type-aliases* alias-name)
+            expanded (if (and body (seq gparams) (seq explicit-args))
+                       (tc/resolve-generic-type body (zipmap (map :name gparams) explicit-args))
+                       body)]
+        (if (nil? expanded)
+          t
+          (recur (cond
+                   (not (:detachable t)) expanded
+                   (string? expanded) {:base-type expanded :detachable true}
+                   (map? expanded) (assoc expanded :detachable true)
+                   :else expanded)
+                 (conj seen alias-name))))
 
       :else t)))
 
