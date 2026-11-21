@@ -36,10 +36,14 @@
     {:module-ast (-> module-ast
                      ;; Calls of a built-in type's extension features become
                      ;; calls of the functions that implement them
-                     ;; (docs/proposals/open-features.md).
-                     (extend/rewrite-extension-calls (:extension-calls result))
+                     ;; (docs/proposals/open-features.md); values stored
+                     ;; into a refinement-typed element slot go through
+                     ;; its check.
+                     (extend/rewrite-checked-sites (:extension-calls result)
+                                                   (:refinement-sites result))
                      (tc/apply-inferred-lambda-types (:lambda-types result)))
-     :lambda-types (:lambda-types result)}))
+     :lambda-types (:lambda-types result)
+     :refinement-sites (:refinement-sites result)}))
 
 (defn- run-interpreted
   [source-id ast program-args skip-contracts?]
@@ -244,10 +248,16 @@
          ;; `console` and `program` (see nex.predeclared), declared before
          ;; the program's first statement.
          ast (predeclared/add (parser/ast source))
-         {:keys [module-ast lambda-types]} (type-check-ast! source-id ast (:max-errors opts))]
+         {:keys [module-ast lambda-types refinement-sites]} (type-check-ast! source-id ast (:max-errors opts))]
      ;; The interpreter loads interned files itself, so it gets the program's
-     ;; own AST (with its lambdas' inferred types), not the merged one.
-     (run-ast source-id (tc/apply-inferred-lambda-types ast lambda-types) module-ast opts))))
+     ;; own AST (with its lambdas' inferred types and refinement-site checks,
+     ;; the latter found by value in the merged program the checker saw),
+     ;; not the merged one.
+     (run-ast source-id
+              (-> ast
+                  (extend/rewrite-checked-sites nil refinement-sites)
+                  (tc/apply-inferred-lambda-types lambda-types))
+              module-ast opts))))
 
 ;;
 ;; Where a runtime error happened

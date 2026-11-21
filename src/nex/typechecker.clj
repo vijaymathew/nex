@@ -10,7 +10,8 @@
             [nex.redeclare :as redeclare]
             [nex.contracts :as contracts]
             [nex.types.bootstrap :as bootstrap]
-            [nex.types.builtins :as bi]))
+            [nex.types.builtins :as bi]
+            [nex.refinements :as refs]))
 
 ;;
 ;; Type Environment
@@ -917,55 +918,170 @@
           m))
       n)))
 
-(defn expand-type-aliases
-  "Recursively expand declared type aliases in a type expression."
+(defn- expand-alias-once
+  "TYPE-EXPR's declared alias replaced by the alias's body, one level only, or
+   nil when TYPE-EXPR names no alias. A generic alias applied with explicit
+   args (`Pair[Integer]`) gets its own generic-param names substituted for
+   them; a plain alias, or a generic one referenced bare (its params left
+   unresolved, as an unspecialized class's would be), expands straight to its
+   stored body, any :type-args on TYPE-EXPR dropped."
   [env type-expr]
   (cond
     (string? type-expr)
-    (if-let [expanded (env-lookup-type-alias env type-expr)]
-      (expand-type-aliases env expanded)
-      type-expr)
+    (env-lookup-type-alias env type-expr)
 
-    (map? type-expr)
-    (cond
-      (:param-types type-expr)
-      (cond-> type-expr
-        true (update :param-types #(mapv (fn [p] (update p :type (partial expand-type-aliases env))) %))
-        (:return-type type-expr) (update :return-type (partial expand-type-aliases env)))
-
-      (:base-type type-expr)
-      (let [alias-name (:base-type type-expr)
-            alias-body (env-lookup-type-alias env alias-name)
-            alias-generic-params (env-lookup-type-alias-generic-params env alias-name)
-            explicit-args (or (:type-args type-expr) (:type-params type-expr))]
+    (and (map? type-expr) (:base-type type-expr) (not (:param-types type-expr)))
+    (let [alias-name (:base-type type-expr)
+          alias-body (env-lookup-type-alias env alias-name)
+          alias-generic-params (env-lookup-type-alias-generic-params env alias-name)
+          explicit-args (or (:type-args type-expr) (:type-params type-expr))
+          body (cond
+                 (and alias-body (seq alias-generic-params) (seq explicit-args))
+                 (resolve-generic-type alias-body
+                                       (into {} (map (fn [p a] [(:name p) a])
+                                                     alias-generic-params explicit-args)))
+                 :else alias-body)]
+      ;; `?Q` / `?Pair[String]`: the `?` sits on this map, not on the alias
+      ;; body, so carry it over to whatever the alias expands to. Dropping it
+      ;; turned `let m: ?Q := nil` into an assignment of Nil to a plain,
+      ;; attached Integer.
+      (when body
         (cond
-          ;; A generic alias applied with explicit args (`Pair[Integer]`):
-          ;; substitute the alias's own generic-param names for those args in
-          ;; its stored body, then keep expanding -- the substituted body may
-          ;; itself reference another alias.
-          (and alias-body (seq alias-generic-params) (seq explicit-args))
-          (let [type-map (into {} (map (fn [p a] [(:name p) a]) alias-generic-params explicit-args))]
-            (expand-type-aliases env (resolve-generic-type alias-body type-map)))
+          (not (:detachable type-expr)) body
+          (string? body) {:base-type body :detachable true}
+          (map? body) (assoc body :detachable true)
+          :else body)))
 
-          ;; A plain (non-generic) alias, or a generic one referenced bare
-          ;; with no explicit args (its own generic-param names are left
-          ;; unresolved in the body, exactly as an unspecialized class would
-          ;; be) -- either way, expand straight to the stored body. Any
-          ;; :type-args on THIS map are meaningless for a non-generic alias
-          ;; and are dropped, matching prior behavior.
-          alias-body
-          (expand-type-aliases env alias-body)
+    :else nil))
 
-          :else
-          (cond-> type-expr
-            (:type-params type-expr)
-            (update :type-params #(mapv (partial expand-type-aliases env) %))
-            (:type-args type-expr)
-            (update :type-args #(mapv (partial expand-type-aliases env) %)))))
+(defn- map-type-args
+  "TYPE-EXPR with F applied to each type inside it one level down: a generic
+   type's arguments, a Function type's parameter and return types."
+  [f type-expr]
+  (if (map? type-expr)
+    (cond-> type-expr
+      (:param-types type-expr) (update :param-types #(mapv (fn [p] (update p :type f)) %))
+      (:return-type type-expr) (update :return-type f)
+      (:type-params type-expr) (update :type-params #(mapv f %))
+      (:type-args type-expr) (update :type-args #(mapv f %)))
+    type-expr))
 
-      :else type-expr)
+(defn expand-type-aliases
+  "Recursively expand declared type aliases in a type expression."
+  [env type-expr]
+  (if-let [expanded (expand-alias-once env type-expr)]
+    (expand-type-aliases env expanded)
+    (map-type-args (partial expand-type-aliases env) type-expr)))
 
-    :else type-expr))
+;; Refinements used as type arguments (`Array[Quantity]`). A value reaching
+;; such a slot — `qs.add(v)`, an element of a collection literal, a `spawn`
+;; into `Task[Quantity]` — is recorded here, with the function that checks it
+;; (generated by nex.walker/add-element-refinement-checkers, named by
+;; nex.refinements/checker-name), and nex.extend/rewrite-checked-sites routes
+;; it through that function before either backend runs.
+
+(def ^:dynamic *refinement-sites*
+  "While type-check runs on a program that has functions checking a
+   refinement slot (nex.walker/add-element-refinement-checkers), a
+   java.util.HashMap from each expression node that flows into such a slot
+   to the name of the function that checks it (a :spawn node: that checks its
+   result). Keyed by value, not identity: the interpreter runs the file's own
+   AST, of which the checked, intern-merged program holds rebuilt (equal)
+   copies. nil otherwise — which is also what keeps a program with no
+   refinement in any type argument from paying anything for this."
+  nil)
+
+(defn- refinement-checker-for
+  "The name of the generated function checking a value entering a slot of
+   TYPE-EXPR (nex.refinements/checker-name), when the program has one: for a
+   refinement applied as a type argument (`Quantity`, `Pair[String]`), a
+   detachable one (`?Quantity`), or a collection of them (`Array[Quantity]`).
+   nil otherwise. TYPE-EXPR is expected with its refinements kept named
+   (keep-refinements)."
+  [env type-expr]
+  (when (and *refinement-sites*
+             (or (string? type-expr)
+                 (and (map? type-expr)
+                      (string? (:base-type type-expr))
+                      (not (:param-types type-expr)))))
+    (let [fn-name (refs/checker-name type-expr)]
+      (when (env-lookup-var env fn-name)
+        fn-name))))
+
+(defn- keep-refinements
+  "TYPE-EXPR with its plain aliases expanded and every refinement it applies
+   (itself included) kept named, normalized: the form a slot's type is
+   recognised in (refinement-checker-for) and two such types compared."
+  [env type-expr]
+  (letfn [(nested [t]
+            (cond
+              (refinement-checker-for env t) t
+              :else (if-let [e (expand-alias-once env t)]
+                      (nested e)
+                      (map-type-args nested t))))]
+    (normalize-type (nested type-expr))))
+
+(defn expand-type-aliases-keeping-refinements
+  "TYPE-EXPR with its aliases expanded, except a refinement applied inside its
+   type arguments, which stays named (`Array[Pair[String]]` keeps `Pair[String]`)
+   so the element slot it types can still be recognised as one. TYPE-EXPR
+   itself is expanded whatever it names: a caller typing a literal against it
+   needs the base (`Array[...]`) to see what kind of literal is wanted."
+  [env type-expr]
+  (cond
+    ;; No checking functions (no refinement in any type argument): nothing
+    ;; to keep, so this is just expand-type-aliases.
+    (nil? *refinement-sites*) (expand-type-aliases env type-expr)
+    :else (if-let [e (expand-alias-once env type-expr)]
+            (expand-type-aliases-keeping-refinements env e)
+            (map-type-args (partial keep-refinements env) type-expr))))
+
+(def ^:private builds-its-own-elements
+  "Expressions whose elements reach a collection slot one by one, each
+   recorded as its own site, or that start empty: a whole-collection check
+   on them would only repeat those."
+  #{:array-literal :map-literal :set-literal :create :nil})
+
+(defn- record-refinement-site!
+  "Record NODE as flowing into a slot of type SLOT-TYPE, when the program has
+   a function checking that slot (refinement-checker-for). ACTUAL, when
+   known, is NODE's own type: a value already typed as the slot is (`q`, a
+   `Quantity`, added to an `Array[Quantity]`) was checked on the way in and
+   is not recorded again. COLLECTIONS-ONLY? leaves a refinement slot
+   (`Quantity`, `?Quantity`) to the walker's narrowing checks, which already
+   cover a `let`, parameter, return or field of that type."
+  ([env node slot-type] (record-refinement-site! env node slot-type nil false))
+  ([env node slot-type actual collections-only?]
+   (when-let [^java.util.HashMap sites *refinement-sites*]
+     (when (map? node)
+       (let [slot (keep-refinements env slot-type)]
+         (when-let [fn-name (refinement-checker-for env slot)]
+           (let [base (if (map? slot) (:base-type slot) slot)
+                 collection? (not (env-lookup-type-alias env base))]
+             (when-not (or (and collections-only? (not collection?))
+                           (= :nil (:type node))
+                           (and collection? (builds-its-own-elements (:type node)))
+                           (and actual (= slot (keep-refinements env actual))))
+               (.put sites node fn-name)))))))))
+
+(defn- record-argument-refinements!
+  "Record the ARGS of a call whose parameters PARAMS were checked against
+   ARG-TYPES (any may be nil) under TYPE-MAP (record-refinement-site!). A
+   parameter of a generic class written in its type parameters (`v: T`,
+   `xs: Array[T]`) is resolved with RAW-TYPE-MAP, the receiver's arguments
+   with their refinements kept: `Box[Quantity].set(v)` narrows `v` into a
+   `Quantity`. Any other parameter is a slot only when it is typed as a
+   collection of refinements (`xs: Array[Quantity]`); one typed as a
+   refinement itself is checked by the routine (nex.walker)."
+  [env args params arg-types type-map raw-type-map]
+  (when *refinement-sites*
+    (doseq [[arg param arg-type] (map vector args params (concat arg-types (repeat nil)))
+            :let [declared (:type param)]
+            :when declared]
+      (let [via-generics (when (seq raw-type-map) (resolve-generic-type declared raw-type-map))]
+        (if (and via-generics (not= via-generics declared))
+          (record-refinement-site! env arg via-generics arg-type false)
+          (record-refinement-site! env arg (resolve-generic-type declared type-map) arg-type true))))))
 
 (defn reference-like-type?
   "Whether type is a reference-like (potentially detachable) object type."
@@ -2400,7 +2516,7 @@
 (def ^:private method-generic-counter (atom 0))
 
 (defn- check-call-signature
-  [env method args method-sig type-map & {:keys [arg-types]}]
+  [env method args method-sig type-map & {:keys [arg-types raw-type-map]}]
   ;; Each argument is checked with its parameter's type as the expected type,
   ;; so a `fn (item) do ... end` argument takes its parameter types from the
   ;; parameter it is passed to (check-arg-in-context). The types it gets are
@@ -2461,6 +2577,7 @@
                           {:error (type-error
                                    (argument-mismatch-message env (:name param) method
                                                               arg-type param-type arg))})))))
+    (record-argument-refinements! env args params arg-types type-map raw-type-map)
     ;; A method with no return-type annotation stores :return-type as nil, not
     ;; the string "Void" — coalesce it here (same convention as other
     ;; return-type call sites) so a Void-returning user method's call
@@ -3467,9 +3584,10 @@
         ;; Function(...)`) is treated as its underlying type. Without this a
         ;; call through a function-type alias misses the `Function` branch below
         ;; and fails with an opaque "Method not found: callN".
-        target-type (expand-type-aliases
-                     env
-                     (if class-target
+        ;; Kept unexpanded too: a refinement in its type arguments
+        ;; (`Array[Quantity]`) marks the element slots a storing call
+        ;; narrows into (record-stored-element-refinements!).
+        raw-target-type (if class-target
                        ;; `Ancestor.m(...)` from inside a heir runs on this
                        ;; object, so the ancestor's generic parameters are
                        ;; the ones the inherit chain binds (`inherit
@@ -3501,7 +3619,8 @@
                                    ;; being in the static world so top-level
                                    ;; source-order threading is preserved.
                                    (env-lookup-global env target))))
-                         (check-expression env target))))
+                         (check-expression env target)))
+        target-type (expand-type-aliases env raw-target-type)
         normalized-target (normalize-type target-type)
         target-detachable? (detachable-type? normalized-target)
         guarded? (and (string? target) (env-var-non-nil? env target))
@@ -3515,6 +3634,7 @@
      :class-target class-target
      :current-class current-class
      :target-type target-type
+     :raw-target-type raw-target-type
      :normalized-target normalized-target
      :target-detachable? target-detachable?
      :guarded? guarded?
@@ -3838,9 +3958,51 @@
   (when-let [^java.util.IdentityHashMap calls *extension-calls*]
     (.put calls call (:extension-fn method-sig))))
 
+(def ^:private element-storing-methods
+  "The features of built-in generic classes that store an argument as an
+   element: {class {method [arity #{index of each stored argument}]}}. Ones
+   that take an element only to look it up (`contains`, `index_of`,
+   `remove`, `get`, the `expected` of `compare_and_set`) are not here —
+   asking whether a list holds a value that could never be in it is just
+   false. Atomic_Reference's `make` is a constructor: see
+   record-created-element-refinements!."
+  {"Array" {"add" [1 #{0}] "add_at" [2 #{1}] "set" [2 #{1}]}
+   "Map" {"put" [2 #{0 1}] "set" [2 #{0 1}]}
+   "Set" {"add" [1 #{0}]}
+   "Channel" {"send" [1 #{0}] "try_send" [1 #{0}]}
+   "Min_Heap" {"insert" [1 #{0}]}
+   "Atomic_Reference" {"store" [1 #{0}] "compare_and_set" [2 #{1}]}})
+
+(defn- record-stored-element-refinements!
+  "For a call storing ARGS into a built-in generic receiver of TARGET-TYPE
+   (`qs.add(v)` on an `Array[Quantity]`), record each argument whose
+   parameter is a refinement-typed element slot (record-refinement-site!).
+   METHOD-SIG is the signature the call resolved to."
+  [env base-type method args target-type method-sig]
+  (when-let [[arity stored] (and *refinement-sites*
+                                (get-in element-storing-methods [base-type method]))]
+   (when (= (count args) arity)
+    (let [t (normalize-type (expand-type-aliases-keeping-refinements env target-type))
+          type-args (when (map? t) (or (:type-params t) (:type-args t)))
+          gparams (map #(if (map? %) (:name %) %)
+                       (:generic-params (env-lookup-class env base-type)))
+          gmap (zipmap gparams type-args)]
+      (when (seq type-args)
+        ;; A signature from builtin-method-signature (Channel, Min_Heap) was
+        ;; resolved against the expanded receiver, its `T` already Integer
+        ;; where the receiver said Quantity; make it again from GMAP. The
+        ;; rest (Array, Map, Set) come from the registry with `T` unresolved.
+        (doseq [[i param arg] (map vector
+                                   (range)
+                                   (:params (or (builtin-method-signature base-type method (count args) gmap)
+                                                method-sig))
+                                   args)
+                :when (stored i)]
+          (record-refinement-site! env arg (resolve-generic-type (:type param) gmap))))))))
+
 (defn- check-general-target-call
   [env {:keys [method args has-parens from-pattern from-across] :as call}
-   {:keys [base-type type-map current-class class-target target-type with-java?]}]
+   {:keys [base-type type-map current-class class-target target-type raw-target-type with-java?]}]
   (let [class-def (env-lookup-class env base-type)]
     ;; Resolution order is what makes an override an override. The receiver's
     ;; own declaration must beat the universal "Any" protocol, or a class
@@ -3859,11 +4021,22 @@
                             (builtin-method-signature "Any" method (count args) type-map)
                             (java-extension-signature env base-type method (count args))
                             (root-extension-signature env base-type method (count args)))]
-      (do
-        (when (:extension-fn method-sig)
-          (check-extension-call! env call method-sig base-type target-type))
-        (check-call-signature env method args method-sig
-                              (member-type-map env target-type type-map method-sig)))
+      (let [result (do
+                     (when (:extension-fn method-sig)
+                       (check-extension-call! env call method-sig base-type target-type))
+                     (check-call-signature env method args method-sig
+                                           (member-type-map env target-type type-map method-sig)
+                                           :raw-type-map
+                                           (when (and *refinement-sites* raw-target-type
+                                                      (not (builtin-type? base-type)))
+                                             (member-type-map
+                                              env
+                                              (normalize-type (expand-type-aliases-keeping-refinements env raw-target-type))
+                                              {} method-sig))))]
+        (record-stored-element-refinements! env base-type method args
+                                            (or raw-target-type target-type)
+                                            method-sig)
+        result)
       (let [arg-types (mapv #(check-expression env %) args)]
         ;; A function has no features but the ones every value has (found
         ;; above): it is called. Typed Any
@@ -4737,6 +4910,7 @@
                         {:error (type-error
                                  (str "Method " call-name " expects " (count effective-params)
                                       " arguments, got " (count args)))})))
+      (record-argument-refinements! env args effective-params arg-types type-map nil)
       (doseq [[arg-type param arg] (map vector arg-types effective-params args)]
         (let [param-type (resolve-generic-type (:type param) type-map)]
           (when (and (is-generic-type-param? env param-type)
@@ -5139,6 +5313,9 @@
           maybe-elem (detachable-version elem-type)]
       (when (any-into-concrete-without-convert? env maybe-elem arg-type)
         (throw-any-narrowing-error! "the Atomic_Reference.make argument" maybe-elem))
+      ;; `create Atomic_Reference[Quantity].make(v)` stores `v`.
+      (when (seq generic-args)
+        (record-refinement-site! env (first args) (detachable-version (keep-refinements env (first generic-args)))))
       (when-not (types-compatible? env arg-type maybe-elem)
         (throw (ex-info "Atomic_Reference.make initial value type mismatch"
                         {:error (type-error
@@ -5329,7 +5506,13 @@
                                   {:error (type-error
                                            (argument-mismatch-message env (:name param)
                                                                       (str class-name "." ctor-name)
-                                                                      arg-type param-type arg))})))))))
+                                                                      arg-type param-type arg))})))))
+            ;; `create Box[Quantity].make(v)` narrows `v` into a Quantity.
+            (record-argument-refinements!
+             env args (map #(assoc %1 :type %2) params param-types) arg-types type-map
+             (when (and *refinement-sites* (seq generic-args))
+               (zipmap (map #(type-name-string (:name %)) gparams)
+                       (map (partial keep-refinements env) generic-args))))))
         target-type))))
 
 (defn check-create
@@ -5809,6 +5992,7 @@
   [env expr elem-type kind]
   (doseq [elem (:elements expr)]
     (let [actual-elem-type (check-expression-with-expected env elem elem-type)]
+      (record-refinement-site! env elem elem-type actual-elem-type false)
       (when (any-into-concrete-without-convert? env elem-type actual-elem-type)
         (throw-any-narrowing-error! (str "a" (when (= kind "array") "n") " " kind " element") elem-type))
       (when-not (types-compatible? env actual-elem-type elem-type)
@@ -5824,6 +6008,8 @@
     (doseq [{:keys [key value]} (:entries expr)]
       (let [actual-key-type (check-expression-with-expected env key expected-key-type)
             actual-val-type (check-expression-with-expected env value expected-val-type)]
+        (record-refinement-site! env key expected-key-type actual-key-type false)
+        (record-refinement-site! env value expected-val-type actual-val-type false)
         (when (any-into-concrete-without-convert? env expected-key-type actual-key-type)
           (throw-any-narrowing-error! "a map key" expected-key-type))
         (when-not (types-compatible? env actual-key-type expected-key-type)
@@ -5843,8 +6029,21 @@
   "Check an expression against an expected type when contextual typing matters,
    especially for collection literals with annotated target types."
   [env expr expected-type]
-  (let [expected-type (normalize-type (expand-type-aliases env expected-type))]
+  ;; Refinements in the expected type's arguments stay named, so a literal's
+  ;; elements typed by one are recorded (record-refinement-site!); every
+  ;; compatibility check below expands them anyway.
+  (let [expected-type (normalize-type (expand-type-aliases-keeping-refinements env expected-type))]
     (cond
+      ;; `let t: Task[Quantity] := spawn do ... end`: the spawn's result is
+      ;; narrowed into Quantity, so it is checked as the task finishes.
+      (and (map? expr)
+           (= :spawn (:type expr))
+           (map? expected-type)
+           (= "Task" (:base-type expected-type))
+           (= 1 (count (:type-params expected-type))))
+      (do (record-refinement-site! env expr (first (:type-params expected-type)))
+          (check-expression env expr))
+
       ;; `let b: Box[Any] := create Box.make(5)`: with no type arguments
       ;; written, the declared ones are meant (Box[Any], not the Box[Integer]
       ;; the argument alone would give — which, generics being invariant, is
@@ -6080,6 +6279,9 @@
         val-type (if var-type
                    (check-expression-with-expected env value var-type)
                    (check-expression env value))]
+    ;; `qs := raw`, `result := raw`: every element is narrowed.
+    (when var-type
+      (record-refinement-site! env value var-type val-type true))
     (when-not var-type
       (if (and (env-lookup-var env "__current_class__")
                (env-lookup-global env target))
@@ -6313,6 +6515,9 @@
                    (check-expression-with-expected env value var-type)
                    (check-expression env value))
         inferred-type (or var-type val-type)]
+    ;; `let qs: Array[Quantity] := raw`: every element is narrowed.
+    (when var-type
+      (record-refinement-site! env value var-type val-type true))
     (when-not inferred-type
       (throw (ex-info (str "Type annotation required for variable '" name "'")
                       {:error (type-error
@@ -6898,7 +7103,8 @@
       (throw (ex-info (str "Type mismatch in assignment to " field-name)
                       {:error (type-error
                                (assignment-mismatch-message env (str "field '" field-name "'")
-                                                            val-type field-type (:value stmt)))})))))
+                                                            val-type field-type (:value stmt)))})))
+    (record-refinement-site! env (:value stmt) field-type val-type true)))
 
 (defn check-statement
   "Check a statement"
@@ -7576,13 +7782,16 @@
 
     ;; Add parameters to method environment. Expand type aliases so a parameter
     ;; declared with an alias type (e.g. `f: Transformer`) resolves its methods.
+    ;; Refinements in their type arguments stay named (`xs: Array[Quantity]`),
+    ;; so storing into one, or `result := raw`, is still recognised as
+    ;; narrowing into them (record-refinement-site!).
     (doseq [param params]
       (env-add-var method-env (:name param)
-                   (expand-type-aliases env (or (:type param) "Any"))))
+                   (expand-type-aliases-keeping-refinements env (or (:type param) "Any"))))
 
     ;; Add Result variable for return type
     (when return-type
-      (let [rt (expand-type-aliases env return-type)]
+      (let [rt (expand-type-aliases-keeping-refinements env return-type)]
         (env-add-var method-env "Result" rt)
         (env-add-var method-env "result" rt)))
 
@@ -10433,9 +10642,11 @@
 
        ;; Inject pre-existing variable types (e.g., from REPL). Expand any type
        ;; aliases so a variable declared with an alias type (e.g. a REPL `let m:
-       ;; Matrix := ...`) resolves its methods on later inputs.
+       ;; Matrix := ...`) resolves its methods on later inputs. A refinement
+       ;; in its type arguments stays named (`Array[Quantity]`), so storing
+       ;; into it is still checked (record-stored-element-refinements!).
          (doseq [[var-name var-type] (:var-types opts)]
-           (env-add-var env var-name (expand-type-aliases env var-type)))
+           (env-add-var env var-name (expand-type-aliases-keeping-refinements env var-type)))
 
        ;; Register top-level `let` globals so class and function bodies can read
        ;; them (§7), and enforce the def-before-use watermark before those bodies
@@ -10557,10 +10768,14 @@
   ([ast] (type-check ast {}))
   ([ast opts]
    (binding [*inferred-lambda-types* (atom {})
-             *extension-calls* (java.util.IdentityHashMap.)]
+             *extension-calls* (java.util.IdentityHashMap.)
+             *refinement-sites* (when (some #(refs/element-refinement-checker? (:name %))
+                                            (:functions ast))
+                                  (java.util.HashMap.))]
      (assoc (check-program ast opts)
             :lambda-types @*inferred-lambda-types*
-            :extension-calls *extension-calls*))))
+            :extension-calls *extension-calls*
+            :refinement-sites *refinement-sites*))))
 
 (defn apply-inferred-lambda-types
   "AST with every `fn` literal named in LAMBDA-TYPES (type-check's

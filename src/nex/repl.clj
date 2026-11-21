@@ -6,6 +6,7 @@
             [nex.interpreter :as interp]
             [nex.ast-walk :as aw]
             [nex.extend :as extend]
+            [nex.refinements :as refs]
             [nex.intern :as intern]
             [nex.compiler.jvm.repl :as compiled-repl]
             [nex.compiler.jvm.runtime :as compiled-runtime]
@@ -46,6 +47,13 @@
 ;; Type aliases (`declare type Name = ...`) declared in earlier inputs, kept by
 ;; name so later lines and the type checker can resolve them.
 (defonce ^:dynamic *repl-type-aliases* (atom {}))
+;; Each session variable's type as its `let` declared it, aliases unexpanded
+;; ({name -> type}). *repl-var-types* holds the types the compiled session
+;; hands back, which have every alias expanded (it cannot resolve them), so a
+;; variable declared `Array[Quantity]` comes back `Array[Integer]` and a later
+;; `qs.add(-1)` no longer looks like it stores into a refinement. The checker
+;; sees these instead, for the variables they cover.
+(defonce ^:dynamic *repl-declared-var-types* (atom {}))
 (defonce ^:dynamic *repl-backend*
   ;; Always :compiled: the interpreted REPL backend was removed (backend
   ;; alignment Stage D3). The interpreter remains reachable only through the
@@ -120,6 +128,7 @@
   "Initialize or reset the REPL context"
   []
   (reset! *repl-var-types* {})
+  (reset! *repl-declared-var-types* {})
   (reset! *repl-type-aliases* {})
   (reset! *compiled-repl-session* (compiled-repl/make-session))
   (interp/make-context))
@@ -571,6 +580,7 @@
   (do
     (println "Context cleared.")
     (reset! *repl-var-types* {})
+    (reset! *repl-declared-var-types* {})
     (reset! *repl-type-aliases* {})
     (reset! *compiled-repl-session* (compiled-repl/reset-session))
     (dbg/reset-run-state!)
@@ -1300,11 +1310,19 @@
 
 (defn- repl-alias-env
   "A minimal type-checker environment carrying just the active REPL type
-  aliases, suitable for `tc/expand-type-aliases`."
+  aliases, suitable for `tc/expand-type-aliases`. A generic alias's param list
+  goes in too: without it `Pair[String]` (for `declare type Pair[T] = ...`)
+  expands to its raw body `Array[T]`, leaving the recorded variable type with
+  an unbound `T` that later calls (`ps.add(...)`) then fail to match."
   []
   {:type-aliases (atom (into {}
                              (map (fn [[k v]] [k (:type-expr v)]))
                              @*repl-type-aliases*))
+   :type-alias-generic-params (atom (into {}
+                                          (keep (fn [[k v]]
+                                                  (when (seq (:generic-params v))
+                                                    [k (:generic-params v)])))
+                                          @*repl-type-aliases*))
    :parent nil})
 
 (defn- expand-alias-type
@@ -1455,6 +1473,15 @@
       (seq prior-refinements)
       (-> (assoc :type-aliases prior-refinements)
           walker/inject-refinement-checks
+          (assoc :type-aliases orig-aliases))
+
+      ;; Functions checking a refinement used as a type argument
+      ;; (`Array[Quantity]`) written in this cell, for one declared in any
+      ;; cell; those the session already defined are not made again.
+      (seq prior-aliases)
+      (-> (assoc :type-aliases (vec (concat prior orig-aliases)))
+          (walker/add-element-refinement-checkers
+           (set (keys @(:function-asts @*compiled-repl-session*))))
           (assoc :type-aliases orig-aliases)))))
 
 (defn- build-exec-ctx
@@ -1684,8 +1711,11 @@
                                              (keep :class-name prev-functions))
                                      (remove current-class-names)
                                      set)
+          var-types @*repl-var-types*
           result (tc/type-check augmented-ast
-                                {:var-types @*repl-var-types*
+                                {:var-types (merge var-types
+                                                   (select-keys @*repl-declared-var-types*
+                                                                (keys var-types)))
                                  :skip-class-body-names skip-class-body-names
                                  ;; An interpreted session keeps no function
                                  ;; nodes the checker could read them from.
@@ -1951,6 +1981,52 @@
     (flush-compiled-output-on-error!)
     e))
 
+(defn- define-element-refinement-checkers!
+  "Define in the session, ahead of the cell, the functions checking a
+   refinement used as a type argument (nex.walker/add-element-refinement-
+   checkers) that the cell's AST carries, and return the AST without them.
+   Run as part of the cell they would make it a declaring cell, which echoes
+   no value: `let qs: Array[Quantity] := [1]` would print nothing. Should the
+   compiled session decline them, they stay in the cell."
+  [exec-ctx ast source-id]
+  (let [checker? (comp refs/element-refinement-checker? :name)
+        fns (vec (filter checker? (:functions ast)))]
+    (if (empty? fns)
+      ast
+      (let [class-names (set (map :class-name fns))
+            program (expand-type-aliases-in-ast
+                     {:type :program :imports [] :interns [] :type-aliases []
+                      :extensions [] :statements [] :calls []
+                      :functions fns
+                      :classes (mapv :class-def fns)})]
+        (if-let [{:keys [session]} (compiled-repl/compile-and-eval!
+                                    @*compiled-repl-session* program source-id)]
+          (do (reset! *compiled-repl-session* session)
+              (let [{:keys [var-types]} (compiled-repl/sync-session->interpreter! session exec-ctx)]
+                (reset! *repl-var-types* var-types))
+              (-> ast
+                  (update :functions #(vec (remove checker? %)))
+                  (update :classes #(vec (remove (comp class-names :name) %)))))
+          ast)))))
+
+(defn- remember-declared-var-types!
+  "Record the type each top-level `let` in this cell's AST declared (see
+   *repl-declared-var-types*); a `let` with no type forgets the name's."
+  [ast]
+  (let [stmts (concat (:statements ast)
+                      ;; A wrapped cell's statements sit in its temp method.
+                      (for [c (:classes ast)
+                            :when (= "__ReplTemp__" (:name c))
+                            section (:body c)
+                            m (:members section)
+                            stmt (:body m)]
+                        stmt))]
+    (doseq [stmt stmts
+            :when (and (map? stmt) (= :let (:type stmt)))]
+      (if (:var-type stmt)
+        (swap! *repl-declared-var-types* assoc (:name stmt) (:var-type stmt))
+        (swap! *repl-declared-var-types* dissoc (:name stmt))))))
+
 (defn eval-code
   ([ctx input]
    (eval-code ctx input "<repl>"))
@@ -1975,14 +2051,18 @@
                ;; aliases; the current cell's are recorded further below.
                ast (inject-session-refinements ast @*repl-type-aliases*)]
            (sync-and-remember-type-aliases! exec-ctx source-id ast)
-           (let [ast (fold-session-extensions exec-ctx source-id ast)
+           (let [ast (define-element-refinement-checkers! exec-ctx ast source-id)
+                 ast (fold-session-extensions exec-ctx source-id ast)
                  checked (type-check-repl-input! ctx ast source-id)
                  ast (-> ast
                          ;; Calls of a built-in type's extension features
                          ;; become calls of the functions implementing them.
-                         (extend/rewrite-extension-calls (:extension-calls checked))
+                         ;; Values stored into a refinement-typed element
+                         ;; slot go through its check.
+                         (extend/rewrite-checked-sites (:extension-calls checked)
+                                                       (:refinement-sites checked))
                          (tc/apply-inferred-lambda-types (:lambda-types checked)))]
-           (cond
+           (let [r (cond
              ;; Experimental compiled path for narrow expression-shaped program inputs.
              (and (= (:type ast) :program)
                   (not was-wrapped?)
@@ -2002,7 +2082,10 @@
 
              ;; Single expression or statement
              :else
-             (eval-single-node! exec-ctx ast source-id)))))
+             (eval-single-node! exec-ctx ast source-id))]
+             ;; Only once the cell has run: a failed `let` binds nothing.
+             (remember-declared-var-types! ast)
+             r))))
 
        (catch ParseError e
          (println "Syntax error:")

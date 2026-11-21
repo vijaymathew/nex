@@ -191,6 +191,262 @@ print(s.union(t).size())")))))
     (is (= interpreted compiled) "compiled and interpreted output must agree")
     compiled))
 
+;; A generic refinement applied to type arguments (`Pair[String]`) is an
+;; annotation with type args, which refinement-for used to skip outright, so
+;; none of its narrowing sites got a check: `let p: Pair[String] := ["only"]`
+;; was silently accepted. The check now binds the predicate's binder at the
+;; base specialized to those args (`Array[String]`).
+(def ^:private generic-pair-prelude
+  "declare type Pair[T] = Array[T] where a: a.length = 2
+function swap(p: Pair[String]): Pair[String] do result := [p.get(1), p.get(0)] end
+function bad_ret(): Pair[Integer] do result := [1] end
+class Box
+  create make(v: Pair[Integer]) do this.p := v end
+  feature p: Pair[Integer]
+  feature set(v: Array[Integer]) do p := v end
+end
+")
+
+(deftest generic-refinement-narrowing-sites-are-checked
+  (testing "let, parameter, return and field narrowing into Pair[X] test the predicate"
+    (is (violates? (str generic-pair-prelude "let p: Pair[String] := [\"only\"]")) "let")
+    (is (violates? (str generic-pair-prelude "print(swap([\"x\"]))")) "parameter")
+    (is (violates? (str generic-pair-prelude "print(bad_ret())")) "return")
+    (is (violates? (str generic-pair-prelude "let b := create Box.make([1, 2, 3])")) "constructor field")
+    (is (violates? (str generic-pair-prelude "let b := create Box.make([1, 2])\nb.set([1])")) "field")))
+
+(deftest generic-refinement-valid-values-pass-on-both-backends
+  (testing "values satisfying a generic refinement's predicate flow through every site"
+    (is (= ["[\"b\", \"a\"]" "[1, 2]" "[3, 4]"]
+           (both (str generic-pair-prelude
+                      "let ok: Pair[String] := [\"a\", \"b\"]
+print(swap(ok))
+let b := create Box.make([1, 2])
+print(b.p)
+b.set([3, 4])
+print(b.p)"))))))
+
+;; A refinement used as a type argument of a built-in generic class
+;; (`Array[Quantity]`, `Map[String, Pair[String]]`, `Task[Quantity]`) is
+;; checked wherever a value enters it: a storing feature (`add`, `set`,
+;; `put`, `send`, `insert`, ...), a collection literal's elements, a `spawn`'s
+;; result. Only the type checker can see those sites, so they are recorded
+;; there (*refinement-sites*) and routed through a checking function the
+;; walker generated (add-element-refinement-checkers) — on both backends.
+
+(defn- violation-on
+  "The error message running CODE raises on the given backend, or nil."
+  [code interpret?]
+  (let [f (java.io.File/createTempFile "refinement" ".nex")]
+    (try
+      (spit f code)
+      (with-out-str (e/eval-file (.getPath f) {:interpret? interpret?}))
+      nil
+      (catch Exception ex (ex-message ex))
+      (finally (.delete f)))))
+
+(defn- violates-on-both?
+  "True when CODE raises a violation of refinement RNAME on both backends."
+  [rname code]
+  (let [expected (str "Refinement " rname " violated")]
+    (and (= expected (violation-on code false))
+         (= expected (violation-on code true)))))
+
+(def ^:private element-prelude
+  "declare type Pair[T] = Array[T] where a: a.length = 2
+declare type Q = Integer where n: n > 0
+")
+
+(deftest refinement-type-argument-storing-features-are-checked
+  (testing "a feature storing an element into a refinement-typed slot checks it"
+    (doseq [[rname body]
+            [["Pair" "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]\nps.add([\"f\"])"]
+             ["Pair" "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]\nps.set(0, [\"f\"])"]
+             ["Q" "let xs: Array[Q] := [1]\nxs.add_at(0, -5)"]
+             ["Q" "let m: Map[String, Q] := {\"a\": 1}\nm.put(\"b\", 0)"]
+             ["Q" "let m: Map[Q, String] := {1: \"a\"}\nm.put(-1, \"b\")"]
+             ["Q" "let s: Set[Q] := #{1}\ns.add(-2)"]
+             ["Q" "let ch: Channel[Q] := create Channel[Q].with_capacity(4)\nch.send(-3)"]
+             ["Q" "let ch: Channel[Q] := create Channel[Q].with_capacity(4)\nprint(ch.try_send(0))"]
+             ["Q" "let h: Min_Heap[Q] := create Min_Heap.empty\nh.insert(0)"]]]
+      (is (violates-on-both? rname (str element-prelude body)) body))))
+
+(deftest refinement-type-argument-literals-and-spawn-are-checked
+  (testing "collection literal elements, nested ones, and a spawn's result are checked"
+    (doseq [[rname body]
+            [["Pair" "let ps: Array[Pair[String]] := [[\"x\"]]"]
+             ["Q" "let qs: Array[Array[Q]] := [[1], [0]]"]
+             ["Q" "let m: Map[String, Q] := {\"a\": -1}"]
+             ["Q" "let s: Set[Q] := #{1, -1}"]
+             ["Q" "let t: Task[Q] := spawn do result := -4 end\nprint(t.await)"]]]
+      (is (violates-on-both? rname (str element-prelude body)) body))))
+
+(deftest refinement-type-argument-valid-values-pass
+  (testing "values satisfying the refinement are stored unchanged, and a lookup
+            never raises, even for a value that could not be in the collection"
+    (is (= ["[[\"x\", \"y\"], [\"c\", \"d\"]]" "false" "[5, 1, 2]"
+            "{\"a\": 1, \"b\": 2}" "#{1, 2}" "3" "2" "4"]
+           (both (str element-prelude
+                      "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]
+ps.add([\"c\", \"d\"])
+ps.set(0, [\"x\", \"y\"])
+print(ps)
+print(ps.contains([\"z\"]))
+let qs: Array[Q] := [1]
+qs.add(2)
+qs.add_at(0, 5)
+print(qs)
+let m: Map[String, Q] := {\"a\": 1}
+m.put(\"b\", 2)
+print(m)
+let s: Set[Q] := #{1}
+s.add(2)
+print(s)
+let ch: Channel[Q] := create Channel[Q].with_capacity(4)
+ch.send(3)
+print(ch.receive)
+let h: Min_Heap[Q] := create Min_Heap.empty
+h.insert(2)
+print(h.peek)
+let t: Task[Q] := spawn do result := 4 end
+print(t.await)"))))))
+
+(def ^:private gap-prelude
+  (str element-prelude
+       "class Box[T]
+  create make(v: T) do this.item := v end
+  feature item: T
+  feature set(v: T) do item := v end
+  feature maybe(v: ?T) do end
+  feature all(vs: Array[T]) do end
+end
+function total(qs: Array[Q]): Integer do result := qs.length end
+function make_raw(): Array[Integer] do result := [1, 0] end
+"))
+
+;; A whole collection narrowed into a collection of refinements — by `let`,
+;; assignment, argument or `result` — has every element checked
+;; (nex.walker/checker-body); its static type said nothing about them.
+(deftest whole-collection-narrowing-is-checked
+  (testing "every element of a collection narrowed into a collection of refinements"
+    (doseq [body ["let raw: Array[Integer] := [1, 0]\nlet qs: Array[Q] := raw"
+                  "let qs: Array[Q] := [1]\nlet raw: Array[Integer] := [1, 0]\nqs := raw"
+                  "let raw: Array[Integer] := [1, 0]\nprint(total(raw))"
+                  "function f(): Array[Q] do result := make_raw() end\nprint(f())"
+                  "let raw: Map[String, Integer] := {\"a\": 0}\nlet m: Map[String, Q] := raw"
+                  "let raw: Map[Integer, String] := {0: \"a\"}\nlet m: Map[Q, String] := raw"
+                  "let raw: Set[Integer] := #{0}\nlet s: Set[Q] := raw"
+                  "let raw: Array[Array[Integer]] := [[1], [0]]\nlet qs: Array[Array[Q]] := raw"
+                  "let raw: Atomic_Reference[Integer] := create Atomic_Reference[Integer].make(0)\nlet r: Atomic_Reference[Q] := raw"]]
+      (is (violates-on-both? "Q" (str gap-prelude body)) body))))
+
+;; A detachable refinement slot — `?Q` itself, an `Array[?Q]` element, or an
+;; Atomic_Reference's value (its features take `?T`) — lets nil through and
+;; checks anything else.
+(deftest detachable-refinement-slots-are-checked
+  (testing "a value that isn't nil is checked"
+    (doseq [body ["let q: ?Q := -1"
+                  "let opt: Array[?Q] := [nil, -1]"
+                  "let opt: Array[?Q] := [nil]\nopt.add(-1)"
+                  "let r: Atomic_Reference[Q] := create Atomic_Reference[Q].make(0)"
+                  "let r: Atomic_Reference[Q] := create Atomic_Reference[Q].make(1)\nr.store(-1)"
+                  "let r: Atomic_Reference[Q] := create Atomic_Reference[Q].make(1)\nprint(r.compare_and_set(1, 0))"]]
+      (is (violates-on-both? "Q" (str gap-prelude body)) body))))
+
+;; A user-defined generic class's `T` bound to a refinement narrows each
+;; argument passed for a `T`-typed parameter, at the call.
+(deftest user-generic-class-arguments-are-checked
+  (testing "an argument for a parameter typed in the class's own type parameters"
+    (doseq [[rname body]
+            [["Q" "let b: Box[Q] := create Box[Q].make(0)"]
+             ["Q" "let b: Box[Q] := create Box[Q].make(1)\nb.set(-1)"]
+             ["Q" "let b: Box[Q] := create Box[Q].make(1)\nb.maybe(-1)"]
+             ["Q" "let b: Box[Q] := create Box[Q].make(1)\nlet raw: Array[Integer] := [0]\nb.all(raw)"]
+             ["Pair" "let bp: Box[Pair[String]] := create Box[Pair[String]].make([\"a\"])"]]]
+      (is (violates-on-both? rname (str gap-prelude body)) body))))
+
+(deftest refinement-gaps-valid-values-pass
+  (testing "valid values pass every one of those sites, and nil passes a detachable one"
+    (is (= ["2" "false" "2" "[1, 2]" "{\"b\": 2}" "[nil, 1, nil, 3]" "4"]
+           (both (str gap-prelude
+                      "let raw: Array[Integer] := [1, 2]
+let qs: Array[Q] := raw
+print(total(raw))
+let m: Map[String, Q] := {\"a\": 1}
+let raw_m: Map[String, Integer] := {\"b\": 2}
+m := raw_m
+let opt: Array[?Q] := [nil, 1]
+opt.add(nil)
+opt.add(3)
+let r: Atomic_Reference[Q] := create Atomic_Reference[Q].make(1)
+r.store(2)
+r.store(nil)
+print(r.compare_and_set(-1, 5))
+let b: Box[Q] := create Box[Q].make(1)
+b.set(2)
+b.maybe(nil)
+b.all([1, 2])
+let q: ?Q := nil
+q := 4
+let bp: Box[Pair[String]] := create Box[Pair[String]].make([\"a\", \"b\"])
+print(b.item)
+print(qs)
+print(m)
+print(opt)
+print(q)"))))))
+
+;; A REPL line naming an alias runs on the interpreter, whose maps and sets
+;; are its own portable structures; a compiled line using one afterwards
+;; failed with a ClassCastException ("a value was not of the expected
+;; type"). They are now turned into host collections as they reach the
+;; compiled session (nex.types.runtime/nex-host-collections).
+(deftest alias-typed-map-from-interpreted-repl-line-is-usable
+  (doseq [typecheck? [false true]]
+    (testing (str "maps and sets made by an alias-typed line, type checking " typecheck?)
+      (let [ctx (repl/init-repl-context)
+            out (try
+                  (reset! repl/*type-checking-enabled* typecheck?)
+                  (with-out-str
+                    (doseq [l ["declare type C = Integer"
+                               "let m: Map[String, C] := {\"a\": 1}"
+                               "m.put(\"b\", 2)"
+                               "m"
+                               "let s: Set[C] := #{1}"
+                               "s.add(2)"
+                               "s"
+                               "let nested: Array[Map[String, C]] := [{\"x\": 1}]"
+                               "nested.get(0).put(\"y\", 2)"
+                               "nested"]]
+                      (repl/eval-code ctx l)))
+                  (finally
+                    (reset! repl/*type-checking-enabled* false)
+                    (reset! repl/*repl-var-types* {})))]
+        (is (not (str/includes? out "Error")) out)
+        (is (str/includes? out "{\"a\": 1, \"b\": 2}") out)
+        (is (str/includes? out "#{1, 2}") out)
+        (is (str/includes? out "[{\"x\": 1, \"y\": 2}]") out)))))
+
+(deftest refinement-type-argument-in-later-repl-cells
+  (testing "a collection declared on one REPL line is checked when stored into on a later one"
+    (let [ctx (repl/init-repl-context)
+          out (try
+                (reset! repl/*type-checking-enabled* true)
+                (with-out-str
+                  (doseq [l ["declare type Pair[T] = Array[T] where a: a.length = 2"
+                             "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]"
+                             "ps.add([\"c\", \"d\"])"
+                             "ps.add([\"f\"])"
+                             "ps"]]
+                    (repl/eval-code ctx l)))
+                (finally
+                  (reset! repl/*type-checking-enabled* false)
+                  (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? out "Array[Pair[String]] [[\"a\", \"b\"]]")
+          "the declaring cell still echoes its value")
+      (is (str/includes? out "Refinement Pair violated") out)
+      (is (str/includes? out "[[\"a\", \"b\"], [\"c\", \"d\"]]") out)
+      (is (not (str/includes? out "[\"f\"]]")) out))))
+
 (deftest compiled-refinement-local-receiver
   (testing "base-type methods dispatch on a refinement-typed local"
     (is (= ["5" "\"TRK-1\"" "true"]
@@ -284,6 +540,35 @@ print(n + 1)")))))
     (when-not (:success result)
       (str/join "\n" (map #(if (map? %) (or (:message %) (pr-str %)) (str %))
                           (:errors result))))))
+
+;; expand-type-aliases dropped the `?` on an alias reference, so `?Q` expanded
+;; to a plain, attached `Integer` and `let m: ?Q := nil` was rejected with
+;; "Cannot assign Nil" — for plain aliases, refinements and generic ones alike.
+(deftest detachable-alias-accepts-nil
+  (testing "a `?Alias` variable can hold nil and later a value"
+    (is (= ["nil" "[\"a\", \"b\"]" "nil" "5" "nil"]
+           (both "declare type Pair[T] = Array[T] where a: a.length = 2
+declare type Q = Integer where n: n > 0
+declare type C = Integer
+let m: ?Pair[String] := nil
+print(m)
+m := [\"a\", \"b\"]
+print(m)
+let q: ?Q := nil
+print(q)
+q := 5
+print(q)
+let c: ?C := nil
+print(c)"))))
+  (testing "the `?` is kept, so the value must still be checked for nil before use"
+    (is (str/includes? (str (type-error-message "declare type Q = Integer where n: n > 0
+let q: ?Q := nil
+print(q + 1)"))
+                       "?Integer")))
+  (testing "an alias without `?` still rejects nil"
+    (is (str/includes? (str (type-error-message "declare type C = Integer
+let c: C := nil"))
+                       "Cannot assign Nil"))))
 
 (deftest plain-alias-resolves-in-a-convert
   (testing "convert to an alias tests the alias's base type"
@@ -478,6 +763,27 @@ if convert b to z: ?Quantity then print(\"yes\") else print(\"no\") end")))))
                        (map str/trim)
                        (filter #{"true" "false"}))]
       (is (= ["true" "false" "true"] printed) out))))
+
+;; The REPL rewrites each recorded variable type through the session's aliases
+;; (repl-alias-env). That env used to carry no generic-param lists, so
+;; `Pair[String]` expanded to its raw body `Array[T]`, `ps` was recorded as
+;; `Array[Array[T]]`, and the next line's `ps.add(["c", "d"])` failed with
+;; "should be Array[T], but got Array[String]".
+(deftest generic-refinement-alias-from-earlier-repl-cell
+  (testing "a generic alias applied on an earlier REPL line keeps its type argument"
+    (let [ctx (repl/init-repl-context)
+          out (try
+                (reset! repl/*type-checking-enabled* true)
+                (with-out-str
+                  (repl/eval-code ctx "declare type Pair[T] = Array[T] where a: a.length = 2")
+                  (repl/eval-code ctx "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]")
+                  (repl/eval-code ctx "ps.add([\"c\", \"d\"])")
+                  (repl/eval-code ctx "ps"))
+                (finally
+                  (reset! repl/*type-checking-enabled* false)
+                  (reset! repl/*repl-var-types* {})))]
+      (is (not (str/includes? out "Type error")) out)
+      (is (str/includes? out "[[\"a\", \"b\"], [\"c\", \"d\"]]") out))))
 
 ;; `where` is matched the same way `alias` is (see operator_alias_test.clj):
 ;; a plain IDENTIFIER at the one position it means something, spelling checked
