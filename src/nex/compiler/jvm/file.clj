@@ -132,6 +132,7 @@
                   (if (:nex/extension-error (ex-data e)) program (throw e)))))
         walker/resolve-convert-aliases
         walker/inject-refinement-checks
+        walker/add-element-refinement-checkers
         walker/resolve-qualified-function-calls)))
 
 (defn- foreign-method-sources
@@ -312,8 +313,11 @@
                           (-> module-ast
                               ;; Calls of a built-in type's extension features
                               ;; become calls of the functions that implement
-                              ;; them (docs/proposals/open-features.md).
-                              (extend/rewrite-extension-calls (:extension-calls result))
+                              ;; them (docs/proposals/open-features.md), and
+                              ;; values stored into a refinement-typed element
+                              ;; slot are routed through its check.
+                              (extend/rewrite-checked-sites (:extension-calls result)
+                                                            (:refinement-sites result))
                               (tc/apply-inferred-lambda-types (:lambda-types result)))))
            prepared-ast (lower/prepare-program-for-closures
                          module-ast

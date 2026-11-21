@@ -226,6 +226,112 @@ print(b.p)
 b.set([3, 4])
 print(b.p)"))))))
 
+;; A refinement used as a type argument of a built-in generic class
+;; (`Array[Quantity]`, `Map[String, Pair[String]]`, `Task[Quantity]`) is
+;; checked wherever a value enters it: a storing feature (`add`, `set`,
+;; `put`, `send`, `insert`, ...), a collection literal's elements, a `spawn`'s
+;; result. Only the type checker can see those sites, so they are recorded
+;; there (*refinement-sites*) and routed through a checking function the
+;; walker generated (add-element-refinement-checkers) — on both backends.
+
+(defn- violation-on
+  "The error message running CODE raises on the given backend, or nil."
+  [code interpret?]
+  (let [f (java.io.File/createTempFile "refinement" ".nex")]
+    (try
+      (spit f code)
+      (with-out-str (e/eval-file (.getPath f) {:interpret? interpret?}))
+      nil
+      (catch Exception ex (ex-message ex))
+      (finally (.delete f)))))
+
+(defn- violates-on-both?
+  "True when CODE raises a violation of refinement RNAME on both backends."
+  [rname code]
+  (let [expected (str "Refinement " rname " violated")]
+    (and (= expected (violation-on code false))
+         (= expected (violation-on code true)))))
+
+(def ^:private element-prelude
+  "declare type Pair[T] = Array[T] where a: a.length = 2
+declare type Q = Integer where n: n > 0
+")
+
+(deftest refinement-type-argument-storing-features-are-checked
+  (testing "a feature storing an element into a refinement-typed slot checks it"
+    (doseq [[rname body]
+            [["Pair" "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]\nps.add([\"f\"])"]
+             ["Pair" "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]\nps.set(0, [\"f\"])"]
+             ["Q" "let xs: Array[Q] := [1]\nxs.add_at(0, -5)"]
+             ["Q" "let m: Map[String, Q] := {\"a\": 1}\nm.put(\"b\", 0)"]
+             ["Q" "let m: Map[Q, String] := {1: \"a\"}\nm.put(-1, \"b\")"]
+             ["Q" "let s: Set[Q] := #{1}\ns.add(-2)"]
+             ["Q" "let ch: Channel[Q] := create Channel[Q].with_capacity(4)\nch.send(-3)"]
+             ["Q" "let ch: Channel[Q] := create Channel[Q].with_capacity(4)\nprint(ch.try_send(0))"]
+             ["Q" "let h: Min_Heap[Q] := create Min_Heap.empty\nh.insert(0)"]]]
+      (is (violates-on-both? rname (str element-prelude body)) body))))
+
+(deftest refinement-type-argument-literals-and-spawn-are-checked
+  (testing "collection literal elements, nested ones, and a spawn's result are checked"
+    (doseq [[rname body]
+            [["Pair" "let ps: Array[Pair[String]] := [[\"x\"]]"]
+             ["Q" "let qs: Array[Array[Q]] := [[1], [0]]"]
+             ["Q" "let m: Map[String, Q] := {\"a\": -1}"]
+             ["Q" "let s: Set[Q] := #{1, -1}"]
+             ["Q" "let t: Task[Q] := spawn do result := -4 end\nprint(t.await)"]]]
+      (is (violates-on-both? rname (str element-prelude body)) body))))
+
+(deftest refinement-type-argument-valid-values-pass
+  (testing "values satisfying the refinement are stored unchanged, and a lookup
+            never raises, even for a value that could not be in the collection"
+    (is (= ["[[\"x\", \"y\"], [\"c\", \"d\"]]" "false" "[5, 1, 2]"
+            "{\"a\": 1, \"b\": 2}" "#{1, 2}" "3" "2" "4"]
+           (both (str element-prelude
+                      "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]
+ps.add([\"c\", \"d\"])
+ps.set(0, [\"x\", \"y\"])
+print(ps)
+print(ps.contains([\"z\"]))
+let qs: Array[Q] := [1]
+qs.add(2)
+qs.add_at(0, 5)
+print(qs)
+let m: Map[String, Q] := {\"a\": 1}
+m.put(\"b\", 2)
+print(m)
+let s: Set[Q] := #{1}
+s.add(2)
+print(s)
+let ch: Channel[Q] := create Channel[Q].with_capacity(4)
+ch.send(3)
+print(ch.receive)
+let h: Min_Heap[Q] := create Min_Heap.empty
+h.insert(2)
+print(h.peek)
+let t: Task[Q] := spawn do result := 4 end
+print(t.await)"))))))
+
+(deftest refinement-type-argument-in-later-repl-cells
+  (testing "a collection declared on one REPL line is checked when stored into on a later one"
+    (let [ctx (repl/init-repl-context)
+          out (try
+                (reset! repl/*type-checking-enabled* true)
+                (with-out-str
+                  (doseq [l ["declare type Pair[T] = Array[T] where a: a.length = 2"
+                             "let ps: Array[Pair[String]] := [[\"a\", \"b\"]]"
+                             "ps.add([\"c\", \"d\"])"
+                             "ps.add([\"f\"])"
+                             "ps"]]
+                    (repl/eval-code ctx l)))
+                (finally
+                  (reset! repl/*type-checking-enabled* false)
+                  (reset! repl/*repl-var-types* {})))]
+      (is (str/includes? out "Array[Pair[String]] [[\"a\", \"b\"]]")
+          "the declaring cell still echoes its value")
+      (is (str/includes? out "Refinement Pair violated") out)
+      (is (str/includes? out "[[\"a\", \"b\"], [\"c\", \"d\"]]") out)
+      (is (not (str/includes? out "[\"f\"]]")) out))))
+
 (deftest compiled-refinement-local-receiver
   (testing "base-type methods dispatch on a refinement-typed local"
     (is (= ["5" "\"TRK-1\"" "true"]

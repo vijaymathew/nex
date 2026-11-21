@@ -2,7 +2,8 @@
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
             [nex.ast-walk :as aw]
-            [nex.field-shadowing :as field-shadowing]))
+            [nex.field-shadowing :as field-shadowing]
+            [nex.refinements :as refs]))
 
 ;;
 ;; Utilities
@@ -1437,6 +1438,111 @@
           (update :classes (fn [classes]
                              (mapv #(inject-class-field-refinement-checks % refinements) classes)))))))
 
+;; A refinement used as a type ARGUMENT (`Array[Quantity]`, `Map[String,
+;; Pair[String]]`, `Task[Quantity]`) has no narrowing site the walker can see:
+;; values reach it through `xs.add(v)`, a collection literal, a `spawn` — places
+;; only the type checker can tell are typed with the refinement. So the walker
+;; just generates a checking function per refinement instantiation written in
+;; the program; the type checker records which expressions to route through it
+;; (nex.typechecker *refinement-sites*), and nex.extend/rewrite-checked-sites
+;; wraps them. Generated before type checking, so the checker checks these
+;; functions too: an instantiation the predicate doesn't fit is a type error,
+;; as `let p: R := ...` with that same instantiation already is.
+
+(defn- type-arg-refinements
+  "Every [checker-name refinement-name info] for a refinement applied as a type
+  argument somewhere in PROGRAM's annotations, info's :base specialized to its
+  arguments. An application mentioning a generic parameter (`Pair[T]` inside a
+  generic class) is skipped: its base isn't a type outside that class."
+  [program refinements]
+  (let [nodes (aw/maps (select-keys program [:statements :functions :classes]))
+        generic-names (into #{}
+                            (comp (mapcat :generic-params)
+                                  (keep #(if (map? %) (:name %) %))
+                                  (filter string?))
+                            nodes)
+        names-in (fn names-in [t]
+                   (cond
+                     (string? t) [t]
+                     (map? t) (concat (when (string? (:base-type t)) [(:base-type t)])
+                                      (mapcat names-in (or (:type-args t) (:type-params t)))
+                                      (mapcat (comp names-in :type) (:param-types t))
+                                      (some-> (:return-type t) names-in))
+                     :else []))
+        args-of (fn [n]
+                  (concat (when (string? (:base-type n))
+                            (or (:type-args n) (:type-params n)))
+                          (when (= :create (:type n)) (:generic-args n))))]
+    (into {}
+          (for [n nodes
+                a (args-of n)
+                :let [[rname r] (refinement-for refinements a)]
+                :when r
+                :let [args (when (map? a) (or (:type-args a) (:type-params a)))]
+                :when (not-any? generic-names (mapcat names-in args))]
+            [(refs/checker-name rname args) [rname r]]))))
+
+(defn- element-refinement-checker-function
+  "`function <fn-name>(v: Base): Base do <R's check on v> result := v end`."
+  [fn-name rname {:keys [binder base] :as r}]
+  (let [class-name (str fn-name "_Function")
+        param (if (= binder refinement-checker-param)
+                (str refinement-checker-param "_")
+                refinement-checker-param)
+        params [{:name param :type base}]
+        body [(make-refinement-check rname r (identifier-node param))
+              {:type :assign :target "result" :value (identifier-node param)}]]
+    {:type :function
+     :name fn-name
+     :class-name class-name
+     :generic-params nil
+     :declaration-only? false
+     :params params
+     :return-type base
+     :body body
+     :class-def {:type :class
+                 :name class-name
+                 :generic-params nil
+                 :note nil
+                 :parents [{:parent "Function"}]
+                 :body [{:type :feature-section
+                         :visibility {:type :public}
+                         :members [{:type :method
+                                    :name "call1"
+                                    :function-name fn-name
+                                    :params params
+                                    :return-type base
+                                    :declaration-only? false
+                                    :note nil
+                                    :require nil
+                                    :body body
+                                    :ensure nil
+                                    :rescue nil}]}]
+                 :invariant nil}}))
+
+(defn add-element-refinement-checkers
+  "PROGRAM with a checking function (see nex.refinements/checker-name) for each
+  refinement applied as a type argument in its annotations, unless one of that
+  name is already among its :functions or in ALREADY-DEFINED (a REPL session's
+  functions). Safe to run twice.
+
+   Public for the same reason inject-refinement-checks is: an intern-merged
+   program, or a REPL cell, sees refinements its own parse did not."
+  ([program] (add-element-refinement-checkers program #{}))
+  ([program already-defined]
+   (let [refinements (collect-refinements program)]
+     (if (empty? refinements)
+       program
+       (let [defined (into (set already-defined) (map :name (:functions program)))
+             new-fns (->> (type-arg-refinements program refinements)
+                          (remove (comp defined key))
+                          (sort-by key)
+                          (mapv (fn [[fn-name [rname r]]]
+                                  (element-refinement-checker-function fn-name rname r))))]
+         (cond-> program
+           (seq new-fns) (-> (update :functions #(vec (concat % new-fns)))
+                             (update :classes #(vec (concat % (map :class-def new-fns)))))))))))
+
 (defn- process-field-patterns
   "Desugar a variant's field patterns against a bound variable `var-name`.
   Returns {:bindings :guards :body-binds}:
@@ -1678,7 +1784,8 @@
                     (add-implied-interns nodes)
                     (add-implied-exception-intern nodes))))
         resolve-convert-aliases
-        inject-refinement-checks)))
+        inject-refinement-checks
+        add-element-refinement-checkers)))
 
 (defn- handle-intern-stmt
   [[_ _intern-kw & tokens]]
