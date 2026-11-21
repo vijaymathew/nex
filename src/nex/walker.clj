@@ -894,9 +894,9 @@
   A plain name (`Quantity`) looks the refinement up as is. A generic one applied
   to type arguments (`Pair[String]`, for `declare type Pair[T] = Array[T]
   where ...`) gets its :base specialized to them (`Array[String]`), since the
-  check binds the predicate's binder at that type. Detachable annotations
-  (`?Quantity`) are still left unchecked: nil must be accepted there, and the
-  check as built would run the predicate on it."
+  check binds the predicate's binder at that type. A detachable annotation
+  (`?Quantity`) gets an info marked :detachable: nil passes there, so
+  make-refinement-check tests the predicate only on a value that isn't nil."
   [refinements type-expr]
   (cond
     (string? type-expr)
@@ -904,15 +904,17 @@
       [type-expr r])
 
     (and (map? type-expr)
-         (not (:detachable type-expr))
-         (string? (:base-type type-expr)))
+         (string? (:base-type type-expr))
+         (not (:param-types type-expr)))
     (let [rname (:base-type type-expr)
           args (or (:type-args type-expr) (:type-params type-expr))]
       (when-let [{:keys [generic-params] :as r} (get refinements rname)]
-        (if (and (seq generic-params) (= (count generic-params) (count args)))
-          [rname (update r :base substitute-type-params
-                         (zipmap (map :name generic-params) args))]
-          [rname r])))
+        [rname (cond-> r
+                 (and (seq generic-params) (= (count generic-params) (count args)))
+                 (update :base substitute-type-params
+                         (zipmap (map :name generic-params) args))
+                 (:detachable type-expr)
+                 (assoc :detachable true))]))
 
     :else nil))
 
@@ -923,20 +925,32 @@
   VALUE-EXPR is a full expression node (not just a name), so a caller checking
   a narrowed field can pass a reference to the temp local it copied the
   right-hand side into (see narrow-field-assignment) rather than only a bare
-  variable name."
-  [rname {:keys [binder predicate base]} value-expr]
-  {:type :scoped-block
-   :rescue nil
-   :body [{:type :let :name binder :var-type base
-           :value value-expr}
-          {:type :if
-           :condition {:type :unary :operator "not" :expr predicate}
-           :then [{:type :raise
-                   :value {:type :string
-                           :value (str "Refinement " rname " violated")}
-                   :builtin (str "Refinement_Violation/" rname)}]
-           :elseif []
-           :else nil}]})
+  variable name.
+
+   For a detachable refinement (`?Quantity`, INFO marked :detachable by
+   refinement-for) nil passes: the check is guarded by `if <value> /= nil`,
+   which narrows VALUE-EXPR — a name, at every site that builds one — for
+   the binder."
+  [rname {:keys [binder predicate base detachable]} value-expr]
+  (let [check {:type :scoped-block
+               :rescue nil
+               :body [{:type :let :name binder :var-type base
+                       :value value-expr}
+                      {:type :if
+                       :condition {:type :unary :operator "not" :expr predicate}
+                       :then [{:type :raise
+                               :value {:type :string
+                                       :value (str "Refinement " rname " violated")}
+                               :builtin (str "Refinement_Violation/" rname)}]
+                       :elseif []
+                       :else nil}]}]
+    (if detachable
+      {:type :if
+       :condition {:type :binary :operator "/=" :left value-expr :right {:type :nil}}
+       :then [check]
+       :elseif []
+       :else nil}
+      check)))
 
 (defn- identifier-node [name]
   {:type :identifier :name name})
@@ -1438,67 +1452,187 @@
           (update :classes (fn [classes]
                              (mapv #(inject-class-field-refinement-checks % refinements) classes)))))))
 
-;; A refinement used as a type ARGUMENT (`Array[Quantity]`, `Map[String,
-;; Pair[String]]`, `Task[Quantity]`) has no narrowing site the walker can see:
-;; values reach it through `xs.add(v)`, a collection literal, a `spawn` — places
-;; only the type checker can tell are typed with the refinement. So the walker
-;; just generates a checking function per refinement instantiation written in
-;; the program; the type checker records which expressions to route through it
-;; (nex.typechecker *refinement-sites*), and nex.extend/rewrite-checked-sites
-;; wraps them. Generated before type checking, so the checker checks these
-;; functions too: an instantiation the predicate doesn't fit is a type error,
-;; as `let p: R := ...` with that same instantiation already is.
+;; Refinements the walker's own narrowing checks can't reach (see
+;; nex.refinements): a refinement used as a type argument (`Array[Quantity]`,
+;; `Box[Pair[String]]`), a detachable one there (`Array[?Quantity]`,
+;; `Atomic_Reference[Quantity]`), and a whole collection of them flowing into
+;; a slot typed as one (`let qs: Array[Quantity] := raw`). Values reach those
+;; through `xs.add(v)`, a literal, a `spawn`, an argument, an assignment —
+;; sites only the type checker can tell are typed so. The walker generates a
+;; checking function per such type written in the program; the type checker
+;; records which expressions to route through it (nex.typechecker
+;; *refinement-sites*), and nex.extend/rewrite-checked-sites wraps them.
+;; Generated before type checking, so the checker checks these functions too:
+;; an instantiation the predicate doesn't fit is a type error, as `let p: R :=
+;; ...` with that same instantiation already is.
 
-(defn- type-arg-refinements
-  "Every [checker-name refinement-name info] for a refinement applied as a type
-  argument somewhere in PROGRAM's annotations, info's :base specialized to its
-  arguments. An application mentioning a generic parameter (`Pair[T]` inside a
-  generic class) is skipped: its base isn't a type outside that class."
-  [program refinements]
-  (let [nodes (aw/maps (select-keys program [:statements :functions :classes]))
-        generic-names (into #{}
-                            (comp (mapcat :generic-params)
-                                  (keep #(if (map? %) (:name %) %))
-                                  (filter string?))
-                            nodes)
-        names-in (fn names-in [t]
-                   (cond
-                     (string? t) [t]
-                     (map? t) (concat (when (string? (:base-type t)) [(:base-type t)])
-                                      (mapcat names-in (or (:type-args t) (:type-params t)))
-                                      (mapcat (comp names-in :type) (:param-types t))
-                                      (some-> (:return-type t) names-in))
-                     :else []))
-        args-of (fn [n]
-                  (concat (when (string? (:base-type n))
-                            (or (:type-args n) (:type-params n)))
-                          (when (= :create (:type n)) (:generic-args n))))]
-    (into {}
-          (for [n nodes
-                a (args-of n)
-                :let [[rname r] (refinement-for refinements a)]
-                :when r
-                :let [args (when (map? a) (or (:type-args a) (:type-params a)))]
-                :when (not-any? generic-names (mapcat names-in args))]
-            [(refs/checker-name rname args) [rname r]]))))
+(def ^:private checked-collection-types
+  "Built-in generic classes whose whole value can be checked element by
+   element. A Channel, Task or Min_Heap can't be looked into without
+   consuming it, so only what enters one is checked."
+  #{"Array" "Set" "Map" "Atomic_Reference"})
 
-(defn- element-refinement-checker-function
-  "`function <fn-name>(v: Base): Base do <R's check on v> result := v end`."
-  [fn-name rname {:keys [binder base] :as r}]
-  (let [class-name (str fn-name "_Function")
-        param (if (= binder refinement-checker-param)
-                (str refinement-checker-param "_")
-                refinement-checker-param)
-        params [{:name param :type base}]
-        body [(make-refinement-check rname r (identifier-node param))
-              {:type :assign :target "result" :value (identifier-node param)}]]
+(defn- plain-alias-expander
+  "A function expanding PROGRAM's plain (non-refinement) aliases in a type,
+   generic ones specialized to their arguments, so `Quantities` (= `Array[
+   Quantity]`) is seen as the collection it is."
+  [program]
+  (let [aliases (into {}
+                      (keep (fn [{:keys [name type-expr refinement generic-params]}]
+                              (when-not refinement [name [type-expr generic-params]])))
+                      (:type-aliases program))
+        detach-like (fn [t like]
+                      (if (and (map? like) (:detachable like))
+                        (if (string? t) {:base-type t :detachable true} (assoc t :detachable true))
+                        t))]
+    (fn expand [t]
+      (cond
+        (and (string? t) (aliases t))
+        (expand (first (aliases t)))
+
+        (and (map? t) (string? (:base-type t)) (aliases (:base-type t)))
+        (let [[body gparams] (aliases (:base-type t))
+              args (or (:type-args t) (:type-params t))
+              body (if (and (seq gparams) (= (count gparams) (count args)))
+                     (substitute-type-params body (zipmap (map :name gparams) args))
+                     body)]
+          (expand (detach-like body t)))
+
+        (map? t)
+        (cond-> t
+          (:type-args t) (update :type-args #(mapv expand %))
+          (:type-params t) (update :type-params #(mapv expand %)))
+
+        :else t))))
+
+(defn- type-args-of [t]
+  (when (map? t) (or (:type-args t) (:type-params t))))
+
+(defn- mentions-refinement?
+  "Whether type T applies a refinement anywhere, itself included."
+  [refinements t]
+  (boolean (or (refinement-for refinements t)
+               (and (map? t) (some #(mentions-refinement? refinements %) (type-args-of t))))))
+
+(defn- checked-collection?
+  "Whether T is a built-in collection (see checked-collection-types) with a
+   refinement somewhere in its type arguments."
+  [refinements t]
+  (and (map? t)
+       (contains? checked-collection-types (:base-type t))
+       (some #(mentions-refinement? refinements %) (type-args-of t))))
+
+(defn- erase-refinements
+  "T with each refinement it applies replaced by its (specialized) base: the
+   type a checking function's parameter is declared at."
+  [refinements t]
+  (if-let [[_ r] (refinement-for refinements t)]
+    (let [base (erase-refinements refinements (:base r))]
+      (if (:detachable r)
+        (if (string? base) {:base-type base :detachable true} (assoc base :detachable true))
+        base))
+    (if (map? t)
+      (cond-> t
+        (:type-args t) (update :type-args #(mapv (partial erase-refinements refinements) %))
+        (:type-params t) (update :type-params #(mapv (partial erase-refinements refinements) %)))
+      t)))
+
+(defn- detachable-type [t]
+  (cond
+    (string? t) {:base-type t :detachable true}
+    (map? t) (assoc t :detachable true)
+    :else t))
+
+(defn- fresh-name [prefix]
+  (str "__" prefix "_" (swap! next-fn-id inc) "__"))
+
+(defn- across-loop
+  "The loop `across COLL as ITEM do BODY end` desugars to (handle-across-statement)."
+  [coll item body]
+  (let [cursor (fresh-name "refine_c")]
+    {:type :loop
+     :init [{:type :let :name cursor :synthetic true
+             :value {:type :call :target coll :method "cursor" :args [] :from-across true}}
+            {:type :call :target cursor :method "start" :args []}]
+     :invariant nil
+     :variant nil
+     :until {:type :call :target cursor :method "at_end" :args []}
+     :body (vec (concat [{:type :let :name item :synthetic true
+                          :value {:type :call :target cursor :method "item" :args []}}]
+                        body
+                        [{:type :call :target cursor :method "next" :args []}]))}))
+
+(defn- nil-guarded
+  "`if <name> /= nil then BODY end`."
+  [name body]
+  {:type :if
+   :condition {:type :binary :operator "/=" :left (identifier-node name) :right {:type :nil}}
+   :then (vec body)
+   :elseif []
+   :else nil})
+
+(defn- slot-check
+  "Statements checking VALUE-EXPR, entering a slot of type T: T's refinement
+  predicate (nil passing a detachable one), or for a checked collection every
+  element, through its own checking function. Empty when T needs no check."
+  [refinements t value-expr]
+  (if-let [[rname r] (refinement-for refinements t)]
+    (if (:detachable r)
+      (let [tmp (fresh-name "refine_v")]
+        [{:type :let :name tmp :var-type (erase-refinements refinements t) :value value-expr}
+         (nil-guarded tmp [(make-refinement-check rname (dissoc r :detachable) (identifier-node tmp))])])
+      [(make-refinement-check rname r value-expr)])
+    (if (checked-collection? refinements (if (:detachable t) (dissoc t :detachable) t))
+      [{:type :let :name (fresh-name "refine_v") :var-type (erase-refinements refinements t)
+        :value {:type :call :target nil :method (refs/checker-name t)
+                :args [value-expr] :has-parens true}}]
+      [])))
+
+(defn- checker-body
+  "Statements checking parameter PARAM, a value of type T."
+  [refinements t param]
+  (let [v (identifier-node param)
+        attached (if (and (map? t) (:detachable t)) (dissoc t :detachable) t)
+        body (if (refinement-for refinements attached)
+               (slot-check refinements attached v)
+               (let [[a b] (type-args-of attached)]
+                 (case (:base-type attached)
+                   ("Array" "Set")
+                   (let [x (fresh-name "refine_x")]
+                     [(across-loop v x (slot-check refinements a (identifier-node x)))])
+
+                   "Map"
+                   (let [e (fresh-name "refine_e")
+                         field (fn [f] {:type :call :target e :method f :args [] :has-parens false})]
+                     [(across-loop v e (concat (slot-check refinements a (field "key"))
+                                               (slot-check refinements b (field "value"))))])
+
+                   "Atomic_Reference"
+                   (slot-check refinements (detachable-type a)
+                               {:type :call :target v :method "load" :args [] :has-parens false})
+
+                   [])))]
+    (if (not= t attached)
+      [(nil-guarded param body)]
+      body)))
+
+(defn- slot-checker-function
+  "`function <name>(v: <T erased>): <T erased> do <check v> result := v end`."
+  [refinements t]
+  (let [fn-name (refs/checker-name t)
+        class-name (str fn-name "_Function")
+        param (fresh-name "refine_value")
+        erased (erase-refinements refinements t)
+        params [{:name param :type erased}]
+        body (conj (checker-body refinements t param)
+                   {:type :assign :target "result" :value (identifier-node param)})]
     {:type :function
      :name fn-name
      :class-name class-name
      :generic-params nil
      :declaration-only? false
      :params params
-     :return-type base
+     :return-type erased
      :body body
      :class-def {:type :class
                  :name class-name
@@ -1511,7 +1645,7 @@
                                     :name "call1"
                                     :function-name fn-name
                                     :params params
-                                    :return-type base
+                                    :return-type erased
                                     :declaration-only? false
                                     :note nil
                                     :require nil
@@ -1520,11 +1654,62 @@
                                     :rescue nil}]}]
                  :invariant nil}}))
 
+(defn- checked-slot-types
+  "Every type in PROGRAM's annotations that needs a checking function: a
+  refinement (or detachable one) applied as a type argument, and a checked
+  collection anywhere. An application mentioning a generic parameter
+  (`Pair[T]` inside a generic class) is skipped: it isn't a type outside its
+  class."
+  [program refinements]
+  (let [nodes (aw/maps (select-keys program [:statements :functions :classes]))
+        expand (plain-alias-expander program)
+        generic-names (into #{}
+                            (comp (mapcat :generic-params)
+                                  (keep #(if (map? %) (:name %) %))
+                                  (filter string?))
+                            nodes)
+        names-in (fn names-in [t]
+                   (cond
+                     (string? t) [t]
+                     (map? t) (concat (when (string? (:base-type t)) [(:base-type t)])
+                                      (mapcat names-in (type-args-of t))
+                                      (mapcat (comp names-in :type) (:param-types t))
+                                      (some-> (:return-type t) names-in))
+                     :else []))
+        type-like? (fn [t] (or (string? t) (and (map? t) (or (:base-type t) (:param-types t)))))
+        annotations (for [n nodes
+                          t (concat [(:var-type n) (:return-type n) (:field-type n)
+                                     (when (type-like? (:type n)) (:type n))]
+                                    (when (and (= :create (:type n)) (seq (:generic-args n)))
+                                      [{:base-type (:class-name n) :type-args (:generic-args n)}]))
+                          :when (type-like? t)]
+                      t)
+        found (atom #{})
+        visit (fn visit [t nested?]
+                (let [t (expand t)]
+                  (when (not-any? generic-names (mapcat names-in (type-args-of t)))
+                    (cond
+                      ;; Both forms: a generic class's `?T` (Atomic_Reference's
+                      ;; store, a user class's `?T` parameter) makes `?Quantity`
+                      ;; a slot wherever `Quantity` is a type argument.
+                      (refinement-for refinements t)
+                      (when nested?
+                        (let [attached (if (and (map? t) (:detachable t)) (dissoc t :detachable) t)]
+                          (swap! found conj attached (detachable-type attached))))
+
+                      (map? t)
+                      (do (when (checked-collection? refinements (if (:detachable t) (dissoc t :detachable) t))
+                            (swap! found conj t))
+                          (doseq [a (type-args-of t)]
+                            (visit a true)))))))]
+    (doseq [t annotations] (visit t false))
+    @found))
+
 (defn add-element-refinement-checkers
-  "PROGRAM with a checking function (see nex.refinements/checker-name) for each
-  refinement applied as a type argument in its annotations, unless one of that
-  name is already among its :functions or in ALREADY-DEFINED (a REPL session's
-  functions). Safe to run twice.
+  "PROGRAM with a checking function (named by nex.refinements/checker-name)
+  for each type in its annotations that needs one (checked-slot-types),
+  unless one of that name is already among its :functions or in
+  ALREADY-DEFINED (a REPL session's functions). Safe to run twice.
 
    Public for the same reason inject-refinement-checks is: an intern-merged
    program, or a REPL cell, sees refinements its own parse did not."
@@ -1534,11 +1719,11 @@
      (if (empty? refinements)
        program
        (let [defined (into (set already-defined) (map :name (:functions program)))
-             new-fns (->> (type-arg-refinements program refinements)
+             new-fns (->> (checked-slot-types program refinements)
+                          (map (fn [t] [(refs/checker-name t) t]))
+                          (into (sorted-map))
                           (remove (comp defined key))
-                          (sort-by key)
-                          (mapv (fn [[fn-name [rname r]]]
-                                  (element-refinement-checker-function fn-name rname r))))]
+                          (mapv (fn [[_ t]] (slot-checker-function refinements t))))]
          (cond-> program
            (seq new-fns) (-> (update :functions #(vec (concat % new-fns)))
                              (update :classes #(vec (concat % (map :class-def new-fns)))))))))))

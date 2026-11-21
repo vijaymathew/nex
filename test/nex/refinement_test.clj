@@ -311,6 +311,90 @@ print(h.peek)
 let t: Task[Q] := spawn do result := 4 end
 print(t.await)"))))))
 
+(def ^:private gap-prelude
+  (str element-prelude
+       "class Box[T]
+  create make(v: T) do this.item := v end
+  feature item: T
+  feature set(v: T) do item := v end
+  feature maybe(v: ?T) do end
+  feature all(vs: Array[T]) do end
+end
+function total(qs: Array[Q]): Integer do result := qs.length end
+function make_raw(): Array[Integer] do result := [1, 0] end
+"))
+
+;; A whole collection narrowed into a collection of refinements — by `let`,
+;; assignment, argument or `result` — has every element checked
+;; (nex.walker/checker-body); its static type said nothing about them.
+(deftest whole-collection-narrowing-is-checked
+  (testing "every element of a collection narrowed into a collection of refinements"
+    (doseq [body ["let raw: Array[Integer] := [1, 0]\nlet qs: Array[Q] := raw"
+                  "let qs: Array[Q] := [1]\nlet raw: Array[Integer] := [1, 0]\nqs := raw"
+                  "let raw: Array[Integer] := [1, 0]\nprint(total(raw))"
+                  "function f(): Array[Q] do result := make_raw() end\nprint(f())"
+                  "let raw: Map[String, Integer] := {\"a\": 0}\nlet m: Map[String, Q] := raw"
+                  "let raw: Map[Integer, String] := {0: \"a\"}\nlet m: Map[Q, String] := raw"
+                  "let raw: Set[Integer] := #{0}\nlet s: Set[Q] := raw"
+                  "let raw: Array[Array[Integer]] := [[1], [0]]\nlet qs: Array[Array[Q]] := raw"
+                  "let raw: Atomic_Reference[Integer] := create Atomic_Reference[Integer].make(0)\nlet r: Atomic_Reference[Q] := raw"]]
+      (is (violates-on-both? "Q" (str gap-prelude body)) body))))
+
+;; A detachable refinement slot — `?Q` itself, an `Array[?Q]` element, or an
+;; Atomic_Reference's value (its features take `?T`) — lets nil through and
+;; checks anything else.
+(deftest detachable-refinement-slots-are-checked
+  (testing "a value that isn't nil is checked"
+    (doseq [body ["let q: ?Q := -1"
+                  "let opt: Array[?Q] := [nil, -1]"
+                  "let opt: Array[?Q] := [nil]\nopt.add(-1)"
+                  "let r: Atomic_Reference[Q] := create Atomic_Reference[Q].make(0)"
+                  "let r: Atomic_Reference[Q] := create Atomic_Reference[Q].make(1)\nr.store(-1)"
+                  "let r: Atomic_Reference[Q] := create Atomic_Reference[Q].make(1)\nprint(r.compare_and_set(1, 0))"]]
+      (is (violates-on-both? "Q" (str gap-prelude body)) body))))
+
+;; A user-defined generic class's `T` bound to a refinement narrows each
+;; argument passed for a `T`-typed parameter, at the call.
+(deftest user-generic-class-arguments-are-checked
+  (testing "an argument for a parameter typed in the class's own type parameters"
+    (doseq [[rname body]
+            [["Q" "let b: Box[Q] := create Box[Q].make(0)"]
+             ["Q" "let b: Box[Q] := create Box[Q].make(1)\nb.set(-1)"]
+             ["Q" "let b: Box[Q] := create Box[Q].make(1)\nb.maybe(-1)"]
+             ["Q" "let b: Box[Q] := create Box[Q].make(1)\nlet raw: Array[Integer] := [0]\nb.all(raw)"]
+             ["Pair" "let bp: Box[Pair[String]] := create Box[Pair[String]].make([\"a\"])"]]]
+      (is (violates-on-both? rname (str gap-prelude body)) body))))
+
+(deftest refinement-gaps-valid-values-pass
+  (testing "valid values pass every one of those sites, and nil passes a detachable one"
+    (is (= ["2" "false" "2" "[1, 2]" "{\"b\": 2}" "[nil, 1, nil, 3]" "4"]
+           (both (str gap-prelude
+                      "let raw: Array[Integer] := [1, 2]
+let qs: Array[Q] := raw
+print(total(raw))
+let m: Map[String, Q] := {\"a\": 1}
+let raw_m: Map[String, Integer] := {\"b\": 2}
+m := raw_m
+let opt: Array[?Q] := [nil, 1]
+opt.add(nil)
+opt.add(3)
+let r: Atomic_Reference[Q] := create Atomic_Reference[Q].make(1)
+r.store(2)
+r.store(nil)
+print(r.compare_and_set(-1, 5))
+let b: Box[Q] := create Box[Q].make(1)
+b.set(2)
+b.maybe(nil)
+b.all([1, 2])
+let q: ?Q := nil
+q := 4
+let bp: Box[Pair[String]] := create Box[Pair[String]].make([\"a\", \"b\"])
+print(b.item)
+print(qs)
+print(m)
+print(opt)
+print(q)"))))))
+
 (deftest refinement-type-argument-in-later-repl-cells
   (testing "a collection declared on one REPL line is checked when stored into on a later one"
     (let [ctx (repl/init-repl-context)
