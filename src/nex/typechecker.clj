@@ -966,6 +966,53 @@
       (:type-args type-expr) (update :type-args #(mapv f %)))
     type-expr))
 
+(defn- type-names-in
+  "Every type name TYPE-EXPR mentions: its base and, recursively, its type
+   arguments and a Function type's parameter and return types."
+  [type-expr]
+  (cond
+    (string? type-expr) #{type-expr}
+    (map? type-expr)
+    (into (if (string? (:base-type type-expr)) #{(:base-type type-expr)} #{})
+          (mapcat type-names-in)
+          (concat (:type-params type-expr)
+                  (:type-args type-expr)
+                  (map :type (:param-types type-expr))
+                  (some-> (:return-type type-expr) vector)))
+    :else #{}))
+
+(defn type-alias-cycle
+  "The first cycle among ALIASES (`declare type` nodes: :name, :type-expr,
+   :generic-params), as the alias names along it with the first repeated at
+   the end (`[\"Pair\" \"Pair\"]`, `[\"A\" \"B\" \"A\"]`), or nil. An alias is
+   replaced by its definition wherever it is used, so one that reaches
+   itself has no finite expansion. A generic alias's own parameters are not
+   references to other aliases."
+  [aliases]
+  (let [refs (into {}
+                   (map (fn [{:keys [name type-expr generic-params]}]
+                          [name (remove (set (map :name generic-params))
+                                        (sort (type-names-in type-expr)))]))
+                   aliases)
+        cycle-from (fn cycle-from [start path seen]
+                     (some (fn [n]
+                             (cond
+                               (= n start) (conj path n)
+                               (or (seen n) (not (contains? refs n))) nil
+                               :else (cycle-from start (conj path n) (conj seen n))))
+                           (refs (peek path))))]
+    (some #(cycle-from (:name %) [(:name %)] #{(:name %)}) aliases)))
+
+(defn type-alias-cycle-error
+  "The error for an alias that refers back to itself along CYCLE (see
+   type-alias-cycle), reported at ALIAS's declaration."
+  [alias cycle]
+  (let [msg (str "Type alias " (first cycle) " refers to itself ("
+                 (str/join " -> " cycle) "). A type alias stands for its "
+                 "definition, so it cannot be recursive; declare a class for a "
+                 "recursive type.")]
+    (ex-info msg {:error (type-error msg (:dbg/line alias) (:dbg/col alias))})))
+
 (defn expand-type-aliases
   "Recursively expand declared type aliases in a type expression."
   [env type-expr]
@@ -10544,6 +10591,11 @@
          (register-builtin-methods env)
 
        ;; Register type aliases first so they are available throughout the program.
+       ;; A recursive one would expand forever wherever it's used.
+         (when-let [cycle (type-alias-cycle type-aliases)]
+           (throw (type-alias-cycle-error
+                   (first (filter #(= (first cycle) (:name %)) type-aliases))
+                   cycle)))
          (doseq [{:keys [name type-expr generic-params]} (or type-aliases [])]
            (env-add-type-alias env name type-expr)
            (env-add-type-alias-generic-params env name generic-params))
