@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **A recursive type alias is a type error, not a stack overflow.** An
+  alias stands for its definition wherever it's used, so one that refers
+  back to itself has no finite expansion: `declare type Pair =
+  Function(Integer, Pair): ?Pair`, or `A = Array[B]` with `B = Array[A]`.
+  Running a file with one crashed with a `StackOverflowError` in the type
+  checker. In the REPL, the alias was recorded anyway, and every later line
+  overflowed, with or without `:typecheck on`. Now the declaration is
+  reported: `Type alias Pair refers to itself (Pair -> Pair)`, followed by
+  a hint to declare a class for a recursive type. A REPL line declaring one
+  is turned away and the session carries on.
+
 - **A refinement used as a type argument is checked.** With `declare type
   Q = Integer where n: n > 0`, an `Array[Q]`, `Map[String, Q]` or
   `Box[Q]` held values that broke `n > 0`, because only a `let`,

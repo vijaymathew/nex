@@ -1575,9 +1575,20 @@
    populated from it."
   [exec-ctx source-id ast]
   (sync-compiled-session-into-interpreter! exec-ctx)
-  (doseq [alias (concat (intern/resolve-interned-type-aliases source-id ast)
-                        (:type-aliases ast))]
-    (swap! *repl-type-aliases* assoc (:name alias) alias)))
+  (let [declared (concat (intern/resolve-interned-type-aliases source-id ast)
+                         (:type-aliases ast))
+        session (reduce #(assoc %1 (:name %2) %2) @*repl-type-aliases* declared)]
+    ;; A recursive alias (`declare type Pair = Function(Integer, Pair): ?Pair`)
+    ;; has no finite expansion, so it is turned away before it's recorded:
+    ;; once in the session, every later line expanding aliases would overflow
+    ;; the stack — whether or not type checking is on.
+    ;; This input's own aliases first, so the cycle is named from the one
+    ;; just declared (earlier cells' aliases have none among themselves).
+    (when-let [cycle (tc/type-alias-cycle (concat declared (vals session)))]
+      (let [e (tc/type-alias-cycle-error (session (first cycle)) cycle)]
+        (println (tc/format-type-error (:error (ex-data e))))
+        (throw (ex-info "Type checking failed" {:errors [(:error (ex-data e))]}))))
+    (reset! *repl-type-aliases* session)))
 
 (defn- session-builtin-extension-functions
   "The functions earlier inputs' extensions of built-in types generated
