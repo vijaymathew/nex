@@ -133,10 +133,10 @@
 (def ^:private non-creatable-builtin-types
   "Built-in types whose values never come from `create`, each with how a
    value of that type is obtained instead. Integer, Real, Char, Boolean and
-   Function are keywords, so `create` on them is already a syntax error."
-  {"Map_Entry" (str "a Map_Entry comes from iterating a Map "
-                    "(`across`, `cursor`, or a method such as `map` or `filter`)")
-   "Task"      "a Task comes from `spawn`"
+   Function are keywords, so `create` on them is already a syntax error.
+   (Map_Entry is not here: it has `make(key, value)`, and a bare
+   `create Map_Entry` is rejected by that constructor's own checks.)"
+  {"Task"      "a Task comes from `spawn`"
    "Byte"      "write a literal such as `65u8`, or convert with `n.to_byte()`"
    "Integer16" "write an Integer and convert it with `n.to_integer16()`"
    "Integer32" "write an Integer and convert it with `n.to_integer32()`"

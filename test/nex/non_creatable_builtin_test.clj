@@ -1,11 +1,11 @@
 (ns nex.non-creatable-builtin-test
-  "Some built-in types have no constructor: a Map_Entry comes from iterating a
-   Map, a Task from `spawn`, a Byte from a literal or `to_byte`. `create` on
-   one of them used to typecheck and then fail in lowering as a construct the
-   compiled backend \"does not support yet\" (pointing at --interpret), or in
-   the REPL as \"Undefined class\" -- and `create Any` quietly made an object.
-   It is now an error saying how to get such a value
-   (nex.types.bootstrap/non-creatable-message)."
+  "Some built-in types have no constructor: a Task comes from `spawn`, a Byte
+   from a literal or `to_byte`. `create` on one of them used to typecheck and
+   then fail in lowering as a construct the compiled backend \"does not
+   support yet\" (pointing at --interpret), or in the REPL as \"Undefined
+   class\" -- and `create Any` quietly made an object. It is now an error
+   saying how to get such a value (nex.types.bootstrap/non-creatable-message).
+   A bare `create Map_Entry`, whose constructor is `make(key, value)`, says so."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [nex.parser :as p]
@@ -28,8 +28,8 @@
       (finally (.delete f)))))
 
 (def ^:private cases
-  [["Map_Entry[String, Integer]" "Cannot create Map_Entry; a Map_Entry comes from iterating a Map"]
-   ["Map_Entry" "Cannot create Map_Entry;"]
+  [["Map_Entry[String, Integer]" "create Map_Entry needs a key and a value: create Map_Entry.make(key, value)"]
+   ["Map_Entry" "create Map_Entry needs a key and a value"]
    ["Task[Integer]" "Cannot create Task; a Task comes from `spawn`"]
    ["Byte" "Cannot create Byte; write a literal such as `65u8`"]
    ["Integer16" "Cannot create Integer16;"]
@@ -49,9 +49,11 @@
 (deftest reported-on-both-backends
   (doseq [interpret? [false true]]
     (testing (if interpret? "interpreter" "compiled")
-      (let [out (run-file "let e := create Map_Entry[String, Integer]\nprint(e)\n" interpret?)]
-        (is (str/includes? out "Cannot create Map_Entry") out)
-        (is (not (str/includes? out "does not support yet")) out)))))
+      (doseq [[t expected] [["Map_Entry[String, Integer]" "create Map_Entry needs a key and a value"]
+                            ["Task[Integer]" "Cannot create Task"]]]
+        (let [out (run-file (str "let e := create " t "\nprint(e)\n") interpret?)]
+          (is (str/includes? out expected) out)
+          (is (not (str/includes? out "does not support yet")) out))))))
 
 (deftest a-program-class-with-a-builtin-name-can-be-created
   (is (nil? (type-errors (str "class Task\n"

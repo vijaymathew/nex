@@ -302,8 +302,16 @@ print("hello".count(fn (c) => c = #l))           -- 2
 
 `map` always gives an `Array`; `filter` gives back the receiver's own kind (a
 `Set` stays a `Set`, a `String` a `String`). A `Map` is walked as its
-`Map_Entry` values (`e.key`, `e.value`). See the collection reference for all
-eight.
+`Map_Entry` values (`e.key`, `e.value`). To get a `Map` back from `map`, make
+entries and collect them:
+
+```nex
+let ages: Map[String, Integer] := {"ann": 31, "bo": 17}
+print(create Map.from_entries(
+  ages.map(fn (e) => create Map_Entry.make(e.key, e.value * 2))))   -- {"ann": 62, "bo": 34}
+```
+
+See the collection reference for all eight.
 
 ## Functions
 

@@ -5778,8 +5778,30 @@
           (throw (ex-info "create Map takes no arguments in compiled lowering"
                           {:expr expr})))
         (ir/map-literal-node [] nex-type (resolve-jvm-type env nex-type)))
-      (throw (unsupported "Unsupported Map constructor in compiled lowering"
-                          {:expr expr :constructor (:constructor expr)})))))
+      (if (= "from_entries" (:constructor expr))
+        (do
+          (when-not (= 1 (count (:args expr)))
+            (throw (ex-info "Map.from_entries expects exactly 1 argument in compiled lowering"
+                            {:expr expr})))
+          (ir/call-runtime-node "create-map-from-entries"
+                                [(lower-expression env (first (:args expr)))]
+                                nex-type
+                                (resolve-jvm-type env nex-type)))
+        (throw (unsupported "Unsupported Map constructor in compiled lowering"
+                            {:expr expr :constructor (:constructor expr)}))))))
+
+(defn- lower-create-map-entry
+  [env expr]
+  ;; Normally the typechecker's to report; marked :error so it reads as a
+  ;; program error, not an unsupported construct.
+  (when-not (and (= "make" (:constructor expr)) (= 2 (count (:args expr))))
+    (let [msg "create Map_Entry needs a key and a value: create Map_Entry.make(key, value)"]
+      (throw (ex-info msg {:expr expr :constructor (:constructor expr) :error msg}))))
+  (let [nex-type (infer-type env expr)]
+    (ir/call-runtime-node "create-map-entry"
+                          (mapv #(lower-expression env %) (:args expr))
+                          nex-type
+                          (resolve-jvm-type env nex-type))))
 
 (defn- lower-create-set
   [env expr]
@@ -5832,6 +5854,7 @@
    "Atomic_Boolean"   (lower-create-single-arg-atomic "Atomic_Boolean" "create-atomic-boolean")
    "Atomic_Reference" (lower-create-single-arg-atomic "Atomic_Reference" "create-atomic-reference")
    "Map"              lower-create-map
+   "Map_Entry"        lower-create-map-entry
    "Set"              lower-create-set})
 
 ;; A constructor name on an imported Java class is decorative: the
