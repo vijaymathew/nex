@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.7 - 2026-11-23
+
 - **`Map_Entry.make` and `Map.from_entries`.** `create
   Map_Entry.make("abc", 123)` builds an entry, with `K` and `V` inferred
   unless written (`create Map_Entry[String, Integer].make(...)`). `create
