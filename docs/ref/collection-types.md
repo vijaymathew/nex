@@ -87,6 +87,19 @@ create Array[String].filled(2, "x")
 
 ```nex
 {}
+create Map.from_entries([create Map_Entry.make("a", 1), create Map_Entry.make("b", 2)])
+```
+
+`create Map.from_entries(entries)` builds a map from an `Array[Map_Entry[K, V]]`,
+in order. A key that appears more than once keeps its last value, as with `put`.
+`K` and `V` come from the entries unless written (`create Map[String, Integer].from_entries(xs)`).
+Since `map` gives an `Array`, this is how to get a `Map` back from one:
+
+```nex
+let ages: Map[String, Integer] := {"ann": 31, "bo": 17}
+let doubled := create Map.from_entries(
+  ages.map(fn (e) => create Map_Entry.make(e.key, e.value * 2)))
+print(doubled)                                   -- {"ann": 62, "bo": 34}
 ```
 
 ### Methods
@@ -114,13 +127,23 @@ create Array[String].filled(2, "x")
 
 ## `Map_Entry[K, V]`
 
-A `Map_Entry[K, V]` is the read-only key/value pair produced when a `Map` is iterated with `across` or a `MapCursor`. It cannot be created directly and has no mutators.
+A `Map_Entry[K, V]` is the read-only key/value pair produced when a `Map` is iterated with `across` or a `MapCursor`. It has no mutators.
 
 ```nex
 across {"name": "Ada"} as entry do
   print(entry.key + ": " + entry.value)
 end
 ```
+
+### Construction
+
+```nex
+create Map_Entry.make("name", "Ada")
+create Map_Entry[String, Integer].make("age", 36)
+```
+
+`make(key, value)` is the only constructor; `K` and `V` come from its
+arguments unless written. A bare `create Map_Entry` is an error.
 
 ### Methods
 

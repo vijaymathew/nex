@@ -3711,8 +3711,37 @@
                       {:class-name "Array" :constructor constructor})))))
 
 (defn- create-map-builtin
-  [_ctx _constructor _args]
-  (nex-map))
+  [ctx constructor args]
+  (let [arg-values (mapv #(eval-node ctx %) args)]
+    (cond
+      (nil? constructor) (nex-map)
+      (= constructor "from_entries")
+      (let [source (first arg-values)]
+        (when-not (and (= 1 (count arg-values)) (nex-array? source))
+          (throw (ex-info "Map.from_entries requires an Array of Map_Entry"
+                          {:class-name "Map" :constructor constructor})))
+        (let [m (nex-map)]
+          (doseq [entry source]
+            (when-not (rt/nex-map-entry? entry)
+              (throw (ex-info "Map.from_entries requires an Array of Map_Entry"
+                              {:class-name "Map" :constructor constructor})))
+            (rt/nex-map-put m (:key entry) (:value entry)))
+          m))
+      :else (throw (ex-info (str "Constructor not found: Map." constructor)
+                            {:class-name "Map" :constructor constructor})))))
+
+(defn- create-map-entry-builtin
+  [ctx constructor args]
+  (when-not (= constructor "make")
+    (throw (ex-info (if constructor
+                      (str "Constructor not found: Map_Entry." constructor)
+                      "create Map_Entry needs a key and a value: create Map_Entry.make(key, value)")
+                    {:class-name "Map_Entry" :constructor constructor})))
+  (when-not (= 2 (count args))
+    (throw (ex-info "Map_Entry.make expects 2 arguments (key, value)"
+                    {:class-name "Map_Entry" :constructor constructor})))
+  (let [[k v] (mapv #(eval-node ctx %) args)]
+    (bi/make-map-entry k v)))
 
 (defn- create-min-heap-builtin
   [ctx constructor args]
@@ -3805,6 +3834,7 @@
    "Process"          create-process-builtin
    "Array"            create-array-builtin
    "Map"              create-map-builtin
+   "Map_Entry"        create-map-entry-builtin
    "Min_Heap"         create-min-heap-builtin
    "Atomic_Integer"   (create-single-arg-atomic "Atomic_Integer" make-atomic-integer)
    "Atomic_Integer64" (create-single-arg-atomic "Atomic_Integer64" make-atomic-integer64)
@@ -3939,6 +3969,12 @@
 
 (defmethod eval-node :create
   [ctx {:keys [class-name generic-args constructor args]}]
+  ;; The typechecker rejects these too; this is for when it is off (the REPL's
+  ;; default), where they otherwise failed as "Undefined class" or, for Any,
+  ;; quietly made an object.
+  (when-let [msg (bootstrap/non-creatable-message
+                  class-name (lookup-class-if-exists ctx class-name))]
+    (throw (ex-info msg {:class-name class-name})))
   ;; Program became a builtin type after programs could already have a class
   ;; called Program; such a class keeps its meaning.
   (if-let [handler (and (not (and (= "Program" class-name)

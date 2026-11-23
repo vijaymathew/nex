@@ -5423,12 +5423,15 @@
                                     (display-type arg-type)))}))))
   "String")
 
+(declare check-create-map-entry)
+
 (def ^:private check-create-builtin-dispatch
   "class-name -> (fn [env expr] ...): the built-in-type half of
    `check-create`. A class name with no entry here falls through to
    `check-create-user-class`, which also handles Map/Set — registered as
    ordinary generic classes rather than special-cased here."
   {"Array"            check-create-array
+   "Map_Entry"        #'check-create-map-entry
    "Console"          check-create-console
    "Program"          check-create-program
    "Process"          check-create-process
@@ -5447,6 +5450,10 @@
     (throw (ex-info (str "Undefined class: " class-name)
                     {:error (type-error (str "Undefined class: " class-name))})))
   (let [class-def (env-lookup-class env class-name)]
+    ;; Map_Entry, Task, Byte, Any, ...: without this, `create` on one of them
+    ;; typechecked and then failed in lowering as a "not supported yet" gap.
+    (when-let [msg (bootstrap/non-creatable-message class-name class-def)]
+      (throw (ex-info msg {:error (type-error msg)})))
     (when (:deferred? class-def)
       (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
                       {:error (type-error
@@ -5561,6 +5568,17 @@
                (zipmap (map #(type-name-string (:name %)) gparams)
                        (map (partial keep-refinements env) generic-args))))))
         target-type))))
+
+(defn- check-create-map-entry
+  "`create Map_Entry.make(key, value)`, K and V inferred from the arguments
+   unless written. `make` is checked as an ordinary generic constructor; only
+   a bare `create Map_Entry` needs saying, since a built-in's constructors
+   don't make one required the way a class's own do."
+  [env {:keys [constructor] :as expr}]
+  (when (nil? constructor)
+    (let [msg "create Map_Entry needs a key and a value: create Map_Entry.make(key, value)"]
+      (throw (ex-info msg {:error (type-error msg)}))))
+  (check-create-user-class env expr))
 
 (defn check-create
   "Check the type of a create expression"
@@ -9802,6 +9820,11 @@
                             :generic-params [{:name "K"} {:name "V"}]
                             :parents [{:parent "Iterable"
                                        :generic-args [{:base-type "Map_Entry" :type-params ["K" "V"]}]}]})
+  (env-add-method env "Map" "from_entries"
+                  {:params [{:name "entries"
+                             :type {:base-type "Array"
+                                    :type-params [{:base-type "Map_Entry" :type-params ["K" "V"]}]}}]
+                   :return-type {:base-type "Map" :type-params ["K" "V"]}})
   (register-builtin-type-signatures! env "Map"))
 
 (defn- register-set-methods!
@@ -9819,6 +9842,10 @@
   [env]
   (env-add-class env "Map_Entry" {:name "Map_Entry"
                                   :generic-params [{:name "K"} {:name "V"}]})
+  (env-add-method env "Map_Entry" "make"
+                  {:params [{:name "key" :type "K"}
+                            {:name "value" :type "V"}]
+                   :return-type {:base-type "Map_Entry" :type-params ["K" "V"]}})
   (register-builtin-type-signatures! env "Map_Entry"))
 
 (defn- register-min-heap-methods!

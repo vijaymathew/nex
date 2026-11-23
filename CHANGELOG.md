@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **`Map_Entry.make` and `Map.from_entries`.** `create
+  Map_Entry.make("abc", 123)` builds an entry, with `K` and `V` inferred
+  unless written (`create Map_Entry[String, Integer].make(...)`). `create
+  Map.from_entries(entries)` builds a `Map` from an `Array[Map_Entry[K,
+  V]]`; a repeated key keeps its last value. Together they turn the `Array`
+  that a Map's `map` gives back into a `Map`: `create
+  Map.from_entries(ages.map(fn (e) => create Map_Entry.make(e.key, e.value
+  * 2)))`. A bare `create Map_Entry` is reported as needing `make(key,
+  value)`. In the interpreter, `create Map.<anything>(...)` used to
+  ignore the constructor and return an empty map. An unknown one is now
+  `Constructor not found`.
+
+- **`create` on a built-in type with no constructor is a proper error.**
+  `create Task`, `create Byte`, `create Integer16`, `create Integer32`,
+  `create Any`, `create Void` and `create Nil` used to pass type checking.
+  A file then failed in the compiled backend with "uses a construct the
+  compiled backend does not support yet", which pointed at `--interpret`
+  as a workaround when there isn't one. The REPL said `Undefined class`
+  (or, for `create Any`, quietly made an object). Now each is reported
+  with how to get such a value, for example `Cannot create Task; a Task
+  comes from spawn`, with or without `:typecheck on`. A program's own
+  class with one of these names (`class Task`) is created as before.
+
 - **A recursive type alias is a type error, not a stack overflow.** An
   alias stands for its definition wherever it's used, so one that refers
   back to itself has no finite expansion: `declare type Pair =

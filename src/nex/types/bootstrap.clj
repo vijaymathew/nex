@@ -129,3 +129,32 @@
          (build-cursor-base-class)
          (build-comparable-base-class)]
         (map build-builtin-scalar-class builtin-scalar-class-names)))
+
+(def ^:private non-creatable-builtin-types
+  "Built-in types whose values never come from `create`, each with how a
+   value of that type is obtained instead. Integer, Real, Char, Boolean and
+   Function are keywords, so `create` on them is already a syntax error.
+   (Map_Entry is not here: it has `make(key, value)`, and a bare
+   `create Map_Entry` is rejected by that constructor's own checks.)"
+  {"Task"      "a Task comes from `spawn`"
+   "Byte"      "write a literal such as `65u8`, or convert with `n.to_byte()`"
+   "Integer16" "write an Integer and convert it with `n.to_integer16()`"
+   "Integer32" "write an Integer and convert it with `n.to_integer32()`"
+   "Any"       "Any is the root of every type; create an instance of a concrete class instead"
+   "Void"      "Void has no values"
+   "Nil"       "the only Nil value is `nil`"})
+
+(def ^:private base-class-def-set (delay (set (base-class-defs))))
+
+(defn non-creatable-message
+  "The error for `create CLASS-NAME` when CLASS-NAME is a built-in type that
+   has no constructor, or nil when it can be created. CLASS-DEF is what the
+   engine has registered under that name (nil if nothing): a program may
+   define its own class with a built-in name (`class Task`), and that one is
+   created as usual. Engine registrations of built-ins are either these base
+   class defs or carry no `:type :class`; a parsed class always does."
+  [class-name class-def]
+  (when-let [hint (get non-creatable-builtin-types class-name)]
+    (when (or (not= :class (:type class-def))
+              (contains? @base-class-def-set class-def))
+      (str "Cannot create " class-name "; " hint))))

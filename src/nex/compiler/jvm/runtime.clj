@@ -475,6 +475,20 @@
       (.add s (rt/nex-array-get arr i)))
     s))
 
+(def create-map-entry bi/make-map-entry)
+
+(defn create-map-from-entries
+  "Build a compiled Map (LinkedHashMap, matching map literals) from a Nex
+   array of Map_Entry values, in order; a repeated key keeps its last value,
+   as `put` would."
+  [arr]
+  (let [m (java.util.LinkedHashMap.)
+        n (rt/nex-array-size arr)]
+    (dotimes [i n]
+      (let [entry (rt/nex-array-get arr i)]
+        (.put m (:key entry) (:value entry))))
+    m))
+
 (defn create-min-heap-from-comparator
   [compare]
   {:nex-builtin-type :MinHeap
@@ -3509,6 +3523,12 @@
 
    "create-set-from-array"
    (fn [_state args] (create-set-from-array (first args)))
+
+   "create-map-from-entries"
+   (fn [_state args] (create-map-from-entries (first args)))
+
+   "create-map-entry"
+   (fn [_state args] (create-map-entry (first args) (second args)))
 
    "create-min-heap-from-comparator"
    (fn [_state args] (create-min-heap-from-comparator (first args)))
