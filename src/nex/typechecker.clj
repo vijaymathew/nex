@@ -5447,6 +5447,10 @@
     (throw (ex-info (str "Undefined class: " class-name)
                     {:error (type-error (str "Undefined class: " class-name))})))
   (let [class-def (env-lookup-class env class-name)]
+    ;; Map_Entry, Task, Byte, Any, ...: without this, `create` on one of them
+    ;; typechecked and then failed in lowering as a "not supported yet" gap.
+    (when-let [msg (bootstrap/non-creatable-message class-name class-def)]
+      (throw (ex-info msg {:error (type-error msg)})))
     (when (:deferred? class-def)
       (throw (ex-info (str "Cannot instantiate deferred class: " class-name)
                       {:error (type-error

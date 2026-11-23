@@ -3939,6 +3939,12 @@
 
 (defmethod eval-node :create
   [ctx {:keys [class-name generic-args constructor args]}]
+  ;; The typechecker rejects these too; this is for when it is off (the REPL's
+  ;; default), where they otherwise failed as "Undefined class" or, for Any,
+  ;; quietly made an object.
+  (when-let [msg (bootstrap/non-creatable-message
+                  class-name (lookup-class-if-exists ctx class-name))]
+    (throw (ex-info msg {:class-name class-name})))
   ;; Program became a builtin type after programs could already have a class
   ;; called Program; such a class keeps its meaning.
   (if-let [handler (and (not (and (= "Program" class-name)

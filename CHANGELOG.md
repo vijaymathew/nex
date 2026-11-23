@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **`create` on a built-in type with no constructor is a proper error.**
+  `create Map_Entry[String, Integer]`, `create Task`, `create Byte`,
+  `create Integer16`, `create Integer32`, `create Any`, `create Void` and
+  `create Nil` used to pass type checking. A file then failed in the
+  compiled backend with "uses a construct the compiled backend does not
+  support yet", which pointed at `--interpret` as a workaround when there
+  isn't one. The REPL said `Undefined class` (or, for `create Any`, quietly
+  made an object). Now each is reported as, for example, `Cannot create
+  Map_Entry; a Map_Entry comes from iterating a Map (across, cursor, or a
+  method such as map or filter)`, with or without `:typecheck on`. A
+  program's own class with one of these names (`class Task`) is created
+  as before.
+
 - **A recursive type alias is a type error, not a stack overflow.** An
   alias stands for its definition wherever it's used, so one that refers
   back to itself has no finite expansion: `declare type Pair =

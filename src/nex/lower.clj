@@ -5889,6 +5889,10 @@
 
 (defn- lower-user-create
   [env expr class-name class-def compiled]
+  ;; Not a gap but a program error (normally the typechecker's to report):
+  ;; marked :error so it is reported as is, not as "not supported yet".
+  (when-let [msg (and (not compiled) (bootstrap/non-creatable-message class-name class-def))]
+    (throw (ex-info msg {:expr expr :class-name class-name :error msg})))
   (when-not compiled
     (throw (unsupported "Create of non-compiled class is not supported in lowering"
                         {:expr expr :class-name class-name})))
