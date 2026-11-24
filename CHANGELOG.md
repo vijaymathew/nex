@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A map or set stored in a collection is shared, not copied, in compiled
+  code.** After `xs.add(m)` or `outer.set(k, m)`, a later `m.set(...)` did
+  not show in `xs` or `outer` when the program was compiled (the default
+  for `nex file.nex`), though it did in the interpreter. The same was true
+  of a `Set`, and of a map or set reached through `convert`. So a tree of
+  `Map[String, Any]` nodes built with `add` lost whatever was set on each
+  new node after it was added. A conversion meant only for the
+  interpreter's representation of maps and sets was also copying the
+  compiled backend's own.
+
 ## 0.7.7 - 2026-11-23
 
 - **`Map_Entry.make` and `Map.from_entries`.** `create

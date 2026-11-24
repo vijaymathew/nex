@@ -108,7 +108,10 @@
 ;; still pass a host HashMap/js.Map through the shared interpreter bridge, so the
 ;; accessors below also accept a host map (the `:else` branches). Phase 4 removes
 ;; the host representation and the dual handling.
-(defn- portable-map? [v] (and (map? v) (= (:nex-builtin-type v) :NexMap)))
+(defn portable-map?
+  "Only the portable tagged map, unlike nex-map?, which also accepts a host map."
+  [v]
+  (and (map? v) (= (:nex-builtin-type v) :NexMap)))
 (defn nex-map? [v]
   (or (portable-map? v)
       (instance? java.util.HashMap v)))
@@ -209,7 +212,10 @@
 ;; Portable set (the interpreter's representation). As with maps, the compiled
 ;; backends bridge a host LinkedHashSet/js.Set through the interpreter, so the read
 ;; accessors also accept a host set (the `:else` branches). Phase 4 removes this.
-(defn- portable-set? [v] (and (map? v) (= (:nex-builtin-type v) :NexSet)))
+(defn portable-set?
+  "Only the portable tagged set, unlike nex-set?, which also accepts a host set."
+  [v]
+  (and (map? v) (= (:nex-builtin-type v) :NexSet)))
 (defn nex-set? [v]
   (or (portable-set? v)
       (instance? java.util.LinkedHashSet v)))
