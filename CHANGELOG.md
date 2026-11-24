@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **A REPL function whose body uses `fn (x) => ...` is defined.** With
+  type checking off (the REPL's default), a function or class whose body
+  held a `fn` literal with its parameter types left out, such as
+  `scores.filter(fn (s) => s > threshold)`, failed with "Unable to infer
+  expression type during lowering", and the function was left undefined.
+  Those types are worked out by the type checker, which did not run. It now
+  runs quietly for such inputs, to supply them; nothing else about the
+  lenient mode changes, and no type error is reported or enforced.
+
+- **A zero-argument function returning `?T`, or with a `require`, works
+  in the type-checked REPL.** With `:typecheck on`, `function pick():
+  ?String` was rejected as an override of `Function.call0` that "changes
+  the return type from Any to ?String", and a zero-argument function with a
+  precondition was rejected as strengthening one. The REPL checked a
+  function's generated wrapper method as if someone had written it as an
+  override. A class that inherits `Function` and overrides `call0` itself
+  is still checked.
+
 - **A map or set stored in a collection is shared, not copied, in compiled
   code.** After `xs.add(m)` or `outer.set(k, m)`, a later `m.set(...)` did
   not show in `xs` or `outer` when the program was compiled (the default

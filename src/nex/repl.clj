@@ -1626,24 +1626,65 @@
       :imports @(:imports ctx)
       :leave-unresolved? true})))
 
+(defn- checkable-repl-input?
+  "Whether there's anything in `ast` worth type-checking."
+  [ast]
+  (and (= (:type ast) :program)
+       (or (seq (:classes ast)) (seq (:functions ast))
+           (seq (:statements ast)) (seq (:calls ast))
+           (seq (:extensions ast))
+           ;; What an interned module declares is checked with the
+           ;; session, as a file's interns are with the file: an
+           ;; `extend` block in one module can leave a class another
+           ;; declares short of a deferred feature.
+           (seq (:interns ast)))))
+
+(defn- contains-anonymous-function?
+  [ast]
+  (boolean (some #(and (map? %) (= :anonymous-function (:type %)))
+                 (tree-seq coll? seq ast))))
+
+(declare check-repl-input)
+
 (defn- type-check-repl-input!
   "Type-check `ast` against the session so far (`ctx`'s previously defined
    classes/functions/imports plus everything interned), when type checking
    is on and there's actually something in `ast` worth checking. Throws
    `ex-info` (after printing each error) on failure; otherwise returns
    tc/type-check's result (its :lambda-types and :extension-calls are what
-   the caller needs), or nil when nothing was checked."
+   the caller needs), or nil when nothing was checked.
+
+   With type checking off, an input holding a `fn` literal is still checked,
+   quietly, for its :lambda-types alone: a parameter type left out
+   (`xs.filter(fn (x) => x > 0)`) is known only to the checker, and without
+   it a function or class whose body holds such a literal could not be
+   compiled, so it was never defined. Nothing is printed and nothing fails;
+   whatever the checker could infer is used."
   [ctx ast source-id]
-  (when (and @*type-checking-enabled*
-             (= (:type ast) :program)
-             (or (seq (:classes ast)) (seq (:functions ast))
-                 (seq (:statements ast)) (seq (:calls ast))
-                 (seq (:extensions ast))
-                 ;; What an interned module declares is checked with the
-                 ;; session, as a file's interns are with the file: an
-                 ;; `extend` block in one module can leave a class another
-                 ;; declares short of a deferred feature.
-                 (seq (:interns ast))))
+  (cond
+    (not (checkable-repl-input? ast))
+    nil
+
+    @*type-checking-enabled*
+    (let [result (check-repl-input ctx ast source-id)]
+      (when-not (:success result)
+        (doseq [line (tc/format-type-errors result)]
+          (println line))
+        (throw (ex-info "Type checking failed" {:errors (:errors result)})))
+      result)
+
+    (contains-anonymous-function? ast)
+    (try
+      (select-keys (check-repl-input ctx ast source-id) [:lambda-types])
+      (catch Throwable _ nil))
+
+    :else nil))
+
+(defn- check-repl-input
+  "tc/type-check's result for `ast` checked against the session so far; see
+   `type-check-repl-input!`."
+  [ctx ast source-id]
+  (do
     ;; Create an augmented AST that includes previously defined classes
     ;; so the type checker knows about them
     (let [prev-functions (vals @(:function-asts @*compiled-repl-session*))
@@ -1732,10 +1773,6 @@
                                  ;; nodes the checker could read them from.
                                  :builtin-extension-functions
                                  (session-builtin-extension-functions ctx)})]
-      (when-not (:success result)
-        (doseq [line (tc/format-type-errors result)]
-          (println line))
-        (throw (ex-info "Type checking failed" {:errors (:errors result)})))
       result)))
 
 (defn- repl-log-path
