@@ -9005,8 +9005,15 @@
                   member
                   (fn []
                     (check-attribute-redeclaration env name parents member)
-                    (check-override-conformance class-env name parents member)
-                    (check-override-contracts env name parents member)))
+                    ;; A function's `callN` (in its generated `<name>_Function`
+                    ;; class; :function-name marks it) is not an override anyone
+                    ;; wrote. Held to Function's own callN (returning Any, with
+                    ;; no precondition), `function pick(): ?String` and any
+                    ;; zero-argument function with a `require` were rejected in
+                    ;; the type-checked REPL.
+                    (when-not (:function-name member)
+                      (check-override-conformance class-env name parents member)
+                      (check-override-contracts env name parents member))))
                 (check-method class-env name member))))
           (= (:type member) :field)
           (when-not (:constant? member)

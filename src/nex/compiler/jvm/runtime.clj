@@ -1203,10 +1203,17 @@
    commonly a builtin free function like json_parse — whose static Nex type
    is Any, so the compiled backend cannot special-case it the way it does its
    own Map/Set literals. Public (not `defn-`) so that reflective lookup by
-   name from bytecode resolves it."
+   name from bytecode resolves it.
+
+   Only the portable forms are rebuilt. A compiled map or set (a host HashMap/
+   LinkedHashSet, which rt/nex-map? and rt/nex-set? also accept) is returned
+   as is: this runs on every Map/Set stored into a collection and on every
+   `convert` result, and a copy there broke sharing: after `xs.add(m)` or
+   `outer.set(k, m)`, a later `m.set(...)` no longer showed up in `xs` or
+   `outer`."
   [v]
   (cond
-    (rt/nex-map? v)
+    (rt/portable-map? v)
     ;; LinkedHashMap, not HashMap: `rt/nex-map-entries` yields the portable
     ;; map's own insertion order (e.g. object-key order from json_parse), and
     ;; a plain HashMap would scramble it to hash-bucket order the moment a
@@ -1216,7 +1223,7 @@
         (.put m (portable-value->compiled k) (portable-value->compiled val)))
       m)
 
-    (rt/nex-set? v)
+    (rt/portable-set? v)
     (let [^java.util.Set s (java.util.LinkedHashSet.)]
       (doseq [item (rt/nex-set-seq v)]
         (.add s (portable-value->compiled item)))
