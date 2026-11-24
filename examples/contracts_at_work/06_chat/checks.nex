@@ -92,7 +92,7 @@ do
   i := i + 1
 end
 
-events.send(create Shutdown.make())
+events.send(create Shutdown)
 hub_task.await(3000)
 server.close()
 

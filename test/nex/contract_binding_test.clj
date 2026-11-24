@@ -57,7 +57,7 @@ end
 
 (def ^:private pred-program
   (str number-decl
-       "let zero := create Zero.make
+       "let zero := create Zero
 
 function pred(n: Number): Number
 require
@@ -117,7 +117,7 @@ do
   end
 end
 
-let b := create Box.make(create Succ.make(create Zero.make))
+let b := create Box.make(create Succ.make(create Zero))
 print(depth(b.item))
 "))
 
@@ -129,7 +129,7 @@ print(depth(b.item))
     (is (= "Precondition violation"
            (violation run-compiled
                       (str constructor-and-invariant-program
-                           "let b2 := create Box.make(create Zero.make)\n"))))))
+                           "let b2 := create Box.make(create Zero)\n"))))))
 
 (deftest contract-binding-is-local-to-its-clause
   (testing "the body cannot see a require binding"
@@ -165,7 +165,7 @@ do
   let s := 1
   result := s
 end
-print(f(create Succ.make(create Zero.make)))
+print(f(create Succ.make(create Zero)))
 ")]
       (is (nil? (type-error-message code)))
       (is (= ["1"] (run-compiled code)))))
@@ -177,7 +177,7 @@ do
 ensure
   ok: convert n to s: Succ
 end
-print(f(create Succ.make(create Zero.make)))
+print(f(create Succ.make(create Zero)))
 ")]
       (is (nil? (type-error-message code)))
       (is (= ["true"] (run-compiled code))))))

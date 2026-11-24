@@ -187,6 +187,6 @@ print(\"val: \" + Color.Green.to_string())"))]
           (both-backends "union Shape
   Circle
 end
-print(create Circle.make())")]
+print(create Circle)")]
       (is (= ["#<Circle object>"] compiled))
       (is (= ["#<Circle object>"] interpreted)))))

@@ -5537,6 +5537,16 @@
                                         " defines constructors; use an explicit constructor call, e.g. create "
                                         class-name ".<ctor>(...)"))})))
         (when (or constructor (seq args))
+          ;; A class with no constructors at all, such as a union variant with
+          ;; no data (`create Resign`), is created without naming one.
+          (when (and (not has-constructors?) (empty? args) (not ctor-sig)
+                     (not (builtin-type? class-name)))
+            (let [written (str class-name
+                               (when (seq generic-args)
+                                 (str "[" (str/join ", " (map display-type generic-args)) "]")))
+                  msg (str "Class " class-name " has no constructors; create it with `create "
+                           written "`")]
+              (throw (ex-info msg {:error (type-error msg)}))))
           (when-not ctor-sig
             (throw (ex-info (str "Constructor not found: " class-name "." ctor-name)
                             {:error (type-error

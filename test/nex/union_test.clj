@@ -46,7 +46,7 @@
   Empty
 end
 let a: Box[Integer] := create Full[Integer].make(3)
-let b: Box[Integer] := create Empty[Integer].make()
+let b: Box[Integer] := create Empty[Integer]
 match a of
   Full  as f then print(\"full\")
   Empty as e then print(\"empty\")
@@ -80,13 +80,12 @@ print(area(create Square.make(4)))"
   Placed(id: String, total: Real)
   Shipped(tracking: String, at: Integer)
 end"
-          ;; The hand-written equivalent. Payload-free variants get an explicit
-          ;; nullary `make` — a constructor-less class cannot be instantiated,
-          ;; so the desugaring must synthesize one.
+          ;; The hand-written equivalent. A payload-free variant has nothing
+          ;; to initialise, so, like a hand-written class with no fields, it
+          ;; has no constructor and is created with a bare `create Draft`.
           hand-code "sealed deferred class Order
 end
 class Draft inherit Order
-  create make() do end
 end
 class Placed inherit Order
   feature
@@ -122,7 +121,7 @@ end"
   Shipped(tracking: String, at: Integer)
 end
 
-let a: Order := create Draft.make()
+let a: Order := create Draft
 let b: Order := create Placed.make(\"A-100\", 42.0)
 let c: Order := create Shipped.make(\"Z9\", 3)
 match a of
@@ -171,7 +170,7 @@ function describe(o: Order): String do
     Placed as p then result := \"placed\"
   end
 end
-print(describe(create Draft.make()))"
+print(describe(create Draft))"
           result (tc/type-check (p/ast code))]
       (is (not (:success result)))
       (is (some #(re-find #"Shipped" (str (:message %))) (:errors result))))))
@@ -186,7 +185,7 @@ let s: Set[Integer] := #{1, 2}
 let t: Set[Integer] := #{2, 3}
 let u: Set[Integer] := s.union(t)
 print(u.size())
-let x: Tag := create A.make()
+let x: Tag := create A
 match x of
   A as a then print(\"a\")
   B as b then print(\"b\")
@@ -208,7 +207,72 @@ function describe(o: Order): String do
     Placed as p then result := \"placed\"
   end
 end
-print(describe(create Draft.make()))"
+print(describe(create Draft))"
           result (tc/type-check (p/ast code))]
       (is (:success result))
       (is (empty? (:errors result))))))
+
+(def ^:private move-union
+  "union Move
+  Step(dx: Integer, dy: Integer)
+  Resign
+end
+
+function show(m: Move): String do
+  match m of
+    Step(dx, dy) then result := \"step\"
+    Resign       then result := \"resigned\"
+  end
+end
+")
+
+(deftest a-data-free-variant-has-no-constructor
+  (testing "it is created with a bare `create`, like a class with no fields"
+    (is (:success (tc/type-check
+                   (p/ast (str move-union
+                               "let a: Move := create Resign\n"
+                               "print(show(a))")))))
+    (is (= ["\"resigned\""]
+           (run-program (str move-union
+                             "let a: Move := create Resign\n"
+                             "print(show(a))")))))
+  (testing "naming a constructor it does not have says how to create it"
+    (let [result (tc/type-check (p/ast (str move-union "let a: Move := create Resign.make")))]
+      (is (not (:success result)))
+      (is (some #(re-find #"Class Resign has no constructors; create it with `create Resign`"
+                          (str (:message %)))
+                (:errors result))))
+    (let [result (tc/type-check (p/ast "union Option[T]
+  Some(value: T)
+  Nothing
+end
+let o: Option[Integer] := create Nothing[Integer].make()"))]
+      (is (not (:success result)))
+      (is (some #(re-find #"create it with `create Nothing\[Integer\]`" (str (:message %)))
+                (:errors result))))
+    (testing "and so does the interpreter, when nothing was type-checked"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Class Resign has no constructors; create it with `create Resign`"
+                            (run-program (str move-union "let a: Move := create Resign.make"))))))
+  (testing "a generic data-free variant still needs its type arguments"
+    (let [code "union Option[T]
+  Some(value: T)
+  Nothing
+end
+let o: Option[Integer] := create Nothing[Integer]
+let p: Option[Integer] := create Nothing"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (= 1 (count (:errors result))))
+      (is (some #(re-find #"create Nothing\[Integer\]" (str (:message %))) (:errors result)))))
+  (testing "a variant with data still needs its constructor"
+    (let [result (tc/type-check (p/ast (str move-union "let s: Move := create Step")))]
+      (is (not (:success result)))
+      (is (some #(re-find #"defines constructors" (str (:message %))) (:errors result)))))
+  (testing "an enum member keeps its make, which records its ordinal"
+    (let [classes (:classes (p/ast "enum union Side
+  White
+  Black
+end"))]
+      (is (every? #(some (fn [m] (= :constructors (:type m))) (:body %))
+                  (remove #(= "Side" (:name %)) classes))))))

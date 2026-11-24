@@ -3660,6 +3660,14 @@
               (lookup-constructor-with-inheritance ctx class-def constructor-name))
             (get-parent-classes ctx class-def))))
 
+(defn- class-has-constructors?
+  "Whether CLASS-DEF declares or inherits any constructor."
+  [ctx class-def]
+  (boolean
+   (or (some #(and (= :constructors (:type %)) (seq (:constructors %))) (:body class-def))
+       (some (fn [{:keys [class-def]}] (class-has-constructors? ctx class-def))
+             (get-parent-classes ctx class-def)))))
+
 (defn- create-console-builtin
   [_ctx _constructor _args]
   {:nex-builtin-type :Console})
@@ -3890,7 +3898,12 @@
   [ctx class-def class-name effective-class-name constructor args initial-field-map]
   (let [ctor-def (lookup-constructor-with-inheritance ctx class-def constructor)]
     (when-not ctor-def
-      (throw (ex-info (str "Constructor not found: " class-name "." constructor)
+      (throw (ex-info (if (class-has-constructors? ctx class-def)
+                        (str "Constructor not found: " class-name "." constructor)
+                        ;; e.g. `create Resign.make` for a union variant with
+                        ;; no data, which has no constructor.
+                        (str "Class " class-name " has no constructors; create it with `create "
+                             class-name "`"))
                       {:class-name class-name :constructor constructor})))
     (let [ctor-env (make-env (:current-env ctx))
           ;; An inherited constructor runs along the path to its class.

@@ -328,7 +328,7 @@ create
     end
   end
 end
-let b := create B.make(create Round.make)"
+let b := create B.make(create Round)"
     "must assign `a` on every path through it"]
 
    ["a rescue that completes without assigning"
@@ -597,7 +597,7 @@ create
     print(a.hello)
   end
 end
-let b := create B.make(create Square.make)"
+let b := create B.make(create Square)"
     ["\"hi\""]]
 
    ["a rescue that raises need not assign"

@@ -70,9 +70,9 @@ end
     result := 0
   end
 end
-print(f(create Zero.make))
-print(f(create Succ.make(create Zero.make)))
-print(f(create Succ.make(create Succ.make(create Zero.make))))
+print(f(create Zero))
+print(f(create Succ.make(create Zero)))
+print(f(create Succ.make(create Succ.make(create Zero))))
 ")]
     (is (nil? (type-error-message code)))
     (is (= ["0" "1" "2"] (run-compiled code)))))
@@ -85,7 +85,7 @@ print(f(create Succ.make(create Succ.make(create Zero.make))))
   let c := 5
   result := result + c
 end
-print(f(create Succ.make(create Zero.make)))
+print(f(create Succ.make(create Zero)))
 ")]
       (is (nil? (type-error-message code)))
       (is (= ["6"] (run-compiled code)))))
@@ -96,7 +96,7 @@ print(f(create Succ.make(create Zero.make)))
 ensure
   ok: convert a to c: Succ or not result
 end
-print(f(create Succ.make(create Zero.make)))
+print(f(create Succ.make(create Zero)))
 ")]
       (is (nil? (type-error-message code)))
       (is (= ["true"] (run-compiled code))))))
@@ -109,8 +109,8 @@ function f(a: Number): Boolean do
   if id(convert a to d: Succ) then print(1) end
   result := d /= nil
 end
-print(f(create Succ.make(create Zero.make)))
-print(f(create Zero.make))
+print(f(create Succ.make(create Zero)))
+print(f(create Zero))
 ")]
     (is (nil? (type-error-message code)))
     (is (= ["1" "true" "false"] (run-compiled code)))))
