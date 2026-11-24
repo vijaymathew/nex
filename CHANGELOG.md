@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A `match` with a clause guard can be typed into the REPL.** A guard
+  such as `Step(dx, dy) if dx > 1 then ...` was counted as an `if` block
+  that needed its own `end`, so the REPL kept asking for more input after
+  the `match`'s `end`, and an extra `end` then failed to parse. A guard
+  `if` (one that follows a pattern on its line) no longer counts as a
+  block.
+
 - **A REPL function whose body uses `fn (x) => ...` is defined.** With
   type checking off (the REPL's default), a function or class whose body
   held a `fn` literal with its parameter types left out, such as

@@ -305,6 +305,27 @@
   (count (re-seq (re-pattern (str "(?<![.\\w])" kw "\\b"))
                  (str/replace text #"\.\s+" "."))))
 
+(defn- guard-if-count
+  "How many `if`s in TEXT are `match` clause guards (`Step(dx, dy) if dx > 1
+   then ...`). A guard opens no block of its own, so it has no `end`. A
+   statement `if` starts its line or follows `then`, `else` or `do`; an `if`
+   that follows a pattern on the same line is a guard."
+  [text]
+  (if (zero? (keyword-count text "match"))
+    0
+    (->> (str/split-lines (str/replace text #"\.\s+" "."))
+         (mapcat (fn [line]
+                   (let [m (re-matcher #"(?<![.\w])if\b" line)]
+                     (loop [guards []]
+                       (if (.find m)
+                         (let [before (str/trimr (subs line 0 (.start m)))]
+                           (recur (if (or (str/blank? before)
+                                          (re-find #"(?<![.\w])(?:then|else|do)$" before))
+                                    guards
+                                    (conj guards before))))
+                         guards)))))
+         count)))
+
 (defn continue-reading?
   "Check if we need to continue reading (unclosed block)"
   [lines]
@@ -332,7 +353,7 @@
         from-count (keyword-count text "from")
         repeat-count (keyword-count text "repeat")
         across-count (keyword-count text "across")
-        if-count (keyword-count text "if")
+        if-count (- (keyword-count text "if") (guard-if-count text))
         when-count (count-when-expressions text)
         case-count (keyword-count text "case")
         match-count (keyword-count text "match")

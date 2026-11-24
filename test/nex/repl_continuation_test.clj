@@ -88,3 +88,37 @@
   (testing "union as a member name is not a declaration"
     (is (false? (repl/continue-reading? ["print(s.union(t))"])))
     (is (false? (repl/continue-reading? ["let u := a.union(b)"])))))
+
+(deftest a-match-clause-guard
+  (testing "a guard's `if` opens no block, so the match ends at its `end`"
+    (is (complete-only-at-the-end?
+         ["match m of"
+          "  Step(dx, dy) if dx.abs > 1 or dy.abs > 1 then print(\"a long move\")"
+          "  Step(dx, dy)                              then print(\"a single step\")"
+          "  Resign then print(\"game over\")"
+          "end"]))
+    (is (complete-only-at-the-end?
+         ["match r of"
+          "  Ok as ok if ok.value > 0 then print(1)"
+          "  _ if true then print(2)"
+          "  else print(3)"
+          "end"]))
+    (is (complete-only-at-the-end?
+         ["function show(m: Move)"
+          "do"
+          "  match m of"
+          "    Step(dx, dy) if dx > 1 then print(1)"
+          "    else print(2)"
+          "  end"
+          "end"])))
+  (testing "an `if` statement inside a clause body still needs its `end`"
+    (is (complete-only-at-the-end?
+         ["match m of"
+          "  Step(dx, dy) then"
+          "    if dx > 1 then"
+          "      print(1)"
+          "    end"
+          "  Resign then if true then print(2) end"
+          "end"])))
+  (testing "without a match, every `if` is a statement"
+    (is (true? (repl/continue-reading? ["let x := 1" "if x > 0 then"])))))
