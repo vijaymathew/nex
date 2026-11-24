@@ -2,13 +2,17 @@
 
 ## Unreleased
 
-- **A union variant with no data can be created with a bare `create`.**
-  `create Resign` now works for `union Move ... Resign end`, as well as
-  `create Resign.make`. The variant's generated `make` takes no arguments
-  and does nothing, so the two are the same. Variants with data still need
-  `make(...)`, a generic variant still needs its type arguments
-  (`create Nothing[Integer]`), and an `enum union` member is still taken
-  from its type (`Side.Black`), because its `make` sets the ordinal.
+- **Breaking: a union variant with no data has no constructor.** For
+  `union Move ... Resign end`, `Resign` is now exactly the class you would
+  write by hand, `class Resign inherit Move end`: it has nothing to
+  initialise, so it gets no `make`, and is created like any class without
+  constructors, with `create Resign` (generic: `create Nothing[Integer]`).
+  `create Resign.make` and `create Resign.make()` no longer work; the error
+  says what to write instead: "Class Resign has no constructors; create it
+  with `create Resign`". Variants with data keep their `make(...)`, and an
+  `enum union` member keeps the `make` that records its ordinal (take it
+  from its type, `Side.Black`). The hand-written `None` of `data/Option`
+  is not a union and still has its `make()`.
 
 - **A `match` with a clause guard can be typed into the REPL.** A guard
   such as `Step(dx, dy) if dx > 1 then ...` was counted as an `if` block

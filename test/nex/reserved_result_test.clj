@@ -42,7 +42,7 @@ if ?s as result then print(1) end"]
   A
   B(x: Integer)
 end
-let s: S := create A.make
+let s: S := create A
 match s of
   A as result then print(1)
   B then print(2)
@@ -51,7 +51,7 @@ end"]
   A
   B(x: Integer)
 end
-let s: S := create A.make
+let s: S := create A
 match s of
   A then print(1)
   B(x as result) then print(2)

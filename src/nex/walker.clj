@@ -653,7 +653,9 @@
 ;; A `union P[G…]` declaration is rewritten into the exact sealed-class AST Nex
 ;; already produces: a `sealed deferred class P[G…]` parent plus one ordinary
 ;; `class Vi[G…] inherit P[G…]` per variant, each with its payload fields and an
-;; auto-generated `make` constructor. Everything downstream (type checker,
+;; auto-generated `make` constructor that takes them. A variant with no payload
+;; gets no constructor, as a hand-written class with no fields would have none,
+;; and is created with a bare `create Vi`. Everything downstream (type checker,
 ;; interpreter, JVM/JS backends) only ever sees `:class` nodes.
 
 (defn- union-variant->class
@@ -736,30 +738,28 @@
                             :visibility {:type :public}
                             :members (vec (concat fields
                                                   (when to-string-method [to-string-method])))})
-         constructor {:type :constructor
-                      :name "make"
-                      :params (when (seq ctor-params) ctor-params)
-                      :require nil
-                      :body ctor-body
-                      :ensure nil
-                      :rescue nil}
-         constructors {:type :constructors
-                       :constructors [constructor]}]
-     (cond-> {:type :class
-              :name var-name
-              :deferred? false
-              :sealed? false
-              :generic-params (when (seq generic-params) generic-params)
-              :note nil
-              :parents [parent-entry]
-              :body (if feature-section
-                      [feature-section constructors]
-                      [constructors])
-              :invariant nil}
-       ;; A data-free variant of a plain union may also be created bare,
-       ;; `create Resign`: its `make` takes nothing and does nothing. Not an
-       ;; enum member, whose `make` sets its ordinal.
-       (and (empty? payload) (nil? enum-ordinal)) (assoc :bare-create? true)))))
+         ;; A variant with no data has nothing to initialise, so, like a
+         ;; hand-written class with no fields, it gets no constructor and is
+         ;; created with a bare `create Resign`. An enum member keeps its
+         ;; `make`, which records its ordinal.
+         constructors (when (or (seq payload) enum-ordinal)
+                        {:type :constructors
+                         :constructors [{:type :constructor
+                                         :name "make"
+                                         :params (when (seq ctor-params) ctor-params)
+                                         :require nil
+                                         :body ctor-body
+                                         :ensure nil
+                                         :rescue nil}]})]
+     {:type :class
+      :name var-name
+      :deferred? false
+      :sealed? false
+      :generic-params (when (seq generic-params) generic-params)
+      :note nil
+      :parents [parent-entry]
+      :body (vec (remove nil? [feature-section constructors]))
+      :invariant nil})))
 
 (defn- payload-free-variant?
   "A variant with no `(payload)` — an enum-style tag."

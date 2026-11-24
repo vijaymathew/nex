@@ -19,7 +19,7 @@ function main() do
   let chat_server: Chat_Server := create Chat_Server.make()
   chat_server.accept_clients(server, 8, events)
 
-  events.send(create Shutdown.make())
+  events.send(create Shutdown)
   hub_task.await()
   server.close()
 end

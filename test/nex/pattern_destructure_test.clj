@@ -53,7 +53,7 @@ end
   end
 end
 print(d(create Placed.make(\"A-100\", 42.0)))
-print(d(create Draft.make()))
+print(d(create Draft))
 print(d(create Shipped.make(\"Z9\", 3)))"))))))
 
 (deftest destructure-rename-and-skip
@@ -92,7 +92,7 @@ print(d(create Placed.make(\"A-100\", 42.0)))"))))))
     _          then result := \"other\"
   end
 end
-print(d(create Draft.make()))
+print(d(create Draft))
 print(d(create Placed.make(\"x\", 1.0)))"))))))
 
 (deftest destructure-keeps-exhaustiveness-check
@@ -105,7 +105,7 @@ print(d(create Placed.make(\"x\", 1.0)))"))))))
     Placed(id) then result := id
   end
 end
-print(d(create Draft.make()))")))))
+print(d(create Draft))")))))
 
 (deftest destructure-bad-field-is-rejected
   (testing "destructuring a field the variant does not have is a type error"
@@ -137,7 +137,7 @@ end
 print(c(create Placed.make(\"A\", 5000.0)))
 print(c(create Placed.make(\"B\", 50.0)))
 print(c(create Placed.make(\"C\", 0.0)))
-print(c(create Draft.make()))"))))))
+print(c(create Draft))"))))))
 
 (deftest guard-may-reference-destructured-fields
   (testing "the guard sees the destructured bindings"
@@ -163,7 +163,7 @@ print(c(create Placed.make(\"y\", 1.0)))"))))))
     Placed(id, total) if total > 0.0  then result := id
   end
 end
-print(c(create Draft.make()))")))))
+print(c(create Draft))")))))
 
 (deftest guard-with-else-or-unguarded-is-exhaustive
   (testing "adding an else (or unguarded clause) restores exhaustiveness"
@@ -176,7 +176,7 @@ print(c(create Draft.make()))")))))
   end
 end
 print(c(create Placed.make(\"x\", 5.0)))
-print(c(create Draft.make()))"))))))
+print(c(create Draft))"))))))
 
 (deftest non-boolean-guard-is-rejected
   (testing "a guard whose type is not Boolean is a type error"
@@ -286,10 +286,10 @@ print(f(create Full[Integer].make(42)))")))))
   end
 end
 let s: Option[Integer] := create Some[Integer].make(42)
-let n: Option[Integer] := create None[Integer].make()
+let n: Option[Integer] := create None[Integer]
 print(f(create Ok[Integer].make(s)))
 print(f(create Ok[Integer].make(n)))
-print(f(create Bad[Integer].make()))"))))))
+print(f(create Bad[Integer]))"))))))
 
 (deftest nested-pattern-does-not-cover-its-variant
   (testing "a nested pattern is conditional, so it does not make the match exhaustive"
@@ -301,7 +301,7 @@ print(f(create Bad[Integer].make()))"))))))
     Bad                                then result := 0
   end
 end
-print(f(create Bad[Integer].make()))")))))
+print(f(create Bad[Integer]))")))))
 
 (deftest trivially-true-field-type-pattern-counts-toward-exhaustiveness
   ;; A bare `field: T` pattern desugars to a narrowing `convert` folded into
@@ -324,7 +324,7 @@ print(f(create Bad[Integer].make()))")))))
     Shipped(tracking)  then result := \"shipped:\" + tracking
   end
 end
-print(d(create Draft.make()))
+print(d(create Draft))
 print(d(create Placed.make(\"A1\", 5.0)))"))))))
 
 (def ^:private result2-decl
@@ -343,7 +343,7 @@ end
     Shipped(tracking)  then result := \"shipped:\" + tracking
   end
 end
-print(d(create Draft.make()))
+print(d(create Draft))
 print(d(create Placed.make(\"A1\", 5.0)))"))
 
 (deftest trivially-true-field-type-pattern-runs-correctly-on-the-compiled-backend
@@ -392,7 +392,7 @@ print(unwrap(create Full.make(\"hi\")))"))))
     Shipped(tracking)                        then result := \"shipped:\" + tracking
   end
 end
-print(d(create Draft.make()))")))))
+print(d(create Draft))")))))
 
 (deftest plain-type-clause-without-as-is-allowed
   (testing "a clause may bind neither fields nor the whole value"
@@ -405,7 +405,7 @@ print(d(create Draft.make()))")))))
     _     then result := \"no\"
   end
 end
-print(d(create Draft.make()))"))))))
+print(d(create Draft))"))))))
 
 ;; ─── `:` constrains, `as` renames ────────────────────────────────────────────
 ;;
@@ -481,7 +481,7 @@ print(d(create Box.make(3)))"))))))
     Empty                then result := \"empty\"
   end
 end
-print(d(create Empty.make()))")))))
+print(d(create Empty))")))))
 
 (deftest as-renames-a-field
   (testing "`field as local` binds the field under a different name"
@@ -574,7 +574,7 @@ print(d(create Box.make(\"hi\")))"))))))
     _                   then result := \"?\"
   end
 end
-print(d(create Draft.make()))"))]
+print(d(create Draft))"))]
       (is (some #(re-find #"`q` is not a field of Shipped" %) msgs)
           (str "error should name the variant, got: " (pr-str msgs)))
       (is (some #(re-find #"Shipped has: at, tracking" %) msgs)

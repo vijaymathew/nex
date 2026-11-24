@@ -1700,7 +1700,7 @@ total"))]
       (is (= 15 (:result result))))))
 
 (deftest compiled-bare-create-of-a-data-free-union-variant-test
-  (testing "`create Resign` and `create Resign.make` build the same variant when compiled"
+  (testing "a union variant with no data has no constructor and is created bare when compiled"
     (let [session (compiled-repl/make-session)
           result (compiled-repl/compile-and-eval!
                   session
@@ -1717,7 +1717,6 @@ function show(m: Move): String do
 end
 
 let a: Move := create Resign
-let b: Move := create Resign.make
-print(show(a) + show(b))"))]
+print(show(a))"))]
       (is (:compiled? result))
-      (is (= ["\"resignedresigned\""] (:output result))))))
+      (is (= ["\"resigned\""] (:output result))))))

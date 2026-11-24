@@ -258,7 +258,7 @@ end
 assert describe_shape(create UCircle.make(200.0)) = "huge circle"
 assert describe_shape(create UCircle.make(5.0)) = "circle"
 assert describe_shape(create URectangle.make(3.0, 4.0)) = "12.0"
-assert describe_shape(create UEmpty.make) = "nothing"
+assert describe_shape(create UEmpty) = "nothing"
 
 enum union Color
   Red

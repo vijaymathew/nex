@@ -197,7 +197,7 @@ print(Currency.INR.to_string)")))))
   INR
   USD
 end
-print(create INR.make().to_string)")))))
+print((create INR).to_string)")))))
 
 (deftest object-to-string-in-concatenation
   (testing "an object without `to_string` concatenates in its Nex form"

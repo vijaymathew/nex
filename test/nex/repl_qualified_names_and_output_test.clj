@@ -45,7 +45,7 @@
                "intern time/Date_Time"
                "union Order  Draft  Placed(id: String, total: Real)  Shipped(tracking: String, at: time/Date_Time) end"
                "function check_order(order: Order) do match order of Placed(id, total) then print(\"Placed: \" + id + \", \" + total) Shipped(tracking, at) then print(\"Shipped with tracking id: \" + tracking) Draft then print(\"Draft\") end end"
-               "check_order(create Draft.make)"
+               "check_order(create Draft)"
                "check_order(create Shipped.make(\"T55617\", create time/Date_Time.now))")]
       (is (= ["\"Draft\"" "\"Shipped with tracking id: T55617\""] out)))))
 
