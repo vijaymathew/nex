@@ -1338,7 +1338,7 @@ match o of
 end
 ```
 
-- A variant with no payload (`Draft`) still gets a nullary `make`, so `create Draft.make()` works.
+- A variant with no payload (`Draft`) gets a nullary `make` that does nothing, so `create Draft` and `create Draft.make` both work. (An `enum union` member is the exception: take it from its type, `Color.Red`.)
 - Generic parameters carry through to every variant: `union Result[T]` gives `Ok`/`Err` that inherit `Result[T]`.
 - Because a `union` *is* a sealed hierarchy after desugaring, `match` exhaustiveness is checked exactly as in the previous section — a missing variant is a compile-time error.
 

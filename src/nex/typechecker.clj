@@ -5528,7 +5528,11 @@
                                      env arg (some-> declared (resolve-generic-type type-map)))))
                               args pre-arg-types (concat param-types (repeat nil))))]
         ;; If class defines constructors, disallow implicit default create.
+        ;; A data-free union variant is the exception: its generated `make`
+        ;; takes no arguments and does nothing, so `create Resign` means the
+        ;; same as `create Resign.make` (see union-variant->class).
         (when (and has-constructors?
+                   (not (:bare-create? class-def))
                    (nil? constructor)
                    (empty? args))
           (throw (ex-info (str "Constructor required for class " class-name)

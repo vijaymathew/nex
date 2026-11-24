@@ -1698,3 +1698,26 @@ end
 total"))]
       (is (:compiled? result))
       (is (= 15 (:result result))))))
+
+(deftest compiled-bare-create-of-a-data-free-union-variant-test
+  (testing "`create Resign` and `create Resign.make` build the same variant when compiled"
+    (let [session (compiled-repl/make-session)
+          result (compiled-repl/compile-and-eval!
+                  session
+                  (p/ast "union Move
+  Step(dx: Integer, dy: Integer)
+  Resign
+end
+
+function show(m: Move): String do
+  match m of
+    Step(dx, dy) then result := \"step\"
+    Resign       then result := \"resigned\"
+  end
+end
+
+let a: Move := create Resign
+let b: Move := create Resign.make
+print(show(a) + show(b))"))]
+      (is (:compiled? result))
+      (is (= ["\"resignedresigned\""] (:output result))))))

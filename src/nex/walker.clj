@@ -745,17 +745,21 @@
                       :rescue nil}
          constructors {:type :constructors
                        :constructors [constructor]}]
-     {:type :class
-      :name var-name
-      :deferred? false
-      :sealed? false
-      :generic-params (when (seq generic-params) generic-params)
-      :note nil
-      :parents [parent-entry]
-      :body (if feature-section
-              [feature-section constructors]
-              [constructors])
-      :invariant nil})))
+     (cond-> {:type :class
+              :name var-name
+              :deferred? false
+              :sealed? false
+              :generic-params (when (seq generic-params) generic-params)
+              :note nil
+              :parents [parent-entry]
+              :body (if feature-section
+                      [feature-section constructors]
+                      [constructors])
+              :invariant nil}
+       ;; A data-free variant of a plain union may also be created bare,
+       ;; `create Resign`: its `make` takes nothing and does nothing. Not an
+       ;; enum member, whose `make` sets its ordinal.
+       (and (empty? payload) (nil? enum-ordinal)) (assoc :bare-create? true)))))
 
 (defn- payload-free-variant?
   "A variant with no `(payload)` — an enum-style tag."

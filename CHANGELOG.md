@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A union variant with no data can be created with a bare `create`.**
+  `create Resign` now works for `union Move ... Resign end`, as well as
+  `create Resign.make`. The variant's generated `make` takes no arguments
+  and does nothing, so the two are the same. Variants with data still need
+  `make(...)`, a generic variant still needs its type arguments
+  (`create Nothing[Integer]`), and an `enum union` member is still taken
+  from its type (`Side.Black`), because its `make` sets the ordinal.
+
 - **A `match` with a clause guard can be typed into the REPL.** A guard
   such as `Step(dx, dy) if dx > 1 then ...` was counted as an `if` block
   that needed its own `end`, so the REPL kept asking for more input after

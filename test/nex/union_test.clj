@@ -81,8 +81,9 @@ print(area(create Square.make(4)))"
   Shipped(tracking: String, at: Integer)
 end"
           ;; The hand-written equivalent. Payload-free variants get an explicit
-          ;; nullary `make` — a constructor-less class cannot be instantiated,
-          ;; so the desugaring must synthesize one.
+          ;; nullary `make`, so `create Draft.make` works as for any variant.
+          ;; They are also marked :bare-create?, so `create Draft` works too;
+          ;; that mark is the one difference from the hand-written form.
           hand-code "sealed deferred class Order
 end
 class Draft inherit Order
@@ -103,7 +104,8 @@ end"
           union-classes (strip-dbg (:classes (p/ast union-code)))
           hand-classes (strip-dbg (:classes (p/ast hand-code)))]
       (is (= (count union-classes) (count hand-classes)))
-      (is (= union-classes hand-classes)))))
+      (is (= ["Draft"] (keep #(when (:bare-create? %) (:name %)) union-classes)))
+      (is (= (map #(dissoc % :bare-create?) union-classes) hand-classes)))))
 
 (deftest union-parent-is-sealed-and-deferred
   (testing "the parent class is sealed + deferred, variants inherit it"
@@ -212,3 +214,53 @@ print(describe(create Draft.make()))"
           result (tc/type-check (p/ast code))]
       (is (:success result))
       (is (empty? (:errors result))))))
+
+(def ^:private move-union
+  "union Move
+  Step(dx: Integer, dy: Integer)
+  Resign
+end
+
+function show(m: Move): String do
+  match m of
+    Step(dx, dy) then result := \"step\"
+    Resign       then result := \"resigned\"
+  end
+end
+")
+
+(deftest a-data-free-variant-can-be-created-bare
+  (testing "`create Resign` type-checks, as `create Resign.make` does"
+    (is (:success (tc/type-check
+                   (p/ast (str move-union
+                               "let a: Move := create Resign\n"
+                               "let b: Move := create Resign.make\n"
+                               "print(show(a) + show(b))"))))))
+  (testing "both forms build the same variant"
+    (is (= ["\"resignedresigned\""]
+           (run-program (str move-union
+                             "let a: Move := create Resign\n"
+                             "let b: Move := create Resign.make\n"
+                             "print(show(a) + show(b))")))))
+  (testing "a generic data-free variant still needs its type arguments"
+    (let [code "union Option[T]
+  Some(value: T)
+  Nothing
+end
+let o: Option[Integer] := create Nothing[Integer]
+let p: Option[Integer] := create Nothing"
+          result (tc/type-check (p/ast code))]
+      (is (not (:success result)))
+      (is (some #(re-find #"create Nothing\[Integer\]" (str (:message %))) (:errors result)))))
+  (testing "a variant with data still needs its constructor"
+    (let [result (tc/type-check (p/ast (str move-union "let s: Move := create Step")))]
+      (is (not (:success result)))
+      (is (some #(re-find #"defines constructors" (str (:message %))) (:errors result)))))
+  (testing "an enum member is not created bare: its make sets the ordinal"
+    (let [result (tc/type-check (p/ast "enum union Side
+  White
+  Black
+end
+let s := create Black"))]
+      (is (not (:success result)))
+      (is (some #(re-find #"defines constructors" (str (:message %))) (:errors result))))))
