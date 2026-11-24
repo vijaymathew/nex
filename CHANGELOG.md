@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.8 - 2026-11-24
+
 - **Breaking: a union variant with no data has no constructor.** For
   `union Move ... Resign end`, `Resign` is now exactly the class you would
   write by hand, `class Resign inherit Move end`: it has nothing to
