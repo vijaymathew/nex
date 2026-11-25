@@ -1,6 +1,6 @@
-# Chapter 29 — What to Read Next (Exercise answers)
+# Chapter 30 — What to Read Next (Exercise answers)
 
-Chapter 29's exercises are reflective and reading-oriented rather than code, so
+Chapter 30's exercises are reflective and reading-oriented rather than code, so
 the answers are written in prose here instead of as a runnable `.nex` file.
 
 ### 1. One book and why it is the best next step
@@ -14,15 +14,15 @@ paper, which is exactly the muscle to grow once the syntax is comfortable.
 
 ### 2. The outside book that would most help improve an earlier program
 
-The Chapter 26 task manager. The book that would help most is a **design** book —
-*Object-Oriented Software Construction* (Meyer) — because the program's weak
-points are design questions, not algorithmic ones: where responsibilities should
-split (Todo_Item vs Task_List vs storage), which assertions belong on the
-constructor versus the invariant, and how to keep clients independent of the
-representation. Meyer's treatment of contracts and class design speaks directly
-to those decisions.
+The spreadsheet of Chapters 27 to 29. The book that would help most is a
+**design** book — *Object-Oriented Software Construction* (Meyer) — because the
+program's hardest questions were design questions, not algorithmic ones: which
+properties are invariants and which are postconditions, why an invariant must
+hold whenever a callback can arrive, and how narrow an interface a client like
+the evaluator should depend on. Meyer's treatment of contracts and class design
+speaks directly to those decisions.
 
-### 3. A routine from Chapters 16–27, restated Hoare-style
+### 3. A routine from Chapters 16–29, restated Hoare-style
 
 Take `average(items: Array[Real]): Real` (Chapter 16/17).
 

@@ -4085,7 +4085,20 @@
   (let [ctx (assoc ctx
                    :this-type (:name class-def)
                    :scope-generic-params (vec (class-generic-params class-def)))]
-    (update class-def :body
+    (cond-> class-def
+      ;; A lambda in the class invariant (`no_overlaps: bookings.all(fn (b) =>
+      ;; clashes(b) = 1)`) reaches the object's own features through the
+      ;; captured `this`, as one in a routine's contract does; left alone, its
+      ;; bare `clashes(...)` would resolve against the lambda's own class.
+      (seq (:invariant class-def))
+      (update :invariant
+              (fn [assertions]
+                (mapv #(update % :condition
+                               (fn [c] (rewrite-expression-for-closures
+                                        (assoc ctx :var-types {}) {} (atom {}) c)))
+                      assertions)))
+      true
+      (update :body
             (fn [sections]
               (mapv (fn [section]
                       (case (:type section)
@@ -4104,7 +4117,7 @@
                                   (mapv #(rewrite-callable-for-closures ctx % {}) ctors)))
 
                         section))
-                    sections)))))
+                    sections))))))
 
 (defn- patch-anonymous-function-class-def
   "Rebuild CLASS-DEF's single method member with PATCHED-PARAMS/PATCHED-RETURN

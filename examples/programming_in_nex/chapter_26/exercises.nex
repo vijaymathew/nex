@@ -1,116 +1,128 @@
 -- ============================================================================
--- Programming with Nex — Chapter 26: A Complete Program
+-- Programming with Nex — Chapter 26: Concurrency with Tasks and Channels
 -- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
---
--- The chapter's task-manager program is split across files (Exercise 8):
---   todo_item.nex   -- Todo_Item  (Exercises 1, 2, 6 — see comments there)
---   task_list.nex   -- Task_List  (Exercises 3, 4, 7 — see comments there)
---   grade_book.nex  -- Grade_Book (Exercise 9* — a program of my own)
--- This driver exercises them and runs the contract-failure tests (Exercise 5).
 -- ============================================================================
 
-intern Todo_Item
-intern Task_List
-intern Grade_Book
-
 function main() do
-  let passed: Integer := 0
-  let total: Integer := 0
-
-  -- Normal run of the task manager.
-  let list: Task_List := create Task_List.make()
-  list.add_task("write chapter")
-  list.add_task("review draft")
-  list.add_task("publish")
-  console.print_line("Task list (" + list.size.to_string + " tasks):")
-  list.mark_task_done(0)
-  list.mark_task_done(2)
-  from let i: Integer := 0 until i >= list.size do
-    let mark: String := when list.is_done_at(i) then "[x]" else "[ ]" end
-    console.print_line("  " + mark + " " + list.title_at(i))   -- via Ex-7 accessors
-    i := i + 1
+  -- 1. A task that sums 1..100, returns through `result`, printed via await.
+  let summer: Task[Integer] := spawn do
+    let total: Integer := 0
+    from let i: Integer := 1 until i > 100 do
+      total := total + i
+      i := i + 1
+    end
+    result := total
   end
+  let total_1_100: Integer := summer.await
+  console.print_line("1. sum 1..100 = " + total_1_100.to_string)   -- 5050
+  assert total_1_100 = 5050
 
-  -- 1. description field on Todo_Item.
-  let item: Todo_Item := create Todo_Item.make("buy milk")
-  console.print_line("1. new item has_description=" + item.has_description.to_string)   -- false
-  assert not item.has_description
-  item.set_description("2 litres, semi-skimmed")
-  console.print_line("1. after set_description has_description=" + item.has_description.to_string)  -- true
-  assert item.has_description
+  -- 2. A buffered Channel[String] of capacity 3: send three, print size, then
+  --    receive them back in order (FIFO).
+  let words: Channel[String] := create Channel[String].with_capacity(3)
+  words.send("alpha")
+  words.send("beta")
+  words.send("gamma")
+  console.print_line("2. channel size after three sends = " + words.size.to_string)   -- 3
+  assert words.size = 3
+  let w1: String := words.receive
+  let w2: String := words.receive
+  let w3: String := words.receive
+  console.print_line("2. received in order: " + w1 + " " + w2 + " " + w3)             -- alpha beta gamma
+  assert w1 = "alpha"
+  assert w2 = "beta"
+  assert w3 = "gamma"
 
-  -- 3. remaining_count.
-  console.print_line("3. completed=" + list.completed_count.to_string +
-                     " remaining=" + list.remaining_count.to_string)   -- 2 remaining, 1
-  assert list.completed_count = 2
-  assert list.remaining_count = 1
-
-  -- 4. all_done on an empty list is vacuously true.
-  let empty: Task_List := create Task_List.make()
-  console.print_line("4. empty list all_done=" + empty.all_done.to_string +
-                     " (vacuously true; size=" + empty.size.to_string + ")")   -- true, 0
-  assert empty.all_done
-  assert empty.size = 0
-
-  -- 5. Contract-failure tests: add_task("") and mark_task_done(bad index).
-  console.print_line("5. contract-failure tests:")
-  total := total + 1
-  let empty_refused: Boolean := false
-  do
-    list.add_task("")
-  rescue
-    empty_refused := true
+  -- 3. Two tasks each send a message; `select` takes whichever is ready first.
+  --    (Both are ready almost at once; select commits to exactly one branch.)
+  let ch_a: Channel[String] := create Channel[String].with_capacity(1)
+  let ch_b: Channel[String] := create Channel[String].with_capacity(1)
+  let sender_a: Task := spawn do ch_a.send("from A") end
+  let sender_b: Task := spawn do ch_b.send("from B") end
+  select
+    when ch_a.receive as msg then
+      console.print_line("3. select received: " + msg)
+    when ch_b.receive as msg then
+      console.print_line("3. select received: " + msg)
   end
-  if empty_refused then passed := passed + 1  console.print_line("  [ok]   add_task('') is refused")
-  else console.print_line("  [FAIL] add_task('') was allowed") end
+  sender_a.await
+  sender_b.await
 
-  total := total + 1
-  let bad_index_refused: Boolean := false
-  do
-    list.mark_task_done(999)
-  rescue
-    bad_index_refused := true
-  end
-  if bad_index_refused then passed := passed + 1  console.print_line("  [ok]   mark_task_done(999) is refused")
-  else console.print_line("  [FAIL] mark_task_done(999) was allowed") end
+  -- 4. await_all collects three independent computations into one array.
+  let a: Task[Integer] := spawn do result := 2 * 2 end
+  let b: Task[Integer] := spawn do result := 3 * 3 end
+  let d: Task[Integer] := spawn do result := 4 * 4 end
+  let results: Array[Integer] := await_all([a, b, d])
+  console.print_line("4. await_all = " + results.get(0).to_string + ", " +
+                     results.get(1).to_string + ", " + results.get(2).to_string)   -- 4, 9, 16
+  assert results = [4, 9, 16]
 
-  -- 6. mark_done twice is refused (precondition not_yet_done).
-  total := total + 1
-  let double_refused: Boolean := false
-  do
-    list.mark_task_done(0)   -- task 0 is already done
-  rescue
-    double_refused := true
+  -- 5. A pipeline that processes SEVERAL values. The producer sends each value
+  --    then CLOSES the channel; the consumer loops on receive until the channel
+  --    is closed AND drained. Closing is how the receiving side knows to stop:
+  --    we close once, on the producer, after the last value.
+  let pipe: Channel[Integer] := create Channel[Integer].with_capacity(4)
+  let producer: Task := spawn do
+    from let i: Integer := 1 until i > 5 do
+      pipe.send(i * 10)
+      i := i + 1
+    end
+    pipe.close          -- signal: no more values are coming
   end
-  if double_refused then passed := passed + 1  console.print_line("  [ok]   marking an already-done task twice is refused")
-  else console.print_line("  [FAIL] double mark_done was allowed") end
+  console.print("5. consumed until closed: ")
+  -- Only receive when a value is buffered; this avoids blocking on an empty
+  -- channel and racing the producer's close. We stop once it is closed AND
+  -- drained.
+  let pipe_out: String := ""
+  from until pipe.is_closed and pipe.size = 0 do
+    if pipe.size > 0 then
+      let v: Integer := pipe.receive
+      console.print(v.to_string + " ")
+      pipe_out := pipe_out + v.to_string + " "
+    end
+  end
+  console.new_line
+  producer.await
+  assert pipe_out.trim = "10 20 30 40 50"
 
-  -- 9.* Grade_Book program.
-  let gb: Grade_Book := create Grade_Book.make()
-  gb.add_score("Ada", 90)
-  gb.add_score("Ada", 80)
-  gb.add_score("Alan", 70)
-  console.print_line("9. Ada average = " + gb.average("Ada").to_string +
-                     ", Alan average = " + gb.average("Alan").to_string)   -- 85.0, 70.0
-  assert gb.average("Ada") = 85.0
-  assert gb.average("Alan") = 70.0
-  total := total + 1
-  let invalid_score_refused: Boolean := false
-  do
-    gb.add_score("Ada", 150)   -- out of range
-  rescue
-    invalid_score_refused := true
+  -- 6.* A two-stage pipeline: read -> transform -> collect, with two channels
+  --     and a worker task. Stage 1 (this routine) feeds raw values into `input`;
+  --     the WORKER reads from `input`, squares each, and writes to `output`;
+  --     stage 3 (this routine) collects from `output`.
+  --     WHERE BLOCKING HAPPENS: send blocks when a channel's buffer is full, and
+  --     receive blocks when a channel is empty — that back-pressure is what keeps
+  --     the stages in step. The worker stops when `input` is closed and drained,
+  --     then closes `output` so the collector likewise knows when to stop.
+  let input: Channel[Integer] := create Channel[Integer].with_capacity(2)
+  let output: Channel[Integer] := create Channel[Integer].with_capacity(2)
+  let worker: Task := spawn do
+    from until input.is_closed and input.size = 0 do
+      if input.size > 0 then
+        let v: Integer := input.receive
+        output.send(v * v)
+      end
+    end
+    output.close
   end
-  if invalid_score_refused then passed := passed + 1  console.print_line("9. [ok] out-of-range score is refused")
-  else console.print_line("9. [FAIL] out-of-range score was allowed") end
-
-  console.print_line("")
-  if passed = total then
-    console.print_line("CHAPTER_26_TESTS: PASS (" + passed.to_string + "/" + total.to_string + ")")
-  else
-    console.print_line("CHAPTER_26_TESTS: FAIL (" + passed.to_string + "/" + total.to_string + ")")
+  let feeder: Task := spawn do
+    across [1, 2, 3, 4] as n do
+      input.send(n)
+    end
+    input.close
   end
-  assert passed = total
+  console.print("6. transformed (squares): ")
+  let squares_out: String := ""
+  from until output.is_closed and output.size = 0 do
+    if output.size > 0 then
+      let v: Integer := output.receive
+      console.print(v.to_string + " ")
+      squares_out := squares_out + v.to_string + " "
+    end
+  end
+  console.new_line
+  feeder.await
+  worker.await
+  assert squares_out.trim = "1 4 9 16"
 end
 
 main()

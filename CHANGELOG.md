@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **The interpreter evaluates each argument of a function call once.** A
+  call to one of the program's own functions went through its Function
+  object with the argument expressions rather than their values, so the
+  interpreter evaluated every argument twice: `show(c.next)` advanced `c`
+  twice and printed its second value. The compiled backend was not
+  affected.
+
+- **Fields set by an unqualified call stick when the routine was called on
+  a non-variable.** In a routine called on something other than a
+  variable, `(create Counter.make).bump_twice` or `a.b.m`, the interpreter
+  made the routine's unqualified calls (`bump`) on a copy of the object, so
+  every field they assigned was lost and `bump_twice` returned 0. The
+  compiled backend was not affected.
+
+- **A lambda in a class invariant can use the object's own features.** An
+  invariant such as `no_overlaps: bookings.all(fn (b: Booking): Boolean do
+  result := clashes(b.start, b.finish) = 1 end)`, whose lambda calls a
+  routine of the class (bare or as `this.clashes`), failed to compile with
+  "Unable to infer expression type during lowering". Lambdas in routine
+  bodies and in `require`/`ensure` already worked; the invariant's are now
+  converted the same way.
+
 - **A deferred routine with no parameters may leave out its parentheses.**
   `area: Real deferred` now declares a deferred routine, as `area: Real do
   ... end` already declared one with a body; before, only `area(): Real
