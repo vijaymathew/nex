@@ -1,0 +1,115 @@
+-- sheet/evaluate.nex: values, and computing the value of a formula.
+intern sheet/Formula
+
+-- A cell's value: a number, or the reason it could not be computed.
+union Value
+  Num(amount: Real)
+  Failed(code: String)
+end
+
+function show_value(v: Value): String do
+  match v of
+    Num(amount)  then result := amount.format(2)
+    Failed(code) then result := code
+  end
+end
+
+-- Anything formulas can read cell values from.
+deferred class Cell_Source
+feature
+  value_of(name: String): Value
+  require
+    valid_name: is_cell_name(name)
+  deferred
+end
+
+function evaluate(e: Expr, cells: Cell_Source): Value do
+  match e of
+    Number(value)              then result := create Num.make(value)
+    Ref(name)                  then result := cells.value_of(name)
+    Negate(operand)            then result := negate(evaluate(operand, cells))
+    Binary(op, left, right)    then result := combine(op, evaluate(left, cells), evaluate(right, cells))
+    Aggregate(fn_name, first, last) then
+      result := aggregate(fn_name, cells_in_range(first, last).map(fn (n: String): Value do
+        result := cells.value_of(n)
+      end))
+  end
+end
+
+function negate(v: Value): Value do
+  match v of
+    Num(amount)  then result := create Num.make(-amount)
+    Failed       then result := v
+  end
+end
+
+function combine(op: Char, a, b: Value): Value
+require
+  known_operator: "+-*/".contains(op.to_string)
+do
+  match a of
+    Failed then result := a
+    Num(amount as x) then
+      match b of
+        Failed then result := b
+        Num(amount as y) then result := arithmetic(op, x, y)
+      end
+  end
+end
+
+function arithmetic(op: Char, x, y: Real): Value
+require
+  known_operator: "+-*/".contains(op.to_string)
+do
+  if op = #+ then
+    result := create Num.make(x + y)
+  elseif op = #- then
+    result := create Num.make(x - y)
+  elseif op = #* then
+    result := create Num.make(x * y)
+  elseif y = 0.0 then
+    result := create Failed.make("#DIV/0!")
+  else
+    result := create Num.make(x / y)
+  end
+end
+
+function aggregate(fn_name: String, values: Array[Value]): Value
+require
+  known_function: is_function_name(fn_name)
+  some_values: values.length > 0
+do
+  result := create Num.make(0.0)
+  let amounts: Array[Real] := []
+  across values as v do
+    match v of
+      Num(amount) then amounts.add(amount)
+      Failed      then result := v
+    end
+  end
+  if amounts.length = values.length then
+    let total := amounts.fold(0.0, fn (acc, x: Real): Real do result := acc + x end)
+    if fn_name = "SUM" then
+      result := create Num.make(total)
+    elseif fn_name = "AVERAGE" then
+      result := create Num.make(total / amounts.length.to_real)
+    elseif fn_name = "MIN" then
+      result := create Num.make(amounts.fold(amounts.get(0), fn (acc, x: Real): Real do result := acc.min(x) end))
+    else
+      result := create Num.make(amounts.fold(amounts.get(0), fn (acc, x: Real): Real do result := acc.max(x) end))
+    end
+  end
+end
+
+-- The cells a formula reads.
+function references(e: Expr): Array[String] do
+  match e of
+    Number                     then result := []
+    Ref(name)                  then result := [name]
+    Negate(operand)            then result := references(operand)
+    Binary(op, left, right)    then result := references(left).concat(references(right))
+    Aggregate(fn_name, first, last) then result := cells_in_range(first, last)
+  end
+ensure
+  all_cells: result.all(fn (n: String): Boolean do result := is_cell_name(n) end)
+end

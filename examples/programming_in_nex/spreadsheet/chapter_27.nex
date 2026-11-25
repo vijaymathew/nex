@@ -1,0 +1,75 @@
+-- The examples of Chapter 27 (A Spreadsheet: Formulas), as a self-checking
+-- program: each assert states what the chapter's REPL session shows.
+intern sheet/Evaluate
+
+-- Cell names
+assert is_cell_name("B3")
+assert not is_cell_name("B0")
+assert column_of("C7") = 2
+assert row_of("C7") = 7
+assert cell_name(2, 7) = "C7"
+assert cells_in_range("A1", "B2") = ["A1", "A2", "B1", "B2"]
+let refused := false
+do
+  let bad := cell_name(26, 1)
+rescue
+  refused := exception.to_string.contains("column_in_range")
+end
+assert column_out_of_range_refused: refused
+
+-- The lexer
+let lexer := create Lexer.make("A1 + 2.5*sum(")
+assert describe_token(lexer.next_token) = "cell A1"
+assert describe_token(lexer.next_token) = "'+'"
+assert describe_token(lexer.next_token) = "number 2.5"
+assert describe_token(lexer.next_token) = "'*'"
+assert describe_token(lexer.next_token) = "name SUM"
+assert describe_token(lexer.next_token) = "'('"
+assert describe_token(lexer.next_token) = "end of formula"
+assert lexer.pos = 13
+
+-- Errors at the boundary
+function try_formula(text: String): String do
+  match parse_formula(text) of
+    Ok as ok then result := "ok: " + ok.value.text
+    Err as e then result := "error: " + e.error
+  end
+end
+assert try_formula(" a1 + A2*2 ") = "ok: a1 + A2*2"
+assert try_formula("(1 + 2") = "error: expected ')' but found end of formula"
+assert try_formula("1 2") = "error: unexpected number 2.0"
+assert try_formula("SUM(A1)") = "error: expected ':' but found ')'"
+assert try_formula("COUNT(A1:A3)") = "error: unknown function COUNT"
+assert try_formula("A1 $ 2") = "error: unexpected '$'"
+
+-- Real division by zero is infinity, not an error
+assert (120.0 / 0.0).is_infinite
+
+-- Testing without a sheet
+class Fixed_Cells inherit Cell_Source
+create
+  make(m: Map[String, Real]) do
+    values := m
+  end
+feature
+  values: Map[String, Real]
+  value_of(name: String): Value do
+    result := create Num.make(values.try_get(name, 0.0))
+  end
+end
+
+function value_text(text: String, cells: Cell_Source): String do
+  match parse_formula(text) of
+    Ok as ok then result := show_value(evaluate(ok.value.expr, cells))
+    Err as e then result := "error: " + e.error
+  end
+end
+
+let cells := create Fixed_Cells.make({"A1": 120.0, "A2": 80.0})
+assert value_text("A1 + A2 * 2", cells) = "280.00"
+assert value_text("SUM(A1:A3)", cells) = "200.00"
+assert value_text("AVERAGE(A1:A2)", cells) = "100.00"
+assert value_text("-A1 + C9", cells) = "-120.00"
+assert value_text("A1 / (A2 - 80)", cells) = "#DIV/0!"
+assert value_text("1 + A1 / 0", cells) = "#DIV/0!"
+print("chapter 27 examples passed")

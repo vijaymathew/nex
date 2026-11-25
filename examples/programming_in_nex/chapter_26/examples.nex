@@ -1,122 +1,296 @@
--- Narrative examples from Chapter 26 (A Complete Program), collected into
--- one self-checking, non-interactive program. Task_List is shown three
--- times, each adding a method; only the final, complete version is kept.
+-- Narrative examples from Chapter 26 (Concurrency), collected into one
+-- self-checking, non-interactive program. Each example is wrapped in its
+-- own `do...end` block so names like `t`/`ch`, reused across many small,
+-- independent demos in the book, don't collide as top-level declarations.
+-- Sleep durations are shortened from the book's illustrative values (5-20
+-- seconds) so the example runs quickly; the behaviour demonstrated doesn't
+-- depend on the exact durations.
 
-class Todo_Item
-  create
-    make(t: String) do
-      title := t
-      done := false
-    end
-  feature
-    title: String
-    done: Boolean
-    mark_done()
-      do
-        done := true
-      ensure
-        now_done: done
-      end
-    is_done(): Boolean do
-      result := done
-    end
-  invariant
-    title_not_empty: title.length > 0
-end
-
-class Task_List
-  create
-    make() do
-      tasks := []
-    end
-  feature
-    tasks: Array[Todo_Item]
-    add_task(title: String)
-      require
-        title_not_empty: title.length > 0
-      do
-        tasks.add(create Todo_Item.make(title))
-      ensure
-        added_title_visible: tasks.get(tasks.length - 1).title = title
-      end
-    task_at(index: Integer): Todo_Item
-      require
-        index_in_range: index >= 0 and index < tasks.length
-      do
-        result := tasks.get(index)
-      end
-    mark_task_done(index: Integer)
-      require
-        index_in_range: index >= 0 and index < tasks.length
-      do
-        task_at(index).mark_done()
-      ensure
-        selected_done: tasks.get(index).done
-      end
-    completed_count(): Integer
-      do
-        result := 0
-        across tasks as task do
-          if task.is_done() then
-            result := result + 1
-          end
-        end
-      ensure
-        count_in_range: result >= 0 and result <= tasks.length
-      end
-    all_done(): Boolean do
-      result := completed_count = tasks.length
-    end
-    size(): Integer do
-      result := tasks.length
-    end
-  invariant
-    storage_exists: tasks /= nil
-end
-
-let todo := create Task_List.make
-todo.add_task("write chapter draft")
-todo.add_task("check examples")
-todo.add_task("revise wording")
-assert todo.size = 3
-assert todo.completed_count = 0
-todo.task_at(0).mark_done()
-todo.task_at(1).mark_done()
-assert todo.completed_count = 2
-assert not todo.all_done
-
-function test_task_list()
 do
-  let todo := create Task_List.make
-  todo.add_task("one")
-  todo.add_task("two")
-  todo.add_task("three")
-
-  if todo.size /= 3 then
-    raise "test failed: size after add"
+  let t: Task[Integer] := spawn do
+    result := 40 + 2
   end
-
-  if todo.completed_count /= 0 then
-    raise "test failed: initial completed count"
-  end
-
-  todo.mark_task_done(1)
-
-  if todo.completed_count /= 1 then
-    raise "test failed: completed count after mark"
-  end
-
-  if todo.all_done then
-    raise "test failed: all_done too early"
-  end
-
-  todo.mark_task_done(0)
-  todo.mark_task_done(2)
-
-  if not todo.all_done then
-    raise "test failed: all_done should be true"
-  end
-
-  print("task list tests passed")
+  assert t.await = 42
 end
-test_task_list()
+
+do
+  let t: Task := spawn do
+    print("background work")
+  end
+  t.await
+end
+
+do
+  let t: Task[String] := spawn do
+    result := "report ready"
+  end
+  assert t.await = "report ready"
+end
+
+do
+  let t: Task[Integer] := spawn do
+    result := 10 * 10
+  end
+  print(t.is_done)
+  assert t.await = 100
+  assert t.is_done
+end
+
+do
+  let t: Task := spawn do
+    sleep(2000)
+  end
+  print(t.cancel)
+  print(t.is_cancelled)
+end
+
+do
+  let t: Task[Integer] := spawn do
+    sleep(300)
+    result := 7
+  end
+  print(t.await(10))
+  print(t.await(1000))
+end
+
+do
+  let ch: Channel[Integer] := create Channel[Integer]
+  let producer: Task := spawn do
+    ch.send(42)
+  end
+  assert ch.receive = 42
+  producer.await
+end
+
+do
+  let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+  ch.send(10)
+  ch.send(20)
+  assert ch.size = 2
+  assert ch.capacity = 2
+end
+
+do
+  let ch: Channel[Integer] := create Channel[Integer].with_capacity(1)
+  assert ch.try_send(5)
+  assert not ch.try_send(6)
+  print(ch.try_receive)
+  print(ch.try_receive)
+end
+
+do
+  let ch: Channel[Integer] := create Channel[Integer].with_capacity(2)
+  ch.send(1)
+  ch.close
+  assert ch.is_closed
+  assert ch.receive = 1
+end
+
+do
+  let slow: Task[Integer] := spawn do
+    sleep(2000)
+    result := 10
+  end
+  let fast: Task[Integer] := spawn do
+    result := 20
+  end
+  assert await_any([slow, fast]) = 20
+end
+
+do
+  let a: Task[Integer] := spawn do
+    result := 1
+  end
+  let b: Task[Integer] := spawn do
+    result := 2
+  end
+  let results: Array[Integer] := await_all([a, b])
+  assert results.get(0) = 1
+  assert results.get(1) = 2
+end
+
+do
+  let ch: Channel[String] := create Channel[String].with_capacity(1)
+  ch.send("done")
+  select
+    when ch.receive as msg then
+      assert msg = "done"
+    else
+      print("nothing ready")
+  end
+end
+
+do
+  let ch: Channel[String] := create Channel[String]
+  select
+    when ch.receive as msg then
+      print(msg)
+    timeout 5 then
+      print("timed out")
+  end
+end
+
+-- Racing tasks and cancelling the rest (Section 26.13). Which search wins
+-- depends on timing; whichever it is, its answer satisfies is_answer.
+-- Any number whose square ends in 609 will do.
+function is_answer(n: Integer): Boolean do
+  result := n * n % 1000 = 609
+end
+
+-- Search `count` numbers from `start` in steps of `step`, stopping early
+-- when `stop` is set. The task's result is -1 if nothing was found.
+function search(start, step, count: Integer, stop: Atomic_Boolean): Task[Integer] do
+  result := spawn do
+    result := -1
+    from let i := 0 until i = count or result /= -1 or stop.load do
+      let n := start + i * step
+      if is_answer(n) then
+        result := n
+      end
+      i := i + 1
+    end
+  end
+end
+
+do
+  let stop := create Atomic_Boolean.make(false)
+  let up := search(1, 1, 1000000, stop)
+  let down := search(1000000, -1, 1000000, stop)
+  let answer: Integer := await_any([up, down])
+  stop.store(true)
+  up.cancel
+  down.cancel
+  assert is_answer(answer)
+  assert answer = 103 or answer = 999897
+end
+
+do
+  let give_up := create Atomic_Boolean.make(false)
+  let evens := search(2, 2, 400000000, give_up)
+  assert no_answer_in_time: evens.await(100) = nil
+  give_up.store(true)
+  evens.cancel
+end
+
+-- Dataflow variables (Section 26.16).
+class Dataflow[T]
+create
+  make do
+    cell := create Channel[T].with_capacity(1)
+    bound := create Atomic_Boolean.make(false)
+  end
+feature
+  cell: Channel[T]
+  bound: Atomic_Boolean
+
+  is_bound: Boolean do
+    result := bound.load
+  end
+
+  bind(v: T) do
+    if not bound.compare_and_set(false, true) then
+      raise "Dataflow.bind: already bound"
+    end
+    cell.send(v)
+  ensure
+    now_bound: is_bound
+  end
+
+  value: T do
+    result := cell.receive
+    cell.send(result)
+  end
+end
+
+do
+  let x := create Dataflow[Integer].make
+  let y := create Dataflow[Integer].make
+  let z := create Dataflow[Integer].make
+  let adder: Task := spawn do
+    z.bind(x.value + y.value)
+  end
+  let doubler: Task := spawn do
+    y.bind(x.value * 2)
+  end
+  let readers := [1, 2, 3, 4].map(fn (k: Integer): Task[Integer] do
+    result := spawn do
+      result := z.value * k
+    end
+  end)
+  x.bind(5)
+  assert z.value = 15
+  assert await_all(readers) = [15, 30, 45, 60]
+  await_all([adder, doubler])
+  let refused := false
+  do
+    x.bind(6)
+  rescue
+    refused := exception.to_string = "Dataflow.bind: already bound"
+  end
+  assert bound_only_once: refused
+  assert x.value = 5
+end
+
+-- A worker pool (Section 26.17), with word_frequencies from Chapter 10.
+function word_frequencies(text: String): Map[String, Integer] do
+  result := {}
+  let words := text.to_lower.split(" ")
+  across words as w do
+    let count := result.try_get(w, 0)
+    result.set(w, count + 1)
+  end
+end
+
+-- Add the counts in `part` to `total`.
+function merge(total, part: Map[String, Integer]) do
+  across part.keys as w do
+    total.set(w, total.try_get(w, 0) + part.get(w))
+  end
+end
+
+-- A worker: count each document from `jobs` until `jobs` is closed and empty.
+function worker(jobs: Channel[String], results: Channel[Map[String, Integer]]): Task do
+  result := spawn do
+    let done := false
+    from until done do
+      select
+        when jobs.receive as doc then
+          results.send(word_frequencies(doc))
+        timeout 50 then
+          done := jobs.is_closed and jobs.size = 0
+      end
+    end
+  end
+end
+
+function count_words(documents: Array[String]): Map[String, Integer] do
+  let jobs: Channel[String] := create Channel[String].with_capacity(2)
+  let results: Channel[Map[String, Integer]] := create Channel[Map[String, Integer]].with_capacity(documents.length)
+  let workers := [worker(jobs, results), worker(jobs, results), worker(jobs, results)]
+  across documents as doc do
+    jobs.send(doc)
+  end
+  jobs.close
+  result := {}
+  from let received := 0 until received = documents.length do
+    select
+      when results.receive as counts then
+        do
+          merge(result, counts)
+          received := received + 1
+        end
+      timeout 2000 then
+        raise "no result for two seconds: is a worker stuck?"
+    end
+  end
+  await_all(workers)
+end
+
+do
+  let totals := count_words(["The cat sat on the mat", "The dog sat on the log",
+                             "A cat and a dog", "The end of the story"])
+  assert totals.keys.sort = ["a", "and", "cat", "dog", "end", "log", "mat", "of", "on", "sat", "story", "the"]
+  assert totals.get("the") = 6
+  assert totals.get("cat") = 2
+  assert totals.get("story") = 1
+end

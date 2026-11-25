@@ -1,0 +1,28 @@
+-- spreadsheet.nex: a spreadsheet on the command line.
+intern sheet/Commands
+
+function main() do
+  let sheet := create Sheet.make
+  console.print_line("Nex spreadsheet. Type help for the commands.")
+  from let done := false until done do
+    console.print("> ")
+    let line := console.read_line
+    if line = nil then
+      done := true
+    else
+      let cmd := parse_command(line)
+      match cmd of
+        Quit then done := true
+        _    then
+          do
+            let output := run(sheet, cmd)
+            if output /= "" then
+              console.print_line(output)
+            end
+          end
+      end
+    end
+  end
+end
+
+main()

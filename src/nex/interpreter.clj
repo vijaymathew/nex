@@ -2828,6 +2828,13 @@
       :else
       (invoke-compiled-object-call ctx obj method has-parens arg-values))))
 
+(def ^:private self-call-target-name
+  "The variable an unqualified call is routed through when the routine making
+   it was invoked on something other than a variable (see
+   eval-call-without-target). No Nex identifier starts with two underscores,
+   so it cannot shadow or be shadowed by a name in the program."
+  "__self_call_target__")
+
 (defn- route-through-caller?
   "Whether an unqualified call on OBJ, the current object as the routine
    sees it, is routed back through TARGET-NAME, the variable the routine was
@@ -2890,12 +2897,15 @@
         (cond
           (or (nex-object? fn-obj) compiled-callable?)
           (if (not= has-parens false)
-            ;; has-parens is true or nil (default): invoke the Function
+            ;; has-parens is true or nil (default): invoke the Function, with
+            ;; the arguments already evaluated. Passing the argument
+            ;; expressions again evaluated each one twice, so an argument
+            ;; with an effect (`show(c.next)`) had it twice.
             (let [call-method (str "call" (count args))]
               (eval-node ctx {:type :call
                               :target method
                               :method call-method
-                              :args args}))
+                              :args (mapv (fn [v] {:type :literal :value v}) arg-values)}))
             ;; has-parens is false: return the Function object
             fn-obj)
 
@@ -2953,14 +2963,25 @@
                           (sync-fields! current-env (:fields called-obj) view nil))]
                   result)
               ;; The enclosing method was invoked on a non-variable target
-              ;; (e.g. `a.b.m()`), so there is no caller variable to route
-              ;; through. Dispatch straight to the current object; rewriting
-              ;; with a nil target would re-enter this branch forever
-              ;; (StackOverflow).
-                (eval-node self-ctx {:type :call
-                                     :target {:type :literal :value updated-obj}
-                                     :method method
-                                     :args literal-args})))
+              ;; (`a.b.m()`, `(create C.make).m`), so there is no caller
+              ;; variable to route through. Bind the current object to a
+              ;; reserved name for the call instead, and copy what the call
+              ;; changed back into the routine's own bindings, as the branch
+              ;; above does through the caller's variable. Calling a literal
+              ;; copy of the object, as this branch once did, lost every field
+              ;; the call assigned; rewriting with a nil target would re-enter
+              ;; this branch forever (StackOverflow).
+                (let [self-env (make-env current-env)
+                      _ (env-define self-env self-call-target-name updated-obj)
+                      result (eval-node (assoc self-ctx :current-env self-env)
+                                        {:type :call
+                                         :target self-call-target-name
+                                         :method method
+                                         :args literal-args})
+                      called-obj (env-lookup self-env self-call-target-name)
+                      _ (when called-obj
+                          (sync-fields! current-env (:fields called-obj) view nil))]
+                  result)))
             (if-let [builtin (get builtins method)]
               (apply builtin ctx arg-values)
               (throw (ex-info (str "Undefined method: " method)

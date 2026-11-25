@@ -3562,13 +3562,19 @@
          :else (first (rewrite-statements-for-closures* ctx local-types captures (:else expr)))))
 
 (defn- rewrite-spawn-for-closures
+  "A `spawn` body runs as a closure, rewritten exactly as a `fn` literal in
+   the same place would be: in this scope, with its captures recorded in
+   this scope's CAPTURES. It used to be rewritten against a fresh capture
+   set that was then dropped, so a spawn inside a `fn` that read a local
+   from outside the `fn` never made the `fn` capture it, and lowering the
+   spawn's construction inside the `fn` failed with \"Unable to infer
+   expression type during lowering\"."
   [ctx local-types captures expr]
-  (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
-        fn-expr (make-synthetic-anonymous-function-expr
+  (let [fn-expr (make-synthetic-anonymous-function-expr
                  []
                  "Any"
                  (:body expr))
-        rewritten-fn (rewrite-expression-for-closures nested-ctx {} (atom {}) fn-expr)]
+        rewritten-fn (rewrite-expression-for-closures ctx local-types captures fn-expr)]
     (assoc expr :fn-expr rewritten-fn)))
 
 (defn- rewrite-expression-for-closures
@@ -4085,7 +4091,20 @@
   (let [ctx (assoc ctx
                    :this-type (:name class-def)
                    :scope-generic-params (vec (class-generic-params class-def)))]
-    (update class-def :body
+    (cond-> class-def
+      ;; A lambda in the class invariant (`no_overlaps: bookings.all(fn (b) =>
+      ;; clashes(b) = 1)`) reaches the object's own features through the
+      ;; captured `this`, as one in a routine's contract does; left alone, its
+      ;; bare `clashes(...)` would resolve against the lambda's own class.
+      (seq (:invariant class-def))
+      (update :invariant
+              (fn [assertions]
+                (mapv #(update % :condition
+                               (fn [c] (rewrite-expression-for-closures
+                                        (assoc ctx :var-types {}) {} (atom {}) c)))
+                      assertions)))
+      true
+      (update :body
             (fn [sections]
               (mapv (fn [section]
                       (case (:type section)
@@ -4104,7 +4123,7 @@
                                   (mapv #(rewrite-callable-for-closures ctx % {}) ctors)))
 
                         section))
-                    sections)))))
+                    sections))))))
 
 (defn- patch-anonymous-function-class-def
   "Rebuild CLASS-DEF's single method member with PATCHED-PARAMS/PATCHED-RETURN

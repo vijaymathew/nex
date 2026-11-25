@@ -71,3 +71,37 @@ print(refused)")
     (is (= expected (run program {}))))
   (testing "interpreted"
     (is (= expected (run program {:interpret? true})))))
+
+(def ^:private invariant-program
+  "class Bag
+create
+  make do xs := [1, 2] end
+feature
+  xs: Array[Integer]
+  twice(n: Integer): Integer do result := n * 2 end
+  add(n: Integer) do xs.add(n) end
+invariant
+  small: xs.all(fn (x: Integer): Boolean do result := twice(x) < 10 end)
+  also_small: xs.all(fn (x: Integer): Boolean do result := this.twice(x) < 10 end)
+end
+
+let b := create Bag.make
+b.add(3)
+print(b.xs)
+do
+  b.add(7)
+rescue
+  print(exception.to_string)
+end")
+
+(def ^:private invariant-expected
+  ["[1, 2, 3]" "\"Class invariant violation: small\""])
+
+(deftest lambdas-in-a-class-invariant-reach-the-object
+  ;; The closure rewrite skipped the class invariant, so a lambda there that
+  ;; called the class's own routine, bare or through `this.`, resolved it
+  ;; against the lambda's own class and failed to compile.
+  (testing "compiled"
+    (is (= invariant-expected (run invariant-program {}))))
+  (testing "interpreted"
+    (is (= invariant-expected (run invariant-program {:interpret? true})))))

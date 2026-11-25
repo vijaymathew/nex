@@ -234,3 +234,40 @@ print(n.items)
 let k := create Bag
 k.put_twice(5, 5)
 print(k.items)")))))
+
+(deftest self-call-from-a-routine-called-on-a-non-variable-test
+  ;; A routine called on something other than a variable, `(create C.make).m`
+  ;; or `a.b.m`, has no caller variable to route its unqualified calls through.
+  ;; The interpreter used to make those calls on a literal copy of the object,
+  ;; so every field they assigned was lost: `bump_twice` returned 0.
+  (testing "fields an unqualified call assigns are seen by the routine that made it"
+    (is (= ["2" "2" "2"]
+           (both "class Counter
+create
+  make do
+    n := 0
+  end
+feature
+  n: Integer
+  bump do
+    n := n + 1
+  end
+  bump_twice: Integer do
+    bump
+    bump
+    result := n
+  end
+end
+class Holder
+create
+  make do
+    counter := create Counter.make
+  end
+feature
+  counter: Counter
+end
+print((create Counter.make).bump_twice)
+let h := create Holder.make
+print(h.counter.bump_twice)
+let c := create Counter.make
+print(c.bump_twice)")))))

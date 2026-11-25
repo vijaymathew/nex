@@ -70,6 +70,15 @@
              (some #(str/includes? path (str dir % sep))
                    ["sample_project" "workspace" "tmp_checks"])))))
 
+(defn- excluded-spreadsheet-main?
+  "programming_in_nex/spreadsheet/'s command-line program, spreadsheet.nex,
+   which reads commands from the console until end of input; its tests.nex
+   and the chapter files beside it cover the same code."
+  [^java.io.File f]
+  (let [sep java.io.File/separator]
+    (and (str/includes? (.getPath f) (str sep "spreadsheet" sep))
+         (= (.getName f) "spreadsheet.nex"))))
+
 (defn- tutorial-build-path?
   "Anything under a tutorial's build/ folder (neural_network/, digital_map/):
    the git-ignored output of tutorial/build.py, one copy of the project per
@@ -106,8 +115,9 @@
 (def ^:private example-temp-dirs ["tmp_io" "tmp_bin_io" "tmp_dupcheck" "tmp_radar_check"])
 
 ;; Files examples write into the folder they run in, which is the repository
-;; root here: graphics_example.nex saves the picture it draws as scene.png.
-(def ^:private example-temp-files ["scene.png" "mandelbrot.png"])
+;; root here: graphics_example.nex saves the picture it draws as scene.png,
+;; and the spreadsheet's tests.nex saves and loads test_sheet.txt.
+(def ^:private example-temp-files ["scene.png" "mandelbrot.png" "test_sheet.txt"])
 
 (defn- example-files []
   (->> (file-seq (io/file "examples"))
@@ -117,6 +127,7 @@
        (remove excluded-contracts-at-work-path?)
        (remove excluded-neural-network-path?)
        (remove excluded-coding-agent-path?)
+       (remove excluded-spreadsheet-main?)
        (remove tutorial-build-path?)
        (sort-by #(.getPath ^java.io.File %))))
 

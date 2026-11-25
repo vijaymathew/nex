@@ -1,0 +1,204 @@
+-- sheet/sheet.nex: the cells of a spreadsheet, kept up to date.
+intern sheet/Evaluate
+
+class Cell
+create
+  make(n: String, f: Formula) do
+    name := n
+    formula := f
+    value := create Num.make(0.0)
+  end
+feature
+  name: String
+  formula: Formula
+  value: Value
+
+  reads: Array[String] do
+    result := references(formula.expr)
+  end
+
+  set_value(v: Value) do
+    value := v
+  end
+invariant
+  valid_name: is_cell_name(name)
+end
+
+-- What formulas see of a sheet: the values of its cells, and nothing else.
+class Cell_Values inherit Cell_Source
+create
+  make(c: Map[String, Cell]) do
+    cells := c
+  end
+feature
+  cells: Map[String, Cell]
+
+  value_of(name: String): Value do
+    if cells.contains_key(name) then
+      result := cells.get(name).value
+    else
+      result := create Num.make(0.0)
+    end
+  end
+end
+
+class Sheet
+create
+  make do
+    cells := {}
+    values := create Cell_Values.make(cells)
+  end
+feature
+  cells: Map[String, Cell]
+  values: Cell_Values
+
+  count: Integer do
+    result := cells.size
+  end
+
+  has(name: String): Boolean do
+    result := cells.contains_key(name)
+  end
+
+  value_of(name: String): Value
+  require
+    valid_name: is_cell_name(name)
+  do
+    result := values.value_of(name)
+  end
+
+  text_of(name: String): String
+  require
+    valid_name: is_cell_name(name)
+  do
+    result := ""
+    if has(name) then
+      result := cells.get(name).formula.text
+    end
+  end
+
+  -- Does `name` read `other`, directly or through other cells?
+  depends_on(name, other: String): Boolean
+  require
+    valid_names: is_cell_name(name) and is_cell_name(other)
+  do
+    result := false
+    let seen: Set[String] := #{}
+    let pending := reads_of(name)
+    from until result or pending.is_empty do
+      let next := pending.get(pending.length - 1)
+      pending.remove(pending.length - 1)
+      if next = other then
+        result := true
+      elseif not seen.contains(next) then
+        seen.add(next)
+        pending := pending.concat(reads_of(next))
+      end
+    end
+  end
+
+  reads_of(name: String): Array[String] do
+    result := []
+    if has(name) then
+      result := cells.get(name).reads
+    end
+  end
+
+  -- Would giving `name` this formula make it depend on itself?
+  would_cycle(name: String, f: Formula): Boolean
+  require
+    valid_name: is_cell_name(name)
+  do
+    result := false
+    across references(f.expr) as r do
+      if r = name or depends_on(r, name) then
+        result := true
+      end
+    end
+  end
+
+  set(name: String, f: Formula)
+  require
+    valid_name: is_cell_name(name)
+    no_cycle: not would_cycle(name, f)
+  do
+    cells.put(name, create Cell.make(name, f))
+    recalculate
+  ensure
+    stored: text_of(name) = f.text
+  end
+
+  clear(name: String)
+  require
+    valid_name: is_cell_name(name)
+  do
+    cells.remove(name)
+    recalculate
+  ensure
+    gone: not has(name)
+  end
+
+  -- Every cell, each after the cells it reads.
+  evaluation_order: Array[String] do
+    result := []
+    across cells.keys.sort as name do
+      visit(name, result)
+    end
+  ensure
+    every_cell_once: result.length = count
+    reads_come_first: reads_come_first(result)
+  end
+
+  -- Does every cell in `order` come after the stored cells it reads?
+  reads_come_first(order: Array[String]): Boolean do
+    result := true
+    across order as name do
+      across reads_of(name) as r do
+        if has(r) and order.index_of(r) > order.index_of(name) then
+          result := false
+        end
+      end
+    end
+  end
+
+  visit(name: String, order: Array[String]) do
+    if has(name) and not order.contains(name) then
+      across reads_of(name) as r do
+        visit(r, order)
+      end
+      order.add(name)
+    end
+  end
+
+  recalculate do
+    across evaluation_order as name do
+      let c := cells.get(name)
+      c.set_value(evaluate(c.formula.expr, values))
+    end
+  ensure
+    up_to_date: is_up_to_date
+  end
+
+  -- Does every cell hold the value of its formula?
+  is_up_to_date: Boolean do
+    result := true
+    across cells.values as c do
+      if c.value /= evaluate(c.formula.expr, values) then
+        result := false
+      end
+    end
+  end
+
+  -- Does no cell depend on itself?
+  is_acyclic: Boolean do
+    result := true
+    across cells.keys as name do
+      if depends_on(name, name) then
+        result := false
+      end
+    end
+  end
+invariant
+  acyclic: is_acyclic
+  consistent: is_up_to_date
+end

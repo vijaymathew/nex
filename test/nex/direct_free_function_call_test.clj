@@ -142,3 +142,33 @@ function try_checked(): String do
 end
 print(try_fail())
 print(try_checked())")))))
+
+(deftest each-argument-is-evaluated-once-test
+  ;; The interpreter calls a free function through its Function object, and
+  ;; used to pass that call the argument expressions rather than their values,
+  ;; so it evaluated every argument twice: `show(c.next)` printed "got 2".
+  (testing "an argument with an effect has it once"
+    (is (= ["\"got 1\"" "1" "\"got 2 and 3\"" "3"]
+           (both "class Counter
+create
+  make do
+    n := 0
+  end
+feature
+  n: Integer
+  next: Integer do
+    n := n + 1
+    result := n
+  end
+end
+function show(i: Integer): String do
+  result := \"got \" + i.to_string
+end
+function show_two(i, j: Integer): String do
+  result := \"got \" + i.to_string + \" and \" + j.to_string
+end
+let c := create Counter.make
+print(show(c.next))
+print(c.n)
+print(show_two(c.next, c.next))
+print(c.n)")))))

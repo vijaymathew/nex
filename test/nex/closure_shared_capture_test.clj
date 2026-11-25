@@ -412,3 +412,32 @@ print(results)")
           values (->> (re-seq #"\d+" line) (map #(Integer/parseInt %)))]
       (is (= 5 (count values)) (str "expected 5 results, got " (pr-str line)))
       (is (every? #{0 10 20 30 40 50} values) (str "every result should be i*10 for some i in 0..5, got " (pr-str line))))))
+
+(deftest spawn-inside-a-fn-capturing-an-outer-local-test
+  ;; A spawn body was rewritten against a capture set of its own that was
+  ;; then dropped, so a spawn inside a `fn` that read a local declared
+  ;; outside the `fn` never made the `fn` capture it: the compiled backend
+  ;; failed with "Unable to infer expression type during lowering".
+  (testing "in a function body"
+    (is (= ["[5, 10]"]
+           (both "function f(): Array[Integer] do
+  let x: Integer := 5
+  let readers := [1, 2].map(fn (k: Integer): Task[Integer] do
+    result := spawn do
+      result := x * k
+    end
+  end)
+  result := await_all(readers)
+end
+print(f())"))))
+  (testing "in a scoped block"
+    (is (= ["[7, 14, 21]"]
+           (both "do
+  let base: Integer := 7
+  let tasks := [1, 2, 3].map(fn (k: Integer): Task[Integer] do
+    result := spawn do
+      result := base * k
+    end
+  end)
+  print(await_all(tasks))
+end")))))
