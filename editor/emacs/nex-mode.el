@@ -4,7 +4,7 @@
 
 ;; Author: Nex Contributors
 ;; Keywords: languages, nex, design-by-contract
-;; Version: 0.7.8
+;; Version: 0.7.9
 ;; Package-Requires: ((emacs "24.3"))
 ;; URL: https://github.com/vijaymathew/nex
 

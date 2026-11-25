@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.9 - 2026-11-25
+
 - **A `spawn` inside a `fn` can use a local from outside the `fn`.**
   `[1, 2].map(fn (k: Integer): Task[Integer] do result := spawn do result
   := x * k end end)`, with `x` a local of the enclosing routine or block,
