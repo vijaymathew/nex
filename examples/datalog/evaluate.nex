@@ -1,0 +1,172 @@
+-- evaluate.nex: deriving every fact the rules imply.
+
+intern Database
+
+-- A way of bringing a database to a fixpoint of some rules: a state in
+-- which applying any rule derives nothing new.
+deferred class Evaluator
+feature
+  -- How many facts the joins have looked at: a measure of the work done.
+  attempts: Integer
+
+  -- How many times the rules were applied in turn.
+  rounds: Integer
+
+  run(rules: Array[Rule], db: Database)
+  require
+    safe: all_safe(rules)
+    negations_settled: negations_settled(rules)
+  deferred
+  ensure
+    fixpoint: is_fixpoint(rules, db)
+    only_grows: db.count >= old db.count
+  end
+
+  -- Note that another round of applying the rules has begun.
+  count_round do
+    rounds := rounds + 1
+  end
+
+  -- Every set of bindings that satisfies the body of `r` in `db`.
+  solutions(r: Rule, db: Database): Array[Bindings] do
+    result := []
+    join(r.body, 0, create Bindings.empty, db, result)
+  end
+
+  -- Extend `b` to satisfy body.get(i), body.get(i + 1) and so on, adding
+  -- every complete extension to `found`.
+  join(body: Array[Literal], i: Integer, b: Bindings, db: Database, found: Array[Bindings])
+  require
+    in_body: 0 <= i and i <= body.length
+  do
+    if i = body.length then
+      found.add(b)
+    else
+      match body.get(i) of
+        Positive(atom) then
+          across source(i, atom, b, db) as f do
+            attempts := attempts + 1
+            let next := match_atom(atom, f, b)
+            if next /= nil then
+              join(body, i + 1, next, db, found)
+            end
+          end
+        Compare(op, left, right) then
+          if holds(op, substitute_term(left, b), substitute_term(right, b)) then
+            join(body, i + 1, b, db, found)
+          end
+        Negated(atom) then
+          if not db.contains(substitute(atom, b)) then
+            join(body, i + 1, b, db, found)
+          end
+      end
+    end
+  end
+
+  -- Where literal `i` of a body finds its facts: here, the database.
+  source(i: Integer, atom: Atom, b: Bindings, db: Database): Array[Atom] do
+    result := db.candidates(atom, b)
+  end
+end
+
+-- Does applying any of `rules` to `db` derive a fact it does not have?
+function is_fixpoint(rules: Array[Rule], db: Database): Boolean do
+  result := true
+  let e := create Naive_Evaluator.make
+  across rules as r do
+    across e.solutions(r, db) as b do
+      if not db.contains(substitute(r.head, b)) then
+        result := false
+      end
+    end
+  end
+end
+
+-- Apply every rule to everything, again and again, until a round adds
+-- nothing.
+class Naive_Evaluator inherit Evaluator
+create
+  make do
+  end
+feature
+  run(rules: Array[Rule], db: Database) do
+    let changed := true
+    from until not changed do
+      changed := false
+      count_round
+      across rules as r do
+        across solutions(r, db) as b do
+          if db.add_derived(substitute(r.head, b), r, b) then
+            changed := true
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Is `l` a positive literal, one that facts can be found for?
+function is_positive(l: Literal): Boolean do
+  match l of
+    Positive then result := true
+    _        then result := false
+  end
+end
+
+-- After the first round, join each rule only against the facts that the
+-- previous round added: a new fact needs at least one new premise.
+class Semi_Naive_Evaluator inherit Evaluator
+create
+  make do
+    delta := create Database.make
+    delta_at := -1
+  end
+feature
+  -- The facts the previous round added.
+  delta: Database
+  -- Which literal of the body reads `delta`; -1 for none.
+  delta_at: Integer
+
+  source(i: Integer, atom: Atom, b: Bindings, db: Database): Array[Atom] do
+    if i = delta_at then
+      result := delta.candidates(atom, b)
+    else
+      result := db.candidates(atom, b)
+    end
+  end
+
+  run(rules: Array[Rule], db: Database) do
+    -- The first round has nothing to compare with: every rule, every fact.
+    count_round
+    delta_at := -1
+    let fresh := create Database.make
+    across rules as r do
+      apply(r, db, fresh)
+    end
+    from until fresh.count = 0 do
+      count_round
+      delta := fresh
+      fresh := create Database.make
+      across rules as r do
+        from let i := 0 until i = r.body.length do
+          if is_positive(r.body.get(i)) then
+            delta_at := i
+            apply(r, db, fresh)
+          end
+          i := i + 1
+        end
+      end
+    end
+    delta_at := -1
+  end
+
+  -- Derive what `r` gives now, adding the new facts to `db` and `fresh`.
+  apply(r: Rule, db: Database, fresh: Database) do
+    across solutions(r, db) as b do
+      let f := substitute(r.head, b)
+      if db.add_derived(f, r, b) then
+        fresh.add(f)
+      end
+    end
+  end
+end

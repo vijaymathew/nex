@@ -1,0 +1,116 @@
+-- analysis.nex: checking a whole program before running it, and running
+-- it one stratum at a time.
+
+intern Evaluate
+
+-- The stratum of every predicate the rules define: the predicates a rule
+-- negates must come in an earlier stratum than its head, and those it
+-- uses positively in the same stratum or an earlier one.
+class Stratifier
+create
+  make(rules: Array[Rule]) do
+    level := {}
+    problem := ""
+    across rules as r do
+      level.put(r.head.predicate, 0)
+    end
+    -- Raise levels until every rule is satisfied. A program whose levels
+    -- keep rising past the number of predicates has a cycle through a
+    -- negation, and cannot be stratified.
+    let changed := true
+    from until not changed or problem /= "" do
+      changed := false
+      across rules as r do
+        across r.body as l do
+          let needed := required_level(l)
+          if needed > level.get(r.head.predicate) then
+            level.put(r.head.predicate, needed)
+            changed := true
+            if needed > level.size then
+              problem := r.head.predicate + " depends on its own negation, through the rule: " + r.text
+            end
+          end
+        end
+      end
+    end
+  end
+feature
+  level: Map[String, Integer]
+  -- Why the rules cannot be stratified, or "".
+  problem: String
+
+  -- The lowest level a rule's head can have, given one body literal.
+  required_level(l: Literal): Integer do
+    result := 0
+    match l of
+      Positive(atom) then result := level.try_get(atom.predicate, 0)
+      Negated(atom)  then result := level.try_get(atom.predicate, 0) + 1
+      Compare        then result := 0
+    end
+  end
+
+  -- The rules, grouped by the level of their heads, lowest first.
+  strata(rules: Array[Rule]): Array[Array[Rule]]
+  require
+    stratified: problem = ""
+  do
+    result := []
+    let top := 0
+    across level.values as n do
+      top := top.max(n)
+    end
+    from let k := 0 until k > top do
+      let group: Array[Rule] := []
+      across rules as r do
+        if level.get(r.head.predicate) = k then
+          group.add(r)
+        end
+      end
+      if not group.is_empty then
+        result.add(group)
+      end
+      k := k + 1
+    end
+  ensure
+    each_settled: all_settled(result)
+  end
+
+  all_settled(groups: Array[Array[Rule]]): Boolean do
+    result := true
+    across groups as g do
+      if not negations_settled(g) then
+        result := false
+      end
+    end
+  end
+end
+
+-- What is wrong with `p` before it can run, or "" if nothing is.
+function program_problem(p: Datalog_Program): String do
+  result := ""
+  across p.rules as r do
+    if result = "" and not r.is_safe then
+      result := r.safety_problem + ", in the rule " + r.text
+    end
+  end
+  if result = "" then
+    result := (create Stratifier.make(p.rules)).problem
+  end
+end
+
+-- Load `p`'s facts into `db` and derive everything its rules imply, one
+-- stratum at a time.
+function evaluate_program(p: Datalog_Program, db: Database, e: Evaluator)
+require
+  runnable: program_problem(p) = ""
+do
+  across p.facts as f do
+    db.add(f)
+  end
+  let stratifier := create Stratifier.make(p.rules)
+  across stratifier.strata(p.rules) as group do
+    e.run(group, db)
+  end
+ensure
+  fixpoint: is_fixpoint(p.rules, db)
+end

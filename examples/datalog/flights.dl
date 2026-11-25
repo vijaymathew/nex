@@ -1,0 +1,19 @@
+% flights.dl: where can you get to, flying only short hops?
+
+flight(lisbon, madrid, 500).
+flight(madrid, paris, 1050).
+flight(madrid, barcelona, 480).
+flight(barcelona, rome, 860).
+flight(rome, athens, 1050).
+flight(paris, oslo, 1340).
+flight(lisbon, new_york, 5400).
+
+short(From, To) :- flight(From, To, Km), Km < 1000.
+
+reachable(From, To) :- short(From, To).
+reachable(From, To) :- short(From, Via), reachable(Via, To).
+
+airport(A) :- flight(A, _, _).
+airport(A) :- flight(_, A, _).
+
+?- reachable(lisbon, Where).

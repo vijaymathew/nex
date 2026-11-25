@@ -1,0 +1,335 @@
+% ===========================================================================
+\chapter{Reading Datalog: the parser}\label{ch:parser}
+
+Tokens say what the words are, not what they mean together. The rules for
+how tokens combine are Datalog's \emph{grammar}, and they are short enough
+to write down in full, as the first lines of the parser:
+
+\begin{newfile}{parser.nex}
+-- parser.nex: reading a Datalog program.
+--
+--   program  ::= { clause }
+--   clause   ::= atom [ ":-" literal { "," literal } ] "."
+--              | "?-" atom "."
+--   literal  ::= atom | "not" atom | term op term
+--   op       ::= "=" | "!=" | "<" | "<=" | ">" | ">="
+--   atom     ::= name [ "(" term { "," term } ")" ]
+--   term     ::= name | variable | integer | string
+
+intern Lexer
+intern data/Result
+
+class Parser
+create
+  make(text: String) do
+    let lexer := create Lexer.make(text)
+    tokens := []
+    lines := []
+    from let done := false until done do
+      let t := lexer.next_token
+      tokens.add(t)
+      lines.add(lexer.line)
+      match t of
+        End_Of_Input then done := true
+        _            then done := false
+      end
+    end
+    index := 0
+    anonymous := 0
+  end
+feature
+  tokens: Array[Token]
+  -- The line each token is on.
+  lines: Array[Integer]
+  index: Integer
+  -- How many `_` variables have been read, so that each gets its own name.
+  anonymous: Integer
+\end{newfile}
+
+Read \code{::=} as ``is'', \code{|} as ``or'', braces as ``any number of
+times'' and square brackets as ``optionally''. A program is any number of
+clauses; a clause is a fact, a rule or a question; and so on down to a
+term.
+
+The parser reads the whole text into tokens first, recording each token's
+line beside it, and then walks along the list. The grammar translates into
+code almost word for word: one routine for each rule of the grammar, each
+calling the routines for the rules it mentions. This style is called
+\emph{recursive descent}.
+
+\section{Moving along the tokens}
+
+A few small routines do the walking. \code{advance} has the precondition
+\code{not_at_end}: no correct parser ever steps past \code{End_Of_Input},
+and if one did, the mistake would be reported at the step that went too
+far. \code{located} prefixes a message with the line it is about, and
+\code{expect} uses it when the punctuation it needs is not there.
+
+\begin{continued}{parser.nex}
+  current: Token do
+    result := tokens.get(index)
+  end
+
+  at_end: Boolean do
+    match current of
+      End_Of_Input then result := true
+      _            then result := false
+    end
+  end
+
+  at_punct(p: String): Boolean do
+    match current of
+      Punct(text) then result := text = p
+      _           then result := false
+    end
+  end
+
+  advance
+  require
+    not_at_end: not at_end
+  do
+    index := index + 1
+  ensure
+    moved_on: index = old index + 1
+  end
+
+  -- `message`, saying where in the program it applies.
+  located(message: String): String do
+    result := "line " + lines.get(index).to_string + ": " + message
+  end
+
+  expect(p: String) do
+    if at_punct(p) then
+      advance
+    else
+      raise located("expected '" + p + "' but found " + token_text(current))
+    end
+  end
+\end{continued}
+
+\section{Clauses}
+
+A program is clauses until the end of the input. A clause that starts with
+\code{?-} is a question; otherwise it starts with an atom, which is the
+head of a rule if \code{:-} follows and a fact if a full stop does.
+
+\begin{continued}{parser.nex}
+  -- The whole program.
+  program: Datalog_Program do
+    result := create Datalog_Program.make
+    from until at_end do
+      clause(result)
+    end
+  ensure
+    all_read: at_end
+  end
+
+  clause(p: Datalog_Program) do
+    if at_punct("?-") then
+      advance
+      p.add_query(atom)
+      expect(".")
+    else
+      let head := atom
+      if at_punct(":-") then
+        advance
+        let body: Array[Literal] := [literal]
+        from until not at_punct(",") do
+          advance
+          body.add(literal)
+        end
+        expect(".")
+        p.add_rule(create Rule.make(head, body))
+      else
+        expect(".")
+        if not head.is_ground then
+          raise located("a fact cannot have variables: " + head.text)
+        end
+        p.add_fact(head)
+      end
+    end
+  end
+\end{continued}
+
+A fact with a variable in it is not a fact, so the parser refuses it with
+a message, rather than leaving it to the precondition of \code{add_fact}.
+That is the division of labour this tutorial follows throughout: mistakes
+in the \emph{input} are reported as messages, and preconditions are kept
+for mistakes in the \emph{program}.
+
+\section{Literals}
+
+A literal can begin in three ways. \code{not} followed by a name is a
+negated atom. A name \emph{not} followed by a comparison operator is an
+atom. Anything else is a test such as \code{X != Y}, whose left side may be
+a constant as well as a variable. Telling these apart needs a peek at the
+token after the current one, which \code{ahead} provides.
+
+\begin{continued}{parser.nex}
+  literal: Literal do
+    if is_name("not", 0) and is_any_name(1) then
+      advance
+      result := create Negated.make(atom)
+    elseif is_any_name(0) and not is_operator(1) then
+      result := create Positive.make(atom)
+    else
+      let left := term
+      if not is_operator(0) then
+        raise located("expected a comparison but found " + token_text(current))
+      end
+      let op := punct_text(current)
+      advance
+      result := create Compare.make(op, left, term)
+    end
+  end
+
+  -- The token `k` places after the current one, or the last token.
+  ahead(k: Integer): Token do
+    result := tokens.get((index + k).min(tokens.length - 1))
+  end
+
+  is_name(name: String, k: Integer): Boolean do
+    match ahead(k) of
+      Name_Token(text) then result := text = name
+      _                then result := false
+    end
+  end
+
+  is_any_name(k: Integer): Boolean do
+    match ahead(k) of
+      Name_Token then result := true
+      _          then result := false
+    end
+  end
+
+  is_operator(k: Integer): Boolean do
+    result := ["=", "!=", "<", "<=", ">", ">="].contains(punct_text(ahead(k)))
+  end
+\end{continued}
+
+\section{Atoms and terms}
+
+An atom is a name, optionally followed by terms in parentheses. A term is a
+single token, and its kind decides what it becomes. One variable is special:
+\code{_} means ``something, I don't care what'', and each \code{_} must be
+a different variable, or \code{flight(A, _, _)} would only match flights
+whose second and third arguments were equal. So the parser gives each one
+its own name, \code{_1}, \code{_2} and so on.
+
+\begin{continued}{parser.nex}
+  atom: Atom do
+    match current of
+      Name_Token(text) then
+        do
+          advance
+          let args: Array[Term] := []
+          if at_punct("(") then
+            advance
+            args.add(term)
+            from until not at_punct(",") do
+              advance
+              args.add(term)
+            end
+            expect(")")
+          end
+          result := create Atom.make(text, args)
+        end
+      _ then raise located("expected a predicate but found " + token_text(current))
+    end
+  end
+
+  term: Term do
+    match current of
+      Name_Token(text) then
+        do
+          advance
+          result := create Symbol.make(text)
+        end
+      Var_Token(text) if text = "_" then
+        do
+          advance
+          anonymous := anonymous + 1
+          result := create Var.make("_" + anonymous.to_string)
+        end
+      Var_Token(text) then
+        do
+          advance
+          result := create Var.make(text)
+        end
+      Int_Token(value) then
+        do
+          advance
+          result := create Int.make(value)
+        end
+      Text_Token(value) then
+        do
+          advance
+          result := create Text.make(value)
+        end
+      _ then raise located("expected a term but found " + token_text(current))
+    end
+  end
+invariant
+  same_length: lines.length = tokens.length
+  inside_tokens: 0 <= index and index < tokens.length
+end
+\end{continued}
+
+\section{Errors at the boundary}
+
+The parser raises an exception at the first mistake. That is convenient
+inside it: a mistake found five calls deep in \code{term} goes straight
+out, without every routine in between checking and passing it along. But a
+caller should not have to know that. Mistakes in a program are an ordinary
+outcome, so the one function the rest of the engine uses turns them into a
+\code{Result} from Nex's \code{data/Result} library: an \code{Ok} holding
+the program, or an \code{Err} holding the message.
+
+\begin{continued}{parser.nex}
+-- The program `text` describes, or what is wrong with it.
+function parse_program(text: String): Result[Datalog_Program, String] do
+  let parser := create Parser.make(text)
+  result := create Ok[Datalog_Program, String].make(parser.program)
+rescue
+  result := create Err[Datalog_Program, String].make(exception.to_string)
+end
+\end{continued}
+
+\section{Trying it out}
+
+\begin{tryit}{try_parser.nex}
+intern Parser
+intern io/Path
+
+function show(text: String) do
+  match parse_program(text) of
+    Ok as ok then
+      do
+        across ok.value.facts as f do
+          console.print_line("fact      " + f.text + ".")
+        end
+        across ok.value.rules as r do
+          console.print_line("rule      " + r.text)
+        end
+        across ok.value.queries as q do
+          console.print_line("question  " + q.text)
+        end
+      end
+    Err as e then console.print_line("error: " + e.error)
+  end
+end
+
+show(create Path.make(program.working_directory + "/family.dl").read_text)
+show("airport(A) :- flight(A, _, _).")
+show("parent(alice bob).")
+show("parent(X, bob).")
+show("p(a).\nq(b) :- p(a)\nr(c).")
+show("p(a) & q(b).")
+\end{tryit}
+\tryoutput{try_parser}
+
+The parser reads every clause of \code{family.dl} and prints it back. The
+\code{_} variables have been numbered. The mistakes are reported with their
+lines: the full stop missing at the end of line 2, after
+\code{q(b) :- p(a)}, is only noticed on line 3, when \code{r} turns up
+where the full stop should be.

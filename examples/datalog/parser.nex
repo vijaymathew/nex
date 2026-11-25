@@ -1,0 +1,219 @@
+-- parser.nex: reading a Datalog program.
+--
+--   program  ::= { clause }
+--   clause   ::= atom [ ":-" literal { "," literal } ] "."
+--              | "?-" atom "."
+--   literal  ::= atom | "not" atom | term op term
+--   op       ::= "=" | "!=" | "<" | "<=" | ">" | ">="
+--   atom     ::= name [ "(" term { "," term } ")" ]
+--   term     ::= name | variable | integer | string
+
+intern Lexer
+intern data/Result
+
+class Parser
+create
+  make(text: String) do
+    let lexer := create Lexer.make(text)
+    tokens := []
+    lines := []
+    from let done := false until done do
+      let t := lexer.next_token
+      tokens.add(t)
+      lines.add(lexer.line)
+      match t of
+        End_Of_Input then done := true
+        _            then done := false
+      end
+    end
+    index := 0
+    anonymous := 0
+  end
+feature
+  tokens: Array[Token]
+  -- The line each token is on.
+  lines: Array[Integer]
+  index: Integer
+  -- How many `_` variables have been read, so that each gets its own name.
+  anonymous: Integer
+
+  current: Token do
+    result := tokens.get(index)
+  end
+
+  at_end: Boolean do
+    match current of
+      End_Of_Input then result := true
+      _            then result := false
+    end
+  end
+
+  at_punct(p: String): Boolean do
+    match current of
+      Punct(text) then result := text = p
+      _           then result := false
+    end
+  end
+
+  advance
+  require
+    not_at_end: not at_end
+  do
+    index := index + 1
+  ensure
+    moved_on: index = old index + 1
+  end
+
+  -- `message`, saying where in the program it applies.
+  located(message: String): String do
+    result := "line " + lines.get(index).to_string + ": " + message
+  end
+
+  expect(p: String) do
+    if at_punct(p) then
+      advance
+    else
+      raise located("expected '" + p + "' but found " + token_text(current))
+    end
+  end
+
+  -- The whole program.
+  program: Datalog_Program do
+    result := create Datalog_Program.make
+    from until at_end do
+      clause(result)
+    end
+  ensure
+    all_read: at_end
+  end
+
+  clause(p: Datalog_Program) do
+    if at_punct("?-") then
+      advance
+      p.add_query(atom)
+      expect(".")
+    else
+      let head := atom
+      if at_punct(":-") then
+        advance
+        let body: Array[Literal] := [literal]
+        from until not at_punct(",") do
+          advance
+          body.add(literal)
+        end
+        expect(".")
+        p.add_rule(create Rule.make(head, body))
+      else
+        expect(".")
+        if not head.is_ground then
+          raise located("a fact cannot have variables: " + head.text)
+        end
+        p.add_fact(head)
+      end
+    end
+  end
+
+  literal: Literal do
+    if is_name("not", 0) and is_any_name(1) then
+      advance
+      result := create Negated.make(atom)
+    elseif is_any_name(0) and not is_operator(1) then
+      result := create Positive.make(atom)
+    else
+      let left := term
+      if not is_operator(0) then
+        raise located("expected a comparison but found " + token_text(current))
+      end
+      let op := punct_text(current)
+      advance
+      result := create Compare.make(op, left, term)
+    end
+  end
+
+  -- The token `k` places after the current one, or the last token.
+  ahead(k: Integer): Token do
+    result := tokens.get((index + k).min(tokens.length - 1))
+  end
+
+  is_name(name: String, k: Integer): Boolean do
+    match ahead(k) of
+      Name_Token(text) then result := text = name
+      _                then result := false
+    end
+  end
+
+  is_any_name(k: Integer): Boolean do
+    match ahead(k) of
+      Name_Token then result := true
+      _          then result := false
+    end
+  end
+
+  is_operator(k: Integer): Boolean do
+    result := ["=", "!=", "<", "<=", ">", ">="].contains(punct_text(ahead(k)))
+  end
+
+  atom: Atom do
+    match current of
+      Name_Token(text) then
+        do
+          advance
+          let args: Array[Term] := []
+          if at_punct("(") then
+            advance
+            args.add(term)
+            from until not at_punct(",") do
+              advance
+              args.add(term)
+            end
+            expect(")")
+          end
+          result := create Atom.make(text, args)
+        end
+      _ then raise located("expected a predicate but found " + token_text(current))
+    end
+  end
+
+  term: Term do
+    match current of
+      Name_Token(text) then
+        do
+          advance
+          result := create Symbol.make(text)
+        end
+      Var_Token(text) if text = "_" then
+        do
+          advance
+          anonymous := anonymous + 1
+          result := create Var.make("_" + anonymous.to_string)
+        end
+      Var_Token(text) then
+        do
+          advance
+          result := create Var.make(text)
+        end
+      Int_Token(value) then
+        do
+          advance
+          result := create Int.make(value)
+        end
+      Text_Token(value) then
+        do
+          advance
+          result := create Text.make(value)
+        end
+      _ then raise located("expected a term but found " + token_text(current))
+    end
+  end
+invariant
+  same_length: lines.length = tokens.length
+  inside_tokens: 0 <= index and index < tokens.length
+end
+
+-- The program `text` describes, or what is wrong with it.
+function parse_program(text: String): Result[Datalog_Program, String] do
+  let parser := create Parser.make(text)
+  result := create Ok[Datalog_Program, String].make(parser.program)
+rescue
+  result := create Err[Datalog_Program, String].make(exception.to_string)
+end

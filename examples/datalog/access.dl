@@ -1,0 +1,21 @@
+% access.dl: who may read which file, with exceptions.
+
+user(ann).
+user(bo).
+user(cy).
+file(report).
+file(payroll).
+secret(payroll).
+banned(bo).
+manager(ann).
+
+% Anyone not banned may read a file that is not secret; managers may
+% read secret files too.
+can_read(U, F) :- user(U), file(F), not banned(U), not secret(F).
+can_read(U, F) :- manager(U), file(F), secret(F).
+
+% Everything else is refused.
+refused(U, F) :- user(U), file(F), not can_read(U, F).
+
+?- can_read(Who, report).
+?- refused(Who, What).

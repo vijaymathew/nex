@@ -1,0 +1,289 @@
+% ===========================================================================
+\chapter{Negation, in layers}\label{ch:negation}
+
+Many rules are about what is \emph{not} so. Look at \code{access.dl}:
+
+\begin{shell}
+can_read(U, F) :- user(U), file(F), not banned(U), not secret(F).
+can_read(U, F) :- manager(U), file(F), secret(F).
+
+refused(U, F) :- user(U), file(F), not can_read(U, F).
+\end{shell}
+
+Anyone not banned may read a file that is not secret; managers may read
+secret files too; everything else is refused. The join has handled
+\code{not} since Chapter~\ref{ch:joins}: \code{not can_read(U, F)} holds when
+that fact is not in the database. But \emph{when} is it not in the
+database?
+
+\section{When negation goes wrong}
+
+With positive rules, the order in which facts are derived does not matter:
+a fact derived late is as good as one derived early, and nothing is ever
+taken back. A negated atom breaks that. \code{not can_read(ann, payroll)}
+is true at the start, before any \code{can_read} facts exist, and becomes
+false once the second rule has run. If \code{refused} is derived in
+between, it is derived from something that later stops being true, and
+facts are never removed.
+
+Here is the access program evaluated naively, with the \code{refused} rule
+written first, so that it runs before \code{can_read} has any facts:
+
+\begin{tryit}{try_wrong.nex}
+intern Parser
+intern Evaluate
+
+match parse_program("user(ann). user(bo). file(report). banned(bo).
+refused(U, F) :- user(U), file(F), not can_read(U, F).
+can_read(U, F) :- user(U), file(F), not banned(U).") of
+  Ok as ok then
+    do
+      let db := create Database.make
+      across ok.value.facts as f do
+        db.add(f)
+      end
+      (create Naive_Evaluator.make).run(ok.value.rules, db)
+      across ["refused", "can_read"] as p do
+        across db.facts_of(p) as f do
+          console.print_line(f.text)
+        end
+      end
+    end
+  Err as e then console.print_line(e.error)
+end
+\end{tryit}
+\tryoutput{try_wrong}
+
+Ann is refused the report, and also allowed to read it. The first round
+derived \code{refused(ann, report)} while \code{can_read} was still empty,
+and nothing ever withdrew it.
+
+\section{A precondition}
+
+The cure is to finish a predicate before anything negates it: evaluate all
+of \code{can_read} first, then the rules that say \code{not can_read}. A
+negated predicate must be \emph{settled}, complete, before the rules that
+negate it run. That is a property of the rules handed to one call of
+\code{run}: none of them may negate a predicate that another of them
+defines.
+
+\begin{append}{terms.nex}
+-- The predicate a negated literal denies, or "" for any other literal.
+function negated_predicate(l: Literal): String do
+  match l of
+    Negated(atom) then result := atom.predicate
+    _             then result := ""
+  end
+end
+
+-- Does no rule negate a predicate that one of `rules` defines? Then each
+-- negated predicate is already complete when the rules are applied.
+function negations_settled(rules: Array[Rule]): Boolean do
+  result := true
+  across rules as r do
+    across r.body as l do
+      let p := negated_predicate(l)
+      across rules as other do
+        if p /= "" and other.head.predicate = p then
+          result := false
+        end
+      end
+    end
+  end
+end
+\end{append}
+
+and it is a precondition of every evaluator:
+
+\begin{tightaddbefore}{evaluate.nex}{to run, before deferred}{  deferred|  ensure|    fixpoint: is_fixpoint(rules, db)}
+    negations_settled: negations_settled(rules)
+\end{tightaddbefore}
+
+\section{Strata}
+
+Now a program has to be evaluated in layers, called \emph{strata}. Give each
+predicate a level. A rule's head must be at least as high as every
+predicate the rule uses positively, and higher than every predicate it
+negates. Then evaluate the rules level by level, lowest first: by the time
+a level is evaluated, every predicate it negates is in a lower level, and
+complete.
+
+The levels can be found by starting everything at 0 and raising heads until
+every rule is satisfied. That fails for one kind of program, one that defines
+a predicate through its own negation:
+
+\begin{shell}
+p(X) :- q(X), not p(X).
+\end{shell}
+
+Here \code{p} must be higher than itself, and the levels rise forever. No
+evaluation order makes sense of such a program, so the engine refuses it.
+Levels can never legitimately rise above the number of predicates, so when
+one does, the stratifier stops and reports the rule.
+
+\begin{newfile}{analysis.nex}
+-- analysis.nex: checking a whole program before running it, and running
+-- it one stratum at a time.
+
+intern Evaluate
+
+-- The stratum of every predicate the rules define: the predicates a rule
+-- negates must come in an earlier stratum than its head, and those it
+-- uses positively in the same stratum or an earlier one.
+class Stratifier
+create
+  make(rules: Array[Rule]) do
+    level := {}
+    problem := ""
+    across rules as r do
+      level.put(r.head.predicate, 0)
+    end
+    -- Raise levels until every rule is satisfied. A program whose levels
+    -- keep rising past the number of predicates has a cycle through a
+    -- negation, and cannot be stratified.
+    let changed := true
+    from until not changed or problem /= "" do
+      changed := false
+      across rules as r do
+        across r.body as l do
+          let needed := required_level(l)
+          if needed > level.get(r.head.predicate) then
+            level.put(r.head.predicate, needed)
+            changed := true
+            if needed > level.size then
+              problem := r.head.predicate + " depends on its own negation, through the rule: " + r.text
+            end
+          end
+        end
+      end
+    end
+  end
+feature
+  level: Map[String, Integer]
+  -- Why the rules cannot be stratified, or "".
+  problem: String
+
+  -- The lowest level a rule's head can have, given one body literal.
+  required_level(l: Literal): Integer do
+    result := 0
+    match l of
+      Positive(atom) then result := level.try_get(atom.predicate, 0)
+      Negated(atom)  then result := level.try_get(atom.predicate, 0) + 1
+      Compare        then result := 0
+    end
+  end
+
+  -- The rules, grouped by the level of their heads, lowest first.
+  strata(rules: Array[Rule]): Array[Array[Rule]]
+  require
+    stratified: problem = ""
+  do
+    result := []
+    let top := 0
+    across level.values as n do
+      top := top.max(n)
+    end
+    from let k := 0 until k > top do
+      let group: Array[Rule] := []
+      across rules as r do
+        if level.get(r.head.predicate) = k then
+          group.add(r)
+        end
+      end
+      if not group.is_empty then
+        result.add(group)
+      end
+      k := k + 1
+    end
+  ensure
+    each_settled: all_settled(result)
+  end
+
+  all_settled(groups: Array[Array[Rule]]): Boolean do
+    result := true
+    across groups as g do
+      if not negations_settled(g) then
+        result := false
+      end
+    end
+  end
+end
+\end{newfile}
+
+\code{strata}'s postcondition is the whole point: every group it returns
+satisfies \code{run}'s precondition. \code{program_problem} gathers every
+check a program must pass before it can run, safety and stratification, into
+one message, and \code{evaluate_program} loads a program's facts and
+evaluates its strata in order. Its own postcondition is the fixpoint of the
+whole program.
+
+\begin{continued}{analysis.nex}
+-- What is wrong with `p` before it can run, or "" if nothing is.
+function program_problem(p: Datalog_Program): String do
+  result := ""
+  across p.rules as r do
+    if result = "" and not r.is_safe then
+      result := r.safety_problem + ", in the rule " + r.text
+    end
+  end
+  if result = "" then
+    result := (create Stratifier.make(p.rules)).problem
+  end
+end
+
+-- Load `p`'s facts into `db` and derive everything its rules imply, one
+-- stratum at a time.
+function evaluate_program(p: Datalog_Program, db: Database, e: Evaluator)
+require
+  runnable: program_problem(p) = ""
+do
+  across p.facts as f do
+    db.add(f)
+  end
+  let stratifier := create Stratifier.make(p.rules)
+  across stratifier.strata(p.rules) as group do
+    e.run(group, db)
+  end
+ensure
+  fixpoint: is_fixpoint(p.rules, db)
+end
+\end{continued}
+
+\section{Trying it out}
+
+\begin{tryit}{try_negation.nex}
+intern Parser
+intern Analysis
+intern Query
+intern io/Path
+
+function run_file(name: String) do
+  match parse_program(create Path.make(program.working_directory + "/" + name).read_text) of
+    Ok as ok then
+      do
+        let problem := program_problem(ok.value)
+        if problem /= "" then
+          console.print_line(name + ": " + problem)
+        else
+          let db := create Database.make
+          evaluate_program(ok.value, db, create Semi_Naive_Evaluator.make)
+          across ok.value.queries as q do
+            console.print_line("?- " + q.text + ".   " + answer_lines(q, db).to_string)
+          end
+        end
+      end
+    Err as e then console.print_line(e.error)
+  end
+end
+
+run_file("access.dl")
+match parse_program("q(a). p(X) :- q(X), not p(X).") of
+  Ok as ok then console.print_line(program_problem(ok.value))
+  Err as e then console.print_line(e.error)
+end
+\end{tryit}
+\tryoutput{try_negation}
+
+Bo is banned, so he is refused both files; Cy is not a manager, so he is
+refused the payroll; Ann may read both. And the program that negates itself
+is refused, with the rule that does it.

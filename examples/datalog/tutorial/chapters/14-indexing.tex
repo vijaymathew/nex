@@ -1,0 +1,121 @@
+% ===========================================================================
+\chapter{An index}\label{ch:indexing}
+
+Semi-naive evaluation stopped the engine repeating itself. There is a second
+kind of waste left, inside every join. To satisfy \code{link(Y, Z)} with
+\code{Y} already bound to \code{t7}, the join tries every \code{link} fact
+and throws away all but the one that starts at \code{t7}. A relation that
+could find ``the facts whose first argument is \code{t7}'' directly would
+save all those attempts.
+
+That is an \emph{index}, as a relational database keeps one: a map from the
+value of the first argument to the facts that have it.
+
+\section{An indexed relation}
+
+Everything the join needs from a relation goes through \code{candidates},
+so an indexed relation is a subclass that keeps the map up to date in
+\code{add} and uses it in \code{candidates} whenever the pattern's first
+argument has a value. When it does not, as in \code{route(X, Y)} with
+\code{X} unbound, there is nothing to look up, and all the facts are
+candidates as before.
+
+\begin{append}{database.nex}
+-- A relation that also files its facts by their first argument, so that
+-- a pattern whose first argument is known looks only at the facts that
+-- have it.
+class Indexed_Relation inherit Relation
+create
+  make(p: String) do
+    Relation.make(p)
+    by_first := {}
+  end
+feature
+  by_first: Map[String, Array[Atom]]
+
+  add(a: Atom): Boolean do
+    result := Relation.add(a)
+    if result and a.arity > 0 then
+      let key := term_text(a.args.get(0))
+      if not by_first.contains_key(key) then
+        by_first.put(key, [])
+      end
+      by_first.get(key).add(a)
+    end
+  end
+
+  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+    result := facts
+    if pattern.arity > 0 then
+      let first := substitute_term(pattern.args.get(0), b)
+      if not is_variable(first) then
+        result := by_first.try_get(term_text(first), [])
+      end
+    end
+  end
+end
+\end{append}
+
+\code{Relation.add(a)} calls the version of \code{add} that \code{Relation}
+declares, the one that stores the fact, before filing it in the index.
+
+The indexed relation inherits the postcondition of \code{candidates},
+\code{complete}. That is the one property an index must have, and the easy
+one to get wrong: forget to file a fact under its first argument and the
+join silently misses it. Here every call is checked against the full list
+of facts.
+
+\section{An indexed database}
+
+Which kind of relation a database uses is decided in one place,
+\code{new_relation}, so an indexed database is a subclass that overrides
+that and nothing else:
+
+\begin{append}{database.nex}
+-- A database whose relations are indexed.
+class Indexed_Database inherit Database
+create
+  make do
+    Database.make
+  end
+feature
+  new_relation(p: String): Relation do
+    result := create Indexed_Relation.make(p)
+  end
+end
+\end{append}
+
+Nothing else in the engine changes. The evaluators, the join and the
+queries all talk to a \code{Database}, and an \code{Indexed_Database} is
+one. Extending a program by adding a subclass, rather than editing code
+that already works, is sometimes called the \emph{open-closed principle}:
+open for extension, closed for modification.
+
+\section{Trying it out}
+
+\begin{tryit}{try_indexing.nex}
+intern Parser
+intern Analysis
+intern io/Path
+
+function measure(label: String, db: Database, e: Evaluator) do
+  match parse_program(create Path.make(program.working_directory + "/chain.dl").read_text) of
+    Ok as ok then
+      do
+        evaluate_program(ok.value, db, e)
+        console.print_line(label + db.count.to_string + " facts, "
+          + e.attempts.to_string + " facts looked at")
+      end
+    Err as er then console.print_line(er.error)
+  end
+end
+
+measure("naive:                ", create Database.make, create Naive_Evaluator.make)
+measure("semi-naive:           ", create Database.make, create Semi_Naive_Evaluator.make)
+measure("semi-naive, indexed:  ", create Indexed_Database.make, create Semi_Naive_Evaluator.make)
+\end{tryit}
+\tryoutput{try_indexing}
+
+The index more than halves the semi-naive evaluator's work again. Together
+the two improvements look at about one fact in twenty-six of the ones
+naive evaluation tries, for the same result.

@@ -1,0 +1,34 @@
+% chain.dl: thirty towns in a row, each linked to the next.
+
+link(t1, t2).
+link(t2, t3).
+link(t3, t4).
+link(t4, t5).
+link(t5, t6).
+link(t6, t7).
+link(t7, t8).
+link(t8, t9).
+link(t9, t10).
+link(t10, t11).
+link(t11, t12).
+link(t12, t13).
+link(t13, t14).
+link(t14, t15).
+link(t15, t16).
+link(t16, t17).
+link(t17, t18).
+link(t18, t19).
+link(t19, t20).
+link(t20, t21).
+link(t21, t22).
+link(t22, t23).
+link(t23, t24).
+link(t24, t25).
+link(t25, t26).
+link(t26, t27).
+link(t27, t28).
+link(t28, t29).
+link(t29, t30).
+
+route(X, Y) :- link(X, Y).
+route(X, Z) :- route(X, Y), link(Y, Z).

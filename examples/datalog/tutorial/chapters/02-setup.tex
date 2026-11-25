@@ -1,0 +1,91 @@
+% ===========================================================================
+\chapter{Setting up}\label{ch:setup}
+
+Make a folder for the project and go into it. Every file in this tutorial
+goes in this one folder.
+
+\begin{shell}
+mkdir datalog
+cd datalog
+\end{shell}
+
+Copy the four sample programs, \code{family.dl}, \code{flights.dl},
+\code{access.dl} and \code{chain.dl}, from the \code{examples/datalog}
+folder of the Nex distribution into it. They are plain text; here is the
+first:
+
+\begin{shell}
+% family.dl: a family, and what follows from it.
+
+parent(alice, bob).
+parent(alice, beth).
+parent(bob, carol).
+parent(bob, chris).
+parent(beth, dan).
+parent(carol, emma).
+
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+
+sibling(X, Y) :- parent(P, X), parent(P, Y), X != Y.
+cousin(X, Y) :- parent(P, X), parent(Q, Y), sibling(P, Q).
+
+?- ancestor(alice, Who).
+?- cousin(carol, Who).
+\end{shell}
+
+A \texttt{\%} starts a comment that runs to the end of the line. Names that
+start with a lower-case letter, like \code{alice} and \code{parent}, are
+constants and predicates; names that start with a capital letter, like
+\code{X} and \code{Who}, are variables. \code{X != Y} is a test: the rule
+for \code{sibling} only applies when \code{X} and \code{Y} are different
+people, or everyone would be their own sibling.
+
+\section{The files}
+
+The engine is split into one file per idea, each building on the ones
+before it with \code{intern}, which makes everything one Nex file defines
+available in another:
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\code{terms.nex} & terms, atoms, literals, rules and programs \\
+\code{lexer.nex} & cutting text into tokens \\
+\code{parser.nex} & building a program from the tokens \\
+\code{bindings.nex} & giving variables values; matching \\
+\code{database.nex} & storing facts \\
+\code{evaluate.nex} & deriving every fact the rules imply \\
+\code{query.nex} & answering questions \\
+\code{analysis.nex} & checking a program; negation in layers \\
+\code{explain.nex} & saying why a fact holds \\
+\code{datalog.nex} & the command line \\
+\code{checks.nex} & checks of all of the above \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Along the way we write small throwaway programs, called \code{try_}
+something, to see each piece work. Run any of them with \code{nex}:
+
+\begin{shell}
+nex try_terms.nex
+\end{shell}
+
+A word about printing. Nex's \code{print} shows a string with its quotes,
+which is handy when debugging. Every Nex program also has a ready-made
+\code{console}, and \code{console.print_line("hello")} prints the text as
+it is, on a line of its own. The try programs use whichever suits
+them.
+
+\section{Contracts}
+
+Nex checks every \code{require}, \code{ensure} and invariant as the program
+runs. The engine is full of them, and several do real work: they are how
+we will know that the fast way of evaluating a program finds exactly what
+the slow way finds. Some are expensive. When you want speed rather than
+checking, run a program with \code{--skip-contracts}:
+
+\begin{shell}
+nex datalog.nex chain.dl --skip-contracts
+\end{shell}

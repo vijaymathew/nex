@@ -1,0 +1,249 @@
+-- terms.nex: what Datalog talks about. Terms, atoms, literals, rules,
+-- and whole programs.
+
+-- A term is a constant (a symbol, an integer or a string) or a variable.
+union Term
+  Symbol(name: String)
+  Int(value: Integer)
+  Text(value: String)
+  Var(name: String)
+end
+
+function is_variable(t: Term): Boolean do
+  match t of
+    Var then result := true
+    _   then result := false
+  end
+end
+
+-- A variable's name, or "" for a constant.
+function variable_name(t: Term): String do
+  match t of
+    Var(name) then result := name
+    _         then result := ""
+  end
+end
+
+-- A term as Datalog writes it.
+function term_text(t: Term): String do
+  match t of
+    Symbol(name) then result := name
+    Int(value)   then result := value.to_string
+    Text(value)  then result := "\"" + value + "\""
+    Var(name)    then result := name
+  end
+end
+
+-- A predicate applied to terms: parent(alice, bob), ancestor(X, Y).
+class Atom
+create
+  make(p: String, a: Array[Term]) do
+    predicate := p
+    args := a
+  end
+feature
+  predicate: String
+  args: Array[Term]
+
+  arity: Integer do
+    result := args.length
+  end
+
+  -- Does it mention no variables? Facts are ground atoms.
+  is_ground: Boolean do
+    result := true
+    across args as t do
+      if is_variable(t) then
+        result := false
+      end
+    end
+  end
+
+  -- The names of its variables, each once, in the order they appear.
+  variables: Array[String] do
+    result := []
+    across args as t do
+      let name := variable_name(t)
+      if name /= "" and not result.contains(name) then
+        result.add(name)
+      end
+    end
+  end
+
+  -- The atom as Datalog writes it. Two atoms are the same exactly when
+  -- their texts are, so the text also serves as a key.
+  text: String do
+    result := predicate
+    if arity > 0 then
+      result := result + "("
+      from let i := 0 until i = arity do
+        if i > 0 then
+          result := result + ", "
+        end
+        result := result + term_text(args.get(i))
+        i := i + 1
+      end
+      result := result + ")"
+    end
+  end
+invariant
+  named: predicate.length > 0
+end
+
+-- One condition in the body of a rule.
+union Literal
+  Positive(atom: Atom)
+  Compare(op: String, left: Term, right: Term)
+  Negated(atom: Atom)
+end
+
+function literal_text(l: Literal): String do
+  match l of
+    Positive(atom) then result := atom.text
+    Compare(op, left, right) then
+      result := term_text(left) + " " + op + " " + term_text(right)
+    Negated(atom) then result := "not " + atom.text
+  end
+end
+
+-- The variables a literal mentions.
+function literal_variables(l: Literal): Array[String] do
+  match l of
+    Positive(atom) then result := atom.variables
+    Compare(op, left, right) then
+      do
+        result := []
+        across [left, right] as t do
+          let name := variable_name(t)
+          if name /= "" and not result.contains(name) then
+            result.add(name)
+          end
+        end
+      end
+    Negated(atom) then result := atom.variables
+  end
+end
+
+-- head :- body. A rule with an empty body would be a fact.
+class Rule
+create
+  make(h: Atom, b: Array[Literal])
+  require
+    has_body: b.length > 0
+  do
+    head := h
+    body := b
+  end
+feature
+  head: Atom
+  body: Array[Literal]
+
+  -- Why the rule is not safe, or "" if it is. A rule is safe when every
+  -- variable is bound by a positive literal: those in the head by one
+  -- anywhere in the body, those in a test by one before it.
+  safety_problem: String do
+    result := ""
+    let bound: Array[String] := []
+    across body as l do
+      match l of
+        Positive(atom) then
+          across atom.variables as v do
+            if not bound.contains(v) then
+              bound.add(v)
+            end
+          end
+        _ then
+          across literal_variables(l) as v do
+            if result = "" and not bound.contains(v) then
+              result := "variable " + v + " in '" + literal_text(l)
+                        + "' must appear in a positive literal before it"
+            end
+          end
+      end
+    end
+    across head.variables as v do
+      if result = "" and not bound.contains(v) then
+        result := "variable " + v + " in the head must appear in a positive literal of the body"
+      end
+    end
+  end
+
+  is_safe: Boolean do
+    result := safety_problem = ""
+  end
+
+  text: String do
+    result := head.text + " :-"
+    from let i := 0 until i = body.length do
+      result := result + when i = 0 then " " else ", " end + literal_text(body.get(i))
+      i := i + 1
+    end
+    result := result + "."
+  end
+end
+
+-- A whole program: the facts it states, the rules it gives, and the
+-- questions it asks.
+class Datalog_Program
+create
+  make do
+    facts := []
+    rules := []
+    queries := []
+  end
+feature
+  facts: Array[Atom]
+  rules: Array[Rule]
+  queries: Array[Atom]
+
+  add_fact(a: Atom)
+  require
+    ground: a.is_ground
+  do
+    facts.add(a)
+  ensure
+    one_more: facts.length = old facts.length + 1
+  end
+
+  add_rule(r: Rule) do
+    rules.add(r)
+  end
+
+  add_query(q: Atom) do
+    queries.add(q)
+  end
+end
+
+-- Are all of `rules` safe?
+function all_safe(rules: Array[Rule]): Boolean do
+  result := true
+  across rules as r do
+    if not r.is_safe then
+      result := false
+    end
+  end
+end
+
+-- The predicate a negated literal denies, or "" for any other literal.
+function negated_predicate(l: Literal): String do
+  match l of
+    Negated(atom) then result := atom.predicate
+    _             then result := ""
+  end
+end
+
+-- Does no rule negate a predicate that one of `rules` defines? Then each
+-- negated predicate is already complete when the rules are applied.
+function negations_settled(rules: Array[Rule]): Boolean do
+  result := true
+  across rules as r do
+    across r.body as l do
+      let p := negated_predicate(l)
+      across rules as other do
+        if p /= "" and other.head.predicate = p then
+          result := false
+        end
+      end
+    end
+  end
+end

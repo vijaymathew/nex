@@ -1,0 +1,149 @@
+% ===========================================================================
+\chapter{Rules as joins}\label{ch:joins}
+
+A rule's head holds whenever its body does, so applying a rule means
+finding every way to make its body true. Take
+
+\begin{shell}
+sibling(X, Y) :- parent(P, X), parent(P, Y), X != Y.
+\end{shell}
+
+The body has three conditions. Match the first, \code{parent(P, X)}, against
+every \code{parent} fact; each match binds \code{P} and \code{X}. For each
+of those, match the second, \code{parent(P, Y)}, where \code{P} now has a
+value, so only the children of that same parent match, binding \code{Y}.
+For each of those, check the test \code{X != Y}. Every set of bindings that
+survives all three gives one fact, \code{sibling(X, Y)}.
+
+Combining conditions this way, each one narrowing the possibilities the
+earlier ones left, is what a relational database calls a \emph{join}, and
+it is the heart of the engine.
+
+\section{The join}
+
+The join goes through the body one literal at a time, carrying the
+bindings so far. It is recursive: to satisfy literals \code{i} onwards,
+satisfy literal \code{i} in every possible way, and for each way, satisfy
+literals \code{i + 1} onwards. When it runs off the end of the body, the
+bindings satisfy everything, and they are a solution.
+
+It belongs to a class, \code{Evaluator}, because the next chapters will need
+two kinds of evaluator that join in slightly different ways. The class also
+counts \code{attempts}, the facts the join has tried to match: a simple
+measure of how much work an evaluation does, which we will use to compare
+evaluators.
+
+\begin{newfile}{evaluate.nex}
+-- evaluate.nex: deriving every fact the rules imply.
+
+intern Database
+
+-- A way of bringing a database to a fixpoint of some rules: a state in
+-- which applying any rule derives nothing new.
+deferred class Evaluator
+feature
+  -- How many facts the joins have looked at: a measure of the work done.
+  attempts: Integer
+
+  -- Every set of bindings that satisfies the body of `r` in `db`.
+  solutions(r: Rule, db: Database): Array[Bindings] do
+    result := []
+    join(r.body, 0, create Bindings.empty, db, result)
+  end
+
+  -- Extend `b` to satisfy body.get(i), body.get(i + 1) and so on, adding
+  -- every complete extension to `found`.
+  join(body: Array[Literal], i: Integer, b: Bindings, db: Database, found: Array[Bindings])
+  require
+    in_body: 0 <= i and i <= body.length
+  do
+    if i = body.length then
+      found.add(b)
+    else
+      match body.get(i) of
+        Positive(atom) then
+          across source(i, atom, b, db) as f do
+            attempts := attempts + 1
+            let next := match_atom(atom, f, b)
+            if next /= nil then
+              join(body, i + 1, next, db, found)
+            end
+          end
+        Compare(op, left, right) then
+          if holds(op, substitute_term(left, b), substitute_term(right, b)) then
+            join(body, i + 1, b, db, found)
+          end
+        Negated(atom) then
+          if not db.contains(substitute(atom, b)) then
+            join(body, i + 1, b, db, found)
+          end
+      end
+    end
+  end
+
+  -- Where literal `i` of a body finds its facts: here, the database.
+  source(i: Integer, atom: Atom, b: Bindings, db: Database): Array[Atom] do
+    result := db.candidates(atom, b)
+  end
+end
+\end{newfile}
+
+Each kind of literal is handled differently:
+\begin{itemize}
+  \item An atom is matched against every candidate fact, and the join
+    continues with each match.
+  \item A test, \code{Compare}, is checked with the bindings applied; if it
+    holds, the join continues with the bindings unchanged.
+  \item A negated atom, \code{not banned(U)}, holds when the fact, with the
+    bindings applied, is \emph{not} in the database. Whether that is a sound
+    thing to ask is the subject of Chapter~\ref{ch:negation}.
+\end{itemize}
+
+Where an atom's candidate facts come from is decided by \code{source}, which
+for now asks the database. Giving that decision a routine of its own is
+what will let the faster evaluator of Chapter~\ref{ch:seminaive} change it.
+
+The order of the body matters for tests. A test can only be checked once its
+variables have values, so \code{X != Y} must come after the atoms that bind
+\code{X} and \code{Y}. Chapter~\ref{ch:safety} turns that into a rule the
+engine checks.
+
+\section{Trying it out}
+
+\code{Evaluator} is deferred, so the try program makes a small subclass of
+its own just to call \code{solutions}. It finds every pair of siblings in
+the family:
+
+\begin{tryit}{try_joins.nex}
+intern Parser
+intern io/Path
+intern Evaluate
+
+class Joiner inherit Evaluator
+create
+  make do
+  end
+end
+
+match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+  Ok as ok then
+    do
+      let db := create Database.make
+      across ok.value.facts as f do
+        db.add(f)
+      end
+      let sibling := ok.value.rules.get(2)
+      console.print_line(sibling.text)
+      let j := create Joiner.make
+      across j.solutions(sibling, db) as b do
+        console.print_line("  " + b.text + "   gives " + substitute(sibling.head, b).text)
+      end
+      console.print_line("facts looked at: " + j.attempts.to_string)
+    end
+  Err as e then console.print_line(e.error)
+end
+\end{tryit}
+\tryoutput{try_joins}
+
+Each pair appears twice, once each way round, because \code{sibling} is
+symmetric, and nobody is their own sibling, thanks to \code{X != Y}.

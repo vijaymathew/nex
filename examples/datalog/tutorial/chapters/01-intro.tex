@@ -1,0 +1,86 @@
+% ===========================================================================
+\chapter{What we are going to build}\label{ch:intro}
+
+A family is a handful of facts. Alice is Bob's parent; Bob is Carol's
+parent; Carol is Emma's parent. A handful of facts, written down, imply a
+great many more: Alice is Emma's ancestor, Carol and Dan are cousins, Bob
+and Beth are siblings. Nobody wrote those down, but anyone who knows what
+``ancestor'' means can work them out.
+
+\emph{Datalog} is a small language for exactly this. A program states some
+facts and some rules, and the rules say how new facts follow from old ones:
+
+\begin{shell}
+parent(alice, bob).
+parent(bob, carol).
+
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+\end{shell}
+
+The first rule says: if \code{X} is a parent of \code{Y}, then \code{X} is
+an ancestor of \code{Y}. The second says: if \code{X} is a parent of some
+\code{Y}, and \code{Y} is an ancestor of \code{Z}, then \code{X} is an
+ancestor of \code{Z}. Then we ask questions:
+
+\begin{shell}
+?- ancestor(alice, Who).
+\end{shell}
+
+and the answer is every \code{Who} that makes it true.
+
+By the end of this tutorial you will have written, in Nex, a Datalog engine
+that reads programs like this one, works out every fact they imply, and
+answers questions about them. It also explains its answers: ask it
+\emph{why} Carol and Dan are cousins, and it shows the proof, step by step,
+down to the facts you gave it.
+
+\laterout{datalog.nex family.dl "why cousin(carol, dan)."}{why_cousin}
+
+\section{Why Datalog}
+
+Datalog looks like a toy, and it is small enough to build in a few hundred
+lines. It is also used in earnest. Query optimisers and database engines
+evaluate recursive queries the way we will. Program analysers written in
+Datalog find bugs in millions of lines of code, by stating facts about a
+program (``this variable may point to that object'') and rules about how
+those facts combine. Access-control systems decide who may read what with
+rules much like the ones in Chapter~\ref{ch:negation}. In every case the
+appeal is the same: you say \emph{what} follows from what, and the engine
+works out \emph{how}.
+
+That last part is where the interesting programming is. Working out
+everything a program implies is a search that has to stop, has to find
+everything, and should not do the same work twice. Those three
+requirements are also three contracts, and this tutorial writes them down
+as contracts and lets Nex check them while the engine runs.
+
+\section{The plan}
+
+\begin{description}[style=nextline, leftmargin=1.2em, itemsep=0.4em]
+  \item[Reading Datalog.] The data model of terms, atoms and rules
+    (Chapter~\ref{ch:terms}), a lexer that cuts the text into tokens
+    (Chapter~\ref{ch:lexer}), and a parser that builds the model from them
+    (Chapter~\ref{ch:parser}).
+  \item[Facts and how rules use them.] Matching a pattern like
+    \code{parent(X, bob)} against facts (Chapter~\ref{ch:matching}), a
+    database to keep the facts in (Chapter~\ref{ch:database}), and joining
+    the conditions of a rule (Chapter~\ref{ch:joins}).
+  \item[Working out everything.] Applying the rules until nothing new
+    appears, which is called reaching a \emph{fixpoint}
+    (Chapter~\ref{ch:fixpoint}); the rules that make this possible
+    (Chapter~\ref{ch:safety}); answering questions
+    (Chapter~\ref{ch:queries}); and doing it much faster
+    (Chapter~\ref{ch:seminaive}).
+  \item[More expressive programs.] Negation, and why it needs the program
+    to be evaluated in layers (Chapter~\ref{ch:negation}).
+  \item[Speed and explanations.] An index (Chapter~\ref{ch:indexing}),
+    and remembering how each fact was derived so that the engine can say
+    why it holds (Chapter~\ref{ch:explanations}).
+  \item[The finished program.] A command line (Chapter~\ref{ch:commandline}),
+    and where to go next (Chapter~\ref{ch:next}).
+\end{description}
+
+Every line of the engine appears in this tutorial, in the order you would
+write it, and every output shown comes from running the code exactly as
+printed.

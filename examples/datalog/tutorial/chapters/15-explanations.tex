@@ -1,0 +1,184 @@
+% ===========================================================================
+\chapter{Why?}\label{ch:explanations}
+
+The engine knows that Carol and Dan are cousins. A person might reasonably
+ask how it knows. The answer is a \emph{proof}: \code{cousin(carol, dan)}
+holds by the rule for cousins, because Bob is Carol's parent, Beth is Dan's
+parent, and Bob and Beth are siblings; and they are siblings by the rule for
+siblings, because Alice is the parent of both. Every step is a rule applied
+to facts, down to facts that were simply given.
+
+To give that answer the engine has to remember, for each fact a rule
+derives, which rule derived it and with what bindings. Every derived fact
+already passes through \code{add_derived} with exactly those two things, so,
+once again, a subclass is all it takes.
+
+\section{Remembering derivations}
+
+\begin{newfile}{explain.nex}
+-- explain.nex: remembering how each fact was derived, and saying why a
+-- fact holds.
+
+intern Database
+
+-- How a fact was derived: by a rule, with bindings that made its body
+-- true.
+class Derivation
+create
+  make(r: Rule, b: Bindings) do
+    rule := r
+    bindings := b
+  end
+feature
+  rule: Rule
+  bindings: Bindings
+end
+\end{newfile}
+
+An explained database is an indexed one that also keeps a map from each
+derived fact to its first derivation. The first is enough: one proof is all
+we need, and the first one found is never longer than later ones, since
+everything it used was known before anything later.
+
+\begin{continued}{explain.nex}
+-- A database that remembers, for every fact a rule derived, the first
+-- derivation it found.
+class Explained_Database inherit Indexed_Database
+create
+  make do
+    Indexed_Database.make
+    how := {}
+  end
+feature
+  how: Map[String, Derivation]
+
+  add_derived(a: Atom, rule: Rule, b: Bindings): Boolean do
+    result := add(a)
+    if result then
+      how.put(a.text, create Derivation.make(rule, b))
+    end
+  ensure
+    remembered: how.contains_key(a.text) or not result
+  end
+
+  is_derived(a: Atom): Boolean do
+    result := how.contains_key(a.text)
+  end
+
+  -- The proof that `a` holds, one step per line: each derived fact,
+  -- with the rule that gave it, above the facts that rule used.
+  why(a: Atom): Array[String]
+  require
+    known: contains(a)
+  do
+    result := []
+    explain(a, "", result)
+  ensure
+    every_step_checks: steps_hold(a)
+  end
+\end{continued}
+
+\section{Printing a proof}
+
+A proof prints from the top down: the fact and the rule that derived it,
+then, indented below, each condition of the rule's body with the bindings
+applied. An atom in the body is a fact itself, so it is explained the same
+way, recursively, until it reaches a fact that was given. A test is shown
+as it was checked, and a negated atom as the fact that does not hold.
+
+\begin{continued}{explain.nex}
+  explain(a: Atom, indent: String, lines: Array[String]) do
+    if is_derived(a) then
+      let d := how.get(a.text)
+      lines.add(indent + a.text + "    by " + d.rule.text)
+      across d.rule.body as l do
+        match l of
+          Positive(atom) then explain(substitute(atom, d.bindings), indent + "  ", lines)
+          Compare(op, left, right) then
+            lines.add(indent + "  " + literal_text(substitute_literal(l, d.bindings)))
+          Negated(atom) then
+            lines.add(indent + "  " + literal_text(substitute_literal(l, d.bindings)) + "    (no such fact)")
+        end
+      end
+    else
+      lines.add(indent + a.text + "    (given)")
+    end
+  end
+\end{continued}
+
+Does the recursion always end? Each step goes from a fact to facts that were
+in the database \emph{before} it was derived, since the join that derived it
+read them there. Going back through ``derived before'' cannot go round in a
+circle, so it ends.
+
+\section{Checking a proof}
+
+A proof is only worth printing if it is right, and \code{why}'s
+postcondition checks that it is: every step's rule, with its bindings,
+really does give that fact, every atom it used is in the database, every
+test holds, and every negated atom is absent. If a bug ever recorded the
+wrong bindings for a fact, the explanation would be caught before anyone
+read it.
+
+\begin{continued}{explain.nex}
+  -- Is the recorded derivation of `a`, and of every fact it used, a true
+  -- instance of its rule in this database?
+  steps_hold(a: Atom): Boolean do
+    result := true
+    if is_derived(a) then
+      let d := how.get(a.text)
+      result := substitute(d.rule.head, d.bindings).text = a.text
+      across d.rule.body as l do
+        match l of
+          Positive(atom) then
+            result := result and contains(substitute(atom, d.bindings))
+                      and steps_hold(substitute(atom, d.bindings))
+          Compare(op, left, right) then
+            result := result and holds(op, substitute_term(left, d.bindings),
+                                       substitute_term(right, d.bindings))
+          Negated(atom) then
+            result := result and not contains(substitute(atom, d.bindings))
+        end
+      end
+    end
+  end
+end
+\end{continued}
+
+\begin{continued}{explain.nex}
+-- `l` with its bound variables replaced by their values.
+function substitute_literal(l: Literal, b: Bindings): Literal do
+  match l of
+    Positive(atom) then result := create Positive.make(substitute(atom, b))
+    Compare(op, left, right) then
+      result := create Compare.make(op, substitute_term(left, b), substitute_term(right, b))
+    Negated(atom) then result := create Negated.make(substitute(atom, b))
+  end
+end
+\end{continued}
+
+\section{Trying it out}
+
+\begin{tryit}{try_why.nex}
+intern Parser
+intern Analysis
+intern Explain
+intern io/Path
+
+match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+  Ok as ok then
+    do
+      let db := create Explained_Database.make
+      evaluate_program(ok.value, db, create Semi_Naive_Evaluator.make)
+      match parse_program("?- ancestor(alice, emma).") of
+        Ok as q then
+          across db.why(q.value.queries.get(0)) as line do
+            console.print_line(line)
+          end
+        Err as e then console.print_line(e.error)
+      end
+    end
+  Err as e then console.print_line(e.error)
+end
+\end{tryit}
+\tryoutput{try_why}

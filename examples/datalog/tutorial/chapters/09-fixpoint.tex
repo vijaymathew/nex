@@ -1,0 +1,140 @@
+% ===========================================================================
+\chapter{Working out everything}\label{ch:fixpoint}
+
+One application of a rule is not enough. Applying the rules for
+\code{ancestor} once to the family gives parents and grandparents, but a
+great-grandparent needs a grandparent first, which needs the rules to run
+again. Applying the rules makes new facts, which let the rules make more.
+
+So the engine applies every rule, adds what it finds, and does it again,
+until a round finds nothing new. The database is then at a \emph{fixpoint}
+of the rules: applying any of them derives only facts it already has. That
+is the whole of Datalog's meaning, in one sentence. The facts a program
+implies are exactly those in the smallest database that contains its given
+facts and is a fixpoint of its rules.
+
+\section{Why it stops}
+
+A loop that runs ``until nothing new appears'' needs an argument that it
+stops. Here it is. Rules never invent constants: every constant in a
+derived fact came from a given fact or from a rule. So there are only
+finitely many facts that could ever be derived, a number of predicates
+times the number of ways of filling their arguments with those constants.
+And every round that does not stop adds at least one of them, while nothing
+is ever removed. A finite supply that only grows must run out.
+
+``Nothing is ever removed'' is something we can state. Every evaluator
+promises it, together with the fixpoint itself, as the postcondition of
+\code{run}. It is deferred in \code{Evaluator}, so every kind of evaluator
+inherits both promises:
+
+\begin{addbefore}{evaluate.nex}{to Evaluator, before solutions}{  -- Every set of bindings that satisfies the body of `r` in `db`.}
+  -- How many times the rules were applied in turn.
+  rounds: Integer
+
+  run(rules: Array[Rule], db: Database)
+  deferred
+  ensure
+    fixpoint: is_fixpoint(rules, db)
+    only_grows: db.count >= old db.count
+  end
+
+  -- Note that another round of applying the rules has begun.
+  count_round do
+    rounds := rounds + 1
+  end
+\end{addbefore}
+
+\code{count_round} is there because a subclass may read the fields it
+inherits but not assign them, so it asks the class that declares
+\code{rounds} to count.
+
+\section{Checking the fixpoint}
+
+The postcondition \code{fixpoint} is a strong check, and a simple one:
+apply every rule once more, and see whether anything comes out that the
+database lacks. It does not care how the evaluator got there, which is
+exactly what we want from it. When a faster evaluator replaces the simple
+one, this same check will say whether it is still right.
+
+\begin{append}{evaluate.nex}
+-- Does applying any of `rules` to `db` derive a fact it does not have?
+function is_fixpoint(rules: Array[Rule], db: Database): Boolean do
+  result := true
+  let e := create Naive_Evaluator.make
+  across rules as r do
+    across e.solutions(r, db) as b do
+      if not db.contains(substitute(r.head, b)) then
+        result := false
+      end
+    end
+  end
+end
+\end{append}
+
+\section{The naive evaluator}
+
+The simplest evaluator does exactly what the definition says: apply every
+rule to everything, round after round, until a round adds nothing. It is
+called \emph{naive} evaluation, and the name is deserved, as
+Chapter~\ref{ch:seminaive} will show.
+
+\begin{append}{evaluate.nex}
+-- Apply every rule to everything, again and again, until a round adds
+-- nothing.
+class Naive_Evaluator inherit Evaluator
+create
+  make do
+  end
+feature
+  run(rules: Array[Rule], db: Database) do
+    let changed := true
+    from until not changed do
+      changed := false
+      count_round
+      across rules as r do
+        across solutions(r, db) as b do
+          if db.add_derived(substitute(r.head, b), r, b) then
+            changed := true
+          end
+        end
+      end
+    end
+  end
+end
+\end{append}
+
+The solutions of a rule are all found before any of its facts are added,
+so a rule never reads facts it is adding in the middle of its own join.
+
+\section{Trying it out}
+
+\begin{tryit}{try_naive.nex}
+intern Parser
+intern io/Path
+intern Evaluate
+
+match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+  Ok as ok then
+    do
+      let db := create Database.make
+      across ok.value.facts as f do
+        db.add(f)
+      end
+      let e := create Naive_Evaluator.make
+      e.run(ok.value.rules, db)
+      across db.facts_of("ancestor") as f do
+        console.print_line(f.text)
+      end
+      console.print_line(db.count.to_string + " facts after " + e.rounds.to_string
+        + " rounds, " + e.attempts.to_string + " facts looked at")
+    end
+  Err as e then console.print_line(e.error)
+end
+\end{tryit}
+\tryoutput{try_naive}
+
+The direct ancestors come first, from the first rule in the first round,
+then the longer chains, one generation further each round. The last round
+found nothing new, which is how the evaluator knew to stop, and the
+postcondition then checked, independently, that nothing more follows.

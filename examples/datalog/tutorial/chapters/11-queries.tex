@@ -1,0 +1,98 @@
+% ===========================================================================
+\chapter{Asking questions}\label{ch:queries}
+
+Once the database is at a fixpoint, a question is easy. \code{?- ancestor(alice,
+Who).} asks for every value of \code{Who} that makes the atom a fact, and the
+facts are all there: match the question against each candidate fact, and
+every match is an answer.
+
+\begin{newfile}{query.nex}
+-- query.nex: answering questions.
+
+intern Database
+
+-- Every way of binding the variables of `q` so that it is a fact in `db`.
+function answers(q: Atom, db: Database): Array[Bindings] do
+  result := []
+  let none := create Bindings.empty
+  across db.candidates(q, none) as f do
+    let b := match_atom(q, f, none)
+    if b /= nil then
+      result.add(b)
+    end
+  end
+ensure
+  all_true: all_facts(q, result, db)
+end
+\end{newfile}
+
+The postcondition says what an answer is: the question, with the answer's
+bindings substituted, is a fact in the database.
+
+\begin{continued}{query.nex}
+-- Is `q`, under each of `found`, a fact in `db`?
+function all_facts(q: Atom, found: Array[Bindings], db: Database): Boolean do
+  result := true
+  across found as b do
+    if not db.contains(substitute(q, b)) then
+      result := false
+    end
+  end
+end
+\end{continued}
+
+For printing, each answer becomes its bindings as text, sorted, so that the
+same question always gives the same output. A question without variables,
+\code{?- sibling(bob, beth).}, has a yes-or-no answer.
+
+\begin{continued}{query.nex}
+-- The answers to `q` as lines of text, in order: "yes" or "no" for a
+-- question without variables.
+function answer_lines(q: Atom, db: Database): Array[String] do
+  let found := answers(q, db)
+  if q.is_ground then
+    result := [when found.is_empty then "no" else "yes" end]
+  elseif found.is_empty then
+    result := ["no answers"]
+  else
+    result := found.map(fn (b: Bindings): String do
+      result := b.text
+    end).sort
+  end
+end
+\end{continued}
+
+\section{Trying it out}
+
+\begin{tryit}{try_queries.nex}
+intern Parser
+intern Evaluate
+intern Query
+intern io/Path
+
+match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+  Ok as ok then
+    do
+      let db := create Database.make
+      across ok.value.facts as f do
+        db.add(f)
+      end
+      (create Naive_Evaluator.make).run(ok.value.rules, db)
+      across ok.value.queries as q do
+        console.print_line("?- " + q.text + ".")
+        across answer_lines(q, db) as line do
+          console.print_line("   " + line)
+        end
+      end
+      match parse_program("?- sibling(bob, beth). ?- sibling(bob, bob). ?- ancestor(emma, X).") of
+        Ok as more then
+          across more.value.queries as q do
+            console.print_line("?- " + q.text + ".   " + answer_lines(q, db).to_string)
+          end
+        Err as e then console.print_line(e.error)
+      end
+    end
+  Err as e then console.print_line(e.error)
+end
+\end{tryit}
+\tryoutput{try_queries}
