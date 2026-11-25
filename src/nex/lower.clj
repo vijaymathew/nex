@@ -3562,13 +3562,19 @@
          :else (first (rewrite-statements-for-closures* ctx local-types captures (:else expr)))))
 
 (defn- rewrite-spawn-for-closures
+  "A `spawn` body runs as a closure, rewritten exactly as a `fn` literal in
+   the same place would be: in this scope, with its captures recorded in
+   this scope's CAPTURES. It used to be rewritten against a fresh capture
+   set that was then dropped, so a spawn inside a `fn` that read a local
+   from outside the `fn` never made the `fn` capture it, and lowering the
+   spawn's construction inside the `fn` failed with \"Unable to infer
+   expression type during lowering\"."
   [ctx local-types captures expr]
-  (let [nested-ctx (assoc ctx :var-types (merge (:var-types ctx) local-types) :inside-closure? true)
-        fn-expr (make-synthetic-anonymous-function-expr
+  (let [fn-expr (make-synthetic-anonymous-function-expr
                  []
                  "Any"
                  (:body expr))
-        rewritten-fn (rewrite-expression-for-closures nested-ctx {} (atom {}) fn-expr)]
+        rewritten-fn (rewrite-expression-for-closures ctx local-types captures fn-expr)]
     (assoc expr :fn-expr rewritten-fn)))
 
 (defn- rewrite-expression-for-closures

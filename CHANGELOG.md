@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A `spawn` inside a `fn` can use a local from outside the `fn`.**
+  `[1, 2].map(fn (k: Integer): Task[Integer] do result := spawn do result
+  := x * k end end)`, with `x` a local of the enclosing routine or block,
+  failed to compile with "Unable to infer expression type during
+  lowering": the spawn's own captures were never passed on to the `fn`
+  around it, so the `fn` did not capture `x`. A spawn body is now treated
+  exactly as a `fn` literal in the same place.
+
 - **The interpreter evaluates each argument of a function call once.** A
   call to one of the program's own functions went through its Function
   object with the argument expressions rather than their values, so the

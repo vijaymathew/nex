@@ -3,6 +3,113 @@
 -- Solutions to the end-of-chapter exercises.   Run:  nex exercises.nex
 -- ============================================================================
 
+-- Shared by the solutions below: the race of Section 26.13, the dataflow
+-- variable of Section 26.16, and the worker pool of Section 26.17.
+-- Any number whose square ends in 609 will do.
+function is_answer(n: Integer): Boolean do
+  result := n * n % 1000 = 609
+end
+
+-- Search `count` numbers from `start` in steps of `step`, stopping early
+-- when `stop` is set. The task's result is -1 if nothing was found.
+function search(start, step, count: Integer, stop: Atomic_Boolean): Task[Integer] do
+  result := spawn do
+    result := -1
+    from let i := 0 until i = count or result /= -1 or stop.load do
+      let n := start + i * step
+      if is_answer(n) then
+        result := n
+      end
+      i := i + 1
+    end
+  end
+end
+
+class Dataflow[T]
+create
+  make do
+    cell := create Channel[T].with_capacity(1)
+    bound := create Atomic_Boolean.make(false)
+  end
+feature
+  cell: Channel[T]
+  bound: Atomic_Boolean
+
+  is_bound: Boolean do
+    result := bound.load
+  end
+
+  bind(v: T) do
+    if not bound.compare_and_set(false, true) then
+      raise "Dataflow.bind: already bound"
+    end
+    cell.send(v)
+  ensure
+    now_bound: is_bound
+  end
+
+  value: T do
+    result := cell.receive
+    cell.send(result)
+  end
+end
+
+function word_frequencies(text: String): Map[String, Integer] do
+  result := {}
+  let words := text.to_lower.split(" ")
+  across words as w do
+    let count := result.try_get(w, 0)
+    result.set(w, count + 1)
+  end
+end
+
+-- Add the counts in `part` to `total`.
+function merge(total, part: Map[String, Integer]) do
+  across part.keys as w do
+    total.set(w, total.try_get(w, 0) + part.get(w))
+  end
+end
+
+-- Exercise 5: a worker whose result is how many documents it counted.
+function counting_worker(jobs: Channel[String], results: Channel[Map[String, Integer]]): Task[Integer] do
+  result := spawn do
+    let counted := 0
+    let done := false
+    from until done do
+      select
+        when jobs.receive as doc then
+          do
+            results.send(word_frequencies(doc))
+            counted := counted + 1
+          end
+        timeout 50 then
+          done := jobs.is_closed and jobs.size = 0
+      end
+    end
+    result := counted
+  end
+end
+
+-- Exercise 6: a worker that stops at a sentinel job instead of a closed channel.
+function STOP(): String do
+  result := "<stop>"
+end
+
+function sentinel_worker(jobs: Channel[String], results: Channel[Map[String, Integer]]): Task do
+  result := spawn do
+    let done := false
+    from until done do
+      let doc := jobs.receive
+      if doc = STOP() then
+        done := true
+      else
+        results.send(word_frequencies(doc))
+      end
+    end
+  end
+end
+
+
 function main() do
   -- 1. A task that sums 1..100, returns through `result`, printed via await.
   let summer: Task[Integer] := spawn do
@@ -57,72 +164,89 @@ function main() do
                      results.get(1).to_string + ", " + results.get(2).to_string)   -- 4, 9, 16
   assert results = [4, 9, 16]
 
-  -- 5. A pipeline that processes SEVERAL values. The producer sends each value
-  --    then CLOSES the channel; the consumer loops on receive until the channel
-  --    is closed AND drained. Closing is how the receiving side knows to stop:
-  --    we close once, on the producer, after the last value.
-  let pipe: Channel[Integer] := create Channel[Integer].with_capacity(4)
-  let producer: Task := spawn do
-    from let i: Integer := 1 until i > 5 do
-      pipe.send(i * 10)
-      i := i + 1
-    end
-    pipe.close          -- signal: no more values are coming
+  -- 5. Each worker also reports how many documents it counted, as its task's
+  --    result. The reports always add up to the number of documents, since
+  --    each document is received by exactly one worker; how the work is
+  --    shared out changes from run to run.
+  let documents := ["The cat sat on the mat", "The dog sat on the log",
+                    "A cat and a dog", "The end of the story", "A dog on a log"]
+  let jobs5: Channel[String] := create Channel[String].with_capacity(2)
+  let results5: Channel[Map[String, Integer]] := create Channel[Map[String, Integer]].with_capacity(documents.length)
+  let workers := [counting_worker(jobs5, results5), counting_worker(jobs5, results5), counting_worker(jobs5, results5)]
+  across documents as doc do
+    jobs5.send(doc)
   end
-  console.print("5. consumed until closed: ")
-  -- Only receive when a value is buffered; this avoids blocking on an empty
-  -- channel and racing the producer's close. We stop once it is closed AND
-  -- drained.
-  let pipe_out: String := ""
-  from until pipe.is_closed and pipe.size = 0 do
-    if pipe.size > 0 then
-      let v: Integer := pipe.receive
-      console.print(v.to_string + " ")
-      pipe_out := pipe_out + v.to_string + " "
-    end
+  jobs5.close
+  let totals: Map[String, Integer] := {}
+  repeat documents.length do
+    merge(totals, results5.receive)
   end
-  console.new_line
-  producer.await
-  assert pipe_out.trim = "10 20 30 40 50"
+  let done_by: Array[Integer] := await_all(workers)
+  let all_done := done_by.fold(0, fn (acc, n: Integer): Integer do result := acc + n end)
+  console.print_line("5. documents per worker add up to " + all_done.to_string)   -- 5
+  assert all_done = documents.length
+  assert totals.get("dog") = 3
 
-  -- 6.* A two-stage pipeline: read -> transform -> collect, with two channels
-  --     and a worker task. Stage 1 (this routine) feeds raw values into `input`;
-  --     the WORKER reads from `input`, squares each, and writes to `output`;
-  --     stage 3 (this routine) collects from `output`.
-  --     WHERE BLOCKING HAPPENS: send blocks when a channel's buffer is full, and
-  --     receive blocks when a channel is empty — that back-pressure is what keeps
-  --     the stages in step. The worker stops when `input` is closed and drained,
-  --     then closes `output` so the collector likewise knows when to stop.
-  let input: Channel[Integer] := create Channel[Integer].with_capacity(2)
-  let output: Channel[Integer] := create Channel[Integer].with_capacity(2)
-  let worker: Task := spawn do
-    from until input.is_closed and input.size = 0 do
-      if input.size > 0 then
-        let v: Integer := input.receive
-        output.send(v * v)
-      end
-    end
-    output.close
+  -- 6.* Ending the workers with a sentinel instead of close: one "stop" job
+  --     per worker. The main program must now know how many workers there are,
+  --     and a worker that stopped early (or a second sentinel taken by one
+  --     worker) would leave another worker waiting forever. close says "no
+  --     more work" once, to every worker, whatever their number.
+  let jobs6: Channel[String] := create Channel[String].with_capacity(2)
+  let results6: Channel[Map[String, Integer]] := create Channel[Map[String, Integer]].with_capacity(documents.length)
+  let workers6 := [sentinel_worker(jobs6, results6), sentinel_worker(jobs6, results6)]
+  across documents as doc do
+    jobs6.send(doc)
   end
-  let feeder: Task := spawn do
-    across [1, 2, 3, 4] as n do
-      input.send(n)
-    end
-    input.close
+  across workers6 as w do
+    jobs6.send(STOP())
   end
-  console.print("6. transformed (squares): ")
-  let squares_out: String := ""
-  from until output.is_closed and output.size = 0 do
-    if output.size > 0 then
-      let v: Integer := output.receive
-      console.print(v.to_string + " ")
-      squares_out := squares_out + v.to_string + " "
-    end
+  let totals6: Map[String, Integer] := {}
+  repeat documents.length do
+    merge(totals6, results6.receive)
   end
-  console.new_line
-  feeder.await
-  worker.await
-  assert squares_out.trim = "1 4 9 16"
+  await_all(workers6)
+  console.print_line("6. sentinel version agrees: " + (totals6 = totals).to_string)   -- true
+  assert totals6 = totals
+
+  -- 10. Two searches under a deadline. A select with a clause for each task
+  --     and a timeout takes whichever finishes first, or gives up. Both
+  --     searches must promise the same postcondition (is_answer) for the
+  --     result to be right whichever one wins.
+  let stop := create Atomic_Boolean.make(false)
+  let up := search(1, 1, 1000000, stop)
+  let down := search(1000000, -1, 1000000, stop)
+  let answer := -1
+  select
+    when up.await as a then answer := a
+    when down.await as b then answer := b
+    timeout 200 then answer := -1
+  end
+  stop.store(true)
+  up.cancel
+  down.cancel
+  console.print_line("10. found within the deadline: " + (answer /= -1).to_string)
+  assert answer = -1 or is_answer(answer)
+
+  -- 11.* Binding a dataflow variable twice raises. With only a precondition,
+  --      not_bound: not is_bound, two tasks could interleave like this:
+  --        task A checks is_bound: false     task B checks is_bound: false
+  --        task A sends its value             task B sends its value
+  --      Both pass the precondition, and the variable is bound twice (the
+  --      second send even blocks, the one-place channel being full).
+  --      compare_and_set makes the check and the change a single step, so
+  --      only one of them can win.
+  let v := create Dataflow[Integer].make
+  v.bind(1)
+  let refused := false
+  do
+    v.bind(2)
+  rescue
+    refused := true
+  end
+  console.print_line("11. second bind refused: " + refused.to_string)   -- true
+  assert refused
+  assert v.value = 1
 end
 
 main()

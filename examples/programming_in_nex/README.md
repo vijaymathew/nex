@@ -11,11 +11,9 @@ chapter:
   examples stay verified as the language evolves. Chapter 30 has no code (a
   reflective, reading-plan chapter) and so has no `examples.nex`. Chapters
   27 to 29 build one program, a command-line spreadsheet, so they share one
-  project folder, `spreadsheet/`, described below. A few
-  syntax-reference appendices (A, B, C, D — placeholder-name grammar
-  listings and API catalogs, not narrative code) and Appendix E (itself
-  "Solutions to Selected Exercises") aren't reproduced here for the same
-  reason `exercises.nex` doesn't reproduce other exercise-solutions content.
+  project folder, `spreadsheet/`, described below. The syntax-reference
+  appendices (A, B, C, D — placeholder-name grammar listings and API
+  catalogs, not narrative code) aren't reproduced here.
 
 ## Layout
 
