@@ -46,6 +46,11 @@ read one is to run it alongside the source.
   breadth-first search, Dijkstra and A*, turn-by-turn directions, and a live
   map in a window where a simulated traveller follows the route (and gets
   rerouted after a wrong turn), with a step-by-step tutorial (PDF)
+- **datalog/** — a Datalog engine: facts, rules and questions, a lexer and
+  recursive-descent parser, matching and joins, naive and semi-naive
+  evaluation to a fixpoint, safe rules, negation evaluated one stratum at a
+  time, an index, and explanations of why each answer holds, with a
+  step-by-step tutorial (PDF)
 - **coding_agent/** — a coding agent: a program that gives Claude tools to
   read, search, edit and test a project, and fixes a bug in a small sample
   project; the agent loop, a sandboxed workspace, safe edits, commands with

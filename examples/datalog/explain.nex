@@ -1,0 +1,104 @@
+-- explain.nex: remembering how each fact was derived, and saying why a
+-- fact holds.
+
+intern Database
+
+-- How a fact was derived: by a rule, with bindings that made its body
+-- true.
+class Derivation
+create
+  make(r: Rule, b: Bindings) do
+    rule := r
+    bindings := b
+  end
+feature
+  rule: Rule
+  bindings: Bindings
+end
+
+-- A database that remembers, for every fact a rule derived, the first
+-- derivation it found.
+class Explained_Database inherit Indexed_Database
+create
+  make do
+    Indexed_Database.make
+    how := {}
+  end
+feature
+  how: Map[String, Derivation]
+
+  add_derived(a: Atom, rule: Rule, b: Bindings): Boolean do
+    result := add(a)
+    if result then
+      how.put(a.text, create Derivation.make(rule, b))
+    end
+  ensure
+    remembered: how.contains_key(a.text) or not result
+  end
+
+  is_derived(a: Atom): Boolean do
+    result := how.contains_key(a.text)
+  end
+
+  -- The proof that `a` holds, one step per line: each derived fact,
+  -- with the rule that gave it, above the facts that rule used.
+  why(a: Atom): Array[String]
+  require
+    known: contains(a)
+  do
+    result := []
+    explain(a, "", result)
+  ensure
+    every_step_checks: steps_hold(a)
+  end
+
+  explain(a: Atom, indent: String, lines: Array[String]) do
+    if is_derived(a) then
+      let d := how.get(a.text)
+      lines.add(indent + a.text + "    by " + d.rule.text)
+      across d.rule.body as l do
+        match l of
+          Positive(atom) then explain(substitute(atom, d.bindings), indent + "  ", lines)
+          Compare(op, left, right) then
+            lines.add(indent + "  " + literal_text(substitute_literal(l, d.bindings)))
+          Negated(atom) then
+            lines.add(indent + "  " + literal_text(substitute_literal(l, d.bindings)) + "    (no such fact)")
+        end
+      end
+    else
+      lines.add(indent + a.text + "    (given)")
+    end
+  end
+
+  -- Is the recorded derivation of `a`, and of every fact it used, a true
+  -- instance of its rule in this database?
+  steps_hold(a: Atom): Boolean do
+    result := true
+    if is_derived(a) then
+      let d := how.get(a.text)
+      result := substitute(d.rule.head, d.bindings).text = a.text
+      across d.rule.body as l do
+        match l of
+          Positive(atom) then
+            result := result and contains(substitute(atom, d.bindings))
+                      and steps_hold(substitute(atom, d.bindings))
+          Compare(op, left, right) then
+            result := result and holds(op, substitute_term(left, d.bindings),
+                                       substitute_term(right, d.bindings))
+          Negated(atom) then
+            result := result and not contains(substitute(atom, d.bindings))
+        end
+      end
+    end
+  end
+end
+
+-- `l` with its bound variables replaced by their values.
+function substitute_literal(l: Literal, b: Bindings): Literal do
+  match l of
+    Positive(atom) then result := create Positive.make(substitute(atom, b))
+    Compare(op, left, right) then
+      result := create Compare.make(op, substitute_term(left, b), substitute_term(right, b))
+    Negated(atom) then result := create Negated.make(substitute(atom, b))
+  end
+end

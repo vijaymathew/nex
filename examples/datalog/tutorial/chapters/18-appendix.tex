@@ -1,0 +1,46 @@
+% ===========================================================================
+\chapter{The language at a glance}\label{ch:appendix}
+
+\section{Grammar}
+
+\begin{shell}
+program  ::= { clause }
+clause   ::= atom [ ":-" literal { "," literal } ] "."
+           | "?-" atom "."
+literal  ::= atom | "not" atom | term op term
+op       ::= "=" | "!=" | "<" | "<=" | ">" | ">="
+atom     ::= name [ "(" term { "," term } ")" ]
+term     ::= name | variable | integer | string
+\end{shell}
+
+A \emph{name} starts with a lower-case letter, a \emph{variable} with a
+capital letter or \code{_}, and both continue with letters, digits and
+\code{_}. An \emph{integer} may start with \code{-}. A \emph{string} is
+written in double quotes and cannot contain one. \texttt{\%} starts a
+comment that runs to the end of the line.
+
+\section{Rules a program must follow}
+
+\begin{itemize}
+  \item A fact has no variables.
+  \item A rule is \emph{safe}: every variable in its head appears in a
+    positive atom of its body, and every variable in a test or a negated
+    atom appears in a positive atom before it.
+  \item A program is \emph{stratified}: no predicate depends on its own
+    negation, directly or through other predicates.
+  \item The order comparisons \code{<}, \code{<=}, \code{>} and \code{>=}
+    are only true between two integers; \code{=} and \code{!=} compare any
+    constants.
+\end{itemize}
+
+\section{The command line}
+
+\begin{shell}
+nex datalog.nex PROGRAM.dl                 run it, answer its questions,
+                                           then read more
+nex datalog.nex PROGRAM.dl "QUESTION"      answer one more, and stop
+nex checks.nex                             check the engine
+\end{shell}
+
+At the prompt, type a question such as \code{ancestor(alice, X)}, \code{why}
+followed by a fact, \code{:facts}, \code{:stats}, or \code{:quit}.

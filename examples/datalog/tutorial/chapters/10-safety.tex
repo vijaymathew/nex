@@ -1,0 +1,153 @@
+% ===========================================================================
+\chapter{Safe rules}\label{ch:safety}
+
+Not every rule makes sense. Consider
+
+\begin{shell}
+likes(X, Y) :- person(X).
+\end{shell}
+
+``Everyone likes everything.'' The head has a variable, \code{Y}, that the
+body never gives a value, so the rule would derive \code{likes(ann, Y)}: a
+``fact'' with a variable in it, which is not a fact at all. The argument in
+Chapter~\ref{ch:fixpoint} that evaluation stops also breaks: it relied on
+derived facts using only constants that already exist.
+
+A test has a similar problem. In \code{p(X) :- X != a, q(X).} the test comes
+first, when \code{X} has no value yet, and there is nothing to compare.
+
+Rules that avoid both problems are called \emph{safe}, and Datalog only
+accepts safe rules. Our definition is:
+\begin{itemize}
+  \item every variable in the head appears in a positive atom of the body;
+  \item every variable in a test or a negated atom appears in a positive
+    atom \emph{before} it.
+\end{itemize}
+The second is a little stricter than it needs to be, since an engine could
+reorder the body itself. Asking the programmer to write tests after the
+atoms that bind their variables keeps the join of Chapter~\ref{ch:joins}
+simple, and it is how most people write rules anyway.
+
+\section{Checking a rule}
+
+To check the second condition we need the variables of a literal, which for
+a test means the variables among its two terms:
+
+\begin{addbefore}{terms.nex}{before the Rule class}{-- head :- body. A rule with an empty body would be a fact.}
+-- The variables a literal mentions.
+function literal_variables(l: Literal): Array[String] do
+  match l of
+    Positive(atom) then result := atom.variables
+    Compare(op, left, right) then
+      do
+        result := []
+        across [left, right] as t do
+          let name := variable_name(t)
+          if name /= "" and not result.contains(name) then
+            result.add(name)
+          end
+        end
+      end
+    Negated(atom) then result := atom.variables
+  end
+end
+\end{addbefore}
+
+A rule checks itself by walking its body in order, collecting the variables
+that positive atoms bind, and complaining about the first variable used
+before it is bound. It returns the complaint, or \code{""}, so that an error
+message can say exactly what is wrong.
+
+\begin{addbefore}{terms.nex}{to Rule, before text}{  text: String do|    result := head.text + " :-"}
+  -- Why the rule is not safe, or "" if it is. A rule is safe when every
+  -- variable is bound by a positive literal: those in the head by one
+  -- anywhere in the body, those in a test by one before it.
+  safety_problem: String do
+    result := ""
+    let bound: Array[String] := []
+    across body as l do
+      match l of
+        Positive(atom) then
+          across atom.variables as v do
+            if not bound.contains(v) then
+              bound.add(v)
+            end
+          end
+        _ then
+          across literal_variables(l) as v do
+            if result = "" and not bound.contains(v) then
+              result := "variable " + v + " in '" + literal_text(l)
+                        + "' must appear in a positive literal before it"
+            end
+          end
+      end
+    end
+    across head.variables as v do
+      if result = "" and not bound.contains(v) then
+        result := "variable " + v + " in the head must appear in a positive literal of the body"
+      end
+    end
+  end
+
+  is_safe: Boolean do
+    result := safety_problem = ""
+  end
+\end{addbefore}
+
+\begin{append}{terms.nex}
+-- Are all of `rules` safe?
+function all_safe(rules: Array[Rule]): Boolean do
+  result := true
+  across rules as r do
+    if not r.is_safe then
+      result := false
+    end
+  end
+end
+\end{append}
+
+\section{A precondition}
+
+Evaluating an unsafe rule is a mistake by whoever called the evaluator, so
+it is a precondition of \code{run}, which every evaluator inherits:
+
+\begin{tightaddbefore}{evaluate.nex}{to run, before deferred}{  deferred|  ensure|    fixpoint: is_fixpoint(rules, db)}
+  require
+    safe: all_safe(rules)
+\end{tightaddbefore}
+
+The engine's own command line will check every rule before it evaluates
+anything, and report an unsafe one with its message. The precondition is
+there for code that forgets.
+
+\section{Trying it out}
+
+\begin{tryit}{try_safety.nex}
+intern Parser
+intern Evaluate
+
+match parse_program("p(X) :- q(X), r(X, Y).
+p(X) :- q(Y).
+p(X) :- X != a, q(X).
+p(X) :- q(X), not r(Y).") of
+  Ok as ok then
+    do
+      across ok.value.rules as r do
+        if r.is_safe then
+          console.print_line("safe:    " + r.text)
+        else
+          console.print_line("unsafe:  " + r.text)
+          console.print_line("         " + r.safety_problem)
+        end
+      end
+      do
+        let e := create Naive_Evaluator.make
+        e.run(ok.value.rules, create Database.make)
+      rescue
+        console.print_line(exception.to_string)
+      end
+    end
+  Err as e then console.print_line(e.error)
+end
+\end{tryit}
+\tryoutput{try_safety}

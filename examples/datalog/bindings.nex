@@ -1,0 +1,140 @@
+-- bindings.nex: giving variables values, and matching atoms against facts.
+
+intern Terms
+
+-- Values for some variables. A Bindings never changes once made: binding
+-- one more variable makes a new one, so a search can try several ways
+-- forward from the same bindings.
+class Bindings
+create
+  empty do
+    values := {}
+  end
+
+  extending(b: Bindings, name: String, t: Term)
+  require
+    unbound: not b.has(name)
+    constant: not is_variable(t)
+  do
+    values := b.values.clone
+    values.put(name, t)
+  end
+feature
+  values: Map[String, Term]
+
+  has(name: String): Boolean do
+    result := values.contains_key(name)
+  end
+
+  value_of(name: String): Term
+  require
+    bound: has(name)
+  do
+    result := values.get(name)
+  end
+
+  -- "X = alice, Y = bob", in name order.
+  text: String do
+    result := ""
+    across values.keys.sort as name do
+      if result /= "" then
+        result := result + ", "
+      end
+      result := result + name + " = " + term_text(values.get(name))
+    end
+  end
+end
+
+-- `t` with its variable replaced by its value, if it has one.
+function substitute_term(t: Term, b: Bindings): Term do
+  result := t
+  let name := variable_name(t)
+  if name /= "" and b.has(name) then
+    result := b.value_of(name)
+  end
+end
+
+-- `a` with every bound variable replaced by its value.
+function substitute(a: Atom, b: Bindings): Atom do
+  result := create Atom.make(a.predicate, a.args.map(fn (t: Term): Term do
+    result := substitute_term(t, b)
+  end))
+ensure
+  same_predicate: result.predicate = a.predicate
+end
+
+-- The bindings, extending `b`, that make `pattern` equal to `fact`; or
+-- nil if there are none.
+function match_atom(pattern: Atom, fact: Atom, b: Bindings): ?Bindings
+require
+  fact_is_ground: fact.is_ground
+do
+  result := nil
+  if pattern.predicate = fact.predicate and pattern.arity = fact.arity then
+    let current := b
+    let failed := false
+    from let i := 0 until i = pattern.arity or failed do
+      let next := match_term(pattern.args.get(i), fact.args.get(i), current)
+      if next = nil then
+        failed := true
+      else
+        current := next
+      end
+      i := i + 1
+    end
+    if not failed then
+      result := current
+    end
+  end
+ensure
+  matched: is_match(pattern, fact, result)
+end
+
+-- Is `b` nil, or does it make `pattern` equal to `fact`?
+function is_match(pattern, fact: Atom, b: ?Bindings): Boolean do
+  result := true
+  if b /= nil then
+    result := substitute(pattern, b).text = fact.text
+  end
+end
+
+-- The bindings, extending `b`, that make `t` equal to the constant `c`.
+function match_term(t: Term, c: Term, b: Bindings): ?Bindings
+require
+  constant: not is_variable(c)
+do
+  let name := variable_name(t)
+  if name = "" then
+    result := when t = c then b else nil end
+  elseif b.has(name) then
+    result := when b.value_of(name) = c then b else nil end
+  else
+    result := create Bindings.extending(b, name, c)
+  end
+end
+
+-- Is `left op right` true? Equality works on any constants; the order
+-- comparisons need two integers.
+function holds(op: String, left, right: Term): Boolean
+require
+  constants: not is_variable(left) and not is_variable(right)
+  known: ["=", "!=", "<", "<=", ">", ">="].contains(op)
+do
+  if op = "=" then
+    result := left = right
+  elseif op = "!=" then
+    result := left /= right
+  else
+    result := false
+    match left of
+      Int(value as a) then
+        match right of
+          Int(value as b) then
+            result := (op = "<" and a < b) or (op = "<=" and a <= b)
+                      or (op = ">" and a > b) or (op = ">=" and a >= b)
+          _ then result := false
+        end
+      _ then result := false
+    end
+  end
+end

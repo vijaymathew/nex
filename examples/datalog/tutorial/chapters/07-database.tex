@@ -1,0 +1,221 @@
+% ===========================================================================
+\chapter{A database of facts}\label{ch:database}
+
+The engine needs somewhere to keep facts: the ones a program states, and
+the far more numerous ones its rules derive. It needs to do three things
+with them quickly. Ask whether a fact is already known, so that it is
+stored once. Add a new one. And find the facts that might match a pattern,
+which is what every rule does all the time.
+
+\section{Relations}
+
+Facts are grouped by predicate. All the \code{parent} facts form one
+\emph{relation}, all the \code{ancestor} facts another, as the rows of one
+table in a relational database. A relation keeps its facts in the order
+they arrived, and the text of each in a set, so that asking whether a fact
+is here does not mean looking at every one.
+
+\begin{newfile}{database.nex}
+-- database.nex: the facts, kept one relation per predicate.
+
+intern Bindings
+
+-- The facts of one predicate, each once.
+class Relation
+create
+  make(p: String) do
+    predicate := p
+    facts := []
+    keys := #{}
+  end
+feature
+  predicate: String
+  facts: Array[Atom]
+  -- The text of every fact, for asking quickly whether one is here.
+  keys: Set[String]
+
+  count: Integer do
+    result := facts.length
+  end
+
+  contains(a: Atom): Boolean do
+    result := keys.contains(a.text)
+  end
+\end{newfile}
+
+Adding a fact that is already here does nothing, and \code{add} reports
+whether the fact was new. Its postcondition \code{counted} says exactly how
+the count changes: by one for a new fact, not at all for a known one.
+
+\begin{continued}{database.nex}
+  -- Add `a`, unless it is already here. Is it new?
+  add(a: Atom): Boolean
+  require
+    this_predicate: a.predicate = predicate
+    ground: a.is_ground
+  do
+    result := not contains(a)
+    if result then
+      facts.add(a)
+      keys.add(a.text)
+    end
+  ensure
+    present: contains(a)
+    counted: count = old count + (when result then 1 else 0 end)
+  end
+\end{continued}
+
+\section{Candidates}
+
+Matching a pattern needs a list of facts to try. For now a relation simply
+offers all of its facts. In Chapter~\ref{ch:indexing} we will find a
+cleverer way that offers fewer, and \code{candidates} is the one place that
+will change. Its postcondition says what any way of choosing candidates
+must guarantee: \code{complete}, that every fact the pattern matches is
+among them. Offering extra facts only wastes a little time, but leaving one
+out would make the engine miss answers, silently.
+
+\begin{continued}{database.nex}
+  -- The facts that might match `pattern` once `b` is applied to it.
+  -- Here that is simply all of them.
+  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+    result := facts
+  ensure
+    complete: covers(result, pattern, b)
+  end
+
+  -- Is every fact that matches `pattern` under `b` among `found`?
+  covers(found: Array[Atom], pattern: Atom, b: Bindings): Boolean do
+    result := true
+    across facts as f do
+      if match_atom(pattern, f, b) /= nil and not found.contains(f) then
+        result := false
+      end
+    end
+  end
+invariant
+  one_key_per_fact: keys.size = facts.length
+end
+\end{continued}
+
+\section{The database}
+
+The database is a map from predicate to relation. It creates a relation the
+first time it sees a predicate, through \code{new_relation}. Making that a
+routine of its own looks like a small thing, but it is what will let a
+different kind of database, in Chapter~\ref{ch:indexing}, choose a
+different kind of relation, without a line of this class changing.
+
+\begin{continued}{database.nex}
+-- All the facts known so far.
+class Database
+create
+  make do
+    relations := {}
+  end
+feature
+  relations: Map[String, Relation]
+
+  -- A relation for a predicate seen for the first time. A kind of
+  -- database that stores its facts differently says so here.
+  new_relation(p: String): Relation do
+    result := create Relation.make(p)
+  ensure
+    for_p: result.predicate = p
+    empty: result.count = 0
+  end
+
+  has(p: String): Boolean do
+    result := relations.contains_key(p)
+  end
+
+  contains(a: Atom): Boolean do
+    result := has(a.predicate) and relations.get(a.predicate).contains(a)
+  end
+
+  -- Add a fact. Is it new?
+  add(a: Atom): Boolean
+  require
+    ground: a.is_ground
+  do
+    if not has(a.predicate) then
+      relations.put(a.predicate, new_relation(a.predicate))
+    end
+    result := relations.get(a.predicate).add(a)
+  ensure
+    present: contains(a)
+    only_grows: count >= old count
+  end
+
+  -- Add a fact that `rule` derived with the bindings `b`. Is it new?
+  add_derived(a: Atom, rule: Rule, b: Bindings): Boolean
+  require
+    ground: a.is_ground
+    from_rule: substitute(rule.head, b).text = a.text
+  do
+    result := add(a)
+  ensure
+    present: contains(a)
+  end
+
+  facts_of(p: String): Array[Atom] do
+    result := when has(p) then relations.get(p).facts else [] end
+  end
+
+  -- The facts that might match `pattern` under `b`.
+  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+    result := []
+    if has(pattern.predicate) then
+      result := relations.get(pattern.predicate).candidates(pattern, b)
+    end
+  end
+
+  count: Integer do
+    result := 0
+    across relations.values as r do
+      result := result + r.count
+    end
+  end
+
+  -- The predicates with facts, in name order.
+  predicates: Array[String] do
+    result := relations.keys.sort
+  end
+end
+\end{continued}
+
+\code{add_derived} is the same: today it just adds the fact, but every fact
+a rule derives will come through it, with the rule and bindings that
+produced it. In Chapter~\ref{ch:explanations} a database that remembers
+them will be able to say why each fact holds. Its precondition
+\code{from_rule} records what ``derived by this rule with these bindings''
+means: substituting the bindings into the rule's head gives the fact.
+
+\section{Trying it out}
+
+\begin{tryit}{try_database.nex}
+intern Parser
+intern io/Path
+intern Database
+
+let db := create Database.make
+match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+  Ok as ok then
+    across ok.value.facts as f do
+      db.add(f)
+    end
+  Err as e then console.print_line(e.error)
+end
+console.print_line(db.count.to_string + " facts about " + db.predicates.to_string)
+match parse_program("parent(alice, bob). parent(bob, zoe).") of
+  Ok as ok then
+    across ok.value.facts as f do
+      console.print_line(f.text + " new? " + db.add(f).to_string)
+    end
+  Err as e then console.print_line(e.error)
+end
+console.print_line(db.count.to_string + " facts")
+\end{tryit}
+\tryoutput{try_database}
+
+The first fact was already known, so adding it again changed nothing.

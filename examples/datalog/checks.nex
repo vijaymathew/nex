@@ -1,0 +1,171 @@
+-- checks.nex: executable checks for every piece of the project.
+-- Run: nex checks.nex
+
+intern Parser
+intern Analysis
+intern Query
+intern Explain
+
+class Checker
+feature
+  passed: Integer
+  failed: Integer
+
+  check(label: String, ok: Boolean) do
+    if ok then
+      passed := passed + 1
+      console.print_line("PASS " + label)
+    else
+      failed := failed + 1
+      console.print_line("FAIL " + label)
+    end
+  end
+
+  summary do
+    console.print_line("---")
+    console.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
+    if failed > 0 then
+      exit(1)
+    end
+  end
+end
+
+-- The program `text` describes; it must be one.
+function program_of(text: String): Datalog_Program do
+  match parse_program(text) of
+    Ok as ok then result := ok.value
+    Err as e then raise e.error
+  end
+end
+
+-- The one atom in `text`.
+function atom_of(text: String): Atom do
+  result := program_of("?- " + text + ".").queries.get(0)
+end
+
+-- What parsing `text` reports, or "" if it parses.
+function parse_error(text: String): String do
+  match parse_program(text) of
+    Ok as ok then result := ""
+    Err as e then result := e.error
+  end
+end
+
+-- Every fact `text` implies, as sorted text, evaluated with `e` into `db`.
+function evaluated(text: String, db: Database, e: Evaluator): Array[String] do
+  evaluate_program(program_of(text), db, e)
+  result := []
+  across db.predicates as p do
+    across db.facts_of(p) as f do
+      result.add(f.text)
+    end
+  end
+  result := result.sort
+end
+
+function check_terms(c: Checker) do
+  let a := atom_of("parent(X, \"Ann Lee\", 3, X)")
+  c.check("an atom prints as it is written", a.text = "parent(X, \"Ann Lee\", 3, X)")
+  c.check("its variables, each once", a.variables = ["X"])
+  c.check("an atom with a variable is not ground", not a.is_ground)
+  c.check("a fact is ground", atom_of("parent(ann, bo)").is_ground)
+end
+
+function check_parser(c: Checker) do
+  let p := program_of("% a comment
+p(a). p(b).
+q(X) :- p(X), X != a.
+r(X) :- p(X), not q(X).
+s(X) :- p(X), t(_, _).
+?- q(Who).")
+  c.check("facts, rules and questions are read", p.facts.length = 2 and p.rules.length = 3
+    and p.queries.length = 1)
+  c.check("a rule prints back as written", p.rules.get(1).text = "r(X) :- p(X), not q(X).")
+  c.check("each _ is a variable of its own",
+    literal_text(p.rules.get(2).body.get(1)) = "t(_1, _2)")
+  c.check("errors give the line", parse_error("p(a).\nq(b) :- p(a)\n").starts_with("line "))
+  c.check("a fact may not have variables", parse_error("p(X).").contains("cannot have variables"))
+  c.check("a stray character is reported", parse_error("p(a) & q.").contains("unexpected character"))
+end
+
+function check_matching(c: Checker) do
+  let none := create Bindings.empty
+  let b := match_atom(atom_of("parent(X, Y)"), atom_of("parent(ann, bo)"), none)
+  c.check("a pattern matches a fact", b /= nil and b.text = "X = ann, Y = bo")
+  c.check("a repeated variable must match the same value",
+    match_atom(atom_of("parent(X, X)"), atom_of("parent(ann, bo)"), none) = nil)
+  c.check("constants must be equal",
+    match_atom(atom_of("parent(cy, Y)"), atom_of("parent(ann, bo)"), none) = nil)
+  c.check("comparisons on integers", holds("<", create Int.make(2), create Int.make(10)))
+  c.check("ordering needs integers", not holds("<", create Symbol.make("a"), create Symbol.make("b")))
+end
+
+function check_evaluation(c: Checker) do
+  let family := "parent(a, b). parent(b, c). parent(c, d).
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z)."
+  let naive := evaluated(family, create Database.make, create Naive_Evaluator.make)
+  let semi := evaluated(family, create Database.make, create Semi_Naive_Evaluator.make)
+  let indexed := evaluated(family, create Indexed_Database.make, create Semi_Naive_Evaluator.make)
+  c.check("naive evaluation finds every ancestor", naive.contains("ancestor(a, d)") and naive.length = 9)
+  c.check("semi-naive evaluation finds the same facts", semi = naive)
+  c.check("so does an indexed database", indexed = naive)
+  let chain := "link(t1, t2). link(t2, t3). link(t3, t4). link(t4, t5). link(t5, t6).
+route(X, Y) :- link(X, Y).
+route(X, Z) :- route(X, Y), link(Y, Z)."
+  let slow := create Naive_Evaluator.make
+  let fast := create Semi_Naive_Evaluator.make
+  evaluated(chain, create Database.make, slow)
+  evaluated(chain, create Database.make, fast)
+  c.check("semi-naive evaluation looks at fewer facts", fast.attempts < slow.attempts)
+end
+
+function check_analysis(c: Checker) do
+  c.check("a head variable must be bound",
+    program_problem(program_of("p(X) :- q(Y).")).contains("variable X in the head"))
+  c.check("a test's variables must be bound before it",
+    program_problem(program_of("p(X) :- X != a, q(X).")).contains("variable X in 'X != a'"))
+  c.check("a negated literal's variables must be bound",
+    program_problem(program_of("p(X) :- q(X), not r(Y).")).contains("variable Y"))
+  c.check("a cycle through negation is refused",
+    program_problem(program_of("q(a). p(X) :- q(X), not p(X).")).contains("its own negation"))
+  let access := evaluated("user(ann). user(bo). banned(bo).
+ok(U) :- user(U), not banned(U).
+refused(U) :- user(U), not ok(U).", create Database.make, create Semi_Naive_Evaluator.make)
+  c.check("negation, one stratum at a time", access.contains("ok(ann)")
+    and not access.contains("ok(bo)") and access.contains("refused(bo)"))
+end
+
+function check_queries(c: Checker) do
+  let db := create Database.make
+  evaluate_program(program_of("parent(a, b). parent(a, c).
+sibling(X, Y) :- parent(P, X), parent(P, Y), X != Y."), db, create Semi_Naive_Evaluator.make)
+  c.check("a question with a variable", answer_lines(atom_of("sibling(b, Who)"), db) = ["Who = c"])
+  c.check("a question without one", answer_lines(atom_of("sibling(b, c)"), db) = ["yes"]
+    and answer_lines(atom_of("sibling(b, b)"), db) = ["no"])
+end
+
+function check_explanations(c: Checker) do
+  let db := create Explained_Database.make
+  evaluate_program(program_of("parent(a, b). parent(b, c).
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z)."), db, create Semi_Naive_Evaluator.make)
+  let proof := db.why(atom_of("ancestor(a, c)"))
+  c.check("a derived fact is explained by its rule", proof.get(0).starts_with("ancestor(a, c)    by "))
+  c.check("down to the given facts", proof.contains("  parent(a, b)    (given)"))
+  c.check("every step checks", db.steps_hold(atom_of("ancestor(a, c)")))
+end
+
+function main() do
+  let c := create Checker
+  check_terms(c)
+  check_parser(c)
+  check_matching(c)
+  check_evaluation(c)
+  check_analysis(c)
+  check_queries(c)
+  check_explanations(c)
+  c.summary
+end
+
+main()

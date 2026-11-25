@@ -1,0 +1,153 @@
+% ===========================================================================
+\chapter{Not doing the same work twice}\label{ch:seminaive}
+
+The naive evaluator is correct, and wasteful. Each round applies every rule
+to every fact, so each round rediscovers everything every earlier round
+found. Take a chain of towns, each linked to the next, and the rules for
+routes along it:
+
+\begin{shell}
+route(X, Y) :- link(X, Y).
+route(X, Z) :- route(X, Y), link(Y, Z).
+\end{shell}
+
+In the first round the routes of one link appear; in the second, the routes
+of two links; and so on, one link longer each round. But every round, the
+second rule joins \emph{all} the routes found so far with the links, and
+all but the newest of those joins only find routes already known.
+
+\section{The idea}
+
+A fact that is new in this round needs a reason that is new too. If every
+fact a rule's body used was already known last round, the rule already
+derived its head last round. So, after the first round, each rule only
+needs to be joined in the ways that use \emph{at least one fact the
+previous round added}.
+
+That is easy to arrange. Keep the facts the previous round added in a small
+database of their own, the \emph{delta}. For a rule with several positive
+atoms, join it once for each of them, reading that atom's facts from the
+delta and the rest from the whole database. Every derivation that uses a
+new fact is found by at least one of those joins. This is called
+\emph{semi-naive} evaluation.
+
+\section{The semi-naive evaluator}
+
+The join already asks \code{source} where an atom's facts come from. The
+semi-naive evaluator overrides it: the atom at position \code{delta_at}
+reads from the delta.
+
+\begin{append}{evaluate.nex}
+-- Is `l` a positive literal, one that facts can be found for?
+function is_positive(l: Literal): Boolean do
+  match l of
+    Positive then result := true
+    _        then result := false
+  end
+end
+\end{append}
+
+\begin{continued}{evaluate.nex}
+-- After the first round, join each rule only against the facts that the
+-- previous round added: a new fact needs at least one new premise.
+class Semi_Naive_Evaluator inherit Evaluator
+create
+  make do
+    delta := create Database.make
+    delta_at := -1
+  end
+feature
+  -- The facts the previous round added.
+  delta: Database
+  -- Which literal of the body reads `delta`; -1 for none.
+  delta_at: Integer
+
+  source(i: Integer, atom: Atom, b: Bindings, db: Database): Array[Atom] do
+    if i = delta_at then
+      result := delta.candidates(atom, b)
+    else
+      result := db.candidates(atom, b)
+    end
+  end
+
+  run(rules: Array[Rule], db: Database) do
+    -- The first round has nothing to compare with: every rule, every fact.
+    count_round
+    delta_at := -1
+    let fresh := create Database.make
+    across rules as r do
+      apply(r, db, fresh)
+    end
+    from until fresh.count = 0 do
+      count_round
+      delta := fresh
+      fresh := create Database.make
+      across rules as r do
+        from let i := 0 until i = r.body.length do
+          if is_positive(r.body.get(i)) then
+            delta_at := i
+            apply(r, db, fresh)
+          end
+          i := i + 1
+        end
+      end
+    end
+    delta_at := -1
+  end
+
+  -- Derive what `r` gives now, adding the new facts to `db` and `fresh`.
+  apply(r: Rule, db: Database, fresh: Database) do
+    across solutions(r, db) as b do
+      let f := substitute(r.head, b)
+      if db.add_derived(f, r, b) then
+        fresh.add(f)
+      end
+    end
+  end
+end
+\end{continued}
+
+Notice what the new class does not have: a postcondition. It inherits
+\code{run}'s from \code{Evaluator}, so every run of the semi-naive evaluator
+is checked, by the plain apply-every-rule test of \code{is_fixpoint}, to
+have found everything the naive one would. The faster algorithm is held to
+the simple one's standard, at no cost in code.
+
+\section{Trying it out}
+
+The chain in \code{chain.dl} has thirty towns. Both evaluators should find
+the same 464 facts; the question is how much work each does.
+
+\begin{tryit}{try_seminaive.nex}
+intern Parser
+intern Evaluate
+intern io/Path
+
+function evaluated(p: Datalog_Program, e: Evaluator): Database do
+  result := create Database.make
+  across p.facts as f do
+    result.add(f)
+  end
+  e.run(p.rules, result)
+end
+
+match parse_program(create Path.make(program.working_directory + "/chain.dl").read_text) of
+  Ok as ok then
+    do
+      let naive := create Naive_Evaluator.make
+      let semi := create Semi_Naive_Evaluator.make
+      let a := evaluated(ok.value, naive)
+      let b := evaluated(ok.value, semi)
+      console.print_line("naive:       " + a.count.to_string + " facts, "
+        + naive.rounds.to_string + " rounds, " + naive.attempts.to_string + " facts looked at")
+      console.print_line("semi-naive:  " + b.count.to_string + " facts, "
+        + semi.rounds.to_string + " rounds, " + semi.attempts.to_string + " facts looked at")
+    end
+  Err as e then console.print_line(e.error)
+end
+\end{tryit}
+\tryoutput{try_seminaive}
+
+The same facts, in the same number of rounds, for about a tenth of the work.
+The saving grows with the length of the chain, because the naive evaluator
+re-joins every route it knows in every round.

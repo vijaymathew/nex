@@ -1,0 +1,278 @@
+% ===========================================================================
+\chapter{Reading Datalog: tokens}\label{ch:lexer}
+
+Reading a program happens in two steps, as it does for every programming
+language. The first cuts the text into \emph{tokens}, the words of the
+language: a name, a variable, a number, a string, a piece of punctuation
+such as \code{:-} or \code{(}. The second, in the next chapter, works out
+how the tokens fit together. This first step is called \emph{lexing}.
+
+\section{Tokens}
+
+A token is one of a handful of kinds, so it is a union. \code{End_Of_Input}
+marks the end of the program, so that the code reading tokens always has a
+token to look at, even after the last real one. \code{token_text} says what
+a token is, for error messages, and \code{punct_text} lets the parser ask
+``is this the punctuation \code{(}?'' with a single comparison.
+
+\begin{newfile}{lexer.nex}
+-- lexer.nex: cutting Datalog text into tokens.
+
+intern Terms
+
+union Token
+  Name_Token(text: String)
+  Var_Token(text: String)
+  Int_Token(value: Integer)
+  Text_Token(value: String)
+  Punct(text: String)
+  End_Of_Input
+end
+
+function token_text(t: Token): String do
+  match t of
+    Name_Token(text) then result := "'" + text + "'"
+    Var_Token(text)  then result := "variable " + text
+    Int_Token(value) then result := value.to_string
+    Text_Token(value) then result := "\"" + value + "\""
+    Punct(text)      then result := "'" + text + "'"
+    End_Of_Input     then result := "the end of the program"
+  end
+end
+
+-- A punctuation token's text, or "" for any other token.
+function punct_text(t: Token): String do
+  match t of
+    Punct(text) then result := text
+    _           then result := ""
+  end
+end
+\end{newfile}
+
+Which kind of token starts at a character depends on what the character
+is: a digit starts a number, a lower-case letter a name, a capital or an
+underscore a variable.
+
+\begin{continued}{lexer.nex}
+function is_digit(c: Char): Boolean do
+  result := "0123456789".contains(c.to_string)
+end
+
+function is_lower(c: Char): Boolean do
+  result := c >= #a and c <= #z
+end
+
+function is_upper(c: Char): Boolean do
+  result := (c >= #A and c <= #Z) or c = #_
+end
+
+-- Can `c` continue a name or a variable?
+function is_name_char(c: Char): Boolean do
+  result := is_lower(c) or is_upper(c) or is_digit(c)
+end
+\end{continued}
+
+Nex writes a single character as \code{\#} followed by it: \code{\#a} is the
+letter a. Digits are the exception, because \code{\#0} means the character
+whose code is 0; so \code{is_digit} asks a string of digits instead.
+
+\section{The lexer}
+
+The lexer keeps the text, a position in it, and the line that position is
+on, so that every error can say where it happened. Its invariant says the
+position never leaves the text. \code{advance} is the only routine that
+moves forward, and it is also the one place that counts lines.
+
+\begin{continued}{lexer.nex}
+class Lexer
+create
+  make(t: String) do
+    text := t
+    pos := 0
+    line := 1
+  end
+feature
+  text: String
+  pos: Integer
+  -- The line `pos` is on, counting from 1.
+  line: Integer
+
+  at_end: Boolean do
+    result := pos >= text.length
+  end
+
+  current: Char
+  require
+    not_at_end: not at_end
+  do
+    result := text.char_at(pos)
+  end
+
+  -- Is the text at `pos` exactly `s`?
+  looking_at(s: String): Boolean do
+    result := pos + s.length <= text.length and text.substring(pos, pos + s.length) = s
+  end
+
+  advance
+  require
+    not_at_end: not at_end
+  do
+    if current = #newline then
+      line := line + 1
+    end
+    pos := pos + 1
+  ensure
+    moved_on: pos = old pos + 1
+  end
+\end{continued}
+
+Spaces, line breaks and comments separate tokens but are not tokens
+themselves, so \code{next_token} skips them first. \code{\#space},
+\code{\#newline}, \code{\#tab} and \code{\#return} are Nex's names for the
+characters that cannot be written after a \code{\#} as themselves.
+
+\begin{continued}{lexer.nex}
+  -- Skip spaces, line breaks and % comments.
+  skip_blanks do
+    let done := false
+    from until done do
+      if at_end then
+        done := true
+      elseif current = #% then
+        from until at_end or current = #newline do
+          advance
+        end
+      elseif current = #space or current = #newline or current = #tab or current = #return then
+        advance
+      else
+        done := true
+      end
+    end
+  end
+
+  next_token: Token do
+    skip_blanks
+    if at_end then
+      result := create End_Of_Input
+    elseif is_digit(current) or (current = #- and pos + 1 < text.length
+                                 and is_digit(text.char_at(pos + 1))) then
+      result := read_integer
+    elseif is_lower(current) then
+      result := create Name_Token.make(read_name)
+    elseif is_upper(current) then
+      result := create Var_Token.make(read_name)
+    elseif current = #" then
+      result := read_string
+    else
+      result := read_punct
+    end
+  ensure
+    moved_on: pos > old pos or at_end
+  end
+\end{continued}
+
+The postcondition of \code{next_token}, \code{moved_on}, is the reason
+reading a program always ends. Every call either consumes some of the
+text, or finds that there is none left and returns \code{End_Of_Input}. A
+loop that calls \code{next_token} until it sees the end cannot go round
+forever on the same character. Without the postcondition that argument
+lives only in our heads; with it, the lexer checks its own progress on
+every call.
+
+The routines that read each kind of token come last. Each has a
+precondition saying where it may start, and \code{next_token} only calls
+one after looking at the character there. Punctuation is found by trying
+the possible symbols in turn, longest first, so that \code{:-} is read as
+one token rather than \code{:} followed by \code{-}.
+
+\begin{continued}{lexer.nex}
+  read_name: String
+  require
+    at_name: not at_end and is_name_char(current)
+  do
+    let start := pos
+    from until at_end or not is_name_char(current) do
+      advance
+    end
+    result := text.substring(start, pos)
+  ensure
+    not_empty: result.length > 0
+  end
+
+  read_integer: Token do
+    let start := pos
+    advance
+    from until at_end or not is_digit(current) do
+      advance
+    end
+    result := create Int_Token.make(text.substring(start, pos).to_integer)
+  ensure
+    moved_on: pos > old pos
+  end
+
+  read_string: Token
+  require
+    at_quote: not at_end and current = #"
+  do
+    advance
+    let start := pos
+    from until at_end or current = #" do
+      advance
+    end
+    if at_end then
+      raise "line " + line.to_string + ": a string is not closed"
+    end
+    result := create Text_Token.make(text.substring(start, pos))
+    advance
+  ensure
+    moved_on: pos > old pos
+  end
+
+  read_punct: Token
+  require
+    not_at_end: not at_end
+  do
+    let found := ""
+    across [":-", "?-", "!=", "<=", ">=", "(", ")", ",", ".", "=", "<", ">"] as p do
+      if found = "" and looking_at(p) then
+        found := p
+      end
+    end
+    if found = "" then
+      raise "line " + line.to_string + ": unexpected character '" + current.to_string + "'"
+    end
+    across found as c do
+      advance
+    end
+    result := create Punct.make(found)
+  ensure
+    moved_on: pos > old pos
+  end
+invariant
+  inside_text: 0 <= pos and pos <= text.length
+  lines_count_from_one: line >= 1
+end
+\end{continued}
+
+\section{Trying it out}
+
+\begin{tryit}{try_lexer.nex}
+intern Lexer
+
+let lexer := create Lexer.make("% kin
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+age(\"Ann Lee\", 42).")
+let done := false
+from until done do
+  let t := lexer.next_token
+  console.print_line(lexer.line.to_string + "  " + token_text(t))
+  match t of
+    End_Of_Input then done := true
+    _            then done := false
+  end
+end
+\end{tryit}
+\tryoutput{try_lexer}
+
+Each token is printed with the line it ends on. The comment and the line
+breaks have gone, and \code{:-} is a single token.

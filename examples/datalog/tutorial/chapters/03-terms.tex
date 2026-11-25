@@ -1,0 +1,262 @@
+% ===========================================================================
+\chapter{Terms, atoms and rules}\label{ch:terms}
+
+Before the engine can read a program, we need something to read it
+\emph{into}: Nex classes for the things a Datalog program is made of. They
+are few.
+
+\begin{description}[style=nextline, leftmargin=1.2em, itemsep=0.4em]
+  \item[Terms.] The smallest pieces: a constant such as \code{alice}, \code{42}
+    or \code{"Ann Lee"}, or a variable such as \code{X}.
+  \item[Atoms.] A predicate applied to terms: \code{parent(alice, bob)},
+    \code{ancestor(X, Y)}. An atom with no variables is \emph{ground}, and a
+    fact is a ground atom.
+  \item[Literals.] The conditions in the body of a rule. Most are atoms,
+    which must match a fact. Two other kinds test something instead:
+    \code{X != Y} compares two terms, and \code{not banned(U)} asks that a
+    fact \emph{not} hold.
+  \item[Rules.] A head and a body: the head holds whenever the whole body
+    does.
+\end{description}
+
+\section{Terms}
+
+A term is exactly one of four things, each carrying different data, which
+is what a \code{union} is for. Three small functions answer the questions
+the rest of the engine asks about a term: is it a variable, what is its
+name if it is one, and how is it written?
+
+\begin{newfile}{terms.nex}
+-- terms.nex: what Datalog talks about. Terms, atoms, literals, rules,
+-- and whole programs.
+
+-- A term is a constant (a symbol, an integer or a string) or a variable.
+union Term
+  Symbol(name: String)
+  Int(value: Integer)
+  Text(value: String)
+  Var(name: String)
+end
+
+function is_variable(t: Term): Boolean do
+  match t of
+    Var then result := true
+    _   then result := false
+  end
+end
+
+-- A variable's name, or "" for a constant.
+function variable_name(t: Term): String do
+  match t of
+    Var(name) then result := name
+    _         then result := ""
+  end
+end
+
+-- A term as Datalog writes it.
+function term_text(t: Term): String do
+  match t of
+    Symbol(name) then result := name
+    Int(value)   then result := value.to_string
+    Text(value)  then result := "\"" + value + "\""
+    Var(name)    then result := name
+  end
+end
+\end{newfile}
+
+\code{variable_name} returns \code{""} for a constant, so that code that
+only cares about variables can skip constants with one test instead of a
+\code{match}.
+
+\section{Atoms}
+
+An atom is a predicate and a list of terms. Its \code{text} is the atom as
+Datalog writes it, and it does double duty: two atoms are the same exactly
+when their texts are, so the text can serve as a key when we store facts
+in Chapter~\ref{ch:database}. That works because \code{term_text} writes
+every kind of constant differently: a string has quotes, a symbol does not,
+so \code{alice} and \code{"alice"} never collide.
+
+\begin{continued}{terms.nex}
+-- A predicate applied to terms: parent(alice, bob), ancestor(X, Y).
+class Atom
+create
+  make(p: String, a: Array[Term]) do
+    predicate := p
+    args := a
+  end
+feature
+  predicate: String
+  args: Array[Term]
+
+  arity: Integer do
+    result := args.length
+  end
+
+  -- Does it mention no variables? Facts are ground atoms.
+  is_ground: Boolean do
+    result := true
+    across args as t do
+      if is_variable(t) then
+        result := false
+      end
+    end
+  end
+
+  -- The names of its variables, each once, in the order they appear.
+  variables: Array[String] do
+    result := []
+    across args as t do
+      let name := variable_name(t)
+      if name /= "" and not result.contains(name) then
+        result.add(name)
+      end
+    end
+  end
+
+  -- The atom as Datalog writes it. Two atoms are the same exactly when
+  -- their texts are, so the text also serves as a key.
+  text: String do
+    result := predicate
+    if arity > 0 then
+      result := result + "("
+      from let i := 0 until i = arity do
+        if i > 0 then
+          result := result + ", "
+        end
+        result := result + term_text(args.get(i))
+        i := i + 1
+      end
+      result := result + ")"
+    end
+  end
+invariant
+  named: predicate.length > 0
+end
+\end{continued}
+
+\section{Literals and rules}
+
+A literal is again one of a few kinds. We define all three now, although
+the tests come into their own in Chapter~\ref{ch:joins} and negation in
+Chapter~\ref{ch:negation}.
+
+\begin{continued}{terms.nex}
+-- One condition in the body of a rule.
+union Literal
+  Positive(atom: Atom)
+  Compare(op: String, left: Term, right: Term)
+  Negated(atom: Atom)
+end
+
+function literal_text(l: Literal): String do
+  match l of
+    Positive(atom) then result := atom.text
+    Compare(op, left, right) then
+      result := term_text(left) + " " + op + " " + term_text(right)
+    Negated(atom) then result := "not " + atom.text
+  end
+end
+\end{continued}
+
+A rule has a head and a body. Its constructor requires a non-empty body:
+a ``rule'' with nothing to check is a fact, and facts are stored
+separately.
+
+\begin{continued}{terms.nex}
+-- head :- body. A rule with an empty body would be a fact.
+class Rule
+create
+  make(h: Atom, b: Array[Literal])
+  require
+    has_body: b.length > 0
+  do
+    head := h
+    body := b
+  end
+feature
+  head: Atom
+  body: Array[Literal]
+
+  text: String do
+    result := head.text + " :-"
+    from let i := 0 until i = body.length do
+      result := result + when i = 0 then " " else ", " end + literal_text(body.get(i))
+      i := i + 1
+    end
+    result := result + "."
+  end
+end
+\end{continued}
+
+Finally, a whole program is its facts, its rules and its questions. A fact
+must be ground, and \code{add_fact} says so: a program that states
+\code{parent(X, bob)} has made a mistake, and the parser will report it
+before it gets this far.
+
+\begin{continued}{terms.nex}
+-- A whole program: the facts it states, the rules it gives, and the
+-- questions it asks.
+class Datalog_Program
+create
+  make do
+    facts := []
+    rules := []
+    queries := []
+  end
+feature
+  facts: Array[Atom]
+  rules: Array[Rule]
+  queries: Array[Atom]
+
+  add_fact(a: Atom)
+  require
+    ground: a.is_ground
+  do
+    facts.add(a)
+  ensure
+    one_more: facts.length = old facts.length + 1
+  end
+
+  add_rule(r: Rule) do
+    rules.add(r)
+  end
+
+  add_query(q: Atom) do
+    queries.add(q)
+  end
+end
+\end{continued}
+
+\section{Trying it out}
+
+There is no parser yet, so the try program builds a rule by hand: the
+recursive rule for \code{ancestor}. Each term is declared as a \code{Term};
+without that, \code{[x, z]} would be an array of \code{Var}, the most
+specific type its elements share, and \code{Atom.make} wants an array of
+\code{Term}.
+
+\begin{tryit}{try_terms.nex}
+intern Terms
+
+-- Each term is declared a Term, so that arrays of them are Array[Term].
+let x: Term := create Var.make("X")
+let y: Term := create Var.make("Y")
+let z: Term := create Var.make("Z")
+let head := create Atom.make("ancestor", [x, z])
+let parent := create Atom.make("parent", [x, y])
+let rest := create Atom.make("ancestor", [y, z])
+let first: Literal := create Positive.make(parent)
+let second: Literal := create Positive.make(rest)
+let rule := create Rule.make(head, [first, second])
+console.print_line(rule.text)
+console.print_line(parent.variables.to_string)
+console.print_line(parent.is_ground.to_string)
+
+let alice: Term := create Symbol.make("alice")
+let ann: Term := create Text.make("Ann Lee")
+let fact := create Atom.make("parent", [alice, ann])
+console.print_line(fact.text)
+console.print_line(fact.is_ground.to_string)
+\end{tryit}
+\tryoutput{try_terms}
