@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A deferred routine with no parameters may leave out its parentheses.**
+  `area: Real deferred` now declares a deferred routine, as `area: Real do
+  ... end` already declared one with a body; before, only `area(): Real
+  deferred` parsed. `require` before `deferred` and `ensure ... end` after it
+  work the same way. Without parentheses the `deferred` is required, since
+  `area: Real` alone is a field.
+
 ## 0.7.8 - 2026-11-24
 
 - **Breaking: a union variant with no data has no constructor.** For
