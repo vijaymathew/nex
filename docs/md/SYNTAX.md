@@ -656,6 +656,11 @@ class Pet
 end
 ```
 
+A routine with no parameters may leave out the parentheses, as `speak` does,
+and is still called with or without them (`p.speak`, `p.speak()`). That holds
+for a deferred routine too, `area: Real deferred`; without parentheses its
+`deferred` is what tells it apart from a field, `area: Real`.
+
 ## Creating Objects
 
 ```nex
@@ -911,7 +916,7 @@ return type. This is also how a deferred query is most often implemented:
 ```nex
 deferred class Shape
   feature
-    area(): Real deferred
+    area: Real deferred
     describe: String do result := "area=" + area.to_string end
 end
 
@@ -1233,7 +1238,7 @@ deferred class Shape
         bigger: result > x
       end
 
-    area(): Real deferred ensure non_negative: result >= 0.0 end
+    area: Real deferred ensure non_negative: result >= 0.0 end
 end
 ```
 
@@ -1913,7 +1918,7 @@ builtin such as `Comparable`, or any class you declare:
 ```nex
 deferred class Shape
   feature
-    area(): Integer deferred
+    area: Integer deferred
     name: String
 end
 

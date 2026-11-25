@@ -113,6 +113,69 @@ end")
       (is (every? :declaration-only? [(by-name "d") (by-name "e")]))
       (is (every? (comp nil? :require) [(by-name "d") (by-name "e")])))))
 
+(deftest a-deferred-routine-without-parameters-may-leave-out-the-parentheses
+  (let [strip (fn [ms] (walk/postwalk #(if (map? %) (dissoc % :dbg/line :dbg/col) %) (vec ms)))
+        without (members "deferred class Shape
+feature
+  area: Real deferred
+  reset deferred
+  label: String
+  scaled: Real
+    require
+      ok: true
+    deferred
+    ensure
+      nonneg: result >= 0.0
+    end
+  kind: String note \"what it is\" deferred
+  sides: Integer
+end")
+        with (members "deferred class Shape
+feature
+  area: Real deferred
+  reset deferred
+  label: String
+  scaled(): Real
+    require
+      ok: true
+    deferred
+    ensure
+      nonneg: result >= 0.0
+    end
+  kind(): String note \"what it is\" deferred
+  sides: Integer
+end")]
+    (testing "each declares the same routine as with `()`, and fields stay fields"
+      (is (= (strip with) (strip without)))
+      (is (= [:method :method :field :method :method :field] (mapv :type without)))))
+  (testing "an heir implements it, on both backends"
+    (is (= ["4.0" "\"square\""]
+           (both "deferred class Shape
+feature
+  area: Real deferred
+  kind: String deferred
+end
+class Square inherit Shape
+feature
+  area: Real do result := 2.0 * 2.0 end
+  kind: String do result := \"square\" end
+end
+let s: Shape := create Square
+print(s.area)
+print(s.kind)"))))
+  (testing "and an heir that leaves it out is rejected"
+    (is (re-find #"does not implement deferred method 'area'"
+                 (str (error-message "deferred class Shape
+feature
+  area: Real deferred
+end
+class Blob inherit Shape
+end
+let b := create Blob")))))
+  (testing "the formatter keeps it"
+    (let [src "deferred class Shape\nfeature\n  area: Real deferred\n  scaled: Real\n  require\n    ok: true\n  deferred\nend"]
+      (is (= src (fmt/format-code src))))))
+
 (deftest deferred-ensure-needs-end
   (is (thrown? Exception
                (p/ast "deferred class Shape

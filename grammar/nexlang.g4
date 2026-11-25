@@ -157,9 +157,14 @@ constructorDecl
 // `end`, since otherwise a following `name: Type` field would read as one more
 // labelled postcondition; `deferred` already ends a `require`.
 //
+// A routine with no parameters may leave out the parentheses, as with a body
+// (`area: Real deferred`). Without them the `deferred` is required: `area: Real`
+// on its own is a field.
+//
 methodDecl
     : IDENTIFIER ('(' paramList? ')')? (':' type)? aliasClause? noteClause? requireClause? DO block ensureClause? rescueClause? END
     | IDENTIFIER '(' paramList? ')' (':' type)? aliasClause? noteClause? (requireClause? DEFERRED (ensureClause END)?)?
+    | IDENTIFIER (':' type)? aliasClause? noteClause? requireClause? DEFERRED (ensureClause END)?
     ;
 
 // Binds an operator symbol to this feature, e.g. `alias "-"`. The operator is
