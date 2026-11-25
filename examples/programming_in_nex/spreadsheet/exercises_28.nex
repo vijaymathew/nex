@@ -1,0 +1,125 @@
+-- Solutions to the exercises of Chapter 28 (A Spreadsheet: The Sheet).
+intern sheet/Sheet
+
+function formula(text: String): Formula do
+  match parse_formula(text) of
+    Ok as ok then result := ok.value
+    Err as e then raise e.error
+  end
+end
+
+-- 1. Every cell that depends on `name`, in name order.
+function dependents(sheet: Sheet, name: String): Array[String]
+require
+  valid_name: is_cell_name(name)
+do
+  result := []
+  across sheet.cells.keys.sort as other do
+    if sheet.depends_on(other, name) then
+      result.add(other)
+    end
+  end
+ensure
+  all_depend: result.all(fn (other: String): Boolean do
+    result := sheet.depends_on(other, name)
+  end)
+end
+
+-- 2. Recalculate only the changed cell and the cells that depend on it,
+--    still in dependency order. The inherited invariant `consistent` checks
+--    every value when `set` returns, so a wrong strategy fails at once.
+class Fast_Sheet inherit Sheet
+create
+  make do
+    Sheet.make
+  end
+feature
+  set(name: String, f: Formula) do
+    cells.put(name, create Cell.make(name, f))
+    across evaluation_order as other do
+      if other = name or depends_on(other, name) then
+        let c := cells.get(other)
+        c.set_value(evaluate(c.formula.expr, values))
+      end
+    end
+  ensure
+    up_to_date: is_up_to_date
+  end
+end
+
+-- 3. Either design can be defended. With a precondition
+--    `nobody_reads: dependents(this, name).is_empty`, the command line must
+--    ask first and explain why it refuses ("B1 reads A1"); a user can then
+--    only empty cells from the top of the chain down. Without one, as now,
+--    clearing is always allowed and the readers silently see zero, which is
+--    what most spreadsheets do but can hide a mistake. Either way the choice
+--    belongs in the contract, where callers can see it.
+
+-- 4. A three-cell chain: the cycle is seen before the third formula is
+--    stored, and storing it anyway violates the precondition.
+function test_three_cell_cycle() do
+  let sheet := create Sheet.make
+  sheet.set("A1", formula("B1"))
+  sheet.set("B1", formula("C1"))
+  assert closing_the_loop_is_a_cycle: sheet.would_cycle("C1", formula("A1"))
+  let reached := false
+  sheet.set("C1", formula("A1"))
+  reached := true
+  raise "test failed: a cycle was accepted"
+rescue
+  if reached then
+    raise "test failed: a cycle was accepted"
+  else
+    print("three-cell cycle test passed")
+  end
+end
+
+-- 5. A ladder: each cell reads the two cells below it, A1 = A2 + B2,
+--    A2 = A3 + B3, and so on, with each B cell reading the A cell below it
+--    too. Without `seen`, a search from A1 reaches A3 by two paths, A4 by
+--    four, and the cell k rows down by about 2^k paths: exponential in the
+--    height of the sheet. With `seen`, each cell is looked at once.
+
+-- 6. A client could call `cell.set_value(create Num.make(1.0))` on a cell it
+--    got from `sheet.cells`. The stored value would then disagree with the
+--    formula, and the invariant `consistent` would report it on the next call
+--    into the sheet from outside: not when the damage was done, but later.
+--    The cure is a Cell whose value is fixed when it is made. The sheet then
+--    replaces the whole cell when a value changes:
+class Fixed_Cell
+create
+  make(n: String, f: Formula, v: Value) do
+    name := n
+    formula := f
+    value := v
+  end
+feature
+  name: String
+  formula: Formula
+  value: Value
+end
+
+-- 7.* See Section 28.8: time chains of 25, 50 and 99 cells with and without
+--     --skip-contracts. The extra time grows faster than the number of cells,
+--     because `consistent` recomputes every cell on each call into the sheet,
+--     and each change makes several such calls.
+
+let sheet := create Sheet.make
+sheet.set("A1", formula("1"))
+sheet.set("A2", formula("A1 + 1"))
+sheet.set("A3", formula("A2 + A1"))
+sheet.set("B1", formula("7"))
+print(dependents(sheet, "A1"))
+print(dependents(sheet, "B1"))
+
+let fast := create Fast_Sheet.make
+fast.set("A1", formula("1"))
+fast.set("A2", formula("A1 * 10"))
+fast.set("A3", formula("A2 + A1"))
+fast.set("A1", formula("2"))
+print(show_value(fast.value_of("A3")))
+
+test_three_cell_cycle()
+
+let frozen := create Fixed_Cell.make("A1", formula("1"), create Num.make(1.0))
+print(show_value(frozen.value))

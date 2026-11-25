@@ -1,0 +1,365 @@
+-- sheet/formula.nex: cell names, and turning formula text into a tree.
+intern data/Result
+
+-- Cell names ---------------------------------------------------------
+
+function column_letters(): String do
+  result := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+end
+
+function is_digit(c: Char): Boolean do
+  result := "0123456789".contains(c.to_string)
+end
+
+function is_letter(c: Char): Boolean do
+  result := (c >= #A and c <= #Z) or (c >= #a and c <= #z)
+end
+
+-- A cell name is a column letter A-Z followed by a row number 1-99.
+function is_cell_name(text: String): Boolean do
+  result := false
+  if text.length >= 2 and text.length <= 3 then
+    let column := text.char_at(0)
+    let row := text.substring(1, text.length)
+    result := column >= #A and column <= #Z
+              and row.all(fn (c: Char): Boolean do result := is_digit(c) end)
+              and not row.starts_with("0")
+  end
+end
+
+function column_of(name: String): Integer
+require
+  valid: is_cell_name(name)
+do
+  result := column_letters().index_of(name.char_at(0).to_string)
+ensure
+  in_range: result >= 0 and result < 26
+end
+
+function row_of(name: String): Integer
+require
+  valid: is_cell_name(name)
+do
+  result := name.substring(1, name.length).to_integer
+ensure
+  in_range: result >= 1 and result <= 99
+end
+
+function cell_name(column, row: Integer): String
+require
+  column_in_range: column >= 0 and column < 26
+  row_in_range: row >= 1 and row <= 99
+do
+  result := column_letters().char_at(column).to_string + row.to_string
+ensure
+  valid: is_cell_name(result)
+  same_column: column_of(result) = column
+  same_row: row_of(result) = row
+end
+
+-- Every cell in the rectangle with corners `first` and `last`.
+function cells_in_range(first, last: String): Array[String]
+require
+  valid_first: is_cell_name(first)
+  valid_last: is_cell_name(last)
+do
+  result := []
+  let left := column_of(first).min(column_of(last))
+  let right := column_of(first).max(column_of(last))
+  let top := row_of(first).min(row_of(last))
+  let bottom := row_of(first).max(row_of(last))
+  from let col := left until col > right do
+    from let row := top until row > bottom do
+      result.add(cell_name(col, row))
+      row := row + 1
+    end
+    col := col + 1
+  end
+ensure
+  whole_rectangle: result.length = ((column_of(first) - column_of(last)).abs + 1)
+                                   * ((row_of(first) - row_of(last)).abs + 1)
+end
+
+-- Tokens --------------------------------------------------------------
+
+union Token
+  Number_Token(value: Real)
+  Cell_Token(name: String)
+  Name_Token(text: String)
+  Symbol(sign: Char)
+  End_Of_Input
+end
+
+function describe_token(t: Token): String do
+  match t of
+    Number_Token(value) then result := "number " + value.to_string
+    Cell_Token(name)    then result := "cell " + name
+    Name_Token(text)    then result := "name " + text
+    Symbol(sign)        then result := "'" + sign.to_string + "'"
+    End_Of_Input        then result := "end of formula"
+  end
+end
+
+class Lexer
+create
+  make(t: String) do
+    text := t
+    pos := 0
+  end
+feature
+  text: String
+  pos: Integer
+
+  at_end: Boolean do
+    result := pos >= text.length
+  end
+
+  next_token: Token do
+    skip_spaces
+    if at_end then
+      result := create End_Of_Input
+    else
+      let c := text.char_at(pos)
+      if is_digit(c) or c = #. then
+        result := read_number
+      elseif is_letter(c) then
+        result := read_word
+      else
+        pos := pos + 1
+        result := create Symbol.make(c)
+      end
+    end
+  ensure
+    moved_on: pos > old pos or at_end
+  end
+
+  skip_spaces do
+    from until at_end or text.char_at(pos) /= #space do
+      pos := pos + 1
+    end
+  end
+
+  read_number: Token
+  require
+    at_number: not at_end
+  do
+    let start := pos
+    skip_digits
+    if not at_end and text.char_at(pos) = #. then
+      pos := pos + 1
+      skip_digits
+    end
+    let digits := text.substring(start, pos)
+    if digits = "." then
+      result := create Symbol.make(#.)
+    else
+      result := create Number_Token.make(digits.to_real)
+    end
+  ensure
+    moved_on: pos > old pos
+  end
+
+  skip_digits do
+    from until at_end or not is_digit(text.char_at(pos)) do
+      pos := pos + 1
+    end
+  end
+
+  read_word: Token
+  require
+    at_letter: not at_end and is_letter(text.char_at(pos))
+  do
+    let start := pos
+    from until at_end or not (is_letter(text.char_at(pos)) or is_digit(text.char_at(pos))) do
+      pos := pos + 1
+    end
+    let word := text.substring(start, pos).to_upper
+    if is_cell_name(word) then
+      result := create Cell_Token.make(word)
+    else
+      result := create Name_Token.make(word)
+    end
+  ensure
+    moved_on: pos > old pos
+  end
+invariant
+  inside_text: 0 <= pos and pos <= text.length
+end
+
+-- Expressions ---------------------------------------------------------
+
+union Expr
+  Number(value: Real)
+  Ref(name: String)
+  Negate(operand: Expr)
+  Binary(op: Char, left: Expr, right: Expr)
+  Aggregate(fn_name: String, first: String, last: String)
+end
+
+function is_function_name(name: String): Boolean do
+  result := ["SUM", "MIN", "MAX", "AVERAGE"].contains(name)
+end
+
+-- What the user typed, and the tree it means.
+class Formula
+create
+  make(t: String, e: Expr) do
+    text := t
+    expr := e
+  end
+feature
+  text: String
+  expr: Expr
+end
+
+-- Parsing -------------------------------------------------------------
+--
+--   expression ::= term { ("+" | "-") term }
+--   term       ::= factor { ("*" | "/") factor }
+--   factor     ::= number | cell | "-" factor | "(" expression ")"
+--                | name "(" cell ":" cell ")"
+
+class Parser
+create
+  make(text: String) do
+    let lexer := create Lexer.make(text)
+    tokens := []
+    from let done := false until done do
+      let t := lexer.next_token
+      tokens.add(t)
+      match t of
+        End_Of_Input then done := true
+        _            then done := false
+      end
+    end
+    index := 0
+  end
+feature
+  tokens: Array[Token]
+  index: Integer
+
+  current: Token do
+    result := tokens.get(index)
+  end
+
+  at_end: Boolean do
+    match current of
+      End_Of_Input then result := true
+      _            then result := false
+    end
+  end
+
+  at_symbol(c: Char): Boolean do
+    match current of
+      Symbol(sign) then result := sign = c
+      _            then result := false
+    end
+  end
+
+  advance
+  require
+    not_at_end: not at_end
+  do
+    index := index + 1
+  ensure
+    moved_on: index = old index + 1
+  end
+
+  expect(c: Char) do
+    if at_symbol(c) then
+      advance
+    else
+      raise "expected '" + c.to_string + "' but found " + describe_token(current)
+    end
+  end
+
+  formula: Expr do
+    result := expression
+    if not at_end then
+      raise "unexpected " + describe_token(current)
+    end
+  ensure
+    all_read: at_end
+  end
+
+  expression: Expr do
+    result := term
+    from until not (at_symbol(#+) or at_symbol(#-)) do
+      let op := when at_symbol(#+) then #+ else #- end
+      advance
+      result := create Binary.make(op, result, term)
+    end
+  end
+
+  term: Expr do
+    result := factor
+    from until not (at_symbol(#*) or at_symbol(#/)) do
+      let op := when at_symbol(#*) then #* else #/ end
+      advance
+      result := create Binary.make(op, result, factor)
+    end
+  end
+
+  factor: Expr do
+    match current of
+      Number_Token(value) then
+        do
+          advance
+          result := create Number.make(value)
+        end
+      Cell_Token(name) then
+        do
+          advance
+          result := create Ref.make(name)
+        end
+      Name_Token(text) then result := call(text)
+      Symbol(sign) if sign = #- then
+        do
+          advance
+          result := create Negate.make(factor)
+        end
+      Symbol(sign) if sign = #( then
+        do
+          advance
+          result := expression
+          expect(#))
+        end
+      _ then raise "unexpected " + describe_token(current)
+    end
+  end
+
+  call(name: String): Expr do
+    if not is_function_name(name) then
+      raise "unknown function " + name
+    end
+    advance
+    expect(#()
+    let first := cell
+    expect(#:)
+    let last := cell
+    expect(#))
+    result := create Aggregate.make(name, first, last)
+  end
+
+  cell: String do
+    match current of
+      Cell_Token(name) then
+        do
+          advance
+          result := name
+        end
+      _ then raise "expected a cell but found " + describe_token(current)
+    end
+  end
+invariant
+  never_empty: tokens.length > 0
+  inside_tokens: 0 <= index and index < tokens.length
+end
+
+-- The tree for `text`, or why it is not a formula.
+function parse_formula(text: String): Result[Formula, String] do
+  let parser := create Parser.make(text)
+  result := create Ok[Formula, String].make(create Formula.make(text.trim, parser.formula))
+rescue
+  result := create Err[Formula, String].make(exception.to_string)
+end

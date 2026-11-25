@@ -1,0 +1,114 @@
+-- tests.nex: the spreadsheet's tests. Run with `nex tests.nex`.
+intern sheet/Commands
+
+-- A Cell_Source with fixed values, for testing formulas without a sheet.
+class Fixed_Cells inherit Cell_Source
+create
+  make(m: Map[String, Real]) do
+    values := m
+  end
+feature
+  values: Map[String, Real]
+  value_of(name: String): Value do
+    result := create Num.make(values.try_get(name, 0.0))
+  end
+end
+
+function value_text(text: String, cells: Cell_Source): String do
+  match parse_formula(text) of
+    Ok as ok then result := show_value(evaluate(ok.value.expr, cells))
+    Err as e then result := "error: " + e.error
+  end
+end
+
+function test_cell_names() do
+  assert first: is_cell_name("A1")
+  assert last: is_cell_name("Z99")
+  assert no_row_zero: not is_cell_name("A0")
+  assert one_letter_only: not is_cell_name("AA1")
+  assert lower_case_is_not_a_name: not is_cell_name("a1")
+  assert range: cells_in_range("B2", "A1") = ["A1", "A2", "B1", "B2"]
+  print("cell name tests passed")
+end
+
+function test_parsing() do
+  let cells := create Fixed_Cells.make({})
+  assert precedence: value_text("1 + 2 * 3", cells) = "7.00"
+  assert parentheses: value_text("(1 + 2) * 3", cells) = "9.00"
+  assert left_to_right: value_text("8 - 2 - 1", cells) = "5.00"
+  assert minus: value_text("-(2 - 5)", cells) = "3.00"
+  assert missing_operand: value_text("1 +", cells) = "error: unexpected end of formula"
+  assert unclosed: value_text("(1 + 2", cells) = "error: expected ')' but found end of formula"
+  assert unknown_function: value_text("FOO(A1:A2)", cells) = "error: unknown function FOO"
+  print("parsing tests passed")
+end
+
+function test_evaluation() do
+  let cells := create Fixed_Cells.make({"A1": 120.0, "A2": 80.0})
+  assert reads_cells: value_text("A1 + A2 * 2", cells) = "280.00"
+  assert empty_is_zero: value_text("A1 + C9", cells) = "120.00"
+  assert sum: value_text("SUM(A1:A3)", cells) = "200.00"
+  assert average: value_text("AVERAGE(A1:A2)", cells) = "100.00"
+  assert min_max: value_text("MAX(A1:A2) - MIN(A1:A2)", cells) = "40.00"
+  assert divide_by_zero: value_text("A1 / (A2 - 80)", cells) = "#DIV/0!"
+  assert errors_spread: value_text("1 + A1 / 0", cells) = "#DIV/0!"
+  print("evaluation tests passed")
+end
+
+function test_sheet() do
+  let sheet := create Sheet.make
+  assert set_before_use: run(sheet, parse_command("A3 = A1 + A2 * 2")) = ""
+  run(sheet, parse_command("A1 = 120"))
+  run(sheet, parse_command("A2 = 80"))
+  assert recalculated: show_value(sheet.value_of("A3")) = "280.00"
+  assert cycle_refused: run(sheet, parse_command("A1 = A3")) = "Error: A1 = A3 would make A1 depend on itself"
+  assert cycle_left_no_trace: sheet.text_of("A1") = "120"
+  run(sheet, parse_command("clear A2"))
+  assert cleared: show_value(sheet.value_of("A3")) = "120.00"
+  print("sheet tests passed")
+end
+
+function test_cycle_is_a_precondition() do
+  let sheet := create Sheet.make
+  let reached := false
+  run(sheet, parse_command("A1 = B1"))
+  sheet.set("B1", create Formula.make("A1", create Ref.make("A1")))
+  reached := true
+  raise "test failed: a cycle was accepted"
+rescue
+  if reached then
+    raise "test failed: a cycle was accepted"
+  else
+    print("cycle precondition test passed")
+  end
+end
+
+function test_commands() do
+  assert assign: parse_command(" b2 = A1 + 1 ") = create Assign.make("B2", "A1 + 1")
+  assert show_all: parse_command("show") = create Show_All
+  assert show_one: parse_command("show a1") = create Show.make("A1")
+  assert unknown: parse_command("frobnicate") = create Unknown.make("frobnicate")
+  print("command tests passed")
+end
+
+function test_save_and_load() do
+  let file := "test_sheet.txt"
+  let sheet := create Sheet.make
+  run(sheet, parse_command("A1 = 2"))
+  run(sheet, parse_command("A2 = A1 * 21"))
+  run(sheet, parse_command("save " + file))
+  let copy := create Sheet.make
+  run(copy, parse_command("load " + file))
+  assert same_formula: copy.text_of("A2") = "A1 * 21"
+  assert same_value: show_value(copy.value_of("A2")) = "42.00"
+  create Path.make(file).delete
+  print("save and load tests passed")
+end
+
+test_cell_names()
+test_parsing()
+test_evaluation()
+test_sheet()
+test_cycle_is_a_precondition()
+test_commands()
+test_save_and_load()

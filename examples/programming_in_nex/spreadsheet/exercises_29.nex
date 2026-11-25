@@ -1,0 +1,194 @@
+-- Solutions to the exercises of Chapter 29 (A Spreadsheet: The Command Line).
+intern sheet/Commands
+
+-- 1. A `cells` command. save already builds exactly these lines.
+function list_cells(sheet: Sheet): String do
+  result := ""
+  across sheet.cells.keys.sort as name do
+    if result /= "" then
+      result := result + "\n"
+    end
+    result := result + name + " = " + sheet.text_of(name)
+  end
+end
+
+-- 2. `export FILE`: the values as comma-separated text, one line per row.
+--    A failed value is written as its code, as the grid shows it.
+function csv_text(sheet: Sheet): String do
+  let last_column := 0
+  let last_row := 1
+  across sheet.cells.keys as name do
+    last_column := last_column.max(column_of(name))
+    last_row := last_row.max(row_of(name))
+  end
+  result := ""
+  from let row := 1 until row > last_row do
+    from let col := 0 until col > last_column do
+      let name := cell_name(col, row)
+      if col > 0 then
+        result := result + ","
+      end
+      if sheet.has(name) then
+        result := result + show_value(sheet.value_of(name))
+      end
+      col := col + 1
+    end
+    result := result + "\n"
+    row := row + 1
+  end
+end
+
+function export_csv(sheet: Sheet, path: String): String do
+  create Path.make(path).write_text(csv_text(sheet))
+  result := "Exported to " + path
+end
+
+-- 3. Each column as wide as its widest value, plus two spaces.
+function column_width(sheet: Sheet, col: Integer): Integer do
+  result := 3
+  across sheet.cells.keys as name do
+    if column_of(name) = col then
+      result := result.max(show_value(sheet.value_of(name)).length + 2)
+    end
+  end
+end
+
+function fitted_grid(sheet: Sheet): String do
+  let last_column := 0
+  let last_row := 1
+  across sheet.cells.keys as name do
+    last_column := last_column.max(column_of(name))
+    last_row := last_row.max(row_of(name))
+  end
+  result := "    "
+  from let col := 0 until col > last_column do
+    result := result + pad_left(column_letters().char_at(col).to_string, column_width(sheet, col))
+    col := col + 1
+  end
+  from let row := 1 until row > last_row do
+    let line := pad_left(row.to_string, 4)
+    from let col := 0 until col > last_column do
+      let name := cell_name(col, row)
+      let shown := when sheet.has(name) then show_value(sheet.value_of(name)) else "" end
+      line := line + pad_left(shown, column_width(sheet, col))
+      col := col + 1
+    end
+    result := result + "\n" + trim_right(line)
+    row := row + 1
+  end
+end
+
+-- 4. `undo`: remember, before each change, the cell and its previous text,
+--    "" when the cell was empty. Undoing sets the text back, or clears the
+--    cell. Undoing can never create a cycle: it returns the cell to a
+--    formula the sheet held before, when the sheet had no cycle, and every
+--    later change has been undone first.
+-- The cell a command changes, or "" for a command that changes none.
+function changed_cell(cmd: Command): String do
+  match cmd of
+    Assign(name) then result := name
+    Clear(name)  then result := name
+    _            then result := ""
+  end
+end
+
+class History
+create
+  make do
+    names := []
+    texts := []
+  end
+feature
+  names: Array[String]
+  texts: Array[String]
+
+  can_undo: Boolean do
+    result := not names.is_empty
+  end
+
+  -- Run `line` on `sheet`, remembering what it changes.
+  run_recorded(sheet: Sheet, line: String): String do
+    let cmd := parse_command(line)
+    let name := changed_cell(cmd)
+    if is_cell_name(name) then
+      remember(sheet, name)
+    end
+    result := run(sheet, cmd)
+  end
+
+  remember(sheet: Sheet, name: String)
+  require
+    valid_name: is_cell_name(name)
+  do
+    names.add(name)
+    texts.add(sheet.text_of(name))
+  ensure
+    one_more: names.length = old names.length + 1
+  end
+
+  undo(sheet: Sheet)
+  require
+    something_to_undo: can_undo
+  do
+    let name := names.get(names.length - 1)
+    let text := texts.get(texts.length - 1)
+    names.remove(names.length - 1)
+    texts.remove(texts.length - 1)
+    if text = "" then
+      sheet.clear(name)
+    else
+      run(sheet, create Assign.make(name, text))
+    end
+  ensure
+    one_fewer: names.length = old names.length - 1
+  end
+end
+
+-- 5. Whether an empty formula clears the cell is a decision about what the
+--    user means, so it belongs in the command layer, in parse_command: an
+--    assignment with nothing after `=` becomes a Clear.
+function parse_command_clearing(line: String): Command do
+  let text := line.trim
+  if text.ends_with("=") then
+    result := create Clear.make(text.substring(0, text.length - 1).trim.to_upper)
+  else
+    result := parse_command(line)
+  end
+end
+
+-- 6. Loading A1 = B1 and then B1 = A1: the first line is accepted (B1 is
+--    empty, so A1 reads zero); the second would make B1 depend on itself, so
+--    it is refused with the usual message, and loading carries on. The user
+--    gets a working sheet and a message naming the line that was dropped,
+--    which is about the best a program can do with a file that cannot be
+--    loaded as written.
+
+-- 7.* Shifting a formula belongs with formulas, in formula.nex: a function
+--     shifted(e: Expr, columns, rows: Integer): Expr that moves every Ref and
+--     both corners of every Aggregate. Its precondition must say that every
+--     reference stays on the grid, which is a query over references(e):
+--       stays_on_grid: references(e).all(fn (n: String): Boolean do
+--         result := column_of(n) + columns >= 0 and column_of(n) + columns < 26
+--                   and row_of(n) + rows >= 1 and row_of(n) + rows <= 99
+--       end)
+--     The copy command checks it first and reports a copy that would leave
+--     the grid, as assign does with cycles.
+
+let sheet := create Sheet.make
+let history := create History.make
+across ["A1 = 120", "A2 = 80", "A3 = A1 + A2 * 2", "B1 = SUM(A1:A3)"] as line do
+  history.run_recorded(sheet, line)
+end
+print(list_cells(sheet))
+print(csv_text(sheet))
+print(fitted_grid(sheet))
+history.run_recorded(sheet, "A1 = 1000")
+print(show_value(sheet.value_of("B1")))
+history.undo(sheet)
+print(show_value(sheet.value_of("B1")))
+history.undo(sheet)
+print(sheet.has("B1"))
+print(parse_command_clearing("A2 =") = create Clear.make("A2"))
+let file := "exercise_export.csv"
+print(export_csv(sheet, file))
+create Path.make(file).delete

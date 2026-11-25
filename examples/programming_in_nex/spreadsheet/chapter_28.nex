@@ -1,0 +1,41 @@
+-- The examples of Chapter 28 (A Spreadsheet: The Sheet), as a self-checking
+-- program: each assert states what the chapter's REPL session shows.
+intern sheet/Sheet
+
+function formula(text: String): Formula do
+  match parse_formula(text) of
+    Ok as ok then result := ok.value
+    Err as e then raise e.error
+  end
+end
+
+let sheet := create Sheet.make
+sheet.set("A3", formula("A1 + A2 * 2"))
+assert show_value(sheet.value_of("A3")) = "0.00"
+sheet.set("A1", formula("120"))
+sheet.set("A2", formula("80"))
+assert show_value(sheet.value_of("A3")) = "280.00"
+sheet.set("B1", formula("SUM(A1:A3)"))
+assert show_value(sheet.value_of("B1")) = "480.00"
+assert sheet.depends_on("B1", "A1")
+assert not sheet.depends_on("A1", "B1")
+assert sheet.evaluation_order = ["A1", "A2", "A3", "B1"]
+assert sheet.would_cycle("A1", formula("B1 + 1"))
+let refused := false
+do
+  sheet.set("A1", formula("B1 + 1"))
+rescue
+  refused := exception.to_string.contains("no_cycle")
+end
+assert cycle_refused_by_precondition: refused
+assert sheet.text_of("A1") = "120"
+
+-- A chain of cells, as timed in Section 28.8 (kept short here)
+let chain := create Sheet.make
+chain.set("A1", formula("1"))
+from let i := 2 until i > 20 do
+  chain.set("A" + i.to_string, formula("A" + (i - 1).to_string + " + 1"))
+  i := i + 1
+end
+assert show_value(chain.value_of("A20")) = "20.00"
+print("chapter 28 examples passed")

@@ -1,0 +1,109 @@
+-- Solutions to the exercises of Chapter 27 (A Spreadsheet: Formulas).
+intern sheet/Evaluate
+
+function formula_of(text: String): Formula do
+  match parse_formula(text) of
+    Ok as ok then result := ok.value
+    Err as e then raise e.error
+  end
+end
+
+-- 1. Case is normalised in one place, at the edge where text comes in: the
+--    lexer upper-cases words in formulas, and parse_command upper-cases the
+--    cell name being assigned. is_cell_name states the rule for names as the
+--    program uses them internally, so it stays strict. If is_cell_name also
+--    accepted "b3", every place that stores or compares names would have to
+--    agree on a form, and "B3" and "b3" could become two different map keys.
+
+-- 2. A formula back as text, every binary operation in parentheses.
+function formula_text(e: Expr): String do
+  match e of
+    Number(value)           then result := value.to_string
+    Ref(name)               then result := name
+    Negate(operand)         then result := "-" + formula_text(operand)
+    Binary(op, left, right) then
+      result := "(" + formula_text(left) + " " + op.to_string + " " + formula_text(right) + ")"
+    Aggregate(fn_name, first, last) then result := fn_name + "(" + first + ":" + last + ")"
+  end
+end
+
+-- 3. The value of a formula that reads no cells. references already knows
+--    which cells a formula reads, so the check is one line.
+class No_Cells inherit Cell_Source
+feature
+  value_of(name: String): Value do
+    result := create Failed.make("#REF!")
+  end
+end
+
+function constant_value(e: Expr): ?Real do
+  result := nil
+  if references(e).is_empty then
+    match evaluate(e, create No_Cells) of
+      Num(amount) then result := amount
+      Failed      then result := nil
+    end
+  end
+end
+
+-- 4. Past End_Of_Input there is no token: index would leave the array, and
+--    the invariant inside_tokens would fail on the next call. A quiet `if`
+--    inside advance would hide the caller's mistake: the parser would loop
+--    on End_Of_Input, or report a confusing error far from its cause. The
+--    precondition names the mistake at the call that made it.
+
+-- 5. A power operator, binding more tightly than * and grouping from the
+--    right, so 2 ^ 3 ^ 2 is 2 ^ (3 ^ 2):
+--
+--      term   ::= power { ("*" | "/") power }
+--      power  ::= factor [ "^" power ]
+--
+--    The parser change is a new routine and a different call in term, which
+--    a subclass can show. The contracts that must change are the
+--    known_operator preconditions of combine and arithmetic in
+--    evaluate.nex, which list "+-*/" and so would reject the new operator
+--    the first time a formula used it, and arithmetic itself.
+class Power_Parser inherit Parser
+create
+  make(text: String) do
+    Parser.make(text)
+  end
+feature
+  term: Expr do
+    result := power
+    from until not (at_symbol(#*) or at_symbol(#/)) do
+      let op := when at_symbol(#*) then #* else #/ end
+      advance
+      result := create Binary.make(op, result, power)
+    end
+  end
+
+  power: Expr do
+    result := factor
+    if at_symbol(#^) then
+      advance
+      result := create Binary.make(#^, result, power)
+    end
+  end
+end
+
+-- 6. Text would be a third kind of value, so Value gains a variant, say
+--    Text(content: String), and every match over Value gains a clause; the
+--    compiler finds them all. aggregate would skip Text values for SUM and
+--    AVERAGE. references would not change: it is about which cells a formula
+--    reads, not what they hold, and its postcondition still says that every
+--    result is a cell name.
+
+-- 7.* With a sealed deferred class Expr and one class per kind of formula,
+--    each class carries its own evaluate(cells): Value. Adding formula_text
+--    then means adding a method to all five classes, while with the union it
+--    is one new function. Adding a new kind of formula goes the other way:
+--    one new class, against a new clause in every function that matches on
+--    Expr. Formulas gain operations more often than kinds, so the union fits.
+
+print(formula_text(formula_of("1 + 2 * 3").expr))
+print(formula_text(formula_of("8 - 2 - 1").expr))
+print(constant_value(formula_of("(1 + 2) * 4").expr))
+print(constant_value(formula_of("A1 + 1").expr))
+print(formula_text((create Power_Parser.make("2 * 3 ^ 2")).formula))
+print(formula_text((create Power_Parser.make("2 ^ 3 ^ 2")).formula))

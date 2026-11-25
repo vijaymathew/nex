@@ -1,0 +1,176 @@
+-- sheet/commands.nex: what the user can type, and what each command does.
+intern sheet/Sheet
+intern io/Path
+
+union Command
+  Assign(name: String, text: String)
+  Show_All
+  Show(name: String)
+  Clear(name: String)
+  Save(path: String)
+  Load(path: String)
+  Help
+  Quit
+  Unknown(text: String)
+end
+
+function parse_command(line: String): Command do
+  let text := line.trim
+  let words := text.split(" ").filter(fn (w: String): Boolean do result := w /= "" end)
+  if text.contains("=") then
+    let i := text.index_of("=")
+    result := create Assign.make(text.substring(0, i).trim.to_upper,
+                                 text.substring(i + 1, text.length).trim)
+  elseif words.length = 1 and words.get(0) = "show" then
+    result := create Show_All
+  elseif words.length = 2 and words.get(0) = "show" then
+    result := create Show.make(words.get(1).to_upper)
+  elseif words.length = 2 and words.get(0) = "clear" then
+    result := create Clear.make(words.get(1).to_upper)
+  elseif words.length = 2 and words.get(0) = "save" then
+    result := create Save.make(words.get(1))
+  elseif words.length = 2 and words.get(0) = "load" then
+    result := create Load.make(words.get(1))
+  elseif words.length = 1 and words.get(0) = "help" then
+    result := create Help
+  elseif words.length = 1 and words.get(0) = "quit" then
+    result := create Quit
+  else
+    result := create Unknown.make(text)
+  end
+end
+
+-- Carry out `cmd`, returning what to print ("" for nothing).
+function run(sheet: Sheet, cmd: Command): String do
+  match cmd of
+    Assign(name, text) then result := assign(sheet, name, text)
+    Show_All           then result := format_grid(sheet)
+    Show(name)         then result := show_cell(sheet, name)
+    Clear(name)        then result := clear_cell(sheet, name)
+    Save(path)         then result := save(sheet, path)
+    Load(path)         then result := load(sheet, path)
+    Help               then result := help_text()
+    Quit               then result := ""
+    Unknown(text)      then result := "Error: unknown command: " + text
+  end
+end
+
+function assign(sheet: Sheet, name, text: String): String do
+  result := ""
+  if not is_cell_name(name) then
+    result := "Error: " + name + " is not a cell name"
+  else
+    match parse_formula(text) of
+      Err as e then result := "Error: " + e.error
+      Ok as ok then
+        if sheet.would_cycle(name, ok.value) then
+          result := "Error: " + name + " = " + text + " would make " + name + " depend on itself"
+        else
+          sheet.set(name, ok.value)
+        end
+    end
+  end
+end
+
+function show_cell(sheet: Sheet, name: String): String do
+  if is_cell_name(name) then
+    result := show_value(sheet.value_of(name))
+    if sheet.has(name) then
+      result := result + "   (" + name + " = " + sheet.text_of(name) + ")"
+    end
+  else
+    result := "Error: " + name + " is not a cell name"
+  end
+end
+
+function clear_cell(sheet: Sheet, name: String): String do
+  result := ""
+  if is_cell_name(name) then
+    sheet.clear(name)
+  else
+    result := "Error: " + name + " is not a cell name"
+  end
+end
+
+-- The grid --------------------------------------------------------------
+
+function pad_left(text: String, width: Integer): String do
+  result := text
+  from until result.length >= width do
+    result := " " + result
+  end
+end
+
+function trim_right(text: String): String do
+  result := text
+  from until result.length = 0 or result.char_at(result.length - 1) /= #space do
+    result := result.substring(0, result.length - 1)
+  end
+end
+
+function format_grid(sheet: Sheet): String do
+  let width := 10
+  let last_column := 0
+  let last_row := 1
+  across sheet.cells.keys as name do
+    last_column := last_column.max(column_of(name))
+    last_row := last_row.max(row_of(name))
+  end
+  result := "    "
+  from let col := 0 until col > last_column do
+    result := result + pad_left(column_letters().char_at(col).to_string, width)
+    col := col + 1
+  end
+  from let row := 1 until row > last_row do
+    let line := pad_left(row.to_string, 4)
+    from let col := 0 until col > last_column do
+      let name := cell_name(col, row)
+      let shown := when sheet.has(name) then show_value(sheet.value_of(name)) else "" end
+      line := line + pad_left(shown, width)
+      col := col + 1
+    end
+    result := result + "\n" + trim_right(line)
+    row := row + 1
+  end
+end
+
+-- Files -----------------------------------------------------------------
+
+function save(sheet: Sheet, path: String): String do
+  let lines := sheet.cells.keys.sort.map(fn (name: String): String do
+    result := name + " = " + sheet.text_of(name)
+  end)
+  create Path.make(path).write_text(lines.fold("", fn (text, line: String): String do
+    result := text + line + "\n"
+  end))
+  result := "Saved " + sheet.count.to_string + " cells to " + path
+end
+
+function load(sheet: Sheet, path: String): String do
+  let file := create Path.make(path)
+  if not file.exists then
+    result := "Error: no file " + path
+  else
+    result := ""
+    across file.read_text.split("\n") as line do
+      if line.trim /= "" then
+        let output := run(sheet, parse_command(line))
+        if output /= "" then
+          result := result + output + "\n"
+        end
+      end
+    end
+    result := result + "Loaded " + path
+  end
+end
+
+function help_text(): String do
+  result := "  A1 = 120          set a cell to a number or formula\n"
+          + "  B1 = SUM(A1:A3)   SUM, MIN, MAX and AVERAGE take a range\n"
+          + "  show              show the sheet\n"
+          + "  show A1           show one cell and its formula\n"
+          + "  clear A1          empty a cell\n"
+          + "  save FILE         save the sheet\n"
+          + "  load FILE         load cells from a file\n"
+          + "  quit              leave"
+end

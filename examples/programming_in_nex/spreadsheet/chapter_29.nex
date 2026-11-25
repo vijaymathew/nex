@@ -1,0 +1,38 @@
+-- The examples of Chapter 29 (A Spreadsheet: The Command Line), as a
+-- self-checking program: the two sessions the chapter shows, run through
+-- the same `run` the main program uses, with their output checked.
+intern sheet/Commands
+
+function session(sheet: Sheet, lines: Array[String]): String do
+  result := ""
+  across lines as line do
+    result := result + "> " + line + "\n"
+    let output := run(sheet, parse_command(line))
+    if output /= "" then
+      result := result + output + "\n"
+    end
+  end
+end
+
+let file := "chapter_29_budget.sheet"
+let first := session(create Sheet.make,
+  ["A1 = 120", "A2 = 80", "A3 = A1 + A2 * 2", "b1 = sum(a1:a3)", "show b1",
+   "A5 = A1 / (A2 - 80)", "show", "save " + file])
+assert first = "> A1 = 120\n> A2 = 80\n> A3 = A1 + A2 * 2\n> b1 = sum(a1:a3)\n> show b1\n"
+             + "480.00   (B1 = sum(a1:a3))\n> A5 = A1 / (A2 - 80)\n> show\n"
+             + "             A         B\n   1    120.00    480.00\n   2     80.00\n"
+             + "   3    280.00\n   4\n   5   #DIV/0!\n> save " + file + "\n"
+             + "Saved 5 cells to " + file + "\n"
+assert saved_file: create Path.make(file).read_text
+                   = "A1 = 120\nA2 = 80\nA3 = A1 + A2 * 2\nA5 = A1 / (A2 - 80)\nB1 = sum(a1:a3)\n"
+
+let second := session(create Sheet.make,
+  ["load " + file, "A2 = 100", "show", "clear A5", "average", "C1 = A1 +", "Q100 = 1"])
+assert second = "> load " + file + "\nLoaded " + file + "\n> A2 = 100\n> show\n"
+              + "             A         B\n   1    120.00    540.00\n   2    100.00\n"
+              + "   3    320.00\n   4\n   5      6.00\n> clear A5\n> average\n"
+              + "Error: unknown command: average\n> C1 = A1 +\n"
+              + "Error: unexpected end of formula\n> Q100 = 1\n"
+              + "Error: Q100 is not a cell name\n"
+create Path.make(file).delete
+print("chapter 29 examples passed")
