@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-27
+
+- **An `extend` block can be typed into the REPL.** The REPL did not count
+  `extend` as opening a block, so it took `extend String` on its own as a
+  complete input and reported "unexpected '<EOF>', expected {'[', 'feature',
+  'private', 'note'}". Every following line then failed on its own. It now
+  keeps reading until the extension's `end`, whether `feature`, generic
+  parameters (`extend Array [T -> Comparable]`) or `note` follow on the same
+  line or the next. `extend` is a soft keyword, so only its declaration
+  position counts: `x.extend(y)` and `let extend := 3` are still complete
+  inputs.
+
+- **A built-in type's extension can be called in the REPL with type checking
+  off.** After `extend String feature is_palindrome: Boolean ... end`, the
+  call `"Level".is_palindrome` failed on the compiled backend with
+  "Attempting to call unbound fn:
+  #'nex.compiler.jvm.runtime/builtin-method-string-is-palindrome" unless
+  `:typecheck on` had been given. Such a call reaches the function that
+  implements the feature only through the type checker, which did not run
+  while checking was off, the REPL's default. While the session extends a
+  built-in type, the REPL now checks each input quietly for these calls, as
+  it already did for the parameter types of `fn` literals. Nothing is
+  printed and nothing fails because of it. The interpreter was not affected.
+
+- **An extension's type constraint is checked when the receiver is an array
+  literal or an inferred local.** With `extend Array [T -> Comparable]
+  feature maximum: T ... end`, the call `[create A, create A].maximum`, for
+  a class `A` that is not `Comparable`, type-checked and failed only at run
+  time, with "Array.sort requires Comparable elements". It is now a
+  compile-time error: "'maximum' is a feature of Array [T -> Comparable]
+  only, and A does not satisfy Comparable." The check read the receiver's
+  type arguments only in the form a declared type such as `let xs: Array[A]`
+  has, which was already checked.
+
 ## 0.7.9 - 2026-11-25
 
 - **A `spawn` inside a `fn` can use a local from outside the `fn`.**
