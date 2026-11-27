@@ -89,6 +89,57 @@
     (is (false? (repl/continue-reading? ["print(s.union(t))"])))
     (is (false? (repl/continue-reading? ["let u := a.union(b)"])))))
 
+(deftest an-extend-declaration
+  (is (complete-only-at-the-end?
+       ["extend String"
+        "feature"
+        "  shout: String"
+        "  do"
+        "    result := to_upper + \"!\""
+        "  end"
+        "end"]))
+  (testing "with a loop and an if inside the extended routine"
+    (is (complete-only-at-the-end?
+         ["extend String"
+          "feature"
+          "  is_palindrome: Boolean"
+          "  do"
+          "    let s := to_lower"
+          "    result := true"
+          "    from"
+          "      let i := 0"
+          "    until"
+          "      i >= length / 2"
+          "    do"
+          "      if s.char_at(i) /= s.char_at(length - 1 - i) then"
+          "        result := false"
+          "      end"
+          "      i := i + 1"
+          "    end"
+          "  end"
+          "end"])))
+  (testing "generic parameters, a note, or feature on the same line"
+    (is (complete-only-at-the-end?
+         ["extend Array [T -> Comparable]"
+          "feature"
+          "  first_item: T"
+          "  do"
+          "    result := get(0)"
+          "  end"
+          "end"]))
+    (is (complete-only-at-the-end?
+         ["extend Account feature"
+          "  double: Real"
+          "  do"
+          "    result := balance * 2.0"
+          "  end"
+          "end"])))
+  (testing "extend as an ordinary name is not a declaration"
+    (is (false? (repl/continue-reading? ["print(x.extend(y))"])))
+    (is (false? (repl/continue-reading? ["let extend := 3"])))
+    (is (false? (repl/continue-reading? ["extend := extend + 1"])))
+    (is (false? (repl/continue-reading? ["extend(items)"])))))
+
 (deftest a-match-clause-guard
   (testing "a guard's `if` opens no block, so the match ends at its `end`"
     (is (complete-only-at-the-end?
