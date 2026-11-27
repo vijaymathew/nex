@@ -3986,13 +3986,22 @@
   "For CALL, which reaches the built-in extension feature METHOD-SIG
    describes: check that the receiver's type arguments satisfy the
    extension's constraints (`extend Array [T -> Comparable]`), and record the
-   call for the compiled backend."
+   call for the compiled backend. The call is recorded first, so that a
+   REPL running with type checking off, which checks quietly only for the
+   calls to rewrite, still runs it as a call of the extension, and the
+   unsatisfied constraint shows up at run time as it would without a
+   checker."
   [env call method-sig base-type target-type]
+  (when-let [^java.util.IdentityHashMap calls *extension-calls*]
+    (.put calls call (:extension-fn method-sig)))
   (let [constraints (:extension-constraints method-sig)]
     (when (seq constraints)
       (let [param-names (map #(type-name-string (:name %))
                              (:generic-params (env-lookup-class env base-type)))
-            args (when (map? target-type) (or (:type-args target-type) (:generic-args target-type)))
+            ;; A receiver's type arguments are :type-params on a checked
+            ;; type (`{:base-type "Array" :type-params ["A"]}`).
+            args (when (map? target-type)
+                   (or (:type-params target-type) (:type-args target-type) (:generic-args target-type)))
             bound (zipmap param-names args)]
         (doseq [[gname constraint] constraints
                 :let [arg (get bound gname)]
@@ -4001,9 +4010,7 @@
             (let [msg (str "'" (:method call) "' is a feature of " base-type " [" gname " -> "
                            constraint "] only, and " (display-type arg)
                            " does not satisfy " constraint ".")]
-              (throw (ex-info msg {:error (type-error msg)}))))))))
-  (when-let [^java.util.IdentityHashMap calls *extension-calls*]
-    (.put calls call (:extension-fn method-sig))))
+              (throw (ex-info msg {:error (type-error msg)})))))))))
 
 (def ^:private element-storing-methods
   "The features of built-in generic classes that store an argument as an

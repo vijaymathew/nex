@@ -578,6 +578,17 @@ extend Array [T -> Comparable] feature first_one: T do result := get(0) end end
 let ds: Array[Dog] := [create Dog.make]
 print(ds.first_one)
 " "'first_one' is a feature of Array [T -> Comparable] only, and Dog does not satisfy Comparable"]
+             ;; An array literal or an inferred local as the receiver, whose
+             ;; type carries its arguments as :type-params.
+             ["class Dog create make do end end
+extend Array [T -> Comparable] feature first_one: T do result := get(0) end end
+print([create Dog.make, create Dog.make].first_one)
+" "'first_one' is a feature of Array [T -> Comparable] only, and Dog does not satisfy Comparable"]
+             ["class Dog create make do end end
+extend Array [T -> Comparable] feature first_one: T do result := get(0) end end
+let ds := [create Dog.make]
+print(ds.first_one)
+" "'first_one' is a feature of Array [T -> Comparable] only, and Dog does not satisfy Comparable"]
              ["extend String feature f: Integer do let length := 1 result := length end end\n"
               "would hide feature 'length' of String"]
              ["class Dog create make do end feature tag: String do result := \"d\" end end
