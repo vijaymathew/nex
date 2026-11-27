@@ -354,16 +354,17 @@ print((create Person.make(\"Ada\")).greeting)
 
 (defn- repl-session
   "What each of INPUTS prints, run in order in one fresh REPL session on
-   BACKEND, type checking on."
-  [backend inputs]
-  (binding [repl/*type-checking-enabled* (atom true)
+   BACKEND, with type checking on unless TYPECHECK? is false."
+  ([backend inputs] (repl-session backend inputs true))
+  ([backend inputs typecheck?]
+  (binding [repl/*type-checking-enabled* (atom typecheck?)
             repl/*repl-var-types* (atom {})
             repl/*repl-type-aliases* (atom {})
             repl/*repl-backend* (atom backend)
             repl/*compiled-repl-session* (atom (compiled-repl/make-session))]
     (let [ctx (repl/init-repl-context)]
       (mapv #(str/trim (with-out-str (binding [*err* *out*] (repl/eval-code ctx %))))
-            inputs))))
+            inputs)))))
 
 (defn- in-both-repls
   "Run INPUTS in a compiled and in an interpreted REPL session, and call
@@ -401,6 +402,20 @@ print((create Person.make(\"Ada\")).greeting)
      ["extend Nowhere feature f(): Integer do result := 1 end end"]
      (fn [out]
        (is (str/includes? (first out) "Cannot extend unknown class 'Nowhere'"))))))
+
+(deftest repl-builtin-extension-without-type-checking-test
+  (testing "a call of a built-in type's extension feature, with type checking off"
+    (doseq [backend [:compiled :interpreter]]
+      (testing (name backend)
+        (let [out (repl-session
+                   backend
+                   ["extend String feature shout: String do result := to_upper + \"!\" end end"
+                    "print(\"hi\".shout)"
+                    "let w := \"nex\""
+                    "print(w.shout)"]
+                   false)]
+          (is (= "\"HI!\"" (nth out 1)))
+          (is (= "\"NEX!\"" (nth out 3))))))))
 
 (deftest repl-module-extensions-test
   (let [dir (doto (.toFile (java.nio.file.Files/createTempDirectory

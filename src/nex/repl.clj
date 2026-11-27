@@ -246,13 +246,21 @@
    (`s.union(t)` is a call)."
   #"(?m)^\s*(?:enum\s+)?union\s+[A-Za-z_]")
 
+(def ^:private extend-decl-pattern
+  "The start of an `extend` declaration, which `end` closes. `extend` is a
+   soft keyword, so only its declaration position counts: at the start of a
+   line, followed by a type name and then nothing, generic parameters, `note`
+   or `feature` (`extend and ok` or `x.extend(y)` is an expression)."
+  #"(?m)^\s*extend\s+[A-Za-z_][\w./]*\s*(?:\[.*)?(?:\s*(?:note|feature)\b.*)?$")
+
 (defn- count-when-expressions
   [text]
-  (let [tokens (->> (re-seq #"(?m)(?<![.\w])deferred\s+ensure\b|^\s*(?:enum\s+)?union\s+[A-Za-z_]|\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)
-                    ;; A deferred routine's ensure clause and a union
-                    ;; declaration are blocks like the rest.
+  (let [tokens (->> (re-seq #"(?m)(?<![.\w])deferred\s+ensure\b|^\s*(?:enum\s+)?union\s+[A-Za-z_]|^\s*extend\s+[A-Za-z_][\w./]*\s*(?:\[.*)?(?:\s*(?:note|feature)\b.*)?$|\bclass\b|\bdo\b|\bfrom\b|\brepeat\b|\bacross\b|\bif\b|\bcase\b|\bmatch\b|\bselect\b|\bwhen\b|\bthen\b|\belse\b|\bend\b" text)
+                    ;; A deferred routine's ensure clause, a union declaration
+                    ;; and an extend declaration are blocks like the rest.
                     (map #(if (or (re-matches deferred-ensure-pattern %)
-                                  (re-matches union-decl-pattern %))
+                                  (re-matches union-decl-pattern %)
+                                  (re-matches extend-decl-pattern %))
                             "class"
                             %)))]
     (loop [tokens tokens
@@ -360,6 +368,7 @@
         select-count (keyword-count text "select")
         deferred-ensure-count (count (re-seq deferred-ensure-pattern text))
         union-count (count (re-seq union-decl-pattern text))
+        extend-count (count (re-seq extend-decl-pattern text))
         end-count (keyword-count text "end")
         ;; In loops, 'do' is part of 'from...until...do...end', 'repeat...do...end', or 'across...do...end'
         ;; So subtract from-count, repeat-count, and across-count from do-count to avoid double-counting
@@ -367,7 +376,7 @@
         ;; Total blocks that need closing
         open-blocks (+ class-count standalone-do-count from-count repeat-count
                        across-count if-count when-count case-count match-count select-count
-                       deferred-ensure-count union-count)
+                       deferred-ensure-count union-count extend-count)
         lines (vec (str/split-lines text))
         bare-function-header?
         (boolean
@@ -1676,11 +1685,14 @@
    the caller needs), or nil when nothing was checked.
 
    With type checking off, an input holding a `fn` literal is still checked,
-   quietly, for its :lambda-types alone: a parameter type left out
+   quietly, for its :lambda-types: a parameter type left out
    (`xs.filter(fn (x) => x > 0)`) is known only to the checker, and without
    it a function or class whose body holds such a literal could not be
-   compiled, so it was never defined. Nothing is printed and nothing fails;
-   whatever the checker could infer is used."
+   compiled, so it was never defined. Likewise, while the session extends a
+   built-in type, every input is checked quietly for its :extension-calls,
+   without which a call of an extension feature would be compiled as a call
+   of a built-in method that does not exist. Nothing is printed and nothing
+   fails; whatever the checker could infer is used."
   [ctx ast source-id]
   (cond
     (not (checkable-repl-input? ast))
@@ -1694,9 +1706,16 @@
         (throw (ex-info "Type checking failed" {:errors (:errors result)})))
       result)
 
-    (contains-anonymous-function? ast)
+    ;; A call of a feature an extension gives a built-in type (`"Level".
+    ;; is_palindrome`) reaches the function that implements it only through
+    ;; the checker's :extension-calls, so such an input is checked quietly
+    ;; for those too, whenever this input or an earlier one extends a
+    ;; built-in type.
+    (or (contains-anonymous-function? ast)
+        (seq (:extensions ast))
+        (seq (session-builtin-extension-functions ctx)))
     (try
-      (select-keys (check-repl-input ctx ast source-id) [:lambda-types])
+      (select-keys (check-repl-input ctx ast source-id) [:lambda-types :extension-calls])
       (catch Throwable _ nil))
 
     :else nil))
