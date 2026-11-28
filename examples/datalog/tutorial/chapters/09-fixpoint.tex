@@ -2,9 +2,9 @@
 \chapter{Working out everything}\label{ch:fixpoint}
 
 One application of a rule is not enough. Applying the rules for
-\code{ancestor} once to the family gives parents and grandparents, but a
-great-grandparent needs a grandparent first, which needs the rules to run
-again. Applying the rules makes new facts, which let the rules make more.
+\code{sees} once finds whose posts reach Ann directly, and through one
+reshare, but a post three reshares away needs the two-reshare facts first,
+which needs the rules to run again. Applying the rules makes new facts, which let the rules make more.
 
 So the engine applies every rule, adds what it finds, and does it again,
 until a round finds nothing new. The database is then at a \emph{fixpoint}
@@ -40,7 +40,8 @@ inherits both promises:
   end
 
   -- Note that another round of applying the rules has begun.
-  count_round do
+  count_round
+  do
     rounds := rounds + 1
   end
 \end{addbefore}
@@ -59,7 +60,8 @@ one, this same check will say whether it is still right.
 
 \begin{append}{evaluate.nex}
 -- Does applying any of `rules` to `db` derive a fact it does not have?
-function is_fixpoint(rules: Array[Rule], db: Database): Boolean do
+function is_fixpoint(rules: Array[Rule], db: Database): Boolean
+do
   result := true
   let e := create Naive_Evaluator.make
   across rules as r do
@@ -84,10 +86,12 @@ Chapter~\ref{ch:seminaive} will show.
 -- nothing.
 class Naive_Evaluator inherit Evaluator
 create
-  make do
+  make
+  do
   end
 feature
-  run(rules: Array[Rule], db: Database) do
+  run(rules: Array[Rule], db: Database)
+  do
     let changed := true
     from until not changed do
       changed := false
@@ -114,7 +118,7 @@ intern Parser
 intern io/Path
 intern Evaluate
 
-match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+match parse_program(create Path.make(program.working_directory + "/social.dl").read_text) of
   Ok as ok then
     do
       let db := create Database.make
@@ -123,7 +127,7 @@ match parse_program(create Path.make(program.working_directory + "/family.dl").r
       end
       let e := create Naive_Evaluator.make
       e.run(ok.value.rules, db)
-      across db.facts_of("ancestor") as f do
+      across db.facts_of("sees") as f do
         console.print_line(f.text)
       end
       console.print_line(db.count.to_string + " facts after " + e.rounds.to_string
@@ -134,7 +138,7 @@ end
 \end{tryit}
 \tryoutput{try_naive}
 
-The direct ancestors come first, from the first rule in the first round,
-then the longer chains, one generation further each round. The last round
+The people each person follows come first, from the first rule in the
+first round, then the longer chains, one reshare further each round. The last round
 found nothing new, which is how the evaluator knew to stop, and the
 postcondition then checked, independently, that nothing more follows.

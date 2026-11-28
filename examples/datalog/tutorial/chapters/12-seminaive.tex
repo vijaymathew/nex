@@ -39,7 +39,8 @@ reads from the delta.
 
 \begin{append}{evaluate.nex}
 -- Is `l` a positive literal, one that facts can be found for?
-function is_positive(l: Literal): Boolean do
+function is_positive(l: Literal): Boolean
+do
   match l of
     Positive then result := true
     _        then result := false
@@ -52,7 +53,8 @@ end
 -- previous round added: a new fact needs at least one new premise.
 class Semi_Naive_Evaluator inherit Evaluator
 create
-  make do
+  make
+  do
     delta := create Database.make
     delta_at := -1
   end
@@ -62,7 +64,8 @@ feature
   -- Which literal of the body reads `delta`; -1 for none.
   delta_at: Integer
 
-  source(i: Integer, atom: Atom, b: Bindings, db: Database): Array[Atom] do
+  source(i: Integer, atom: Atom, b: Bindings, db: Database): Array[Atom]
+  do
     if i = delta_at then
       result := delta.candidates(atom, b)
     else
@@ -70,7 +73,8 @@ feature
     end
   end
 
-  run(rules: Array[Rule], db: Database) do
+  run(rules: Array[Rule], db: Database)
+  do
     -- The first round has nothing to compare with: every rule, every fact.
     count_round
     delta_at := -1
@@ -96,7 +100,8 @@ feature
   end
 
   -- Derive what `r` gives now, adding the new facts to `db` and `fresh`.
-  apply(r: Rule, db: Database, fresh: Database) do
+  apply(r: Rule, db: Database, fresh: Database)
+  do
     across solutions(r, db) as b do
       let f := substitute(r.head, b)
       if db.add_derived(f, r, b) then
@@ -123,7 +128,8 @@ intern Parser
 intern Evaluate
 intern io/Path
 
-function evaluated(p: Datalog_Program, e: Evaluator): Database do
+function evaluated(p: Datalog_Program, e: Evaluator): Database
+do
   result := create Database.make
   across p.facts as f do
     result.add(f)

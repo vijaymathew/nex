@@ -2,15 +2,15 @@
 \chapter{Matching}\label{ch:matching}
 
 Everything the engine does comes down to one question, asked over and over:
-does this pattern match this fact? \code{parent(X, bob)} matches
-\code{parent(alice, bob)} if \code{X} is \code{alice}. It does not match
-\code{parent(alice, carol)} at all. \code{parent(X, X)} matches only a fact
+does this pattern match this fact? \code{follows(X, bo)} matches
+\code{follows(ann, bo)} if \code{X} is \code{ann}. It does not match
+\code{follows(ann, cy)} at all. \code{follows(X, X)} matches only a fact
 whose two arguments are the same.
 
 \section{Bindings}
 
 The answer to ``does it match'' is either ``no'' or ``yes, if \code{X} is
-\code{alice}''. The second kind of answer gives values to variables, and a
+\code{ann}''. The second kind of answer gives values to variables, and a
 set of such values is called \emph{bindings}.
 
 Our bindings never change once they are made. Binding one more variable
@@ -30,7 +30,8 @@ intern Terms
 -- forward from the same bindings.
 class Bindings
 create
-  empty do
+  empty
+  do
     values := {}
   end
 
@@ -45,7 +46,8 @@ create
 feature
   values: Map[String, Term]
 
-  has(name: String): Boolean do
+  has(name: String): Boolean
+  do
     result := values.contains_key(name)
   end
 
@@ -56,8 +58,9 @@ feature
     result := values.get(name)
   end
 
-  -- "X = alice, Y = bob", in name order.
-  text: String do
+  -- "X = ann, Y = bo", in name order.
+  text: String
+  do
     result := ""
     across values.keys.sort as name do
       if result /= "" then
@@ -75,11 +78,12 @@ variable is bound once, and to a constant, never to another variable.
 \section{Substitution}
 
 Applying bindings to an atom replaces each bound variable by its value:
-\code{parent(X, Y)} under \code{X = alice} becomes \code{parent(alice, Y)}.
+\code{follows(X, Y)} under \code{X = ann} becomes \code{follows(ann, Y)}.
 
 \begin{continued}{bindings.nex}
 -- `t` with its variable replaced by its value, if it has one.
-function substitute_term(t: Term, b: Bindings): Term do
+function substitute_term(t: Term, b: Bindings): Term
+do
   result := t
   let name := variable_name(t)
   if name /= "" and b.has(name) then
@@ -88,7 +92,8 @@ function substitute_term(t: Term, b: Bindings): Term do
 end
 
 -- `a` with every bound variable replaced by its value.
-function substitute(a: Atom, b: Bindings): Atom do
+function substitute(a: Atom, b: Bindings): Atom
+do
   result := create Atom.make(a.predicate, a.args.map(fn (t: Term): Term do
     result := substitute_term(t, b)
   end))
@@ -133,7 +138,8 @@ ensure
 end
 
 -- Is `b` nil, or does it make `pattern` equal to `fact`?
-function is_match(pattern, fact: Atom, b: ?Bindings): Boolean do
+function is_match(pattern, fact: Atom, b: ?Bindings): Boolean
+do
   result := true
   if b /= nil then
     result := substitute(pattern, b).text = fact.text
@@ -206,14 +212,16 @@ intern Parser
 intern Bindings
 
 -- The one atom in `text`.
-function atom_of(text: String): Atom do
+function atom_of(text: String): Atom
+do
   match parse_program("?- " + text + ".") of
     Ok as ok then result := ok.value.queries.get(0)
     Err as e then raise e.error
   end
 end
 
-function try_match(pattern, fact: String) do
+function try_match(pattern, fact: String)
+do
   let b := match_atom(atom_of(pattern), atom_of(fact), create Bindings.empty)
   if b = nil then
     console.print_line(pattern + " against " + fact + ": no match")
@@ -222,12 +230,12 @@ function try_match(pattern, fact: String) do
   end
 end
 
-try_match("parent(X, Y)", "parent(alice, bob)")
-try_match("parent(X, bob)", "parent(alice, bob)")
-try_match("parent(X, bob)", "parent(alice, carol)")
-try_match("parent(X, X)", "parent(alice, bob)")
-try_match("parent(X, X)", "parent(bob, bob)")
-try_match("parent(X, Y)", "ancestor(alice, bob)")
+try_match("follows(X, Y)", "follows(ann, bo)")
+try_match("follows(X, bo)", "follows(ann, bo)")
+try_match("follows(X, bo)", "follows(ann, cy)")
+try_match("follows(X, X)", "follows(ann, bo)")
+try_match("follows(X, X)", "follows(bo, bo)")
+try_match("follows(X, Y)", "sees(ann, bo)")
 console.print_line(holds("<", create Int.make(480), create Int.make(1000)).to_string)
 console.print_line(holds("!=", create Symbol.make("bob"), create Symbol.make("bob")).to_string)
 \end{tryit}

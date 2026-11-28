@@ -24,7 +24,8 @@ feature
   passed: Integer
   failed: Integer
 
-  check(label: String, ok: Boolean) do
+  check(label: String, ok: Boolean)
+  do
     if ok then
       passed := passed + 1
       console.print_line("PASS " + label)
@@ -34,7 +35,8 @@ feature
     end
   end
 
-  summary do
+  summary
+  do
     console.print_line("---")
     console.print_line(passed.to_string + " passed, " + failed.to_string + " failed")
     if failed > 0 then
@@ -48,7 +50,8 @@ A few helpers turn text into the things the checks need:
 
 \begin{continued}{checks.nex}
 -- The program `text` describes; it must be one.
-function program_of(text: String): Datalog_Program do
+function program_of(text: String): Datalog_Program
+do
   match parse_program(text) of
     Ok as ok then result := ok.value
     Err as e then raise e.error
@@ -56,12 +59,14 @@ function program_of(text: String): Datalog_Program do
 end
 
 -- The one atom in `text`.
-function atom_of(text: String): Atom do
+function atom_of(text: String): Atom
+do
   result := program_of("?- " + text + ".").queries.get(0)
 end
 
 -- What parsing `text` reports, or "" if it parses.
-function parse_error(text: String): String do
+function parse_error(text: String): String
+do
   match parse_program(text) of
     Ok as ok then result := ""
     Err as e then result := e.error
@@ -69,7 +74,8 @@ function parse_error(text: String): String do
 end
 
 -- Every fact `text` implies, as sorted text, evaluated with `e` into `db`.
-function evaluated(text: String, db: Database, e: Evaluator): Array[String] do
+function evaluated(text: String, db: Database, e: Evaluator): Array[String]
+do
   evaluate_program(program_of(text), db, e)
   result := []
   across db.predicates as p do
@@ -82,15 +88,17 @@ end
 \end{continued}
 
 \begin{continued}{checks.nex}
-function check_terms(c: Checker) do
-  let a := atom_of("parent(X, \"Ann Lee\", 3, X)")
-  c.check("an atom prints as it is written", a.text = "parent(X, \"Ann Lee\", 3, X)")
+function check_terms(c: Checker)
+do
+  let a := atom_of("follows(X, \"Ann Lee\", 3, X)")
+  c.check("an atom prints as it is written", a.text = "follows(X, \"Ann Lee\", 3, X)")
   c.check("its variables, each once", a.variables = ["X"])
   c.check("an atom with a variable is not ground", not a.is_ground)
-  c.check("a fact is ground", atom_of("parent(ann, bo)").is_ground)
+  c.check("a fact is ground", atom_of("follows(ann, bo)").is_ground)
 end
 
-function check_parser(c: Checker) do
+function check_parser(c: Checker)
+do
   let p := program_of("% a comment
 p(a). p(b).
 q(X) :- p(X), X != a.
@@ -107,14 +115,15 @@ s(X) :- p(X), t(_, _).
   c.check("a stray character is reported", parse_error("p(a) & q.").contains("unexpected character"))
 end
 
-function check_matching(c: Checker) do
+function check_matching(c: Checker)
+do
   let none := create Bindings.empty
-  let b := match_atom(atom_of("parent(X, Y)"), atom_of("parent(ann, bo)"), none)
+  let b := match_atom(atom_of("follows(X, Y)"), atom_of("follows(ann, bo)"), none)
   c.check("a pattern matches a fact", b /= nil and b.text = "X = ann, Y = bo")
   c.check("a repeated variable must match the same value",
-    match_atom(atom_of("parent(X, X)"), atom_of("parent(ann, bo)"), none) = nil)
+    match_atom(atom_of("follows(X, X)"), atom_of("follows(ann, bo)"), none) = nil)
   c.check("constants must be equal",
-    match_atom(atom_of("parent(cy, Y)"), atom_of("parent(ann, bo)"), none) = nil)
+    match_atom(atom_of("follows(cy, Y)"), atom_of("follows(ann, bo)"), none) = nil)
   c.check("comparisons on integers", holds("<", create Int.make(2), create Int.make(10)))
   c.check("ordering needs integers", not holds("<", create Symbol.make("a"), create Symbol.make("b")))
 end
@@ -127,14 +136,15 @@ checks also make sure they agree with one another, and with the answers we
 expect.
 
 \begin{continued}{checks.nex}
-function check_evaluation(c: Checker) do
-  let family := "parent(a, b). parent(b, c). parent(c, d).
-ancestor(X, Y) :- parent(X, Y).
-ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z)."
-  let naive := evaluated(family, create Database.make, create Naive_Evaluator.make)
-  let semi := evaluated(family, create Database.make, create Semi_Naive_Evaluator.make)
-  let indexed := evaluated(family, create Indexed_Database.make, create Semi_Naive_Evaluator.make)
-  c.check("naive evaluation finds every ancestor", naive.contains("ancestor(a, d)") and naive.length = 9)
+function check_evaluation(c: Checker)
+do
+  let network := "follows(a, b). follows(b, c). follows(c, d).
+sees(X, Y) :- follows(X, Y).
+sees(X, Z) :- follows(X, Y), sees(Y, Z)."
+  let naive := evaluated(network, create Database.make, create Naive_Evaluator.make)
+  let semi := evaluated(network, create Database.make, create Semi_Naive_Evaluator.make)
+  let indexed := evaluated(network, create Indexed_Database.make, create Semi_Naive_Evaluator.make)
+  c.check("naive evaluation finds everything each one sees", naive.contains("sees(a, d)") and naive.length = 9)
   c.check("semi-naive evaluation finds the same facts", semi = naive)
   c.check("so does an indexed database", indexed = naive)
   let chain := "link(t1, t2). link(t2, t3). link(t3, t4). link(t4, t5). link(t5, t6).
@@ -147,7 +157,8 @@ route(X, Z) :- route(X, Y), link(Y, Z)."
   c.check("semi-naive evaluation looks at fewer facts", fast.attempts < slow.attempts)
 end
 
-function check_analysis(c: Checker) do
+function check_analysis(c: Checker)
+do
   c.check("a head variable must be bound",
     program_problem(program_of("p(X) :- q(Y).")).contains("variable X in the head"))
   c.check("a test's variables must be bound before it",
@@ -163,29 +174,32 @@ refused(U) :- user(U), not ok(U).", create Database.make, create Semi_Naive_Eval
     and not access.contains("ok(bo)") and access.contains("refused(bo)"))
 end
 
-function check_queries(c: Checker) do
+function check_queries(c: Checker)
+do
   let db := create Database.make
-  evaluate_program(program_of("parent(a, b). parent(a, c).
-sibling(X, Y) :- parent(P, X), parent(P, Y), X != Y."), db, create Semi_Naive_Evaluator.make)
-  c.check("a question with a variable", answer_lines(atom_of("sibling(b, Who)"), db) = ["Who = c"])
-  c.check("a question without one", answer_lines(atom_of("sibling(b, c)"), db) = ["yes"]
-    and answer_lines(atom_of("sibling(b, b)"), db) = ["no"])
+  evaluate_program(program_of("follows(b, a). follows(c, a).
+in_common(X, Y) :- follows(X, Z), follows(Y, Z), X != Y."), db, create Semi_Naive_Evaluator.make)
+  c.check("a question with a variable", answer_lines(atom_of("in_common(b, Who)"), db) = ["Who = c"])
+  c.check("a question without one", answer_lines(atom_of("in_common(b, c)"), db) = ["yes"]
+    and answer_lines(atom_of("in_common(b, b)"), db) = ["no"])
 end
 
-function check_explanations(c: Checker) do
+function check_explanations(c: Checker)
+do
   let db := create Explained_Database.make
-  evaluate_program(program_of("parent(a, b). parent(b, c).
-ancestor(X, Y) :- parent(X, Y).
-ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z)."), db, create Semi_Naive_Evaluator.make)
-  let proof := db.why(atom_of("ancestor(a, c)"))
-  c.check("a derived fact is explained by its rule", proof.get(0).starts_with("ancestor(a, c)    by "))
-  c.check("down to the given facts", proof.contains("  parent(a, b)    (given)"))
-  c.check("every step checks", db.steps_hold(atom_of("ancestor(a, c)")))
+  evaluate_program(program_of("follows(a, b). follows(b, c).
+sees(X, Y) :- follows(X, Y).
+sees(X, Z) :- follows(X, Y), sees(Y, Z)."), db, create Semi_Naive_Evaluator.make)
+  let proof := db.why(atom_of("sees(a, c)"))
+  c.check("a derived fact is explained by its rule", proof.get(0).starts_with("sees(a, c)    by "))
+  c.check("down to the given facts", proof.contains("  follows(a, b)    (given)"))
+  c.check("every step checks", db.steps_hold(atom_of("sees(a, c)")))
 end
 \end{continued}
 
 \begin{continued}{checks.nex}
-function main() do
+function main()
+do
   let c := create Checker
   check_terms(c)
   check_parser(c)
@@ -210,7 +224,7 @@ subject goes from here, and how the engine could follow.
 \begin{description}[style=nextline, leftmargin=1.2em, itemsep=0.4em]
   \item[Answering only what is asked.] Our engine derives every fact a
     program implies, then answers questions from them. A question such as
-    \code{?- ancestor(alice, X).} only needs Alice's descendants. The
+    \code{?- sees(ann, X).} only needs the people Ann can see. The
     \emph{magic sets} transformation rewrites a program so that bottom-up
     evaluation derives only the facts relevant to a question, keeping the
     simple evaluator and its guarantees.

@@ -26,14 +26,16 @@ candidates as before.
 -- have it.
 class Indexed_Relation inherit Relation
 create
-  make(p: String) do
+  make(p: String)
+  do
     Relation.make(p)
     by_first := {}
   end
 feature
   by_first: Map[String, Array[Atom]]
 
-  add(a: Atom): Boolean do
+  add(a: Atom): Boolean
+  do
     result := Relation.add(a)
     if result and a.arity > 0 then
       let key := term_text(a.args.get(0))
@@ -44,7 +46,8 @@ feature
     end
   end
 
-  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+  candidates(pattern: Atom, b: Bindings): Array[Atom]
+  do
     result := facts
     if pattern.arity > 0 then
       let first := substitute_term(pattern.args.get(0), b)
@@ -75,11 +78,13 @@ that and nothing else:
 -- A database whose relations are indexed.
 class Indexed_Database inherit Database
 create
-  make do
+  make
+  do
     Database.make
   end
 feature
-  new_relation(p: String): Relation do
+  new_relation(p: String): Relation
+  do
     result := create Indexed_Relation.make(p)
   end
 end
@@ -98,7 +103,8 @@ intern Parser
 intern Analysis
 intern io/Path
 
-function measure(label: String, db: Database, e: Evaluator) do
+function measure(label: String, db: Database, e: Evaluator)
+do
   match parse_program(create Path.make(program.working_directory + "/chain.dl").read_text) of
     Ok as ok then
       do

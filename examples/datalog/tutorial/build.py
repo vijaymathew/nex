@@ -39,7 +39,7 @@ TEX = os.path.join(HERE, "tutorial.tex")
 
 # Files from the project that the tutorial's programs need but does not
 # build itself: the sample Datalog programs.
-SUPPORT = ["family.dl", "flights.dl", "access.dl", "chain.dl"]
+SUPPORT = ["social.dl", "flights.dl", "access.dl", "chain.dl"]
 INPUT = re.compile(r"^\\input\{([^{}]*)\}", re.M)
 
 CHUNK = re.compile(

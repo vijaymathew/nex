@@ -13,7 +13,8 @@ intern data/Result
 
 class Parser
 create
-  make(text: String) do
+  make(text: String)
+  do
     let lexer := create Lexer.make(text)
     tokens := []
     lines := []
@@ -37,18 +38,21 @@ feature
   -- How many `_` variables have been read, so that each gets its own name.
   anonymous: Integer
 
-  current: Token do
+  current: Token
+  do
     result := tokens.get(index)
   end
 
-  at_end: Boolean do
+  at_end: Boolean
+  do
     match current of
       End_Of_Input then result := true
       _            then result := false
     end
   end
 
-  at_punct(p: String): Boolean do
+  at_punct(p: String): Boolean
+  do
     match current of
       Punct(text) then result := text = p
       _           then result := false
@@ -65,11 +69,13 @@ feature
   end
 
   -- `message`, saying where in the program it applies.
-  located(message: String): String do
+  located(message: String): String
+  do
     result := "line " + lines.get(index).to_string + ": " + message
   end
 
-  expect(p: String) do
+  expect(p: String)
+  do
     if at_punct(p) then
       advance
     else
@@ -78,7 +84,8 @@ feature
   end
 
   -- The whole program.
-  program: Datalog_Program do
+  program: Datalog_Program
+  do
     result := create Datalog_Program.make
     from until at_end do
       clause(result)
@@ -87,7 +94,8 @@ feature
     all_read: at_end
   end
 
-  clause(p: Datalog_Program) do
+  clause(p: Datalog_Program)
+  do
     if at_punct("?-") then
       advance
       p.add_query(atom)
@@ -113,7 +121,8 @@ feature
     end
   end
 
-  literal: Literal do
+  literal: Literal
+  do
     if is_name("not", 0) and is_any_name(1) then
       advance
       result := create Negated.make(atom)
@@ -131,29 +140,34 @@ feature
   end
 
   -- The token `k` places after the current one, or the last token.
-  ahead(k: Integer): Token do
+  ahead(k: Integer): Token
+  do
     result := tokens.get((index + k).min(tokens.length - 1))
   end
 
-  is_name(name: String, k: Integer): Boolean do
+  is_name(name: String, k: Integer): Boolean
+  do
     match ahead(k) of
       Name_Token(text) then result := text = name
       _                then result := false
     end
   end
 
-  is_any_name(k: Integer): Boolean do
+  is_any_name(k: Integer): Boolean
+  do
     match ahead(k) of
       Name_Token then result := true
       _          then result := false
     end
   end
 
-  is_operator(k: Integer): Boolean do
+  is_operator(k: Integer): Boolean
+  do
     result := ["=", "!=", "<", "<=", ">", ">="].contains(punct_text(ahead(k)))
   end
 
-  atom: Atom do
+  atom: Atom
+  do
     match current of
       Name_Token(text) then
         do
@@ -174,7 +188,8 @@ feature
     end
   end
 
-  term: Term do
+  term: Term
+  do
     match current of
       Name_Token(text) then
         do
@@ -211,7 +226,8 @@ invariant
 end
 
 -- The program `text` describes, or what is wrong with it.
-function parse_program(text: String): Result[Datalog_Program, String] do
+function parse_program(text: String): Result[Datalog_Program, String]
+do
   let parser := create Parser.make(text)
   result := create Ok[Datalog_Program, String].make(parser.program)
 rescue

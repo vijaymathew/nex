@@ -9,8 +9,8 @@ which is what every rule does all the time.
 
 \section{Relations}
 
-Facts are grouped by predicate. All the \code{parent} facts form one
-\emph{relation}, all the \code{ancestor} facts another, as the rows of one
+Facts are grouped by predicate. All the \code{follows} facts form one
+\emph{relation}, all the \code{sees} facts another, as the rows of one
 table in a relational database. A relation keeps its facts in the order
 they arrived, and the text of each in a set, so that asking whether a fact
 is here does not mean looking at every one.
@@ -23,7 +23,8 @@ intern Bindings
 -- The facts of one predicate, each once.
 class Relation
 create
-  make(p: String) do
+  make(p: String)
+  do
     predicate := p
     facts := []
     keys := #{}
@@ -34,11 +35,13 @@ feature
   -- The text of every fact, for asking quickly whether one is here.
   keys: Set[String]
 
-  count: Integer do
+  count: Integer
+  do
     result := facts.length
   end
 
-  contains(a: Atom): Boolean do
+  contains(a: Atom): Boolean
+  do
     result := keys.contains(a.text)
   end
 \end{newfile}
@@ -78,14 +81,16 @@ out would make the engine miss answers, silently.
 \begin{continued}{database.nex}
   -- The facts that might match `pattern` once `b` is applied to it.
   -- Here that is simply all of them.
-  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+  candidates(pattern: Atom, b: Bindings): Array[Atom]
+  do
     result := facts
   ensure
     complete: covers(result, pattern, b)
   end
 
   -- Is every fact that matches `pattern` under `b` among `found`?
-  covers(found: Array[Atom], pattern: Atom, b: Bindings): Boolean do
+  covers(found: Array[Atom], pattern: Atom, b: Bindings): Boolean
+  do
     result := true
     across facts as f do
       if match_atom(pattern, f, b) /= nil and not found.contains(f) then
@@ -110,7 +115,8 @@ different kind of relation, without a line of this class changing.
 -- All the facts known so far.
 class Database
 create
-  make do
+  make
+  do
     relations := {}
   end
 feature
@@ -118,18 +124,21 @@ feature
 
   -- A relation for a predicate seen for the first time. A kind of
   -- database that stores its facts differently says so here.
-  new_relation(p: String): Relation do
+  new_relation(p: String): Relation
+  do
     result := create Relation.make(p)
   ensure
     for_p: result.predicate = p
     empty: result.count = 0
   end
 
-  has(p: String): Boolean do
+  has(p: String): Boolean
+  do
     result := relations.contains_key(p)
   end
 
-  contains(a: Atom): Boolean do
+  contains(a: Atom): Boolean
+  do
     result := has(a.predicate) and relations.get(a.predicate).contains(a)
   end
 
@@ -158,19 +167,22 @@ feature
     present: contains(a)
   end
 
-  facts_of(p: String): Array[Atom] do
+  facts_of(p: String): Array[Atom]
+  do
     result := when has(p) then relations.get(p).facts else [] end
   end
 
   -- The facts that might match `pattern` under `b`.
-  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+  candidates(pattern: Atom, b: Bindings): Array[Atom]
+  do
     result := []
     if has(pattern.predicate) then
       result := relations.get(pattern.predicate).candidates(pattern, b)
     end
   end
 
-  count: Integer do
+  count: Integer
+  do
     result := 0
     across relations.values as r do
       result := result + r.count
@@ -178,7 +190,8 @@ feature
   end
 
   -- The predicates with facts, in name order.
-  predicates: Array[String] do
+  predicates: Array[String]
+  do
     result := relations.keys.sort
   end
 end
@@ -199,7 +212,7 @@ intern io/Path
 intern Database
 
 let db := create Database.make
-match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+match parse_program(create Path.make(program.working_directory + "/social.dl").read_text) of
   Ok as ok then
     across ok.value.facts as f do
       db.add(f)
@@ -207,7 +220,7 @@ match parse_program(create Path.make(program.working_directory + "/family.dl").r
   Err as e then console.print_line(e.error)
 end
 console.print_line(db.count.to_string + " facts about " + db.predicates.to_string)
-match parse_program("parent(alice, bob). parent(bob, zoe).") of
+match parse_program("follows(ann, bo). follows(bo, zed).") of
   Ok as ok then
     across ok.value.facts as f do
       console.print_line(f.text + " new? " + db.add(f).to_string)

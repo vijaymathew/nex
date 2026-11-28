@@ -1,30 +1,31 @@
 % ===========================================================================
 \chapter{What we are going to build}\label{ch:intro}
 
-A family is a handful of facts. Alice is Bob's parent; Bob is Carol's
-parent; Carol is Emma's parent. A handful of facts, written down, imply a
-great many more: Alice is Emma's ancestor, Carol and Dan are cousins, Bob
-and Beth are siblings. Nobody wrote those down, but anyone who knows what
-``ancestor'' means can work them out.
+A social network is a handful of facts. Ann follows Bo; Bo follows Cy; Cy
+follows Dee. A handful of facts, written down, imply a great many more. If
+people reshare what they see, Dee's posts can reach Ann. Bo and Fay follow
+someone in common. And Ann might like to follow Cy, since two of the people
+she follows do. Nobody wrote those down, but anyone who knows what the
+words mean can work them out.
 
 \emph{Datalog} is a small language for exactly this. A program states some
 facts and some rules, and the rules say how new facts follow from old ones:
 
 \begin{shell}
-parent(alice, bob).
-parent(bob, carol).
+follows(ann, bo).
+follows(bo, cy).
 
-ancestor(X, Y) :- parent(X, Y).
-ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+sees(X, Y) :- follows(X, Y).
+sees(X, Z) :- follows(X, Y), sees(Y, Z).
 \end{shell}
 
-The first rule says: if \code{X} is a parent of \code{Y}, then \code{X} is
-an ancestor of \code{Y}. The second says: if \code{X} is a parent of some
-\code{Y}, and \code{Y} is an ancestor of \code{Z}, then \code{X} is an
-ancestor of \code{Z}. Then we ask questions:
+The first rule says: if \code{X} follows \code{Y}, then \code{X} sees
+\code{Y}'s posts. The second says: if \code{X} follows some \code{Y}, and
+\code{Y} sees \code{Z}'s posts, then so does \code{X}, through \code{Y}'s
+reshares. Then we ask questions:
 
 \begin{shell}
-?- ancestor(alice, Who).
+?- sees(ann, Who).
 \end{shell}
 
 and the answer is every \code{Who} that makes it true.
@@ -32,10 +33,10 @@ and the answer is every \code{Who} that makes it true.
 By the end of this tutorial you will have written, in Nex, a Datalog engine
 that reads programs like this one, works out every fact they imply, and
 answers questions about them. It also explains its answers: ask it
-\emph{why} Carol and Dan are cousins, and it shows the proof, step by step,
-down to the facts you gave it.
+\emph{why} it suggests that Ann follow Cy, and it shows the proof, step by
+step, down to the facts you gave it.
 
-\laterout{datalog.nex family.dl "why cousin(carol, dan)."}{why_cousin}
+\laterout{datalog.nex social.dl "why suggest(ann, cy)."}{why_suggest}
 
 \section{Why Datalog}
 
@@ -63,7 +64,7 @@ as contracts and lets Nex check them while the engine runs.
     (Chapter~\ref{ch:lexer}), and a parser that builds the model from them
     (Chapter~\ref{ch:parser}).
   \item[Facts and how rules use them.] Matching a pattern like
-    \code{parent(X, bob)} against facts (Chapter~\ref{ch:matching}), a
+    \code{follows(X, cy)} against facts (Chapter~\ref{ch:matching}), a
     database to keep the facts in (Chapter~\ref{ch:database}), and joining
     the conditions of a rule (Chapter~\ref{ch:joins}).
   \item[Working out everything.] Applying the rules until nothing new

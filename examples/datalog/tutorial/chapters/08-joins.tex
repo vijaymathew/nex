@@ -5,15 +5,15 @@ A rule's head holds whenever its body does, so applying a rule means
 finding every way to make its body true. Take
 
 \begin{shell}
-sibling(X, Y) :- parent(P, X), parent(P, Y), X != Y.
+in_common(X, Y) :- follows(X, Z), follows(Y, Z), X != Y.
 \end{shell}
 
-The body has three conditions. Match the first, \code{parent(P, X)}, against
-every \code{parent} fact; each match binds \code{P} and \code{X}. For each
-of those, match the second, \code{parent(P, Y)}, where \code{P} now has a
-value, so only the children of that same parent match, binding \code{Y}.
-For each of those, check the test \code{X != Y}. Every set of bindings that
-survives all three gives one fact, \code{sibling(X, Y)}.
+The body has three conditions. Match the first, \code{follows(X, Z)}, against
+every \code{follows} fact; each match binds \code{X} and \code{Z}. For each
+of those, match the second, \code{follows(Y, Z)}, where \code{Z} now has a
+value, so only the other followers of that same person match, binding
+\code{Y}. For each of those, check the test \code{X != Y}. Every set of
+bindings that survives all three gives one fact, \code{in_common(X, Y)}.
 
 Combining conditions this way, each one narrowing the possibilities the
 earlier ones left, is what a relational database calls a \emph{join}, and
@@ -46,7 +46,8 @@ feature
   attempts: Integer
 
   -- Every set of bindings that satisfies the body of `r` in `db`.
-  solutions(r: Rule, db: Database): Array[Bindings] do
+  solutions(r: Rule, db: Database): Array[Bindings]
+  do
     result := []
     join(r.body, 0, create Bindings.empty, db, result)
   end
@@ -82,7 +83,8 @@ feature
   end
 
   -- Where literal `i` of a body finds its facts: here, the database.
-  source(i: Integer, atom: Atom, b: Bindings, db: Database): Array[Atom] do
+  source(i: Integer, atom: Atom, b: Bindings, db: Database): Array[Atom]
+  do
     result := db.candidates(atom, b)
   end
 end
@@ -111,8 +113,8 @@ engine checks.
 \section{Trying it out}
 
 \code{Evaluator} is deferred, so the try program makes a small subclass of
-its own just to call \code{solutions}. It finds every pair of siblings in
-the family:
+its own just to call \code{solutions}. It finds every pair of people who
+follow someone in common:
 
 \begin{tryit}{try_joins.nex}
 intern Parser
@@ -121,22 +123,23 @@ intern Evaluate
 
 class Joiner inherit Evaluator
 create
-  make do
+  make
+  do
   end
 end
 
-match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+match parse_program(create Path.make(program.working_directory + "/social.dl").read_text) of
   Ok as ok then
     do
       let db := create Database.make
       across ok.value.facts as f do
         db.add(f)
       end
-      let sibling := ok.value.rules.get(2)
-      console.print_line(sibling.text)
+      let in_common := ok.value.rules.get(3)
+      console.print_line(in_common.text)
       let j := create Joiner.make
-      across j.solutions(sibling, db) as b do
-        console.print_line("  " + b.text + "   gives " + substitute(sibling.head, b).text)
+      across j.solutions(in_common, db) as b do
+        console.print_line("  " + b.text + "   gives " + substitute(in_common.head, b).text)
       end
       console.print_line("facts looked at: " + j.attempts.to_string)
     end
@@ -145,5 +148,7 @@ end
 \end{tryit}
 \tryoutput{try_joins}
 
-Each pair appears twice, once each way round, because \code{sibling} is
-symmetric, and nobody is their own sibling, thanks to \code{X != Y}.
+Bo and Fay both follow Cy, so the pair appears, twice, once each way round,
+because \code{in_common} is symmetric. Nobody is paired with themselves,
+thanks to \code{X != Y}: without it, everyone who follows anyone would have
+something in common with themselves.

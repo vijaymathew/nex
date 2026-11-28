@@ -1,12 +1,13 @@
 % ===========================================================================
 \chapter{Why?}\label{ch:explanations}
 
-The engine knows that Carol and Dan are cousins. A person might reasonably
-ask how it knows. The answer is a \emph{proof}: \code{cousin(carol, dan)}
-holds by the rule for cousins, because Bob is Carol's parent, Beth is Dan's
-parent, and Bob and Beth are siblings; and they are siblings by the rule for
-siblings, because Alice is the parent of both. Every step is a rule applied
-to facts, down to facts that were simply given.
+The engine suggests that Ann follow Cy. Ann might reasonably ask why. The
+answer is a \emph{proof}: \code{suggest(ann, cy)} holds by the rule for
+suggestions, because Ann follows Bo, Bo follows Cy, Ann is not Cy, and there
+is no fact that Ann follows Cy already. Some proofs go deeper: Ann sees
+Eli's posts because she follows Bo and Bo sees them, which holds because Bo
+follows Cy and Cy sees them, and so on. Every step is a rule applied to
+facts, down to facts that were simply given.
 
 To give that answer the engine has to remember, for each fact a rule
 derives, which rule derived it and with what bindings. Every derived fact
@@ -25,7 +26,8 @@ intern Database
 -- true.
 class Derivation
 create
-  make(r: Rule, b: Bindings) do
+  make(r: Rule, b: Bindings)
+  do
     rule := r
     bindings := b
   end
@@ -45,14 +47,16 @@ everything it used was known before anything later.
 -- derivation it found.
 class Explained_Database inherit Indexed_Database
 create
-  make do
+  make
+  do
     Indexed_Database.make
     how := {}
   end
 feature
   how: Map[String, Derivation]
 
-  add_derived(a: Atom, rule: Rule, b: Bindings): Boolean do
+  add_derived(a: Atom, rule: Rule, b: Bindings): Boolean
+  do
     result := add(a)
     if result then
       how.put(a.text, create Derivation.make(rule, b))
@@ -61,7 +65,8 @@ feature
     remembered: how.contains_key(a.text) or not result
   end
 
-  is_derived(a: Atom): Boolean do
+  is_derived(a: Atom): Boolean
+  do
     result := how.contains_key(a.text)
   end
 
@@ -87,7 +92,8 @@ way, recursively, until it reaches a fact that was given. A test is shown
 as it was checked, and a negated atom as the fact that does not hold.
 
 \begin{continued}{explain.nex}
-  explain(a: Atom, indent: String, lines: Array[String]) do
+  explain(a: Atom, indent: String, lines: Array[String])
+  do
     if is_derived(a) then
       let d := how.get(a.text)
       lines.add(indent + a.text + "    by " + d.rule.text)
@@ -123,7 +129,8 @@ read it.
 \begin{continued}{explain.nex}
   -- Is the recorded derivation of `a`, and of every fact it used, a true
   -- instance of its rule in this database?
-  steps_hold(a: Atom): Boolean do
+  steps_hold(a: Atom): Boolean
+  do
     result := true
     if is_derived(a) then
       let d := how.get(a.text)
@@ -147,7 +154,8 @@ end
 
 \begin{continued}{explain.nex}
 -- `l` with its bound variables replaced by their values.
-function substitute_literal(l: Literal, b: Bindings): Literal do
+function substitute_literal(l: Literal, b: Bindings): Literal
+do
   match l of
     Positive(atom) then result := create Positive.make(substitute(atom, b))
     Compare(op, left, right) then
@@ -165,12 +173,12 @@ intern Analysis
 intern Explain
 intern io/Path
 
-match parse_program(create Path.make(program.working_directory + "/family.dl").read_text) of
+match parse_program(create Path.make(program.working_directory + "/social.dl").read_text) of
   Ok as ok then
     do
       let db := create Explained_Database.make
       evaluate_program(ok.value, db, create Semi_Naive_Evaluator.make)
-      match parse_program("?- ancestor(alice, emma).") of
+      match parse_program("?- sees(ann, eli).") of
         Ok as q then
           across db.why(q.value.queries.get(0)) as line do
             console.print_line(line)

@@ -21,7 +21,8 @@ intern data/Result
 
 class Parser
 create
-  make(text: String) do
+  make(text: String)
+  do
     let lexer := create Lexer.make(text)
     tokens := []
     lines := []
@@ -66,18 +67,21 @@ far. \code{located} prefixes a message with the line it is about, and
 \code{expect} uses it when the punctuation it needs is not there.
 
 \begin{continued}{parser.nex}
-  current: Token do
+  current: Token
+  do
     result := tokens.get(index)
   end
 
-  at_end: Boolean do
+  at_end: Boolean
+  do
     match current of
       End_Of_Input then result := true
       _            then result := false
     end
   end
 
-  at_punct(p: String): Boolean do
+  at_punct(p: String): Boolean
+  do
     match current of
       Punct(text) then result := text = p
       _           then result := false
@@ -94,11 +98,13 @@ far. \code{located} prefixes a message with the line it is about, and
   end
 
   -- `message`, saying where in the program it applies.
-  located(message: String): String do
+  located(message: String): String
+  do
     result := "line " + lines.get(index).to_string + ": " + message
   end
 
-  expect(p: String) do
+  expect(p: String)
+  do
     if at_punct(p) then
       advance
     else
@@ -115,7 +121,8 @@ head of a rule if \code{:-} follows and a fact if a full stop does.
 
 \begin{continued}{parser.nex}
   -- The whole program.
-  program: Datalog_Program do
+  program: Datalog_Program
+  do
     result := create Datalog_Program.make
     from until at_end do
       clause(result)
@@ -124,7 +131,8 @@ head of a rule if \code{:-} follows and a fact if a full stop does.
     all_read: at_end
   end
 
-  clause(p: Datalog_Program) do
+  clause(p: Datalog_Program)
+  do
     if at_punct("?-") then
       advance
       p.add_query(atom)
@@ -166,7 +174,8 @@ a constant as well as a variable. Telling these apart needs a peek at the
 token after the current one, which \code{ahead} provides.
 
 \begin{continued}{parser.nex}
-  literal: Literal do
+  literal: Literal
+  do
     if is_name("not", 0) and is_any_name(1) then
       advance
       result := create Negated.make(atom)
@@ -184,25 +193,29 @@ token after the current one, which \code{ahead} provides.
   end
 
   -- The token `k` places after the current one, or the last token.
-  ahead(k: Integer): Token do
+  ahead(k: Integer): Token
+  do
     result := tokens.get((index + k).min(tokens.length - 1))
   end
 
-  is_name(name: String, k: Integer): Boolean do
+  is_name(name: String, k: Integer): Boolean
+  do
     match ahead(k) of
       Name_Token(text) then result := text = name
       _                then result := false
     end
   end
 
-  is_any_name(k: Integer): Boolean do
+  is_any_name(k: Integer): Boolean
+  do
     match ahead(k) of
       Name_Token then result := true
       _          then result := false
     end
   end
 
-  is_operator(k: Integer): Boolean do
+  is_operator(k: Integer): Boolean
+  do
     result := ["=", "!=", "<", "<=", ">", ">="].contains(punct_text(ahead(k)))
   end
 \end{continued}
@@ -217,7 +230,8 @@ whose second and third arguments were equal. So the parser gives each one
 its own name, \code{_1}, \code{_2} and so on.
 
 \begin{continued}{parser.nex}
-  atom: Atom do
+  atom: Atom
+  do
     match current of
       Name_Token(text) then
         do
@@ -238,7 +252,8 @@ its own name, \code{_1}, \code{_2} and so on.
     end
   end
 
-  term: Term do
+  term: Term
+  do
     match current of
       Name_Token(text) then
         do
@@ -287,7 +302,8 @@ the program, or an \code{Err} holding the message.
 
 \begin{continued}{parser.nex}
 -- The program `text` describes, or what is wrong with it.
-function parse_program(text: String): Result[Datalog_Program, String] do
+function parse_program(text: String): Result[Datalog_Program, String]
+do
   let parser := create Parser.make(text)
   result := create Ok[Datalog_Program, String].make(parser.program)
 rescue
@@ -301,7 +317,8 @@ end
 intern Parser
 intern io/Path
 
-function show(text: String) do
+function show(text: String)
+do
   match parse_program(text) of
     Ok as ok then
       do
@@ -319,16 +336,16 @@ function show(text: String) do
   end
 end
 
-show(create Path.make(program.working_directory + "/family.dl").read_text)
+show(create Path.make(program.working_directory + "/social.dl").read_text)
 show("airport(A) :- flight(A, _, _).")
-show("parent(alice bob).")
-show("parent(X, bob).")
+show("follows(ann bo).")
+show("follows(X, bo).")
 show("p(a).\nq(b) :- p(a)\nr(c).")
 show("p(a) & q(b).")
 \end{tryit}
 \tryoutput{try_parser}
 
-The parser reads every clause of \code{family.dl} and prints it back. The
+The parser reads every clause of \code{social.dl} and prints it back. The
 \code{_} variables have been numbered. The mistakes are reported with their
 lines: the full stop missing at the end of line 2, after
 \code{q(b) :- p(a)}, is only noticed on line 3, when \code{r} turns up

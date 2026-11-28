@@ -9,7 +9,8 @@ union Term
   Var(name: String)
 end
 
-function is_variable(t: Term): Boolean do
+function is_variable(t: Term): Boolean
+do
   match t of
     Var then result := true
     _   then result := false
@@ -17,7 +18,8 @@ function is_variable(t: Term): Boolean do
 end
 
 -- A variable's name, or "" for a constant.
-function variable_name(t: Term): String do
+function variable_name(t: Term): String
+do
   match t of
     Var(name) then result := name
     _         then result := ""
@@ -25,7 +27,8 @@ function variable_name(t: Term): String do
 end
 
 -- A term as Datalog writes it.
-function term_text(t: Term): String do
+function term_text(t: Term): String
+do
   match t of
     Symbol(name) then result := name
     Int(value)   then result := value.to_string
@@ -34,10 +37,11 @@ function term_text(t: Term): String do
   end
 end
 
--- A predicate applied to terms: parent(alice, bob), ancestor(X, Y).
+-- A predicate applied to terms: follows(ann, bo), sees(X, Y).
 class Atom
 create
-  make(p: String, a: Array[Term]) do
+  make(p: String, a: Array[Term])
+  do
     predicate := p
     args := a
   end
@@ -45,12 +49,14 @@ feature
   predicate: String
   args: Array[Term]
 
-  arity: Integer do
+  arity: Integer
+  do
     result := args.length
   end
 
   -- Does it mention no variables? Facts are ground atoms.
-  is_ground: Boolean do
+  is_ground: Boolean
+  do
     result := true
     across args as t do
       if is_variable(t) then
@@ -60,7 +66,8 @@ feature
   end
 
   -- The names of its variables, each once, in the order they appear.
-  variables: Array[String] do
+  variables: Array[String]
+  do
     result := []
     across args as t do
       let name := variable_name(t)
@@ -72,7 +79,8 @@ feature
 
   -- The atom as Datalog writes it. Two atoms are the same exactly when
   -- their texts are, so the text also serves as a key.
-  text: String do
+  text: String
+  do
     result := predicate
     if arity > 0 then
       result := result + "("
@@ -97,7 +105,8 @@ union Literal
   Negated(atom: Atom)
 end
 
-function literal_text(l: Literal): String do
+function literal_text(l: Literal): String
+do
   match l of
     Positive(atom) then result := atom.text
     Compare(op, left, right) then
@@ -107,7 +116,8 @@ function literal_text(l: Literal): String do
 end
 
 -- The variables a literal mentions.
-function literal_variables(l: Literal): Array[String] do
+function literal_variables(l: Literal): Array[String]
+do
   match l of
     Positive(atom) then result := atom.variables
     Compare(op, left, right) then
@@ -141,7 +151,8 @@ feature
   -- Why the rule is not safe, or "" if it is. A rule is safe when every
   -- variable is bound by a positive literal: those in the head by one
   -- anywhere in the body, those in a test by one before it.
-  safety_problem: String do
+  safety_problem: String
+  do
     result := ""
     let bound: Array[String] := []
     across body as l do
@@ -168,11 +179,13 @@ feature
     end
   end
 
-  is_safe: Boolean do
+  is_safe: Boolean
+  do
     result := safety_problem = ""
   end
 
-  text: String do
+  text: String
+  do
     result := head.text + " :-"
     from let i := 0 until i = body.length do
       result := result + when i = 0 then " " else ", " end + literal_text(body.get(i))
@@ -186,7 +199,8 @@ end
 -- questions it asks.
 class Datalog_Program
 create
-  make do
+  make
+  do
     facts := []
     rules := []
     queries := []
@@ -205,17 +219,20 @@ feature
     one_more: facts.length = old facts.length + 1
   end
 
-  add_rule(r: Rule) do
+  add_rule(r: Rule)
+  do
     rules.add(r)
   end
 
-  add_query(q: Atom) do
+  add_query(q: Atom)
+  do
     queries.add(q)
   end
 end
 
 -- Are all of `rules` safe?
-function all_safe(rules: Array[Rule]): Boolean do
+function all_safe(rules: Array[Rule]): Boolean
+do
   result := true
   across rules as r do
     if not r.is_safe then
@@ -225,7 +242,8 @@ function all_safe(rules: Array[Rule]): Boolean do
 end
 
 -- The predicate a negated literal denies, or "" for any other literal.
-function negated_predicate(l: Literal): String do
+function negated_predicate(l: Literal): String
+do
   match l of
     Negated(atom) then result := atom.predicate
     _             then result := ""
@@ -234,7 +252,8 @@ end
 
 -- Does no rule negate a predicate that one of `rules` defines? Then each
 -- negated predicate is already complete when the rules are applied.
-function negations_settled(rules: Array[Rule]): Boolean do
+function negations_settled(rules: Array[Rule]): Boolean
+do
   result := true
   across rules as r do
     across r.body as l do

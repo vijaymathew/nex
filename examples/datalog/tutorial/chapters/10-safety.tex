@@ -35,7 +35,8 @@ a test means the variables among its two terms:
 
 \begin{addbefore}{terms.nex}{before the Rule class}{-- head :- body. A rule with an empty body would be a fact.}
 -- The variables a literal mentions.
-function literal_variables(l: Literal): Array[String] do
+function literal_variables(l: Literal): Array[String]
+do
   match l of
     Positive(atom) then result := atom.variables
     Compare(op, left, right) then
@@ -58,11 +59,12 @@ that positive atoms bind, and complaining about the first variable used
 before it is bound. It returns the complaint, or \code{""}, so that an error
 message can say exactly what is wrong.
 
-\begin{addbefore}{terms.nex}{to Rule, before text}{  text: String do|    result := head.text + " :-"}
+\begin{addbefore}{terms.nex}{to Rule, before text}{  text: String|  do|    result := head.text + " :-"}
   -- Why the rule is not safe, or "" if it is. A rule is safe when every
   -- variable is bound by a positive literal: those in the head by one
   -- anywhere in the body, those in a test by one before it.
-  safety_problem: String do
+  safety_problem: String
+  do
     result := ""
     let bound: Array[String] := []
     across body as l do
@@ -89,14 +91,16 @@ message can say exactly what is wrong.
     end
   end
 
-  is_safe: Boolean do
+  is_safe: Boolean
+  do
     result := safety_problem = ""
   end
 \end{addbefore}
 
 \begin{append}{terms.nex}
 -- Are all of `rules` safe?
-function all_safe(rules: Array[Rule]): Boolean do
+function all_safe(rules: Array[Rule]): Boolean
+do
   result := true
   across rules as r do
     if not r.is_safe then

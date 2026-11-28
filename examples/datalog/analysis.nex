@@ -8,7 +8,8 @@ intern Evaluate
 -- uses positively in the same stratum or an earlier one.
 class Stratifier
 create
-  make(rules: Array[Rule]) do
+  make(rules: Array[Rule])
+  do
     level := {}
     problem := ""
     across rules as r do
@@ -40,7 +41,8 @@ feature
   problem: String
 
   -- The lowest level a rule's head can have, given one body literal.
-  required_level(l: Literal): Integer do
+  required_level(l: Literal): Integer
+  do
     result := 0
     match l of
       Positive(atom) then result := level.try_get(atom.predicate, 0)
@@ -75,7 +77,8 @@ feature
     each_settled: all_settled(result)
   end
 
-  all_settled(groups: Array[Array[Rule]]): Boolean do
+  all_settled(groups: Array[Array[Rule]]): Boolean
+  do
     result := true
     across groups as g do
       if not negations_settled(g) then
@@ -86,7 +89,8 @@ feature
 end
 
 -- What is wrong with `p` before it can run, or "" if nothing is.
-function program_problem(p: Datalog_Program): String do
+function program_problem(p: Datalog_Program): String
+do
   result := ""
   across p.rules as r do
     if result = "" and not r.is_safe then

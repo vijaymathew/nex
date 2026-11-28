@@ -3,7 +3,8 @@
 intern Database
 
 -- Every way of binding the variables of `q` so that it is a fact in `db`.
-function answers(q: Atom, db: Database): Array[Bindings] do
+function answers(q: Atom, db: Database): Array[Bindings]
+do
   result := []
   let none := create Bindings.empty
   across db.candidates(q, none) as f do
@@ -17,7 +18,8 @@ ensure
 end
 
 -- Is `q`, under each of `found`, a fact in `db`?
-function all_facts(q: Atom, found: Array[Bindings], db: Database): Boolean do
+function all_facts(q: Atom, found: Array[Bindings], db: Database): Boolean
+do
   result := true
   across found as b do
     if not db.contains(substitute(q, b)) then
@@ -28,7 +30,8 @@ end
 
 -- The answers to `q` as lines of text, in order: "yes" or "no" for a
 -- question without variables.
-function answer_lines(q: Atom, db: Database): Array[String] do
+function answer_lines(q: Atom, db: Database): Array[String]
+do
   let found := answers(q, db)
   if q.is_ground then
     result := [when found.is_empty then "no" else "yes" end]

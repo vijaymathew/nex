@@ -1,7 +1,7 @@
 % ===========================================================================
 \chapter{The command line}\label{ch:commandline}
 
-The last program puts it all together. \code{nex datalog.nex family.dl}
+The last program puts it all together. \code{nex datalog.nex social.dl}
 reads the file, checks it, evaluates it, answers the questions it asks,
 and then waits for more questions, until the input ends or you type
 \code{:quit}. Given a question on the command line as well, it answers that
@@ -10,8 +10,8 @@ one and stops.
 \begin{newfile}{datalog.nex}
 -- datalog.nex: run a Datalog program, then answer questions about it.
 --
---   nex datalog.nex family.dl                          -- then ask questions
---   nex datalog.nex family.dl "ancestor(alice, X)."    -- ask one, and stop
+--   nex datalog.nex social.dl                     -- then ask questions
+--   nex datalog.nex social.dl "sees(ann, X)."     -- ask one, and stop
 --
 -- A question is an atom, with or without "?-" before it. "why" before a
 -- fact explains it; ":facts" lists every fact, ":stats" says how much
@@ -26,7 +26,8 @@ intern io/Path
 -- The full path of a file the user named. The `nex` launcher runs
 -- programs from its own installation folder, so a relative name is
 -- resolved against the folder the program was started from.
-function user_path(raw: String): String do
+function user_path(raw: String): String
+do
   if raw.starts_with("/") then
     result := raw
   else
@@ -47,7 +48,8 @@ the parser do the work:
 
 \begin{continued}{datalog.nex}
 -- The one atom in `text`, a question or a fact, or why there is none.
-function read_atom(text: String): Result[Atom, String] do
+function read_atom(text: String): Result[Atom, String]
+do
   let t := text.trim
   if t.starts_with("?-") then
     t := t.substring(2, t.length).trim
@@ -72,7 +74,8 @@ to print.
 \begin{continued}{datalog.nex}
 class Session
 create
-  make(p: Datalog_Program) do
+  make(p: Datalog_Program)
+  do
     source := p
     db := create Explained_Database.make
     evaluator := create Semi_Naive_Evaluator.make
@@ -83,7 +86,8 @@ feature
   db: Explained_Database
   evaluator: Semi_Naive_Evaluator
 
-  summary: String do
+  summary: String
+  do
     let given := 0
     across db.predicates as p do
       across db.facts_of(p) as f do
@@ -99,7 +103,8 @@ feature
 
 \begin{continued}{datalog.nex}
   -- What to print in answer to one line of input.
-  respond(line: String): Array[String] do
+  respond(line: String): Array[String]
+  do
     let t := line.trim
     if t = ":stats" then
       result := [db.count.to_string + " facts; the evaluation took "
@@ -122,7 +127,8 @@ feature
     end
   end
 
-  explain(text: String): Array[String] do
+  explain(text: String): Array[String]
+  do
     match read_atom(text) of
       Ok as a then
         if not a.value.is_ground then
@@ -147,13 +153,15 @@ preconditions of \code{evaluate_program} and the evaluators are never broken
 by bad input; they are there to catch bugs in the engine.
 
 \begin{continued}{datalog.nex}
-function print_lines(lines: Array[String]) do
+function print_lines(lines: Array[String])
+do
   across lines as l do
     console.print_line(l)
   end
 end
 
-function main() do
+function main()
+do
   let args := program.arguments
   if args.is_empty then
     console.print_line("usage: nex datalog.nex PROGRAM.dl [QUESTION]")
@@ -175,7 +183,8 @@ function main() do
   end
 end
 
-function converse(s: Session, name: String, args: Array[String]) do
+function converse(s: Session, name: String, args: Array[String])
+do
   console.print_line(name + ": " + s.summary)
   across s.source.queries as q do
     console.print_line("?- " + q.text + ".")
@@ -207,13 +216,13 @@ main()
 
 \section{Running it}
 
-\runoutput{datalog.nex family.dl "sibling(bob, Who)."}{family}
+\runoutput{datalog.nex social.dl "friends(ann, Who)."}{social}
 
 The two questions in the file are answered first, then the one on the
 command line. Without that one, the program would go on to wait for
 questions to be typed.
 
-\runoutput{datalog.nex family.dl "why cousin(carol, dan)."}{why_cousin}
+\runoutput{datalog.nex social.dl "why suggest(ann, cy)."}{why_suggest}
 
 \runoutput{datalog.nex flights.dl "airport(A)."}{flights}
 

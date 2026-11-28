@@ -6,10 +6,10 @@ Before the engine can read a program, we need something to read it
 are few.
 
 \begin{description}[style=nextline, leftmargin=1.2em, itemsep=0.4em]
-  \item[Terms.] The smallest pieces: a constant such as \code{alice}, \code{42}
+  \item[Terms.] The smallest pieces: a constant such as \code{ann}, \code{42}
     or \code{"Ann Lee"}, or a variable such as \code{X}.
-  \item[Atoms.] A predicate applied to terms: \code{parent(alice, bob)},
-    \code{ancestor(X, Y)}. An atom with no variables is \emph{ground}, and a
+  \item[Atoms.] A predicate applied to terms: \code{follows(ann, bo)},
+    \code{sees(X, Y)}. An atom with no variables is \emph{ground}, and a
     fact is a ground atom.
   \item[Literals.] The conditions in the body of a rule. Most are atoms,
     which must match a fact. Two other kinds test something instead:
@@ -38,7 +38,8 @@ union Term
   Var(name: String)
 end
 
-function is_variable(t: Term): Boolean do
+function is_variable(t: Term): Boolean
+do
   match t of
     Var then result := true
     _   then result := false
@@ -46,7 +47,8 @@ function is_variable(t: Term): Boolean do
 end
 
 -- A variable's name, or "" for a constant.
-function variable_name(t: Term): String do
+function variable_name(t: Term): String
+do
   match t of
     Var(name) then result := name
     _         then result := ""
@@ -54,7 +56,8 @@ function variable_name(t: Term): String do
 end
 
 -- A term as Datalog writes it.
-function term_text(t: Term): String do
+function term_text(t: Term): String
+do
   match t of
     Symbol(name) then result := name
     Int(value)   then result := value.to_string
@@ -75,13 +78,14 @@ Datalog writes it, and it does double duty: two atoms are the same exactly
 when their texts are, so the text can serve as a key when we store facts
 in Chapter~\ref{ch:database}. That works because \code{term_text} writes
 every kind of constant differently: a string has quotes, a symbol does not,
-so \code{alice} and \code{"alice"} never collide.
+so \code{ann} and \code{"ann"} never collide.
 
 \begin{continued}{terms.nex}
--- A predicate applied to terms: parent(alice, bob), ancestor(X, Y).
+-- A predicate applied to terms: follows(ann, bo), sees(X, Y).
 class Atom
 create
-  make(p: String, a: Array[Term]) do
+  make(p: String, a: Array[Term])
+  do
     predicate := p
     args := a
   end
@@ -89,12 +93,14 @@ feature
   predicate: String
   args: Array[Term]
 
-  arity: Integer do
+  arity: Integer
+  do
     result := args.length
   end
 
   -- Does it mention no variables? Facts are ground atoms.
-  is_ground: Boolean do
+  is_ground: Boolean
+  do
     result := true
     across args as t do
       if is_variable(t) then
@@ -104,7 +110,8 @@ feature
   end
 
   -- The names of its variables, each once, in the order they appear.
-  variables: Array[String] do
+  variables: Array[String]
+  do
     result := []
     across args as t do
       let name := variable_name(t)
@@ -116,7 +123,8 @@ feature
 
   -- The atom as Datalog writes it. Two atoms are the same exactly when
   -- their texts are, so the text also serves as a key.
-  text: String do
+  text: String
+  do
     result := predicate
     if arity > 0 then
       result := result + "("
@@ -149,7 +157,8 @@ union Literal
   Negated(atom: Atom)
 end
 
-function literal_text(l: Literal): String do
+function literal_text(l: Literal): String
+do
   match l of
     Positive(atom) then result := atom.text
     Compare(op, left, right) then
@@ -178,7 +187,8 @@ feature
   head: Atom
   body: Array[Literal]
 
-  text: String do
+  text: String
+  do
     result := head.text + " :-"
     from let i := 0 until i = body.length do
       result := result + when i = 0 then " " else ", " end + literal_text(body.get(i))
@@ -191,7 +201,7 @@ end
 
 Finally, a whole program is its facts, its rules and its questions. A fact
 must be ground, and \code{add_fact} says so: a program that states
-\code{parent(X, bob)} has made a mistake, and the parser will report it
+\code{follows(X, bo)} has made a mistake, and the parser will report it
 before it gets this far.
 
 \begin{continued}{terms.nex}
@@ -199,7 +209,8 @@ before it gets this far.
 -- questions it asks.
 class Datalog_Program
 create
-  make do
+  make
+  do
     facts := []
     rules := []
     queries := []
@@ -218,11 +229,13 @@ feature
     one_more: facts.length = old facts.length + 1
   end
 
-  add_rule(r: Rule) do
+  add_rule(r: Rule)
+  do
     rules.add(r)
   end
 
-  add_query(q: Atom) do
+  add_query(q: Atom)
+  do
     queries.add(q)
   end
 end
@@ -231,7 +244,7 @@ end
 \section{Trying it out}
 
 There is no parser yet, so the try program builds a rule by hand: the
-recursive rule for \code{ancestor}. Each term is declared as a \code{Term};
+recursive rule for \code{sees}. Each term is declared as a \code{Term};
 without that, \code{[x, z]} would be an array of \code{Var}, the most
 specific type its elements share, and \code{Atom.make} wants an array of
 \code{Term}.
@@ -243,19 +256,19 @@ intern Terms
 let x: Term := create Var.make("X")
 let y: Term := create Var.make("Y")
 let z: Term := create Var.make("Z")
-let head := create Atom.make("ancestor", [x, z])
-let parent := create Atom.make("parent", [x, y])
-let rest := create Atom.make("ancestor", [y, z])
-let first: Literal := create Positive.make(parent)
+let head := create Atom.make("sees", [x, z])
+let follows := create Atom.make("follows", [x, y])
+let rest := create Atom.make("sees", [y, z])
+let first: Literal := create Positive.make(follows)
 let second: Literal := create Positive.make(rest)
 let rule := create Rule.make(head, [first, second])
 console.print_line(rule.text)
-console.print_line(parent.variables.to_string)
-console.print_line(parent.is_ground.to_string)
+console.print_line(follows.variables.to_string)
+console.print_line(follows.is_ground.to_string)
 
-let alice: Term := create Symbol.make("alice")
-let ann: Term := create Text.make("Ann Lee")
-let fact := create Atom.make("parent", [alice, ann])
+let ann: Term := create Symbol.make("ann")
+let bo: Term := create Text.make("Bo Lee")
+let fact := create Atom.make("follows", [ann, bo])
 console.print_line(fact.text)
 console.print_line(fact.is_ground.to_string)
 \end{tryit}

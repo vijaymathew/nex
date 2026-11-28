@@ -5,7 +5,8 @@ intern Bindings
 -- The facts of one predicate, each once.
 class Relation
 create
-  make(p: String) do
+  make(p: String)
+  do
     predicate := p
     facts := []
     keys := #{}
@@ -16,11 +17,13 @@ feature
   -- The text of every fact, for asking quickly whether one is here.
   keys: Set[String]
 
-  count: Integer do
+  count: Integer
+  do
     result := facts.length
   end
 
-  contains(a: Atom): Boolean do
+  contains(a: Atom): Boolean
+  do
     result := keys.contains(a.text)
   end
 
@@ -42,14 +45,16 @@ feature
 
   -- The facts that might match `pattern` once `b` is applied to it.
   -- Here that is simply all of them.
-  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+  candidates(pattern: Atom, b: Bindings): Array[Atom]
+  do
     result := facts
   ensure
     complete: covers(result, pattern, b)
   end
 
   -- Is every fact that matches `pattern` under `b` among `found`?
-  covers(found: Array[Atom], pattern: Atom, b: Bindings): Boolean do
+  covers(found: Array[Atom], pattern: Atom, b: Bindings): Boolean
+  do
     result := true
     across facts as f do
       if match_atom(pattern, f, b) /= nil and not found.contains(f) then
@@ -64,7 +69,8 @@ end
 -- All the facts known so far.
 class Database
 create
-  make do
+  make
+  do
     relations := {}
   end
 feature
@@ -72,18 +78,21 @@ feature
 
   -- A relation for a predicate seen for the first time. A kind of
   -- database that stores its facts differently says so here.
-  new_relation(p: String): Relation do
+  new_relation(p: String): Relation
+  do
     result := create Relation.make(p)
   ensure
     for_p: result.predicate = p
     empty: result.count = 0
   end
 
-  has(p: String): Boolean do
+  has(p: String): Boolean
+  do
     result := relations.contains_key(p)
   end
 
-  contains(a: Atom): Boolean do
+  contains(a: Atom): Boolean
+  do
     result := has(a.predicate) and relations.get(a.predicate).contains(a)
   end
 
@@ -112,19 +121,22 @@ feature
     present: contains(a)
   end
 
-  facts_of(p: String): Array[Atom] do
+  facts_of(p: String): Array[Atom]
+  do
     result := when has(p) then relations.get(p).facts else [] end
   end
 
   -- The facts that might match `pattern` under `b`.
-  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+  candidates(pattern: Atom, b: Bindings): Array[Atom]
+  do
     result := []
     if has(pattern.predicate) then
       result := relations.get(pattern.predicate).candidates(pattern, b)
     end
   end
 
-  count: Integer do
+  count: Integer
+  do
     result := 0
     across relations.values as r do
       result := result + r.count
@@ -132,7 +144,8 @@ feature
   end
 
   -- The predicates with facts, in name order.
-  predicates: Array[String] do
+  predicates: Array[String]
+  do
     result := relations.keys.sort
   end
 end
@@ -142,14 +155,16 @@ end
 -- have it.
 class Indexed_Relation inherit Relation
 create
-  make(p: String) do
+  make(p: String)
+  do
     Relation.make(p)
     by_first := {}
   end
 feature
   by_first: Map[String, Array[Atom]]
 
-  add(a: Atom): Boolean do
+  add(a: Atom): Boolean
+  do
     result := Relation.add(a)
     if result and a.arity > 0 then
       let key := term_text(a.args.get(0))
@@ -160,7 +175,8 @@ feature
     end
   end
 
-  candidates(pattern: Atom, b: Bindings): Array[Atom] do
+  candidates(pattern: Atom, b: Bindings): Array[Atom]
+  do
     result := facts
     if pattern.arity > 0 then
       let first := substitute_term(pattern.args.get(0), b)
@@ -174,11 +190,13 @@ end
 -- A database whose relations are indexed.
 class Indexed_Database inherit Database
 create
-  make do
+  make
+  do
     Database.make
   end
 feature
-  new_relation(p: String): Relation do
+  new_relation(p: String): Relation
+  do
     result := create Indexed_Relation.make(p)
   end
 end

@@ -205,10 +205,10 @@
 
 \begin{tikzpicture}[x=1cm,y=1cm, every node/.style={font=\small\ttfamily}]
   \fill[codebg] (-0.3,-0.5) rectangle (9.3,4.4);
-  \node[draw=accent, fill=titlebg, rounded corners=2pt] (a) at (4.5,3.6) {ancestor(alice, emma)};
-  \node[draw=codeframe, fill=white, rounded corners=2pt] (b) at (1.9,2.0) {parent(alice, bob)};
-  \node[draw=accent, fill=titlebg, rounded corners=2pt] (c) at (7.0,2.0) {ancestor(bob, emma)};
-  \node[draw=codeframe, fill=white, rounded corners=2pt] (d) at (4.6,0.3) {parent(bob, carol)};
+  \node[draw=accent, fill=titlebg, rounded corners=2pt] (a) at (4.5,3.6) {sees(ann, eli)};
+  \node[draw=codeframe, fill=white, rounded corners=2pt] (b) at (1.9,2.0) {follows(ann, bo)};
+  \node[draw=accent, fill=titlebg, rounded corners=2pt] (c) at (7.0,2.0) {sees(bo, eli)};
+  \node[draw=codeframe, fill=white, rounded corners=2pt] (d) at (4.6,0.3) {follows(bo, cy)};
   \node[draw=accent, fill=titlebg, rounded corners=2pt] (e) at (8.0,0.3) {...};
   \draw[accent, line width=1pt, ->] (b) -- (a);
   \draw[accent, line width=1pt, ->] (c) -- (a);

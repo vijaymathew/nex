@@ -9,37 +9,49 @@ mkdir datalog
 cd datalog
 \end{shell}
 
-Copy the four sample programs, \code{family.dl}, \code{flights.dl},
+Copy the four sample programs, \code{social.dl}, \code{flights.dl},
 \code{access.dl} and \code{chain.dl}, from the \code{examples/datalog}
 folder of the Nex distribution into it. They are plain text; here is the
 first:
 
 \begin{shell}
-% family.dl: a family, and what follows from it.
+% social.dl: who follows whom, and what follows from it.
 
-parent(alice, bob).
-parent(alice, beth).
-parent(bob, carol).
-parent(bob, chris).
-parent(beth, dan).
-parent(carol, emma).
+follows(ann, bo).
+follows(bo, ann).
+follows(bo, cy).
+follows(cy, dee).
+follows(dee, eli).
+follows(ann, fay).
+follows(fay, cy).
 
-ancestor(X, Y) :- parent(X, Y).
-ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+% Two people are friends when each follows the other.
+friends(X, Y) :- follows(X, Y), follows(Y, X).
 
-sibling(X, Y) :- parent(P, X), parent(P, Y), X != Y.
-cousin(X, Y) :- parent(P, X), parent(Q, Y), sibling(P, Q).
+% Whose posts can reach X, if everyone reshares what they see: everyone X
+% follows, everyone they follow, and so on.
+sees(X, Y) :- follows(X, Y).
+sees(X, Z) :- follows(X, Y), sees(Y, Z).
 
-?- ancestor(alice, Who).
-?- cousin(carol, Who).
+% People who follow someone in common.
+in_common(X, Y) :- follows(X, Z), follows(Y, Z), X != Y.
+
+% Someone X might like to follow: followed by someone X follows, but not
+% yet by X, and not X.
+suggest(X, Z) :- follows(X, Y), follows(Y, Z), X != Z, not follows(X, Z).
+
+?- sees(ann, Who).
+?- suggest(ann, Who).
 \end{shell}
 
 A \texttt{\%} starts a comment that runs to the end of the line. Names that
-start with a lower-case letter, like \code{alice} and \code{parent}, are
+start with a lower-case letter, like \code{ann} and \code{follows}, are
 constants and predicates; names that start with a capital letter, like
 \code{X} and \code{Who}, are variables. \code{X != Y} is a test: the rule
-for \code{sibling} only applies when \code{X} and \code{Y} are different
-people, or everyone would be their own sibling.
+for \code{in_common} only applies when \code{X} and \code{Y} are different
+people, or everyone would have something in common with themselves.
+\code{not follows(X, Z)} holds when there is no such fact, so a suggestion
+is only made to someone who doesn't already follow that person.
 
 \section{The files}
 

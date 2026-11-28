@@ -29,7 +29,8 @@ union Token
   End_Of_Input
 end
 
-function token_text(t: Token): String do
+function token_text(t: Token): String
+do
   match t of
     Name_Token(text) then result := "'" + text + "'"
     Var_Token(text)  then result := "variable " + text
@@ -41,7 +42,8 @@ function token_text(t: Token): String do
 end
 
 -- A punctuation token's text, or "" for any other token.
-function punct_text(t: Token): String do
+function punct_text(t: Token): String
+do
   match t of
     Punct(text) then result := text
     _           then result := ""
@@ -54,20 +56,24 @@ is: a digit starts a number, a lower-case letter a name, a capital or an
 underscore a variable.
 
 \begin{continued}{lexer.nex}
-function is_digit(c: Char): Boolean do
+function is_digit(c: Char): Boolean
+do
   result := "0123456789".contains(c.to_string)
 end
 
-function is_lower(c: Char): Boolean do
+function is_lower(c: Char): Boolean
+do
   result := c >= #a and c <= #z
 end
 
-function is_upper(c: Char): Boolean do
+function is_upper(c: Char): Boolean
+do
   result := (c >= #A and c <= #Z) or c = #_
 end
 
 -- Can `c` continue a name or a variable?
-function is_name_char(c: Char): Boolean do
+function is_name_char(c: Char): Boolean
+do
   result := is_lower(c) or is_upper(c) or is_digit(c)
 end
 \end{continued}
@@ -86,7 +92,8 @@ moves forward, and it is also the one place that counts lines.
 \begin{continued}{lexer.nex}
 class Lexer
 create
-  make(t: String) do
+  make(t: String)
+  do
     text := t
     pos := 0
     line := 1
@@ -97,7 +104,8 @@ feature
   -- The line `pos` is on, counting from 1.
   line: Integer
 
-  at_end: Boolean do
+  at_end: Boolean
+  do
     result := pos >= text.length
   end
 
@@ -109,7 +117,8 @@ feature
   end
 
   -- Is the text at `pos` exactly `s`?
-  looking_at(s: String): Boolean do
+  looking_at(s: String): Boolean
+  do
     result := pos + s.length <= text.length and text.substring(pos, pos + s.length) = s
   end
 
@@ -133,7 +142,8 @@ characters that cannot be written after a \code{\#} as themselves.
 
 \begin{continued}{lexer.nex}
   -- Skip spaces, line breaks and % comments.
-  skip_blanks do
+  skip_blanks
+  do
     let done := false
     from until done do
       if at_end then
@@ -150,7 +160,8 @@ characters that cannot be written after a \code{\#} as themselves.
     end
   end
 
-  next_token: Token do
+  next_token: Token
+  do
     skip_blanks
     if at_end then
       result := create End_Of_Input
@@ -199,7 +210,8 @@ one token rather than \code{:} followed by \code{-}.
     not_empty: result.length > 0
   end
 
-  read_integer: Token do
+  read_integer: Token
+  do
     let start := pos
     advance
     from until at_end or not is_digit(current) do
@@ -259,8 +271,8 @@ end
 \begin{tryit}{try_lexer.nex}
 intern Lexer
 
-let lexer := create Lexer.make("% kin
-ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+let lexer := create Lexer.make("% reach
+sees(X, Z) :- follows(X, Y), sees(Y, Z).
 age(\"Ann Lee\", 42).")
 let done := false
 from until done do

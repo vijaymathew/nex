@@ -1,43 +1,41 @@
 # A Datalog Engine in Nex
 
-Datalog is a small language of facts and rules: state that Alice is Bob's
-parent and Bob is Carol's, give a rule for what an ancestor is, and ask who
-Alice's descendants are. This project is a Datalog engine written in Nex. It
-reads a program, checks it, works out every fact its rules imply, answers
-questions, and explains its answers.
+Datalog is a small language of facts and rules: state who follows whom on a
+social network, give rules for what follows from that (whose posts reach
+whom, who might like to follow whom), and ask questions. This project is a
+Datalog engine written in Nex. It reads a program, checks it, works out
+every fact its rules imply, answers questions, and explains its answers.
 
 ```
-nex datalog.nex family.dl                     # answer its questions, then read more
-nex datalog.nex family.dl "sibling(bob, Who)."
-nex datalog.nex family.dl "why cousin(carol, dan)."
+nex datalog.nex social.dl                     # answer its questions, then read more
+nex datalog.nex social.dl "friends(ann, Who)."
+nex datalog.nex social.dl "why suggest(ann, cy)."
 nex checks.nex                                # 29 checks of everything
 ```
 
 ```
-$ nex datalog.nex family.dl "sibling(bob, Who)."
-family.dl: 6 facts given, 19 derived in 3 rounds.
-?- ancestor(alice, Who).
-   Who = beth
-   Who = bob
-   Who = carol
-   Who = chris
-   Who = dan
-   Who = emma
-?- cousin(carol, Who).
-   Who = dan
-Who = beth
+$ nex datalog.nex social.dl "friends(ann, Who)."
+social.dl: 7 facts given, 27 derived in 6 rounds.
+?- sees(ann, Who).
+   Who = ann
+   Who = bo
+   Who = cy
+   Who = dee
+   Who = eli
+   Who = fay
+?- suggest(ann, Who).
+   Who = cy
+Who = bo
 ```
 
 ```
-$ nex datalog.nex family.dl "why cousin(carol, dan)."
+$ nex datalog.nex social.dl "why suggest(ann, cy)."
 ...
-cousin(carol, dan)    by cousin(X, Y) :- parent(P, X), parent(Q, Y), sibling(P, Q).
-  parent(bob, carol)    (given)
-  parent(beth, dan)    (given)
-  sibling(bob, beth)    by sibling(X, Y) :- parent(P, X), parent(P, Y), X != Y.
-    parent(alice, bob)    (given)
-    parent(alice, beth)    (given)
-    bob != beth
+suggest(ann, cy)    by suggest(X, Z) :- follows(X, Y), follows(Y, Z), X != Z, not follows(X, Z).
+  follows(ann, bo)    (given)
+  follows(bo, cy)    (given)
+  ann != cy
+  not follows(ann, cy)    (no such fact)
 ```
 
 No library is used beyond Nex's own. Everything is written out: the lexer and
@@ -54,11 +52,11 @@ step.
 ## The language
 
 ```
-parent(alice, bob).                              % a fact
-ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).  % a rule
-sibling(X, Y) :- parent(P, X), parent(P, Y), X != Y.
+follows(ann, bo).                                 % a fact
+sees(X, Z) :- follows(X, Y), sees(Y, Z).          % a rule
+in_common(X, Y) :- follows(X, Z), follows(Y, Z), X != Y.
 can_read(U, F) :- user(U), file(F), not banned(U).
-?- ancestor(alice, Who).                         % a question
+?- sees(ann, Who).                                % a question
 ```
 
 Names starting with a lower-case letter are constants and predicates; names
@@ -68,7 +66,7 @@ values (`=`, `!=`, `<`, `<=`, `>`, `>=`) and negate atoms with
 any test or negation that uses it), and a program must be *stratified* (no
 predicate may depend on its own negation).
 
-At the prompt, type a question (`ancestor(alice, X)`), `why` and a fact,
+At the prompt, type a question (`sees(ann, X)`), `why` and a fact,
 `:facts`, `:stats`, or `:quit`.
 
 ## Files
@@ -86,7 +84,7 @@ At the prompt, type a question (`ancestor(alice, X)`), `why` and a fact,
 | `explain.nex` | Remembering how each fact was derived, and printing why it holds |
 | `datalog.nex` | The command line |
 | `checks.nex` | Executable checks of all of the above |
-| `family.dl`, `flights.dl`, `access.dl`, `chain.dl` | Sample programs |
+| `social.dl`, `flights.dl`, `access.dl`, `chain.dl` | Sample programs |
 
 ## The tutorial
 

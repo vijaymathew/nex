@@ -7,7 +7,8 @@ intern Terms
 -- forward from the same bindings.
 class Bindings
 create
-  empty do
+  empty
+  do
     values := {}
   end
 
@@ -22,7 +23,8 @@ create
 feature
   values: Map[String, Term]
 
-  has(name: String): Boolean do
+  has(name: String): Boolean
+  do
     result := values.contains_key(name)
   end
 
@@ -33,8 +35,9 @@ feature
     result := values.get(name)
   end
 
-  -- "X = alice, Y = bob", in name order.
-  text: String do
+  -- "X = ann, Y = bo", in name order.
+  text: String
+  do
     result := ""
     across values.keys.sort as name do
       if result /= "" then
@@ -46,7 +49,8 @@ feature
 end
 
 -- `t` with its variable replaced by its value, if it has one.
-function substitute_term(t: Term, b: Bindings): Term do
+function substitute_term(t: Term, b: Bindings): Term
+do
   result := t
   let name := variable_name(t)
   if name /= "" and b.has(name) then
@@ -55,7 +59,8 @@ function substitute_term(t: Term, b: Bindings): Term do
 end
 
 -- `a` with every bound variable replaced by its value.
-function substitute(a: Atom, b: Bindings): Atom do
+function substitute(a: Atom, b: Bindings): Atom
+do
   result := create Atom.make(a.predicate, a.args.map(fn (t: Term): Term do
     result := substitute_term(t, b)
   end))
@@ -91,7 +96,8 @@ ensure
 end
 
 -- Is `b` nil, or does it make `pattern` equal to `fact`?
-function is_match(pattern, fact: Atom, b: ?Bindings): Boolean do
+function is_match(pattern, fact: Atom, b: ?Bindings): Boolean
+do
   result := true
   if b /= nil then
     result := substitute(pattern, b).text = fact.text

@@ -67,9 +67,15 @@ negate it run. That is a property of the rules handed to one call of
 \code{run}: none of them may negate a predicate that another of them
 defines.
 
+The rule for suggestions in \code{social.dl} already has this property.
+\code{suggest} negates only \code{follows}, and no rule defines
+\code{follows}, so it is settled from the start. That is why the suggestions
+in the earlier chapters were right before any of this existed.
+
 \begin{append}{terms.nex}
 -- The predicate a negated literal denies, or "" for any other literal.
-function negated_predicate(l: Literal): String do
+function negated_predicate(l: Literal): String
+do
   match l of
     Negated(atom) then result := atom.predicate
     _             then result := ""
@@ -78,7 +84,8 @@ end
 
 -- Does no rule negate a predicate that one of `rules` defines? Then each
 -- negated predicate is already complete when the rules are applied.
-function negations_settled(rules: Array[Rule]): Boolean do
+function negations_settled(rules: Array[Rule]): Boolean
+do
   result := true
   across rules as r do
     across r.body as l do
@@ -93,7 +100,7 @@ function negations_settled(rules: Array[Rule]): Boolean do
 end
 \end{append}
 
-and it is a precondition of every evaluator:
+The property becomes a precondition of every evaluator:
 
 \begin{tightaddbefore}{evaluate.nex}{to run, before deferred}{  deferred|  ensure|    fixpoint: is_fixpoint(rules, db)}
     negations_settled: negations_settled(rules)
@@ -132,7 +139,8 @@ intern Evaluate
 -- uses positively in the same stratum or an earlier one.
 class Stratifier
 create
-  make(rules: Array[Rule]) do
+  make(rules: Array[Rule])
+  do
     level := {}
     problem := ""
     across rules as r do
@@ -164,7 +172,8 @@ feature
   problem: String
 
   -- The lowest level a rule's head can have, given one body literal.
-  required_level(l: Literal): Integer do
+  required_level(l: Literal): Integer
+  do
     result := 0
     match l of
       Positive(atom) then result := level.try_get(atom.predicate, 0)
@@ -199,7 +208,8 @@ feature
     each_settled: all_settled(result)
   end
 
-  all_settled(groups: Array[Array[Rule]]): Boolean do
+  all_settled(groups: Array[Array[Rule]]): Boolean
+  do
     result := true
     across groups as g do
       if not negations_settled(g) then
@@ -219,7 +229,8 @@ whole program.
 
 \begin{continued}{analysis.nex}
 -- What is wrong with `p` before it can run, or "" if nothing is.
-function program_problem(p: Datalog_Program): String do
+function program_problem(p: Datalog_Program): String
+do
   result := ""
   across p.rules as r do
     if result = "" and not r.is_safe then
@@ -257,7 +268,8 @@ intern Analysis
 intern Query
 intern io/Path
 
-function run_file(name: String) do
+function run_file(name: String)
+do
   match parse_program(create Path.make(program.working_directory + "/" + name).read_text) of
     Ok as ok then
       do
